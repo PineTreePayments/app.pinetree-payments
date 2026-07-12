@@ -13,7 +13,10 @@ describe("Dynamic wallet provisioning — zero-wallet case", () => {
     // user can hit a window where it's empty before the SDK catches up — requiredChains falls
     // back to an explicit EVM+SOL request so creation is never silently skipped (see
     // pineTreeDynamicProvisioningFlow.test.ts for the fallback-path coverage).
-    expect(page).toContain("await createWalletAccount(requiredChains)")
+    // Bounded via runWithBoundedTimeout (production showed this hang 129+ seconds
+    // unbounded) rather than an unbounded await.
+    expect(page).toContain("() => createWalletAccount(requiredChains),")
+    expect(page).toContain("const initialCreateOutcome = await initialCreateCall.result")
     expect(page).toContain("needsAutoCreateWalletChains.length > 0")
     expect(page).toContain("? needsAutoCreateWalletChains")
     expect(page).toContain("if (runtimeWallets.length === 0) {")

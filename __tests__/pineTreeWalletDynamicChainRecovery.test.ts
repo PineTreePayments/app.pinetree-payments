@@ -164,7 +164,7 @@ describe("Chain create is bounded by a true PineTree-side deadline, not just the
   )
 
   it("wraps each createWalletAccount call in the reusable bounded helper instead of awaiting it directly", () => {
-    expect(page).toContain('import { runWithBoundedTimeout } from "@/lib/wallets/boundedProviderCall"')
+    expect(page).toContain('import { runWithBoundedTimeout, type BoundedProviderCallSettlement } from "@/lib/wallets/boundedProviderCall"')
     expect(implFn).toContain("createWalletAccount([{ chain: ChainEnum.Evm }])")
     expect(implFn).toContain("createWalletAccount([{ chain: ChainEnum.Sol }])")
     expect(implFn).toContain("const baseCreateOutcome = await baseCreateCall.result")
@@ -194,25 +194,46 @@ describe("Chain create is bounded by a true PineTree-side deadline, not just the
     expect(implFn).toContain("void solanaCreateCall.settlement.then((settled) => {\n                solanaWalletCreateDetachedRef.current = false")
   })
 
-  it("an older provider promise resolving later cannot overwrite a newer generation or trigger duplicate profile work", () => {
+  it("an older provider promise resolving later cannot overwrite a newer generation, flip an already-succeeded wallet to failed, or trigger duplicate profile work", () => {
     expect(implFn).toContain("const baseCreateGeneration = generation")
     expect(implFn).toContain("const solanaCreateGeneration = generation")
+    // Both settlement handlers route through the shared helper, which itself checks
+    // generation match (and terminal-success) before ever bumping the refresh nonce.
+    expect(implFn).toContain("void baseCreateCall.settlement.then((settled) => {")
+    expect(implFn).toContain("void solanaCreateCall.settlement.then((settled) => {")
     expect(implFn).toContain(
-      "const stillCurrentGeneration =\n                  walletRuntimeRefreshMetaRef.current[refreshMode]?.generation === baseCreateGeneration"
+      "logStaleDynamicCreateSettlement({\n                  reason,\n                  refreshMode,\n                  label: \"base\","
     )
     expect(implFn).toContain(
-      "const stillCurrentGeneration =\n                  walletRuntimeRefreshMetaRef.current[refreshMode]?.generation === solanaCreateGeneration"
+      "logStaleDynamicCreateSettlement({\n                  reason,\n                  refreshMode,\n                  label: \"solana\","
     )
-    expect(implFn).toContain("if (stillCurrentGeneration && settled.status === \"fulfilled\") {\n                  setDynamicWalletRuntimeRefreshNonce((value) => value + 1)")
+    // A late settlement must never flip an already-terminally-succeeded wallet to
+    // failed - the *CreateFailedRef assignment is gated on !pastTerminalSuccess.
+    expect(implFn).toContain("if (!pastTerminalSuccess) {\n                  baseWalletCreateFailedRef.current = settled.status === \"rejected\"")
+    expect(implFn).toContain("if (!pastTerminalSuccess) {\n                  solanaWalletCreateFailedRef.current = settled.status === \"rejected\"")
+
+    const helperFn = page.slice(
+      page.indexOf("const logStaleDynamicCreateSettlement = useCallback"),
+      page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback")
+    )
+    expect(helperFn).toContain("const stillCurrentGeneration = walletRuntimeRefreshMetaRef.current[refreshMode]?.generation === generation")
+    expect(helperFn).toContain("if (settled.status === \"fulfilled\") {\n      setDynamicWalletRuntimeRefreshNonce((value) => value + 1)")
   })
 
   it("emits the required safe timeout/late-settlement events, whitelisted for the server-visible beacon", () => {
-    for (const event of [
-      "wallet_dynamic_base_create_timed_out",
-      "wallet_dynamic_solana_create_timed_out",
-      "wallet_dynamic_chain_create_late_settlement_ignored",
-    ]) {
+    for (const event of ["wallet_dynamic_base_create_timed_out", "wallet_dynamic_solana_create_timed_out"]) {
       expect(implFn).toContain(event)
+      expect(eventRoute).toContain(`"${event}"`)
+    }
+    // The late-settlement-ignored event moved into the shared helper (deduped across
+    // the initial waas create, Base create, and Solana create call sites) - it's no
+    // longer inline in implFn, but it must still exist and be whitelisted.
+    for (const event of [
+      "wallet_dynamic_chain_create_late_settlement_ignored",
+      "wallet_dynamic_stale_generation_ignored",
+      "wallet_dynamic_late_result_ignored",
+    ]) {
+      expect(page).toContain(event)
       expect(eventRoute).toContain(`"${event}"`)
     }
   })
@@ -293,6 +314,109 @@ describe("Both chains completing proceeds to profile POST and modal open exactly
     expect(page).toContain("function openPineTreeWalletModalOnce(stage: string) {")
     expect(page).toContain("if (walletModalOpenedForAttemptRef.current || walletOpen) return")
     expect(page).toContain("if (profilePostInFlightKeyRef.current === profilePostKey) {")
+  })
+})
+
+describe("Stale Dynamic create/hydration work is ignored once setup terminally succeeds", () => {
+  const implFn = page.slice(
+    page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback"),
+    page.indexOf("// Single-flight wrapper")
+  )
+  const helperFn = page.slice(
+    page.indexOf("const logStaleDynamicCreateSettlement = useCallback"),
+    page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback")
+  )
+  const supersededFn = page.slice(
+    page.indexOf("const isDynamicCreateGenerationSuperseded = useCallback"),
+    page.indexOf("const logStaleDynamicCreateSettlement = useCallback")
+  )
+
+  it("captures the active generation the first time coreWalletProfileReady flips true, and only once", () => {
+    const captureEffect = page.slice(
+      page.indexOf("// Once core wallet setup (Base + Solana + a saved \"ready\" profile) is terminally"),
+      page.indexOf("// syncWalletReadiness: combine the core wallet and Speed/Lightning task outcomes")
+    )
+    expect(captureEffect).toContain("if (!coreWalletProfileReady) return")
+    // Idempotent guard - a Strict Mode double-invoke or a later re-render with
+    // coreWalletProfileReady still true must not recapture (and must not treat a
+    // later legitimate refresh's higher generation as terminal).
+    expect(captureEffect).toContain("if (walletCoreSetupTerminalGenerationRef.current !== null) return")
+    expect(captureEffect).toContain("const generationAtSuccess = walletRuntimeRefreshGenerationRef.current")
+    expect(captureEffect).toContain("walletCoreSetupTerminalGenerationRef.current = generationAtSuccess")
+    expect(captureEffect).toContain("wallet_dynamic_setup_cancelled_after_success")
+  })
+
+  it("a generation is considered superseded once it is at or before the captured terminal generation, or no longer the tracked meta", () => {
+    expect(supersededFn).toContain("generation <= walletCoreSetupTerminalGenerationRef.current")
+    expect(supersededFn).toContain("walletRuntimeRefreshMetaRef.current[refreshMode]?.generation !== generation")
+  })
+
+  it("never starts another createWalletAccount call once this generation is superseded (initial waas-create, Base, and Solana paths)", () => {
+    expect(implFn).toContain("isDynamicCreateGenerationSuperseded(refreshMode, generation)")
+    expect(implFn).toContain(
+      "if (requiredChains.length > 0 && !creatingEmbeddedWalletRef.current && isDynamicCreateGenerationSuperseded(refreshMode, generation)) {"
+    )
+    expect(implFn).toContain("!baseWalletCreateDetachedRef.current &&\n            !isDynamicCreateGenerationSuperseded(refreshMode, generation)")
+    expect(implFn).toContain("!solanaWalletCreateDetachedRef.current &&\n            !isDynamicCreateGenerationSuperseded(refreshMode, generation)")
+  })
+
+  it("the initial WaaS create call is bounded, not an unbounded await - production hung 129+ seconds on exactly this call", () => {
+    expect(implFn).toContain("const initialCreateCall = runWithBoundedTimeout(")
+    expect(implFn).toContain("() => createWalletAccount(requiredChains),")
+    expect(implFn).toContain("const initialCreateOutcome = await initialCreateCall.result")
+    expect(implFn).toContain("wallet_dynamic_create_embedded_wallet_timed_out")
+    expect(implFn).toContain("void initialCreateCall.settlement.then((settled) => {")
+  })
+
+  it("a late settlement past terminal success is ignored - no nonce bump, no failure ref flip, just a safe diagnostic", () => {
+    expect(helperFn).toContain("const pastTerminalSuccess =\n      walletCoreSetupTerminalGenerationRef.current !== null &&\n      generation <= walletCoreSetupTerminalGenerationRef.current")
+    expect(helperFn).toContain('if (pastTerminalSuccess) {\n      console.info("[pinetree-wallets] wallet_dynamic_late_result_ignored", diagnostic)')
+    expect(helperFn).toContain("emitWalletSetupDebugEvent(\"wallet_dynamic_late_result_ignored\", diagnostic)\n      return")
+    // A superseded-but-not-yet-terminal generation gets its own distinct event.
+    expect(helperFn).toContain('if (!stillCurrentGeneration) {\n      console.info("[pinetree-wallets] wallet_dynamic_stale_generation_ignored", diagnostic)')
+  })
+
+  it("a late throw from the outer refresh attempt is also ignored once setup already succeeded - never reported as a fresh failure", () => {
+    const catchBlock = page.slice(
+      page.indexOf("} catch (error) {\n      creatingEmbeddedWalletRef.current = false"),
+      page.indexOf("}, [\n    createEmbeddedWallet,")
+    )
+    expect(catchBlock).toContain("const pastTerminalSuccess =")
+    expect(catchBlock).toContain("wallet_dynamic_late_result_ignored")
+    expect(catchBlock).toContain("return true")
+  })
+
+  it("the single-flight clear event is relabeled after terminal success instead of reported as a normal clear", () => {
+    const wrapperFn = page.slice(
+      page.indexOf("const refreshDynamicWalletRuntime = useCallback((reason: string"),
+      page.indexOf("}, [refreshDynamicWalletRuntimeImpl, sdkHasLoaded, user])")
+    )
+    expect(wrapperFn).toContain("wallet_dynamic_singleflight_cleared_after_success")
+    expect(wrapperFn).toContain(
+      "const pastTerminalSuccess =\n            walletCoreSetupTerminalGenerationRef.current !== null &&\n            generation <= walletCoreSetupTerminalGenerationRef.current"
+    )
+  })
+
+  it("a later, explicitly user-initiated refresh still gets a fresh (higher) generation and is unaffected by an earlier terminal capture", () => {
+    const wrapperFn = page.slice(
+      page.indexOf("const refreshDynamicWalletRuntime = useCallback((reason: string"),
+      page.indexOf("}, [refreshDynamicWalletRuntimeImpl, sdkHasLoaded, user])")
+    )
+    // Generation assignment is unconditional - never gated on terminal-success state -
+    // so a fresh call always gets a strictly higher generation than the captured one.
+    expect(wrapperFn).toContain("const generation = ++walletRuntimeRefreshGenerationRef.current")
+    expect(wrapperFn).not.toContain("if (walletCoreSetupTerminalGenerationRef.current")
+  })
+
+  it("all four new safe diagnostic events are whitelisted for the server-visible beacon", () => {
+    for (const event of [
+      "wallet_dynamic_stale_generation_ignored",
+      "wallet_dynamic_setup_cancelled_after_success",
+      "wallet_dynamic_singleflight_cleared_after_success",
+      "wallet_dynamic_late_result_ignored",
+    ]) {
+      expect(eventRoute).toContain(`"${event}"`)
+    }
   })
 })
 

@@ -222,26 +222,135 @@ describe("syncPineTreeWalletRailsEngine", () => {
     expect(result.rails.find((r) => r.rail === "base")?.status).toBe("synced")
   })
 
-  it("returns database_schema_missing when the rail-sync schema contract is missing", async () => {
+  it("never 500s when the rail-sync dedup schema contract check fails - Base/Solana still sync", async () => {
     mockGetProfile.mockResolvedValue({
       solana_address: "solana-addr-abc",
       base_address: "0xbaseaddr",
       btc_address: null,
     })
+    mockGetSyncs.mockResolvedValue([])
     mockCheckSchema.mockRejectedValue({
       code: "database_schema_missing",
+      underlyingCode: "42P01",
+      underlyingMessage: 'relation "pinetree_wallet_rail_syncs" does not exist',
+      relation: "pinetree_wallet_rail_syncs",
+      column: null,
       missing: ["table:pinetree_wallet_rail_syncs"],
       migration: "database/migrations/20260623_create_pinetree_wallet_rail_syncs.sql",
     })
 
-    await expect(syncPineTreeWalletRailsEngine("merchant-1")).rejects.toSatisfy((error: unknown) => {
-      expect(error).toBeInstanceOf(RailSyncEngineError)
-      const railSyncError = error as RailSyncEngineError
-      expect(railSyncError.code).toBe("database_schema_missing")
-      expect(railSyncError.missing).toEqual(["table:pinetree_wallet_rail_syncs"])
-      return true
+    const result = await syncPineTreeWalletRailsEngine("merchant-1")
+
+    expect(result.rails.find((r) => r.rail === "solana")?.status).toBe("synced")
+    expect(result.rails.find((r) => r.rail === "base")?.status).toBe("synced")
+    expect(result.warnings).toContain("rail_sync_dedup_table_unavailable")
+    expect(mockSaveProvider).toHaveBeenCalledTimes(2)
+  })
+
+  it("never 500s when reading existing rail syncs fails with a schema error - falls back to resync", async () => {
+    mockGetProfile.mockResolvedValue({
+      solana_address: "solana-addr-abc",
+      base_address: "0xbaseaddr",
+      btc_address: null,
     })
-    expect(mockSaveProvider).not.toHaveBeenCalled()
+    mockGetSyncs.mockRejectedValue({
+      code: "database_schema_missing",
+      underlyingCode: "PGRST205",
+      underlyingMessage: "Could not find the table 'pinetree_wallet_rail_syncs' in the schema cache",
+      relation: "pinetree_wallet_rail_syncs",
+      column: null,
+    })
+
+    const result = await syncPineTreeWalletRailsEngine("merchant-1")
+
+    expect(result.rails.find((r) => r.rail === "solana")?.status).toBe("synced")
+    expect(result.rails.find((r) => r.rail === "base")?.status).toBe("synced")
+    expect(result.warnings).toContain("rail_sync_dedup_table_unavailable")
+  })
+
+  it("never 500s when the dedup-table upsert fails - the real routing write already succeeded", async () => {
+    mockGetProfile.mockResolvedValue({
+      solana_address: "solana-addr-abc",
+      base_address: null,
+      btc_address: null,
+    })
+    mockGetSyncs.mockResolvedValue([])
+    mockUpsertSync.mockRejectedValue({
+      code: "database_schema_missing",
+      underlyingCode: "42P10",
+      underlyingMessage: "there is no unique or exclusion constraint matching the ON CONFLICT specification",
+      relation: "pinetree_wallet_rail_syncs",
+      column: null,
+    })
+
+    const result = await syncPineTreeWalletRailsEngine("merchant-1")
+
+    expect(mockSaveProvider).toHaveBeenCalledOnce()
+    expect(result.rails.find((r) => r.rail === "solana")?.status).toBe("synced")
+    expect(result.warnings).toContain("rail_sync_dedup_write_failed:solana")
+  })
+
+  it("syncs a Solana-only profile safely (no Base address provisioned yet)", async () => {
+    mockGetProfile.mockResolvedValue({
+      solana_address: "solana-addr-abc",
+      base_address: null,
+      btc_address: null,
+    })
+    mockGetSyncs.mockResolvedValue([])
+
+    const result = await syncPineTreeWalletRailsEngine("merchant-1")
+
+    expect(result.rails.find((r) => r.rail === "solana")?.status).toBe("synced")
+    expect(result.rails.find((r) => r.rail === "base")?.status).toBe("skipped")
+    expect(mockSaveProvider).toHaveBeenCalledOnce()
+  })
+
+  it("reports a ready Speed Lightning profile without touching the Base/Solana result", async () => {
+    mockGetProfile.mockResolvedValue({
+      solana_address: "solana-addr-abc",
+      base_address: "0xbaseaddr",
+      btc_address: null,
+      status: "ready",
+    })
+    mockGetSyncs.mockResolvedValue([])
+    mockGetLightningProfile.mockResolvedValue({ status: "ready" })
+
+    const result = await syncPineTreeWalletRailsEngine("merchant-1")
+
+    expect(result.lightningStatus).toBe("ready")
+    expect(result.rails.find((r) => r.rail === "solana")?.status).toBe("synced")
+    expect(result.rails.find((r) => r.rail === "base")?.status).toBe("synced")
+  })
+
+  it("never calls Dynamic wallet creation or Speed account creation from rail sync", async () => {
+    mockGetProfile.mockResolvedValue({
+      solana_address: "solana-addr-abc",
+      base_address: "0xbaseaddr",
+      btc_address: null,
+    })
+    mockGetSyncs.mockResolvedValue([])
+
+    await syncPineTreeWalletRailsEngine("merchant-1")
+
+    const engineSource = read("engine/pineTreeWalletRailSync.ts")
+    expect(engineSource).not.toContain("createWalletAccount")
+    expect(engineSource).not.toContain("provisionSpeedLightning")
+  })
+
+  it("preserves existing profile data - profile fields are read-only inputs, never mutated", async () => {
+    const profile = {
+      solana_address: "solana-addr-abc",
+      base_address: "0xbaseaddr",
+      btc_address: null,
+      status: "ready",
+    }
+    const profileSnapshot = { ...profile }
+    mockGetProfile.mockResolvedValue(profile)
+    mockGetSyncs.mockResolvedValue([])
+
+    await syncPineTreeWalletRailsEngine("merchant-1")
+
+    expect(profile).toEqual(profileSnapshot)
   })
 
   it("wraps a genuinely unexpected failure in RailSyncEngineError with a stage and code instead of a bare Error", async () => {
@@ -422,6 +531,32 @@ describe("POST /api/wallets/pinetree-wallet/rail-sync", () => {
     const response = await POST(new NextRequest("https://app.test/api/wallets/pinetree-wallet/rail-sync", { method: "POST" }))
 
     expect(response.status).toBe(200)
+  })
+
+  it("returns 200 ok:true even when the rail-sync dedup table schema is missing - the reported production 500 is now non-fatal", async () => {
+    mockGetProfile.mockResolvedValue({
+      solana_address: "solana-addr-abc",
+      base_address: "0xbaseaddr",
+      btc_address: null,
+      status: "ready",
+    })
+    mockGetSyncs.mockRejectedValue({
+      code: "database_schema_missing",
+      underlyingCode: "42P01",
+      underlyingMessage: 'relation "pinetree_wallet_rail_syncs" does not exist',
+      relation: "pinetree_wallet_rail_syncs",
+      column: null,
+    })
+
+    const { POST } = await import("@/app/api/wallets/pinetree-wallet/rail-sync/route")
+    const { NextRequest } = await import("next/server")
+    const response = await POST(new NextRequest("https://app.test/api/wallets/pinetree-wallet/rail-sync", { method: "POST" }))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(body.syncedRails).toEqual(expect.arrayContaining(["solana", "base"]))
+    expect(body.warnings).toContain("rail_sync_dedup_table_unavailable")
   })
 
   it("returns a structured ok:false with stage/code and a real 500 for a genuine database failure", async () => {

@@ -21,8 +21,15 @@ export type WalletRailSyncSchemaContract = {
   migration: string | null
 }
 
+export type RailSyncDbOperation = "select" | "upsert"
+
 export class WalletRailSyncSchemaError extends Error {
   code = "database_schema_missing" as const
+  /** The table/relation this failure was attributed to. */
+  relation: string
+  /** The specific column named by the underlying Postgres error, when one is present. */
+  column: string | null
+  operation: RailSyncDbOperation
   missing: string[]
   migration: string
   /** The real, sanitized Postgres/PostgREST error code and message that triggered
@@ -32,51 +39,59 @@ export class WalletRailSyncSchemaError extends Error {
   underlyingMessage: string | null
 
   constructor(
-    missing: string[],
+    operation: RailSyncDbOperation,
     underlying?: { code?: string | null; message?: string | null },
     message = "PineTree Wallet rail-sync database schema is missing."
   ) {
     super(message)
     this.name = "WalletRailSyncSchemaError"
-    this.missing = missing
+    this.operation = operation
+    this.relation = TABLE
+    this.column = extractColumnName(underlying?.message || null)
+    this.missing = [`table:${TABLE}`]
     this.migration = "database/migrations/20260623_create_pinetree_wallet_rail_syncs.sql and database/migrations/20260624_expand_pinetree_wallet_rail_syncs_bitcoin.sql"
     this.underlyingCode = underlying?.code || null
     this.underlyingMessage = underlying?.message ? underlying.message.slice(0, 300) : null
   }
 }
 
+function extractColumnName(message: string | null): string | null {
+  if (!message) return null
+  const match = message.match(/column\s+"?([a-zA-Z0-9_.]+)"?/i)
+  return match ? match[1] : null
+}
+
 /**
- * Only classifies an error as a genuinely missing table/relation when Postgres
- * or PostgREST itself says so (undefined-table / unknown-relation codes, or a
- * "does not exist"/"schema cache" message). Deliberately does NOT match on the
- * table name alone - a permission-denied, RLS, or FK-violation error can
- * legitimately mention "pinetree_wallet_rail_syncs" in its message while having
- * nothing to do with a missing migration, and misclassifying it as
- * database_schema_missing would silently hide the real cause (and turn a
- * transient/permissions problem into a hard 500 instead of the safe fallback
- * path other callers in this module already rely on).
+ * Only classifies an error as a genuinely missing table/column/relation when
+ * Postgres or PostgREST itself says so via an unambiguous error code
+ * (undefined-table, undefined-column, invalid ON CONFLICT target, or a
+ * PostgREST schema-cache miss), or - lacking one of those codes - when the
+ * message explicitly names a relation/table/column/schema-cache alongside
+ * "does not exist". A bare "does not exist" substring is NOT enough on its
+ * own: connection-pooler errors like `prepared statement "s0" does not
+ * exist` (a known Supabase/PgBouncer transaction-pooling artifact, entirely
+ * unrelated to schema) also match that phrase, and misclassifying one as
+ * database_schema_missing turns a transient hiccup into a hard 500 instead
+ * of the safe fallback path other callers in this module already rely on.
  */
 function isSchemaMissingError(error: unknown): boolean {
   const row = error as { code?: unknown; message?: unknown; details?: unknown } | null
   const code = String(row?.code || "")
+  if (code === "42P01" || code === "42P10" || code === "PGRST205" || code === "42703") return true
+
   const message = `${String(row?.message || "")} ${String(row?.details || "")}`.toLowerCase()
-  return (
-    code === "42P01" ||
-    code === "42P10" ||
-    code === "PGRST205" ||
-    message.includes("does not exist") ||
-    message.includes("schema cache") ||
-    message.includes("no unique or exclusion constraint")
-  )
+  const namesSchemaObject = /\b(relation|table|column|schema cache)\b/.test(message)
+  if (!namesSchemaObject) return false
+  return message.includes("does not exist") || message.includes("schema cache")
 }
 
-function railSyncSchemaError(error: unknown, missing: string[]): Error {
+function railSyncSchemaError(error: unknown, operation: RailSyncDbOperation): Error {
   const row = error as { code?: unknown; message?: unknown } | null
   const underlying = {
     code: row?.code != null ? String(row.code) : null,
     message: row?.message != null ? String(row.message) : null,
   }
-  if (isSchemaMissingError(error)) return new WalletRailSyncSchemaError(missing, underlying)
+  if (isSchemaMissingError(error)) return new WalletRailSyncSchemaError(operation, underlying)
   if (error instanceof Error) return error
   console.warn("[pinetree-wallets] rail_sync_db_error_unclassified", underlying)
   return new Error("Rail sync database operation failed")
@@ -93,7 +108,7 @@ export async function checkWalletRailSyncSchemaContract(): Promise<WalletRailSyn
     .limit(0)
 
   if (error) {
-    throw railSyncSchemaError(error, ["table:pinetree_wallet_rail_syncs"])
+    throw railSyncSchemaError(error, "select")
   }
 
   return { ok: true, code: "ok", missing: [], migration: null }
@@ -105,7 +120,7 @@ export async function getWalletRailSyncs(merchantId: string): Promise<WalletRail
     .select("*")
     .eq("merchant_id", merchantId)
 
-  if (error) throw railSyncSchemaError(error, ["table:pinetree_wallet_rail_syncs"])
+  if (error) throw railSyncSchemaError(error, "select")
   return (data || []) as WalletRailSyncRecord[]
 }
 
@@ -128,7 +143,7 @@ export async function upsertWalletRailSync(input: {
     .single()
 
   if (error) {
-    throw railSyncSchemaError(error, ["unique:pinetree_wallet_rail_syncs(merchant_id,rail)"])
+    throw railSyncSchemaError(error, "upsert")
   }
 
   if (!data) {

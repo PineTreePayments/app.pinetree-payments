@@ -4,7 +4,9 @@ import {
   getWalletRailSyncs,
   isWalletRailSyncSchemaError,
   upsertWalletRailSync,
+  type RailSyncDbOperation,
   type WalletRailSyncRecord,
+  type WalletRailSyncSchemaError,
 } from "@/database/pineTreeWalletRailSyncs"
 import { deriveLightningReadiness, getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
 import { saveProviderEngine } from "./providersDashboard"
@@ -74,6 +76,31 @@ function logRailSyncStage(stage: RailSyncStage, merchantId: string, details?: Re
 }
 
 /**
+ * Single structured diagnostic for any schema-classified failure against the
+ * rail-sync dedup table, so the exact underlying Postgres code/relation/column
+ * is always preserved instead of collapsing into an opaque
+ * "database_schema_missing" - safe fields only (no addresses, credentials, or
+ * raw SQL).
+ */
+function logRailSyncSchemaFailure(params: {
+  merchantId: string
+  stage: RailSyncStage
+  operation: RailSyncDbOperation
+  error: WalletRailSyncSchemaError
+  elapsedMs: number
+}) {
+  console.warn("[pinetree-wallets] rail_sync_schema_failure", {
+    merchant_id: params.merchantId,
+    stage: params.stage,
+    postgres_code: params.error.underlyingCode,
+    relation: params.error.relation,
+    column: params.error.column,
+    operation: params.operation,
+    elapsed_ms: params.elapsedMs,
+  })
+}
+
+/**
  * Idempotent: reads the merchant's PineTree Wallet profile and writes the
  * base_address and solana_address into the provider rows that drive checkout
  * availability. Lightning readiness is Speed-managed and is never inferred from
@@ -82,36 +109,41 @@ function logRailSyncStage(stage: RailSyncStage, merchantId: string, details?: Re
  *
  * Resilient by design: a ready Base/Solana profile must never turn into a 500
  * because Lightning is unavailable, or because the rail-sync dedup table
- * (pinetree_wallet_rail_syncs) is temporarily unreadable - both are treated as
- * non-fatal and logged, not thrown. Only an unexpected exception escaping this
- * function raises RailSyncEngineError for the route to map to a real failure.
+ * (pinetree_wallet_rail_syncs) is unreadable/unwritable - reading or writing
+ * that table is an optimization (skip re-syncing an unchanged address; avoid a
+ * duplicate saveProviderEngine call), never a correctness requirement, since
+ * saveProviderEngine itself is idempotent against merchant_wallets. Any
+ * failure against that table - schema-missing or otherwise - is logged with
+ * full diagnostics and degrades gracefully rather than failing the route.
+ * Only a genuine failure writing the real routing tables (merchant_wallets /
+ * merchant_providers via saveProviderEngine) raises RailSyncEngineError.
  */
 export async function syncPineTreeWalletRailsEngine(
   merchantId: string
 ): Promise<PineTreeWalletRailSyncResult> {
   logRailSyncStage("rail_sync_started", merchantId)
+  const warnings: string[] = []
 
   try {
+    const schemaCheckStartedAt = Date.now()
     try {
       await checkWalletRailSyncSchemaContract()
     } catch (error) {
       if (isWalletRailSyncSchemaError(error)) {
-        console.warn("[pinetree-wallets] rail_sync_schema_contract_missing", {
+        logRailSyncSchemaFailure({
           merchantId,
-          code: error.code,
-          missing: error.missing,
-          migration: error.migration,
-          underlyingCode: error.underlyingCode,
-          underlyingMessage: error.underlyingMessage,
+          stage: "rail_sync_started",
+          operation: "select",
+          error,
+          elapsedMs: Date.now() - schemaCheckStartedAt,
         })
-        throw new RailSyncEngineError(
-          "rail_sync_started",
-          "database_schema_missing",
-          "PineTree Wallet rail-sync schema is missing.",
-          { migration: error.migration, missing: error.missing }
-        )
+      } else {
+        console.warn("[pinetree-wallets] rail_sync_schema_contract_check_failed", {
+          merchantId,
+          error: error instanceof Error ? error.message : "unknown_error",
+        })
       }
-      throw error
+      warnings.push("rail_sync_dedup_table_unavailable")
     }
 
     const profile = await getPineTreeWalletProfile(merchantId)
@@ -133,36 +165,31 @@ export async function syncPineTreeWalletRailsEngine(
       }
     }
 
-    // The dedup table is an optimization (skip re-syncing an unchanged address),
-    // never a correctness requirement - saveProviderEngine/upsertWalletRailSync
-    // are themselves idempotent against merchant_wallets. A read failure here
-    // (RLS hiccup, transient connection issue) must not block provisioning; fall
-    // back to treating every address as needing a (safe, idempotent) resync.
+    // A read failure here (missing table, RLS hiccup, transient connection
+    // issue, pooler "prepared statement does not exist" artifact) must not
+    // block provisioning; fall back to treating every address as needing a
+    // (safe, idempotent) resync.
     let syncByRail = new Map<string, WalletRailSyncRecord>()
+    const existingSyncsStartedAt = Date.now()
     try {
       const existingSyncs = await getWalletRailSyncs(merchantId)
       syncByRail = new Map(existingSyncs.map((s) => [s.rail, s]))
     } catch (error) {
       if (isWalletRailSyncSchemaError(error)) {
-        console.warn("[pinetree-wallets] rail_sync_schema_contract_missing", {
+        logRailSyncSchemaFailure({
           merchantId,
-          code: error.code,
-          missing: error.missing,
-          migration: error.migration,
-          underlyingCode: error.underlyingCode,
-          underlyingMessage: error.underlyingMessage,
+          stage: "rail_sync_profile_loaded",
+          operation: "select",
+          error,
+          elapsedMs: Date.now() - existingSyncsStartedAt,
         })
-        throw new RailSyncEngineError(
-          "rail_sync_profile_loaded",
-          "database_schema_missing",
-          "PineTree Wallet rail-sync schema is missing.",
-          { migration: error.migration, missing: error.missing }
-        )
+      } else {
+        console.warn("[pinetree-wallets] rail_sync_existing_syncs_lookup_failed", {
+          merchantId,
+          error: error instanceof Error ? error.message : "unknown_error",
+        })
       }
-      console.warn("[pinetree-wallets] rail_sync_existing_syncs_lookup_failed", {
-        merchantId,
-        error: error instanceof Error ? error.message : "unknown_error",
-      })
+      warnings.push("rail_sync_dedup_table_unavailable")
     }
 
     const railConfigs: Array<{
@@ -198,6 +225,9 @@ export async function syncPineTreeWalletRailsEngine(
         continue
       }
 
+      // saveProviderEngine writes the real routing state (merchant_wallets /
+      // merchant_providers) that checkout actually depends on - a failure here
+      // is a genuine sync failure and must surface as one.
       try {
         logRailSyncStage("rail_sync_persist_started", merchantId, { rail })
         await saveProviderEngine({
@@ -206,28 +236,7 @@ export async function syncPineTreeWalletRailsEngine(
           walletAddress: address,
           walletType,
         })
-
-        await upsertWalletRailSync({ merchantId, rail, syncedAddress: address })
-
-        results.push({ rail, status: "synced", address })
       } catch (error) {
-        if (isWalletRailSyncSchemaError(error)) {
-          console.warn("[pinetree-wallets] rail_sync_schema_contract_missing", {
-            merchantId,
-            rail,
-            code: error.code,
-            missing: error.missing,
-            migration: error.migration,
-            underlyingCode: error.underlyingCode,
-            underlyingMessage: error.underlyingMessage,
-          })
-          throw new RailSyncEngineError(
-            "rail_sync_persist_started",
-            "database_schema_missing",
-            "PineTree Wallet rail-sync schema is missing.",
-            { migration: error.migration, missing: error.missing }
-          )
-        }
         console.warn("[pinetree-wallets] rail_sync_persist_failed", {
           merchantId,
           rail,
@@ -239,6 +248,33 @@ export async function syncPineTreeWalletRailsEngine(
           `Failed to sync ${rail} rail`
         )
       }
+
+      // upsertWalletRailSync only records dedup/idempotency bookkeeping - the
+      // real routing write above already succeeded, so a failure here (schema
+      // or otherwise) must never undo that or fail the route.
+      const dedupWriteStartedAt = Date.now()
+      try {
+        await upsertWalletRailSync({ merchantId, rail, syncedAddress: address })
+      } catch (error) {
+        if (isWalletRailSyncSchemaError(error)) {
+          logRailSyncSchemaFailure({
+            merchantId,
+            stage: "rail_sync_persist_started",
+            operation: "upsert",
+            error,
+            elapsedMs: Date.now() - dedupWriteStartedAt,
+          })
+        } else {
+          console.warn("[pinetree-wallets] rail_sync_dedup_write_failed", {
+            merchantId,
+            rail,
+            error: error instanceof Error ? error.message : "unknown_error",
+          })
+        }
+        warnings.push(`rail_sync_dedup_write_failed:${rail}`)
+      }
+
+      results.push({ rail, status: "synced", address })
     }
 
     // Lightning readiness check is purely informational here - Speed manages
@@ -272,7 +308,7 @@ export async function syncPineTreeWalletRailsEngine(
       syncedAt: new Date().toISOString(),
       coreStatus: profile.status === "ready" ? "ready" : profile.status === "needs_attention" ? "needs_attention" : "not_created",
       lightningStatus,
-      warnings: lightningConfigured ? [] : [],
+      warnings,
     }
   } catch (error) {
     if (error instanceof RailSyncEngineError) throw error

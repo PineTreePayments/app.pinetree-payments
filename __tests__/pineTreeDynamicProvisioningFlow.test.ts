@@ -216,7 +216,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(refreshFn).toContain("const runtimeCredentials = getWaasWalletsByCredentials()")
     expect(refreshFn).toContain("runtimeCredentials.length === 0")
     expect(refreshFn).toContain("(REQUIRED_WAAS_WALLET_CHAINS as unknown as typeof needsAutoCreateWalletChains)")
-    expect(refreshFn).toContain("await createWalletAccount(requiredChains)")
+    expect(refreshFn).toContain("() => createWalletAccount(requiredChains),")
   })
 
   it("existing WaaS credentials without runtime wallets force a restore instead of a duplicate create", () => {

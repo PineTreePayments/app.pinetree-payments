@@ -109,6 +109,53 @@ describe("pineTreeWalletRailSyncs schema-error classifier (real module, mocked S
     })
   })
 
+  it("does not misclassify a connection-pooler 'prepared statement does not exist' error as a missing schema", async () => {
+    // A known Supabase/PgBouncer transaction-pooling artifact: unrelated to the
+    // table's schema, but its message contains "does not exist" just like a
+    // genuine undefined-relation error. This is the exact shape that produced
+    // production's "rail_sync_route_failed { stage: 'rail_sync_profile_loaded',
+    // code: 'database_schema_missing' }" even though the schema-contract HEAD
+    // check moments earlier had already passed for the same table.
+    const preparedStatementError = {
+      code: "26000",
+      message: 'prepared statement "s0" does not exist',
+    }
+    vi.doMock("@/database/supabase", () => ({
+      supabase: { from: () => fluentQuery({ data: null, error: preparedStatementError }) },
+      supabaseAdmin: null,
+    }))
+
+    const { getWalletRailSyncs, isWalletRailSyncSchemaError } = await import("@/database/pineTreeWalletRailSyncs")
+
+    await expect(getWalletRailSyncs("merchant-1")).rejects.toSatisfy((error: unknown) => {
+      expect(isWalletRailSyncSchemaError(error)).toBe(false)
+      return true
+    })
+  })
+
+  it("classifies a genuine undefined-column Postgres error (42703) as database_schema_missing and extracts the column name", async () => {
+    const undefinedColumnError = {
+      code: "42703",
+      message: 'column "synced_address" does not exist',
+    }
+    vi.doMock("@/database/supabase", () => ({
+      supabase: { from: () => fluentQuery({ data: null, error: undefinedColumnError }) },
+      supabaseAdmin: null,
+    }))
+
+    const { getWalletRailSyncs, isWalletRailSyncSchemaError } = await import("@/database/pineTreeWalletRailSyncs")
+
+    await expect(getWalletRailSyncs("merchant-1")).rejects.toSatisfy((error: unknown) => {
+      expect(isWalletRailSyncSchemaError(error)).toBe(true)
+      if (isWalletRailSyncSchemaError(error)) {
+        expect(error.column).toBe("synced_address")
+        expect(error.relation).toBe("pinetree_wallet_rail_syncs")
+        expect(error.operation).toBe("select")
+      }
+      return true
+    })
+  })
+
   it("does not misclassify a transient/unknown database error", async () => {
     const transientError = { code: "57014", message: "canceling statement due to statement timeout" }
     vi.doMock("@/database/supabase", () => ({

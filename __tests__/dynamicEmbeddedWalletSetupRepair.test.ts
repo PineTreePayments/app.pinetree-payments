@@ -52,7 +52,7 @@ describe("Dynamic embedded wallet setup repair", () => {
   it("Finish setup provisions or restores embedded Base and Solana wallets before saving", () => {
     expect(page).toContain('beginWalletSetupRepair("finish_embedded_wallet_setup")')
     expect(page).toContain("refreshDynamicWalletRuntime(reason, { requireApprovalWallet: false })")
-    expect(page).toContain("await createWalletAccount(requiredChains)")
+    expect(page).toContain("() => createWalletAccount(requiredChains),")
     expect(page).toContain("await createOrRestoreSession()")
     expect(page).toContain("await createEmbeddedWallet()")
     // Product rule: signer hydration is required for withdrawals only, never for wallet
