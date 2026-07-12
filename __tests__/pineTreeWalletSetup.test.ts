@@ -31,6 +31,8 @@ describe("PineTree embedded wallet setup", () => {
   const speedConnectMigration = read("database/migrations/20260623_add_speed_connect_fields_to_merchant_lightning_profiles.sql")
   const lightningDbHelper = read("database/merchantLightningProfiles.ts")
   const lightningApiRoute = read("app/api/wallets/lightning/pinetree-managed/route.ts")
+  const businessProfileApiRoute = read("app/api/merchant/business-profile/route.ts")
+  const businessOwnerProfileApiRoute = read("app/api/merchant/business-owner-profile/route.ts")
 
   it("keeps legacy email resolution out of the PineTree profile route", () => {
     expect(resolveWalletIdentity({
@@ -967,7 +969,22 @@ describe("PineTree embedded wallet setup", () => {
     expect(apiRoute).toContain("BACKGROUND_PROVISIONING_TIMEOUT_MS = 12_000")
     expect(apiRoute).toContain('step: "core_profile_saved"')
     expect(apiRoute).toContain('step: "provider_sync_complete"')
-    expect(apiRoute).toContain('step: "lightning_ensure_complete"')
+    expect(apiRoute).not.toContain('step: "lightning_ensure_start"')
+    expect(apiRoute).not.toContain('step: "lightning_ensure_complete"')
+    expect(apiRoute).not.toContain("wallet_lightning_background_started")
+  })
+
+  it("Business Profile save only persists profile data and never provisions Speed or Lightning", () => {
+    expect(businessProfileApiRoute).toContain("saveMerchantBusinessProfile(merchantId, body)")
+    expect(businessProfileApiRoute).toContain("return NextResponse.json({ profile })")
+    expect(businessProfileApiRoute).not.toContain("ensureManagedLightningForMerchant")
+    expect(businessProfileApiRoute).not.toContain("/api/wallets/lightning/pinetree-managed")
+    expect(businessProfileApiRoute).not.toContain("wallet_speed_setup_started")
+    expect(businessProfileApiRoute).not.toContain("wallet_lightning_auto_provision_complete")
+
+    expect(businessOwnerProfileApiRoute).toContain("updateMerchantBusinessOwnerProfile")
+    expect(businessOwnerProfileApiRoute).not.toContain("ensureManagedLightningForMerchant")
+    expect(businessOwnerProfileApiRoute).not.toContain("lightning")
   })
 
   it("automatically repairs a missing or stale DB profile once Dynamic already has both addresses", () => {
@@ -1034,9 +1051,6 @@ describe("PineTree embedded wallet setup", () => {
       "wallet_profile_post_error",
       "wallet_core_ready",
       "wallet_signers_missing_non_blocking",
-      "wallet_lightning_background_started",
-      "wallet_lightning_pending",
-      "wallet_lightning_needs_attention",
       "wallet_provider_sync_background_started",
       "wallet_provider_sync_background_failed",
       "wallet_dynamic_sdk_loaded",

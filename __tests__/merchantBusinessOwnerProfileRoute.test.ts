@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   getRouteErrorStatus: vi.fn(),
   getMerchantById: vi.fn(),
   updateMerchantBusinessOwnerProfile: vi.fn(),
-  ensureManagedLightningForMerchant: vi.fn(),
 }))
 
 vi.mock("@/lib/api/merchantAuth", () => ({
@@ -28,10 +27,6 @@ vi.mock("@/database/merchants", () => ({
     return { ownerFirstName, ownerLastName, businessCountry }
   },
   updateMerchantBusinessOwnerProfile: mocks.updateMerchantBusinessOwnerProfile,
-}))
-
-vi.mock("@/engine/pineTreeWalletReadiness", () => ({
-  ensureManagedLightningForMerchant: mocks.ensureManagedLightningForMerchant,
 }))
 
 function postRequest(body: unknown) {
@@ -85,13 +80,6 @@ describe("POST /api/merchant/business-owner-profile", () => {
     mocks.requireMerchantIdFromRequest.mockResolvedValue(merchantId)
     mocks.getRouteErrorStatus.mockReturnValue(500)
     mocks.updateMerchantBusinessOwnerProfile.mockResolvedValue({ id: merchantId })
-    mocks.ensureManagedLightningForMerchant.mockResolvedValue({
-      status: "ready",
-      action: "provisioned",
-      speedConnectedAccountId: "acct_123",
-      speedConnectedAccountRelationshipId: "ca_123",
-      speedConnectedAccountStatus: "active",
-    })
   })
 
   it("rejects missing first name", async () => {
@@ -110,7 +98,7 @@ describe("POST /api/merchant/business-owner-profile", () => {
     expect(mocks.updateMerchantBusinessOwnerProfile).not.toHaveBeenCalled()
   })
 
-  it("saves the profile and triggers ensureManagedLightningForMerchant", async () => {
+  it("saves only the profile and does not provision Speed or Lightning", async () => {
     const { POST } = await import("@/app/api/merchant/business-owner-profile/route")
     const response = await POST(
       postRequest({ owner_first_name: "Ada", owner_last_name: "Lovelace", business_country: "us" })
@@ -123,8 +111,7 @@ describe("POST /api/merchant/business-owner-profile", () => {
       ownerLastName: "Lovelace",
       businessCountry: "US",
     })
-    expect(mocks.ensureManagedLightningForMerchant).toHaveBeenCalledWith(merchantId)
-    expect(body.lightning.action).toBe("provisioned")
+    expect(body.lightning).toBeUndefined()
     expect(JSON.stringify(body)).not.toContain("password")
   })
 })

@@ -5,7 +5,6 @@ import {
   getMerchantBusinessOwnerProfile,
   updateMerchantBusinessOwnerProfile
 } from "@/database/merchants"
-import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
 import { normalizeBusinessCountry } from "@/engine/businessProfileLocation"
 
 export async function GET(req: NextRequest) {
@@ -57,11 +56,8 @@ export async function POST(req: NextRequest) {
       businessCountry
     })
 
-    const lightning = await ensureManagedLightningForMerchant(merchantId)
-
     return NextResponse.json({
       profile: { ownerFirstName, ownerLastName, businessCountry },
-      lightning
     })
   } catch (error) {
     return NextResponse.json(

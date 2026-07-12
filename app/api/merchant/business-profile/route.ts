@@ -5,7 +5,6 @@ import {
   saveMerchantBusinessProfile,
   type MerchantBusinessProfileInput
 } from "@/engine/businessProfile"
-import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
@@ -29,10 +28,6 @@ export async function POST(req: NextRequest) {
     const merchantId = await requireMerchantIdFromRequest(req)
     const body = (await req.json().catch(() => ({}))) as MerchantBusinessProfileInput
     const profile = await saveMerchantBusinessProfile(merchantId, body)
-
-    if (profile.profile_status === "complete") {
-      await ensureManagedLightningForMerchant(merchantId)
-    }
 
     return NextResponse.json({ profile })
   } catch (error) {

@@ -8,50 +8,27 @@ function read(file: string) {
 
 const page = read("app/dashboard/wallet-setup/page.tsx")
 
-describe("Automatic Lightning/Speed provisioning fires right after core profile sync succeeds, not at click time (Part 1/2)", () => {
-  it("triggerAutomaticLightningProvisioningOnce is called from the profile-sync success path, alongside rail sync", () => {
+describe("Speed/Bitcoin provisioning starts from Create PineTree Wallet only", () => {
+  it("profile-sync success runs rail sync but does not start Speed or Lightning provisioning", () => {
     const successBranch = page.slice(
       page.indexOf('if (res.ok) {'),
       page.indexOf('console.warn("[pinetree-wallets] profile_sync_failed"')
     )
     expect(successBranch).toContain("runRailSyncOnceForProfile(json.profile, token)")
-    expect(successBranch).toContain("triggerAutomaticLightningProvisioningOnce(json.profile)")
-    // Fired after the modal-open block, non-blocking (return follows immediately).
-    const railSyncIndex = successBranch.indexOf("runRailSyncOnceForProfile(json.profile, token)")
-    const lightningIndex = successBranch.indexOf("triggerAutomaticLightningProvisioningOnce(json.profile)")
-    const returnIndex = successBranch.indexOf("return json.profile")
-    expect(lightningIndex).toBeGreaterThan(railSyncIndex)
-    expect(returnIndex).toBeGreaterThan(lightningIndex)
+    expect(successBranch).not.toContain("triggerAutomaticLightningProvisioningOnce")
+    expect(successBranch).not.toContain("provisionSpeedLightning")
+    expect(successBranch).not.toContain("/api/wallets/lightning/pinetree-managed")
   })
 
-  it("is idempotent per (merchant, base address, solana address) so Strict Mode/rerenders/reloads never fire twice for the same profile", () => {
-    expect(page).toContain("const lightningAutoProvisionAttemptedForProfileRef = useRef<string | null>(null)")
-    const fn = page.slice(
-      page.indexOf("function triggerAutomaticLightningProvisioningOnce"),
-      page.indexOf("// Speed/Lightning provisioning runs concurrently")
+  it("Create PineTree Wallet starts core Dynamic setup and Speed provisioning in parallel", () => {
+    const orchestratorFn = page.slice(
+      page.indexOf("async function createPineTreeWalletSetup("),
+      page.indexOf("// Kicks off core Dynamic wallet setup")
     )
-    expect(fn).toContain("if (!profileForAttempt.base_address || !profileForAttempt.solana_address) return")
-    expect(fn).toContain("if (lightningAutoProvisionAttemptedForProfileRef.current === attemptKey) return")
-    expect(fn).toContain("lightningAutoProvisionAttemptedForProfileRef.current = attemptKey")
-  })
-
-  it("is bounded so a slow Speed request can never block core wallet setup", () => {
-    const fn = page.slice(
-      page.indexOf("function triggerAutomaticLightningProvisioningOnce"),
-      page.indexOf("// Speed/Lightning provisioning runs concurrently")
-    )
-    expect(fn).toContain("runWithBoundedTimeout(() => provisionSpeedLightning(), lightningAutoProvisionClientTimeoutMs)")
-    expect(page).toContain("const lightningAutoProvisionClientTimeoutMs = 15_000")
-  })
-
-  it("logs a safe timeout event and lets the request keep running in the background instead of blocking on it", () => {
-    const fn = page.slice(
-      page.indexOf("function triggerAutomaticLightningProvisioningOnce"),
-      page.indexOf("// Speed/Lightning provisioning runs concurrently")
-    )
-    expect(fn).toContain('outcome.status === "timeout"')
-    expect(fn).toContain("wallet_lightning_auto_provision_client_timeout")
-    expect(fn).toContain("bounded.settlement.catch(() => undefined)")
+    expect(orchestratorFn).toContain('emitWalletSetupDebugEvent("wallet_setup_orchestrator_started"')
+    expect(orchestratorFn).toContain("await Promise.allSettled([")
+    expect(orchestratorFn).toContain("startCoreDynamicWallet(options),")
+    expect(orchestratorFn).toContain("provisionSpeedLightning(),")
   })
 
   it("modal open is independent of Lightning status - it only depends on the core profile being ready", () => {
@@ -68,10 +45,12 @@ describe("Automatic Lightning/Speed provisioning fires right after core profile 
     expect(modalBlock).not.toContain("provisionSpeedLightning")
   })
 
-  it("new client-side auto-provision events are whitelisted for the server-visible beacon", () => {
-    const eventRoute = read("app/api/debug/pinetree-wallet/setup-event/route.ts")
-    expect(eventRoute).toContain('"wallet_lightning_auto_provision_client_started"')
-    expect(eventRoute).toContain('"wallet_lightning_auto_provision_client_timeout"')
+  it("does not keep the old post-profile-sync auto-provision helper or client timeout events", () => {
+    expect(page).not.toContain("function triggerAutomaticLightningProvisioningOnce")
+    expect(page).not.toContain("lightningAutoProvisionAttemptedForProfileRef")
+    expect(page).not.toContain("lightningAutoProvisionClientTimeoutMs")
+    expect(page).not.toContain("wallet_lightning_auto_provision_client_started")
+    expect(page).not.toContain("wallet_lightning_auto_provision_client_timeout")
   })
 })
 

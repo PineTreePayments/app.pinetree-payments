@@ -11,7 +11,6 @@ import {
 import { getMerchantByAuthUserId, getMerchantById } from "@/database/merchants"
 import { syncPineTreeWalletProfileProviders } from "@/database/pineTreeWalletProfileProviderSync"
 import { provisionMerchantBitcoinAddress } from "@/engine/pineTreeBitcoinAddressProvisioning"
-import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
 import { assertMerchantBusinessProfileComplete } from "@/engine/businessProfile"
 import { withOperationTimeout } from "@/engine/promiseTimeout"
 
@@ -121,37 +120,6 @@ function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTr
         merchant_id: profile.merchant_id,
         step: "provider_sync_complete",
         duration_ms: Date.now() - providerSyncStartedAt,
-      })
-    }
-
-    const lightningStartedAt = Date.now()
-    console.info("[pinetree-wallets] background_step", {
-      merchant_id: profile.merchant_id,
-      step: "lightning_ensure_start",
-    })
-    console.info("[pinetree-wallets] wallet_lightning_background_started", { merchantId: profile.merchant_id })
-    try {
-      const lightningResult = await withOperationTimeout(
-        ensureManagedLightningForMerchant(profile.merchant_id),
-        BACKGROUND_PROVISIONING_TIMEOUT_MS,
-        "managed lightning provisioning"
-      )
-      if (lightningResult.status === "needs_attention") {
-        console.info("[pinetree-wallets] wallet_lightning_needs_attention", { merchantId: profile.merchant_id })
-      } else if (lightningResult.status === "pending") {
-        console.info("[pinetree-wallets] wallet_lightning_pending", { merchantId: profile.merchant_id })
-      }
-    } catch (error) {
-      console.warn("[pinetree-wallets] background_lightning_provisioning_failed", {
-        merchantId: profile.merchant_id,
-        error: error instanceof Error ? error.message : String(error),
-      })
-      console.info("[pinetree-wallets] wallet_lightning_needs_attention", { merchantId: profile.merchant_id })
-    } finally {
-      console.info("[pinetree-wallets] background_timing", {
-        merchant_id: profile.merchant_id,
-        step: "lightning_ensure_complete",
-        duration_ms: Date.now() - lightningStartedAt,
       })
     }
   })
