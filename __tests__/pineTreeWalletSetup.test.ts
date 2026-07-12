@@ -691,6 +691,81 @@ describe("PineTree embedded wallet setup", () => {
     expect(coreFn).toContain('emitWalletSetupDebugEvent("wallet_core_setup_started"')
   })
 
+  it("renders an event-driven four-stage wallet creation progress panel", () => {
+    const progressModel = page.slice(
+      page.indexOf("type WalletSetupProgressStage ="),
+      page.indexOf("function walletSetupFailureMessage(")
+    )
+    const progressComponent = page.slice(
+      page.indexOf("function WalletSetupProgress("),
+      page.indexOf("function walletSetupFailureMessage(")
+    )
+    const progressRender = page.slice(
+      page.indexOf("{walletSetupProgressActive ? ("),
+      page.indexOf("{dynamicVerificationPromptReason ? (")
+    )
+    const openingScheduler = page.slice(
+      page.indexOf("function schedulePineTreeWalletModalOpenAfterProgress("),
+      page.indexOf("function runRailSyncOnceForProfile(")
+    )
+    const progressLabels = page.slice(
+      page.indexOf("const walletSetupProgressStages"),
+      page.indexOf("function walletSetupProgressStageForStep(")
+    )
+
+    expect(progressModel).toContain('| "preparing"')
+    expect(progressModel).toContain('| "connections"')
+    expect(progressModel).toContain('| "finalizing"')
+    expect(progressModel).toContain('| "opening"')
+    expect(progressLabels).toContain('label: "Preparing secure wallet"')
+    expect(progressLabels).toContain('label: "Setting up wallet connections"')
+    expect(progressLabels).toContain('label: "Finalizing wallet"')
+    expect(progressLabels).toContain('label: "Opening PineTree Wallet"')
+    expect(progressLabels).toContain("dotIndex: 0")
+    expect(progressLabels).toContain("dotIndex: 3")
+    expect(progressLabels).not.toContain("Base")
+    expect(progressLabels).not.toContain("Solana")
+    expect(progressLabels).not.toContain("Bitcoin")
+    expect(progressLabels).not.toContain("Speed")
+
+    expect(progressModel).toContain("const walletSetupProgressSubtitleRotationMs = 5_000")
+    expect(progressComponent).toContain("window.setInterval")
+    expect(progressComponent).toContain("window.clearInterval")
+    expect(progressComponent).toContain("setSubtitleIndex")
+    expect(progressComponent).not.toContain("setWalletCreationStep")
+    expect(progressComponent).not.toContain("setWalletSetupStage")
+    expect(progressComponent).toContain("motion-safe:animate-pulse")
+    expect(progressComponent).toContain("motion-safe:animate-spin")
+    expect(progressComponent).toContain("motion-reduce:animate-none")
+    expect(progressComponent).toContain("motion-reduce:transition-none")
+    expect(progressComponent).toContain("overflow-hidden")
+    expect(progressComponent).toContain("min-w-0")
+    expect(progressComponent).toContain("break-words")
+    expect(progressComponent).toContain("h-2.5 w-2.5 shrink-0 rounded-full")
+    expect(progressComponent).toContain('aria-label="PineTree Wallet setup progress"')
+
+    expect(progressModel).toContain('input.walletCreationStep === "dynamic_authenticated"')
+    expect(progressModel).toContain('input.walletCreationStep === "provisioning_wallet"')
+    expect(progressModel).toContain('input.walletCreationStep === "syncing_pinetree_profile"')
+    expect(progressModel).toContain('input.walletCreationStep === "profile_synced"')
+    expect(progressModel).toContain("if (input.walletSetupOpeningAfterCreate) return \"opening\"")
+    expect(progressModel).not.toContain("Date.now()")
+    expect(progressModel).not.toContain("setTimeout")
+
+    expect(progressRender).toContain("<WalletSetupProgress")
+    expect(progressRender).toContain("stage={walletSetupProgressStage}")
+    expect(progressRender).toContain("active={walletSetupProgressActive}")
+    expect(page).toContain("walletCreationStep !== \"failed\" &&")
+    expect(page).toContain("walletCreationStep !== \"timeout\"")
+    expect(page).toContain("clearScheduledWalletOpenAfterCreate()")
+    expect(page).toContain("return () => {\n      clearScheduledWalletOpenAfterCreate()\n    }")
+    expect(openingScheduler).toContain("setWalletSetupOpeningAfterCreate(true)")
+    expect(openingScheduler).toContain("window.setTimeout")
+    expect(openingScheduler).toContain("walletSetupOpeningDelayMs")
+    expect(openingScheduler).toContain("openPineTreeWalletModalOnce(stage)")
+    expect(page).toContain("schedulePineTreeWalletModalOpenAfterProgress(\"profile_ready_after_create\")")
+  })
+
   it("Speed provisioning never throws into or fails core wallet setup", () => {
     const speedFn = page.slice(
       page.indexOf("async function provisionSpeedLightning("),

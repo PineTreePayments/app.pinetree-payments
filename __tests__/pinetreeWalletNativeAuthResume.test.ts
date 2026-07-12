@@ -166,14 +166,16 @@ describe("PineTree Wallet native auth resume - page wiring", () => {
     expect(page).toContain("lightningProfileKind: lightningProfileState.kind")
   })
 
-  it("opens the wallet and emits create-success events after a successful core profile save", () => {
+  it("schedules the wallet open and emits create-success events after a successful core profile save", () => {
     const readySaveBlock = page.slice(
       page.indexOf('emitWalletSetupDebugEvent("wallet_core_profile_post_success"'),
       page.indexOf("// Fire rail sync in the background")
     )
     expect(readySaveBlock).toContain('emitWalletSetupDebugEvent("wallet_core_create_success"')
     expect(readySaveBlock).toContain("autoOpenWalletAfterCreateRef.current")
-    expect(readySaveBlock).toContain('openPineTreeWalletModalOnce("profile_ready_after_create")')
+    expect(readySaveBlock).toContain(
+      'schedulePineTreeWalletModalOpenAfterProgress("profile_ready_after_create")'
+    )
     expect(page).toContain("setWalletOpen(true)")
     expect(page).toContain('emitWalletSetupDebugEvent("wallet_wallet_page_opened_after_create", {})')
   })

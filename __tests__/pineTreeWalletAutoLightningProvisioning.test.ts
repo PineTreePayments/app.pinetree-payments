@@ -40,7 +40,7 @@ describe("Speed/Bitcoin provisioning starts from Create PineTree Wallet only", (
       successBranch.indexOf('if (json.profile.status === "ready") {'),
       successBranch.indexOf("runRailSyncOnceForProfile")
     )
-    expect(modalBlock).toContain("openPineTreeWalletModalOnce")
+    expect(modalBlock).toContain("schedulePineTreeWalletModalOpenAfterProgress")
     expect(modalBlock).not.toContain("lightningProfileState")
     expect(modalBlock).not.toContain("provisionSpeedLightning")
   })

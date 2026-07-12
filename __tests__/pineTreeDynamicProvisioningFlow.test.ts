@@ -661,7 +661,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("normal merchant notices do not render raw technical debug fields", () => {
     const noticeChain = page.slice(
       page.indexOf('{walletSetupPrimaryState === "reconnect_needed" ? ('),
-      page.indexOf("{walletCreationMessage ? (")
+      page.indexOf("{walletSetupProgressActive ? (")
     )
     for (const hidden of [
       "dynamic_user_id",
@@ -725,7 +725,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).not.toContain("{repairOrSetupIncomplete ? (")
     const bannerChain = page.slice(
       page.indexOf('{walletSetupPrimaryState === "reconnect_needed" ? ('),
-      page.indexOf("{walletCreationMessage ? (")
+      page.indexOf("{walletSetupProgressActive ? (")
     )
     expect(bannerChain).toContain(') : walletSetupPrimaryState === "email_mismatch" ? (')
     expect(bannerChain).toContain(') : walletSetupPrimaryState === "email_unverified" ? (')
@@ -738,7 +738,7 @@ describe("PineTree Dynamic provisioning flow", () => {
       '(walletSetupPrimaryState === "ready" && walletCreationStep === "profile_synced")'
     )
     const messageBlock = page.slice(
-      page.indexOf("{walletCreationMessage ? ("),
+      page.indexOf("{walletSetupProgressActive ? ("),
       page.indexOf("{/* Safe diagnostics")
     )
     expect(messageBlock).not.toContain("Try again")

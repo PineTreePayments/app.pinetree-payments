@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChainEnum, useDynamicContext, useDynamicEvents, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
-import { AlertTriangle, CheckCircle2, ChevronDown, Copy, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, ChevronDown, Copy, Loader2, X } from "lucide-react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import {
@@ -300,6 +300,12 @@ type WalletCreationStep =
   | "profile_synced"
   | "failed"
   | "timeout"
+
+type WalletSetupProgressStage =
+  | "preparing"
+  | "connections"
+  | "finalizing"
+  | "opening"
 
 // Priority-ordered: exactly one of these drives the setup card at a time, highest first.
 type WalletSetupPrimaryState =
@@ -1086,6 +1092,141 @@ function walletCreationStepMessage(step: WalletCreationStep) {
   if (step === "timeout") return ""
   if (step === "failed") return ""
   return ""
+}
+
+const walletSetupProgressSubtitleRotationMs = 5_000
+const walletSetupOpeningDelayMs = 800
+
+const walletSetupProgressStages: Record<WalletSetupProgressStage, {
+  label: string
+  subtitle: string
+  rotatingSubtitles: string[]
+  dotIndex: number
+}> = {
+  preparing: {
+    label: "Preparing secure wallet",
+    subtitle: "Initializing your secure merchant wallet.",
+    rotatingSubtitles: [
+      "Initializing your secure merchant wallet.",
+      "Securing your wallet setup.",
+      "Preparing your wallet environment.",
+      "This may take a few moments.",
+    ],
+    dotIndex: 0,
+  },
+  connections: {
+    label: "Setting up wallet connections",
+    subtitle: "Connecting your supported payment networks.",
+    rotatingSubtitles: [
+      "Connecting your supported payment networks.",
+      "Verifying wallet connections.",
+      "Establishing secure payment access.",
+      "Still working on your wallet connections.",
+    ],
+    dotIndex: 1,
+  },
+  finalizing: {
+    label: "Finalizing wallet",
+    subtitle: "Syncing your wallet and payment configuration.",
+    rotatingSubtitles: [
+      "Syncing your wallet and payment configuration.",
+      "Verifying your wallet setup.",
+      "Applying final wallet settings.",
+      "Almost finished.",
+    ],
+    dotIndex: 2,
+  },
+  opening: {
+    label: "Opening PineTree Wallet",
+    subtitle: "Your wallet is ready.",
+    rotatingSubtitles: [
+      "Your wallet is ready.",
+      "Opening your PineTree Wallet.",
+    ],
+    dotIndex: 3,
+  },
+}
+
+function walletSetupProgressStageForStep(input: {
+  walletCreationStep: WalletCreationStep
+  walletSetupPrimaryState: WalletSetupPrimaryState
+  walletSetupOpeningAfterCreate: boolean
+}) : WalletSetupProgressStage {
+  if (input.walletSetupOpeningAfterCreate) return "opening"
+  if (
+    input.walletCreationStep === "syncing_pinetree_profile" ||
+    input.walletCreationStep === "profile_synced"
+  ) return "finalizing"
+  if (
+    input.walletCreationStep === "dynamic_authenticated" ||
+    input.walletCreationStep === "provisioning_wallet" ||
+    input.walletCreationStep === "waiting_for_embedded_wallets" ||
+    input.walletCreationStep === "wallets_detected" ||
+    input.walletCreationStep === "extracting_addresses" ||
+    input.walletCreationStep === "repairing_profile"
+  ) return "connections"
+  return "preparing"
+}
+
+function WalletSetupProgress({
+  stage,
+  active,
+}: {
+  stage: WalletSetupProgressStage
+  active: boolean
+}) {
+  const config = walletSetupProgressStages[stage]
+  const [subtitleIndex, setSubtitleIndex] = useState(0)
+
+  useEffect(() => {
+    setSubtitleIndex(0)
+    if (!active || config.rotatingSubtitles.length <= 1) return
+    const subtitleRotationTimer = window.setInterval(() => {
+      setSubtitleIndex((current) => (current + 1) % config.rotatingSubtitles.length)
+    }, walletSetupProgressSubtitleRotationMs)
+    return () => window.clearInterval(subtitleRotationTimer)
+  }, [active, stage, config.rotatingSubtitles.length])
+
+  const subtitle = config.rotatingSubtitles[subtitleIndex] || config.subtitle
+
+  return (
+    <div className="mt-4 w-full max-w-xl overflow-hidden rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-3 sm:px-3.5" data-wallet-setup-progress>
+      <div className="flex min-w-0 items-center gap-2.5" aria-label="PineTree Wallet setup progress">
+        {(["preparing", "connections", "finalizing", "opening"] as WalletSetupProgressStage[]).map((item) => {
+          const dot = walletSetupProgressStages[item]
+          const completedOrActive = dot.dotIndex <= config.dotIndex
+          const isActive = item === stage && active
+          return (
+            <span
+              key={item}
+              aria-hidden="true"
+              className={`h-2.5 w-2.5 shrink-0 rounded-full transition-colors duration-300 motion-reduce:transition-none ${
+                completedOrActive ? "bg-[#0052FF]" : "border border-blue-200 bg-white/80"
+              } ${isActive ? "motion-safe:animate-pulse shadow-[0_0_0_4px_rgba(0,82,255,0.12)]" : ""}`}
+            />
+          )
+        })}
+      </div>
+      <div className="mt-3 flex min-w-0 items-start gap-2.5">
+        {active ? (
+          <Loader2
+            size={15}
+            aria-hidden="true"
+            className="mt-0.5 shrink-0 text-[#0052FF] motion-safe:animate-spin motion-reduce:animate-none"
+          />
+        ) : null}
+        <div className="min-w-0 flex-1">
+          <p className="break-words text-xs font-semibold leading-5 text-blue-900">{config.label}</p>
+          <p
+            key={`${stage}-${subtitleIndex}`}
+            className="mt-0.5 break-words text-xs leading-5 text-blue-800 transition-opacity duration-300 motion-reduce:transition-none"
+          >
+            {subtitle}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function walletSetupFailureMessage(reason: WalletSetupFailureReason | null) {
@@ -2577,6 +2718,7 @@ function PineTreeWalletRuntime() {
   const [sdkTimedOut, setSdkTimedOut] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
   const [walletOpening, setWalletOpening] = useState(false)
+  const [walletSetupOpeningAfterCreate, setWalletSetupOpeningAfterCreate] = useState(false)
   const [openWalletReconnectNeeded, setOpenWalletReconnectNeeded] = useState(false)
   const [activeTab, setActiveTab] = useState<WalletTab>("overview")
   const [merchantId, setMerchantId] = useState<string | null>(null)
@@ -2680,6 +2822,7 @@ function PineTreeWalletRuntime() {
   const creatingEmbeddedWalletRef = useRef(false)
   const railSyncInFlightKeyRef = useRef<string | null>(null)
   const walletModalOpenedForAttemptRef = useRef(false)
+  const walletSetupOpeningDelayRef = useRef<number | null>(null)
   const nativeFallbackPendingRef = useRef(false)
   // True while an explicit create/retry/native-auth-resume attempt is running, so a
   // successful core profile save opens the wallet instead of leaving the merchant on
@@ -3387,6 +3530,7 @@ function PineTreeWalletRuntime() {
     stage: WalletSetupStage = "failed",
     extra?: Record<string, unknown>
   ) => {
+    clearScheduledWalletOpenAfterCreate()
     setWalletSetupFailureReason(failureReason)
     setWalletSetupStage(stage)
     const payload = {
@@ -3480,6 +3624,7 @@ function PineTreeWalletRuntime() {
       setShowAuthFlow(false)
       setShowDynamicUserProfile(false)
       if (setupWasActive) {
+        clearScheduledWalletOpenAfterCreate()
         overallSetupActiveRef.current = false
         setCoreSetupStageLabel("")
         setPendingSync(false)
@@ -5440,7 +5585,7 @@ function PineTreeWalletRuntime() {
           // sets the flag, so background saves don't pop the modal.
           if (autoOpenWalletAfterCreateRef.current) {
             autoOpenWalletAfterCreateRef.current = false
-            openPineTreeWalletModalOnce("profile_ready_after_create")
+            schedulePineTreeWalletModalOpenAfterProgress("profile_ready_after_create")
           }
         }
         // Fire rail sync in the background so merchant_wallets stays in sync with
@@ -6513,6 +6658,15 @@ function PineTreeWalletRuntime() {
     walletCreationStep !== "profile_synced" &&
     walletCreationStep !== "failed" &&
     walletCreationStep !== "timeout"
+  const walletSetupProgressActive =
+    (walletSetupPrimaryState === "provisioning" || walletSetupOpeningAfterCreate) &&
+    walletCreationStep !== "failed" &&
+    walletCreationStep !== "timeout"
+  const walletSetupProgressStage = walletSetupProgressStageForStep({
+    walletCreationStep,
+    walletSetupPrimaryState,
+    walletSetupOpeningAfterCreate,
+  })
   const showProvisioningRetryOnly = walletSetupPrimaryState === "failed" && Boolean(user)
 
   useEffect(() => {
@@ -6570,6 +6724,12 @@ function PineTreeWalletRuntime() {
     clearWalletSetupInProgress()
     setWalletCreationStep("profile_synced")
   }, [coreWalletProfileReady])
+
+  useEffect(() => {
+    return () => {
+      clearScheduledWalletOpenAfterCreate()
+    }
+  }, [])
 
   // Defense in depth: the effect above only fires on a false -> true transition of
   // dynamicProfileReady. If a stale failed/timeout step gets set afterward (e.g. a
@@ -6706,11 +6866,31 @@ function PineTreeWalletRuntime() {
 
   function openPineTreeWalletModalOnce(stage: string) {
     if (walletModalOpenedForAttemptRef.current || walletOpen) return
+    clearScheduledWalletOpenAfterCreate()
     walletModalOpenedForAttemptRef.current = true
+    setWalletSetupOpeningAfterCreate(false)
     setActiveTab("overview")
     setWalletOpen(true)
     emitWalletSetupStageDiagnostic("wallet_create_modal_opened", stage)
     emitWalletSetupDebugEvent("wallet_wallet_page_opened_after_create", {})
+  }
+
+  function clearScheduledWalletOpenAfterCreate() {
+    if (walletSetupOpeningDelayRef.current) {
+      window.clearTimeout(walletSetupOpeningDelayRef.current)
+      walletSetupOpeningDelayRef.current = null
+    }
+    setWalletSetupOpeningAfterCreate(false)
+  }
+
+  function schedulePineTreeWalletModalOpenAfterProgress(stage: string) {
+    if (walletModalOpenedForAttemptRef.current || walletOpen) return
+    if (walletSetupOpeningDelayRef.current) return
+    setWalletSetupOpeningAfterCreate(true)
+    walletSetupOpeningDelayRef.current = window.setTimeout(() => {
+      walletSetupOpeningDelayRef.current = null
+      openPineTreeWalletModalOnce(stage)
+    }, walletSetupOpeningDelayMs)
   }
 
   function runRailSyncOnceForProfile(profileToSync: PineTreeWalletProfile, token: string) {
@@ -6735,6 +6915,7 @@ function PineTreeWalletRuntime() {
   }
 
   function blockWalletSetupForBusinessProfile(reason: string) {
+    clearScheduledWalletOpenAfterCreate()
     setWalletSetupFailureReason("business_profile_required")
     setWalletSetupStage("idle")
     setWalletCreationStep("idle")
@@ -6757,6 +6938,7 @@ function PineTreeWalletRuntime() {
     }
     if (walletSetupStartInFlightRef.current || (pendingSync && !provisioningRetryExhausted)) return false
     const attemptId = createWalletSetupAttemptId()
+    clearScheduledWalletOpenAfterCreate()
     walletSetupStartInFlightRef.current = attemptId
     setWalletSetupAttemptId(attemptId)
     setWalletSetupFailureReason(null)
@@ -7698,17 +7880,14 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        {walletCreationMessage ? (
-          <div className={`mt-4 flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2.5 ${
-            walletCreationStep === "failed" || walletCreationStep === "timeout"
-              ? "border-amber-200 bg-amber-50/80"
-              : "border-blue-100 bg-blue-50/70"
-          }`}>
-            <p className={`text-xs font-semibold leading-5 ${
-              walletCreationStep === "failed" || walletCreationStep === "timeout"
-                ? "text-amber-800"
-                : "text-blue-800"
-            }`}>
+        {walletSetupProgressActive ? (
+          <WalletSetupProgress
+            stage={walletSetupProgressStage}
+            active={walletSetupProgressActive}
+          />
+        ) : walletCreationMessage ? (
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2.5">
+            <p className="text-xs font-semibold leading-5 text-amber-800">
               {walletCreationMessage}
             </p>
           </div>
