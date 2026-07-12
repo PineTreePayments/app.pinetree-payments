@@ -405,6 +405,7 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(src).toContain("Open PineTree Wallet")
     expect(src).toContain("Create PineTree Wallet")
     expect(src).toContain("mt-6 flex justify-start")
+    expect(src).toContain("h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60")
   })
 
   it("EnabledRailChips renders Connected rails label above active rail pills", () => {

@@ -682,7 +682,7 @@ export default function SettingsPage() {
             aria-labelledby="business-profile-modal-title"
             className="flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden rounded-none border border-white/70 bg-white shadow-[0_32px_100px_rgba(15,23,42,0.30)] sm:h-auto sm:max-h-[92dvh] sm:rounded-[1.5rem]"
           >
-            <header className="shrink-0 flex items-start justify-between gap-4 border-b border-gray-100 px-5 pb-5 pt-[calc(env(safe-area-inset-top)+1rem)] sm:px-7 sm:pt-5">
+            <header className="shrink-0 flex items-start justify-between gap-4 border-b border-gray-100 px-5 pb-5 pt-[calc(env(safe-area-inset-top)+1.5rem)] sm:px-7 sm:pt-5">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 id="business-profile-modal-title" className="text-lg font-semibold text-gray-950">Business Profile</h2>
@@ -738,7 +738,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => setBusinessProfileOpen(false)}
                 disabled={saving}
-                className="inline-flex min-h-11 min-w-[8.5rem] items-center justify-center rounded-xl border border-gray-200 bg-white px-5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+                className="inline-flex h-12 w-64 items-center justify-center rounded-lg border border-gray-200 bg-white px-6 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -746,7 +746,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => void saveBusinessProfile()}
                 disabled={saving || !schemaReady}
-                className="inline-flex min-h-11 min-w-[14rem] items-center justify-center rounded-xl bg-blue-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+                className="inline-flex h-12 w-64 items-center justify-center rounded-lg bg-blue-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
               >
                 {saving ? "Saving..." : "Save Business Profile"}
               </button>
@@ -770,7 +770,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setBusinessProfileOpen(true)}
-              className="inline-flex min-h-11 w-auto min-w-[10rem] items-center justify-center rounded-xl bg-blue-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              className="inline-flex h-10 w-auto min-w-[9.5rem] items-center justify-center rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
             >
               {profileActionLabel(profileStatus)}
             </button>

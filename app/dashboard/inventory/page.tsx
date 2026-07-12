@@ -486,7 +486,7 @@ export default function InventoryPage() {
             type="button"
             onClick={openCreate}
             disabled={!available}
-            className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-full bg-blue-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <PackagePlus size={13} />
             Add Item

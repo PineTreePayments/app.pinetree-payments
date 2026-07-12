@@ -63,12 +63,17 @@ describe("Business Profile onboarding UI", () => {
       settings.indexOf('<DashboardSection title="Business Profile"'),
       settings.indexOf('<DashboardSection title="Receipt Preferences"')
     )
+    const editProfileButton = businessSection.slice(
+      businessSection.indexOf("onClick={() => setBusinessProfileOpen(true)}"),
+      businessSection.indexOf("{profileActionLabel(profileStatus)}")
+    )
 
     expect(businessSection).toContain("Business and owner details required for payment activation.")
     expect(businessSection).toContain("flex items-center justify-between gap-3")
     expect(businessSection).toContain("shrink-0 rounded-full border px-1.5 py-px text-[10px]")
-    expect(businessSection).toContain("inline-flex min-h-11 w-auto min-w-[10rem] items-center justify-center rounded-xl bg-blue-600 px-6 text-sm")
-    expect(businessSection).not.toContain("w-full")
+    expect(editProfileButton).toContain("inline-flex h-10 w-auto min-w-[9.5rem] items-center justify-center rounded-lg bg-blue-600 px-5 text-sm")
+    expect(editProfileButton).not.toContain("w-full")
+    expect(editProfileButton).not.toContain("rounded-full")
     expect(businessSection).not.toContain("inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm")
     expect(businessSection).not.toContain("Required business and owner information for payment activation and PineTree Wallet Lightning setup.")
     expect(businessSection).not.toContain("Complete this profile before activating payments.")
@@ -106,7 +111,7 @@ describe("Business Profile onboarding UI", () => {
     expect(modalBlock).toContain("flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden")
     expect(modalBlock).toContain("sm:h-auto sm:max-h-[92dvh]")
     expect(modalBlock).toContain("shrink-0 flex items-start justify-between")
-    expect(modalBlock).toContain("pt-[calc(env(safe-area-inset-top)+1rem)]")
+    expect(modalBlock).toContain("pt-[calc(env(safe-area-inset-top)+1.5rem)]")
     expect(modalBlock).toContain("min-h-0 flex-1 overflow-y-auto overscroll-contain")
     expect(modalBlock).toContain("[-webkit-overflow-scrolling:touch]")
     expect(modalBlock).toContain("shrink-0 flex flex-col-reverse items-center")
@@ -164,8 +169,12 @@ describe("Business Profile onboarding UI", () => {
     expect(modalBlock).toContain("onClick={() => void saveBusinessProfile()}")
     expect(modalBlock).toContain("disabled={saving || !schemaReady}")
     expect(modalBlock).toContain('{saving ? "Saving..." : "Save Business Profile"}')
-    expect(footerBlock).toContain("inline-flex min-h-11 min-w-[14rem]")
-    expect(footerBlock).toContain("inline-flex min-h-11 min-w-[8.5rem]")
+    expect(footerBlock).toContain("inline-flex h-12 w-64")
+    expect(footerBlock.match(/inline-flex h-12 w-64/g)?.length).toBe(2)
+    expect(footerBlock.match(/rounded-lg/g)?.length).toBe(2)
+    expect(footerBlock.match(/px-6 text-sm/g)?.length).toBe(2)
+    expect(footerBlock).toContain("bg-blue-600")
+    expect(footerBlock).toContain("border border-gray-200 bg-white")
     expect(footerBlock).not.toContain("w-full")
   })
 

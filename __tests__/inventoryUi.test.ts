@@ -1,0 +1,37 @@
+import fs from "node:fs"
+import path from "node:path"
+import { describe, expect, it } from "vitest"
+
+function read(relativePath: string) {
+  return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8")
+}
+
+const inventory = read("app/dashboard/inventory/page.tsx")
+
+describe("Inventory UI polish", () => {
+  it("uses a compact rectangular Add Item action while preserving behavior", () => {
+    const addItemAction = inventory.slice(
+      inventory.indexOf("action={"),
+      inventory.indexOf('<div className="overflow-hidden rounded-2xl')
+    )
+
+    expect(addItemAction).toContain("onClick={openCreate}")
+    expect(addItemAction).toContain("disabled={!available}")
+    expect(addItemAction).toContain("<PackagePlus")
+    expect(addItemAction).toContain("Add Item")
+    expect(addItemAction).toContain("inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-5 text-sm")
+    expect(addItemAction).not.toContain("rounded-full")
+    expect(addItemAction).not.toContain("w-full")
+  })
+
+  it("keeps inventory filter pills pill-shaped", () => {
+    const filterButtons = inventory.slice(
+      inventory.indexOf("(["),
+      inventory.indexOf("{loading ? (")
+    )
+
+    expect(filterButtons).toContain("shrink-0 rounded-full border px-3 py-2 text-xs font-semibold")
+    expect(filterButtons).toContain('["ALL", "All"]')
+    expect(filterButtons).toContain('["ACTIVE", "Active"]')
+  })
+})
