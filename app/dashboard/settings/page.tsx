@@ -193,7 +193,6 @@ export default function SettingsPage() {
   const [businessProfileOpen, setBusinessProfileOpen] = useState(false)
   const [businessProfileErrors, setBusinessProfileErrors] = useState<BusinessProfileErrors>({})
   const [businessProfileReturnDestination, setBusinessProfileReturnDestination] = useState<"overview" | "wallet" | "providers" | null>(null)
-  const [businessProfileSavedForReturn, setBusinessProfileSavedForReturn] = useState(false)
   const firstBusinessProfileFieldRef = useRef<HTMLInputElement | HTMLSelectElement | null>(null)
   const businessProfileFieldRefs = useRef<Partial<Record<BusinessProfileField, HTMLInputElement | HTMLSelectElement | null>>>({})
 
@@ -378,15 +377,6 @@ export default function SettingsPage() {
     }
   }, [loading])
 
-  useEffect(() => {
-    if (!businessProfileOpen || typeof document === "undefined") return
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = "hidden"
-    return () => {
-      document.body.style.overflow = previousOverflow
-    }
-  }, [businessProfileOpen])
-
   async function saveSettings() {
     const parsedTaxRate = parseTaxRate(taxRate)
     if (taxEnabled && (parsedTaxRate === null || parsedTaxRate <= 0 || parsedTaxRate > 100)) {
@@ -508,7 +498,6 @@ export default function SettingsPage() {
       setProfileStatus(payload?.profile?.profile_status || "complete")
       setBusinessProfileErrors({})
       setBusinessProfileOpen(false)
-      if (businessProfileReturnDestination) setBusinessProfileSavedForReturn(true)
       toast.success("Business Profile saved")
     } catch (error) {
       console.error(error)
@@ -680,7 +669,8 @@ export default function SettingsPage() {
 
       {businessProfileOpen ? (
         <div
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
+          data-pinetree-overlay="true"
+          className="pinetree-modal-backdrop fixed inset-0 z-[80] flex items-end justify-center overflow-hidden p-0 sm:items-center sm:p-5"
           role="presentation"
           onMouseDown={(event) => {
             if (event.currentTarget === event.target) setBusinessProfileOpen(false)
@@ -690,9 +680,9 @@ export default function SettingsPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="business-profile-modal-title"
-            className="flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white shadow-[0_32px_100px_rgba(15,23,42,0.30)]"
+            className="flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden rounded-none border border-white/70 bg-white shadow-[0_32px_100px_rgba(15,23,42,0.30)] sm:h-auto sm:max-h-[92dvh] sm:rounded-[1.5rem]"
           >
-            <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-7">
+            <header className="shrink-0 flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 pt-[calc(1.25rem+env(safe-area-inset-top))] sm:px-7 sm:pt-5">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 id="business-profile-modal-title" className="text-lg font-semibold text-gray-950">Business Profile</h2>
@@ -711,7 +701,7 @@ export default function SettingsPage() {
               </button>
             </header>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-7">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [-webkit-overflow-scrolling:touch] sm:px-7">
               <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-blue-900">
                 <p className="text-xs font-semibold">Payment activation</p>
                 <p className="mt-0.5 text-xs leading-5">Complete the required details below to activate payments.</p>
@@ -748,7 +738,7 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <footer className="flex flex-col-reverse gap-2 border-t border-gray-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-7">
+            <footer className="shrink-0 flex flex-col-reverse gap-2 border-t border-gray-100 px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-end sm:px-7 sm:pb-4">
               <button
                 type="button"
                 onClick={() => setBusinessProfileOpen(false)}
@@ -785,22 +775,11 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setBusinessProfileOpen(true)}
-              className="inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              className="inline-flex min-h-9 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
             >
               {profileActionLabel(profileStatus)}
             </button>
           </div>
-          {businessProfileSavedForReturn && businessProfileReturnDestination ? (
-            <div className="mt-3 flex flex-col gap-2 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-3 text-sm text-blue-900 sm:flex-row sm:items-center sm:justify-between">
-              <p className="font-medium">Business Profile saved.</p>
-              <Link
-                href={businessProfileReturnDestination === "wallet" ? "/dashboard/wallet-setup" : businessProfileReturnDestination === "providers" ? "/dashboard/providers" : "/dashboard"}
-                className="font-semibold text-blue-700 hover:text-blue-800"
-              >
-                {businessProfileReturnDestination === "wallet" ? "Return to PineTree Wallet" : businessProfileReturnDestination === "providers" ? "Return to Providers" : "Return to Overview"}
-              </Link>
-            </div>
-          ) : null}
         </div>
       </DashboardSection>
 

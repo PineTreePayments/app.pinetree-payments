@@ -67,9 +67,55 @@ describe("Business Profile onboarding UI", () => {
     expect(businessSection).toContain("Business and owner details required for payment activation.")
     expect(businessSection).toContain("flex items-center justify-between gap-3")
     expect(businessSection).toContain("shrink-0 rounded-full border px-1.5 py-px text-[10px]")
-    expect(businessSection).toContain("w-full")
+    expect(businessSection).toContain("inline-flex min-h-9 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-1.5 text-xs")
+    expect(businessSection).not.toContain("inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm")
     expect(businessSection).not.toContain("Required business and owner information for payment activation and PineTree Wallet Lightning setup.")
     expect(businessSection).not.toContain("Complete this profile before activating payments.")
+  })
+
+  it("settings Business Profile save relies on the green toast and no persistent return card", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+    const businessSection = settings.slice(
+      settings.indexOf('<DashboardSection title="Business Profile"'),
+      settings.indexOf('<DashboardSection title="Receipt Preferences"')
+    )
+
+    expect(settings).toContain('toast.success("Business Profile saved")')
+    expect(settings).toContain("const refreshed = await callSettingsApi(\"GET\")")
+    expect(settings).toContain("setBusinessProfileOpen(false)")
+    expect(settings).toContain('params.get("section") === "business-profile"')
+    expect(settings).toContain('returnDestination === "wallet" || returnDestination === "overview" || returnDestination === "providers"')
+    expect(businessSection).not.toContain("Business Profile saved.")
+    expect(businessSection).not.toContain("Return to Overview")
+    expect(businessSection).not.toContain("Return to PineTree Wallet")
+    expect(businessSection).not.toContain("Return to Providers")
+    expect(settings).not.toContain("businessProfileSavedForReturn")
+  })
+
+  it("Business Profile modal joins the shared overlay lock and keeps scrolling inside the form body", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+    const overlayManager = read("components/ui/OverlayScrollLockManager.tsx")
+    const modalBlock = settings.slice(
+      settings.indexOf('data-pinetree-overlay="true"'),
+      settings.indexOf('<DashboardSection title="Business Profile"')
+    )
+
+    expect(modalBlock).toContain('data-pinetree-overlay="true"')
+    expect(modalBlock).toContain("pinetree-modal-backdrop fixed inset-0 z-[80] flex items-end justify-center overflow-hidden")
+    expect(modalBlock).toContain("flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden")
+    expect(modalBlock).toContain("sm:h-auto sm:max-h-[92dvh]")
+    expect(modalBlock).toContain("shrink-0 flex items-start justify-between")
+    expect(modalBlock).toContain("min-h-0 flex-1 overflow-y-auto overscroll-contain")
+    expect(modalBlock).toContain("[-webkit-overflow-scrolling:touch]")
+    expect(modalBlock).toContain("shrink-0 flex flex-col-reverse")
+    expect(settings).not.toContain("document.body.style.overflow")
+
+    expect(overlayManager).toContain('const OVERLAY_SELECTOR = \'[data-pinetree-overlay="true"]\'')
+    expect(overlayManager).toContain("body.style.position = \"fixed\"")
+    expect(overlayManager).toContain("body.style.top = `-${scrollY}px`")
+    expect(overlayManager).toContain("body.style.overflow = \"hidden\"")
+    expect(overlayManager).toContain("window.scrollTo(0, scrollY)")
+    expect(overlayManager).toContain(".some((overlay) => overlay.getClientRects().length > 0)")
   })
 
   it("Business Profile status pills use gray for incomplete, blue for complete, and no green complete styling", () => {
@@ -152,8 +198,8 @@ describe("Business Profile onboarding UI", () => {
     expect(wallet).toContain('wallet_speed_setup_skipped_business_profile_required')
     expect(settings).toContain('params.get("section") === "business-profile"')
     expect(settings).toContain('returnDestination === "wallet" || returnDestination === "overview" || returnDestination === "providers"')
-    expect(settings).toContain("Return to PineTree Wallet")
-    expect(settings).toContain("Return to Overview")
+    expect(settings).not.toContain("Return to PineTree Wallet")
+    expect(settings).not.toContain("Return to Overview")
   })
 
   it("settings page keeps Business Profile, tax, POS, receipt, and security surfaces separate", () => {
