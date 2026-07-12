@@ -14,7 +14,10 @@ export type WithdrawalAuditEventType =
   | "withdrawal.failed"
   | "withdrawal.canceled"
 
-export type MerchantAuditEventType = "webhook.secret_regenerated" | WithdrawalAuditEventType
+export type MerchantAuditEventType =
+  | "webhook.secret_regenerated"
+  | "lightning.speed_credential_revealed"
+  | WithdrawalAuditEventType
 
 export type MerchantAuditEvent = {
   id: string

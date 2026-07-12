@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const merchantId = "71478b11-ed12-4dbf-8466-52807995bac0"
 
@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getMerchantBusinessProfile: vi.fn(),
   getPineTreeSpeedConfigStatus: vi.fn(),
   isSpeedPlatformTreasurySweepEnabled: vi.fn(),
+  upsertMerchantSpeedCredential: vi.fn(),
 }))
 
 vi.mock("@/database/merchants", () => ({
@@ -43,6 +44,11 @@ vi.mock("@/database/pineTreeWalletProfiles", () => ({
 
 vi.mock("@/database/merchantProviders", () => ({
   saveMerchantSpeedConnection: mocks.saveMerchantSpeedConnection,
+}))
+
+vi.mock("@/database/merchantSpeedCredentials", () => ({
+  upsertMerchantSpeedCredential: mocks.upsertMerchantSpeedCredential,
+  resolveSpeedCredentialEnvironment: () => "non_production",
 }))
 
 vi.mock("@/providers/lightning/speedConnectedAccounts", () => ({
@@ -96,10 +102,13 @@ function lightningProfile(input: {
 }
 
 describe("ensureManagedLightningForMerchant", () => {
+  const originalEnv = { ...process.env }
+
   beforeEach(() => {
     vi.clearAllMocks()
     vi.spyOn(console, "info").mockImplementation(() => undefined)
     vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    process.env = { ...originalEnv, NODE_ENV: "test", SPEED_TEST_ACCOUNT_PASSWORD: "Fixture-Shared-Test-Pass9!" }
     mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(false)
     mocks.getPineTreeWalletProfile.mockResolvedValue(null)
     mocks.getMerchantBusinessProfile.mockResolvedValue({
@@ -116,6 +125,20 @@ describe("ensureManagedLightningForMerchant", () => {
         accountStatus: input.speedConnectedAccountStatus,
       })
     )
+    mocks.upsertMerchantSpeedCredential.mockResolvedValue({
+      id: "cred_1",
+      merchant_id: merchantId,
+      speed_connected_account_id: "acct_456",
+      speed_login_email: "merchant@example.test",
+      environment: "non_production",
+      created_at: "2026-07-08T00:00:00.000Z",
+      updated_at: "2026-07-08T00:00:00.000Z",
+      rotated_at: null,
+    })
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
   })
 
   it("no-ops when merchant_lightning_profiles already has an active Speed account", async () => {
@@ -185,6 +208,7 @@ describe("ensureManagedLightningForMerchant", () => {
       provider_response_summary: { source: "existing_connected_account" },
       error_message: null,
       mode: "test",
+      credential_password_used: true,
     })
 
     const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
@@ -207,7 +231,9 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(call).not.toHaveProperty("account_type")
     expect(call).not.toHaveProperty("business_name")
     expect(mocks.getMerchantBusinessProfile).toHaveBeenCalledWith(merchantId)
-    // A password is required by Speed's API but is generated and never persisted/returned.
+    // A password is required by Speed's API. It is retained (encrypted) via
+    // upsertMerchantSpeedCredential immediately below - never logged or
+    // returned in plaintext.
     expect(typeof call.password).toBe("string")
     expect(call.password.length).toBeGreaterThan(10)
     const { speedCustomConnectPasswordPolicyPass } = await import("@/engine/pineTreeWalletReadiness")
@@ -217,6 +243,15 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(result.status).toBe("ready")
     expect(result.speedConnectedAccountId).toBe("acct_456")
     expect(result.speedConnectedAccountRelationshipId).toBe("ca_456")
+
+    // The exact password just used to create the account is retained via the
+    // encrypted credential store - never a freshly re-generated or fabricated one.
+    expect(mocks.upsertMerchantSpeedCredential).toHaveBeenCalledWith({
+      merchantId,
+      speedConnectedAccountId: "acct_456",
+      speedLoginEmail: "merchant@example.test",
+      password: call.password,
+    })
 
     expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -232,6 +267,88 @@ describe("ensureManagedLightningForMerchant", () => {
       merchantId,
       expect.objectContaining({ accountId: "acct_456", enabled: true })
     )
+  })
+
+  it("does not store a credential when Speed resolved the account via existing-email reuse (credential_password_used is false)", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: merchantId,
+      business_name: "PineTree Test Merchant",
+      email: "merchant@example.test",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_country: "us",
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_789",
+      speed_connected_account_relationship_id: "ca_789",
+      speed_account_id: "acct_789",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: { source: "existing_connected_account" },
+      error_message: null,
+      mode: "test",
+      // No credential_password_used: true here - Speed resolved this account
+      // by an existing-email lookup, so the password PineTree generated for
+      // this attempt is not the account's real password.
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.status).toBe("ready")
+    expect(mocks.upsertMerchantSpeedCredential).not.toHaveBeenCalled()
+  })
+
+  it("marks needs_attention with speed_connect_credential_store_failed when credential storage fails after a fresh Speed create, without leaking the password", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: merchantId,
+      business_name: "PineTree Test Merchant",
+      email: "merchant@example.test",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      business_country: "us",
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_999",
+      speed_connected_account_relationship_id: "ca_999",
+      speed_account_id: "acct_999",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: { source: "existing_connected_account" },
+      error_message: null,
+      mode: "test",
+      credential_password_used: true,
+    })
+    mocks.upsertMerchantSpeedCredential.mockRejectedValue(new Error("connection reset"))
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    // Speed genuinely created the account - never report full success when
+    // PineTree lost the ability to administratively access it.
+    expect(result.status).toBe("needs_attention")
+    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantId,
+        status: "needs_attention",
+        speedConnectedAccountStatus: "speed_connect_credential_store_failed",
+        // The account id Speed created is still preserved, not dropped.
+        speedConnectedAccountId: "acct_999",
+        speedAccountId: "acct_999",
+      })
+    )
+
+    const usedPassword = (
+      mocks.createSpeedCustomConnectedAccountForMerchant.mock.calls[0]?.[0] as { password?: string } | undefined
+    )?.password
+    expect(typeof usedPassword).toBe("string")
+
+    const warnCalls = (console.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls
+    expect(JSON.stringify(warnCalls)).not.toContain(usedPassword)
   })
 
   it("uses Business Profile contact_email as the primary connected-account email, ahead of the merchant account email", async () => {
@@ -1091,6 +1208,17 @@ describe("no frontend surface calls Speed directly", () => {
     // own route, which internally delegates to ensureManagedLightningForMerchant.
     expect(walletPage).toContain('"/api/wallets/lightning/pinetree-managed"')
     expect(walletPage).toContain('"/api/merchant/business-owner-profile"')
+
+    // Speed Custom Connect credential retention is internal-only - merchants
+    // must never see the account id, login email, password, or admin reveal
+    // route/action.
+    for (const src of [walletPage, providersPage]) {
+      expect(src).not.toMatch(/speed_login_email|speedLoginEmail/i)
+      expect(src).not.toMatch(/speedPassword|speed_password/i)
+      expect(src).not.toContain("merchant_speed_credentials")
+      expect(src).not.toContain("/api/admin/speed-credentials")
+      expect(src).not.toMatch(/revealAdminSpeedCredential|revealMerchantSpeedCredential/)
+    }
   })
 })
 
@@ -1148,16 +1276,77 @@ describe("Speed Custom Connect generated credentials", () => {
     expect(speedCustomConnectPasswordPolicyPass("NoNumber!!!!!")).toBe(false)
   })
 
-  it("never logs or persists the plaintext password anywhere in this module's password lifecycle", () => {
+  it("never logs the plaintext password anywhere in this module's password lifecycle", () => {
     const fs = require("node:fs")
     const path = require("node:path")
     const engine = fs.readFileSync(path.join(process.cwd(), "engine/pineTreeWalletReadiness.ts"), "utf8") as string
     // The password variable is only ever passed to Speed (createSpeedCustomConnectedAccountForMerchant's
-    // `password:` field) and to diagnostic presence booleans - it must never
+    // `password:` field), to upsertMerchantSpeedCredential (which encrypts it
+    // before storage), and to diagnostic presence booleans - it must never
     // appear on the same line as a console.* call.
     const offendingLines = engine
       .split("\n")
       .filter((line) => /console\.(info|warn|error)/.test(line) && /speedPassword/.test(line))
     expect(offendingLines).toEqual([])
+  })
+})
+
+describe("Speed Custom Connect password resolution (test vs production)", () => {
+  const originalEnv = { ...process.env }
+
+  beforeEach(() => {
+    vi.resetModules()
+    process.env = { ...originalEnv }
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+  })
+
+  it("uses the shared SPEED_TEST_ACCOUNT_PASSWORD outside production", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "development",
+      SPEED_TEST_ACCOUNT_PASSWORD: "Shared-Fixed-Test-Password9!",
+    }
+    const { resolveSpeedAccountPassword } = await import("@/engine/pineTreeWalletReadiness")
+    expect(resolveSpeedAccountPassword()).toBe("Shared-Fixed-Test-Password9!")
+    expect(resolveSpeedAccountPassword()).toBe(resolveSpeedAccountPassword())
+  })
+
+  it("throws a clear configuration error when SPEED_TEST_ACCOUNT_PASSWORD is missing outside production", async () => {
+    process.env = { ...process.env, NODE_ENV: "test" }
+    delete process.env.SPEED_TEST_ACCOUNT_PASSWORD
+    const { resolveSpeedAccountPassword } = await import("@/engine/pineTreeWalletReadiness")
+    expect(() => resolveSpeedAccountPassword()).toThrow(/SPEED_TEST_ACCOUNT_PASSWORD/)
+  })
+
+  it("generates a fresh, unique password per call in production - never a shared password", async () => {
+    process.env = { ...process.env, NODE_ENV: "production" }
+    delete process.env.SPEED_TEST_ACCOUNT_PASSWORD
+    const { resolveSpeedAccountPassword, speedCustomConnectPasswordPolicyPass } = await import(
+      "@/engine/pineTreeWalletReadiness"
+    )
+    const first = resolveSpeedAccountPassword()
+    const second = resolveSpeedAccountPassword()
+    expect(first).not.toBe(second)
+    expect(speedCustomConnectPasswordPolicyPass(first)).toBe(true)
+    expect(speedCustomConnectPasswordPolicyPass(second)).toBe(true)
+  })
+
+  it("never reads SPEED_TEST_ACCOUNT_PASSWORD in production, even if it happens to be set", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      SPEED_TEST_ACCOUNT_PASSWORD: "should-never-be-used-in-production",
+    }
+    const { resolveSpeedAccountPassword } = await import("@/engine/pineTreeWalletReadiness")
+    expect(resolveSpeedAccountPassword()).not.toBe("should-never-be-used-in-production")
+  })
+
+  it("isProductionRuntime mirrors the codebase's one NODE_ENV convention", async () => {
+    process.env = { ...process.env, NODE_ENV: "production" }
+    const { isProductionRuntime } = await import("@/engine/pineTreeWalletReadiness")
+    expect(isProductionRuntime()).toBe(true)
   })
 })

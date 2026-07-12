@@ -132,6 +132,15 @@ const groups = [
       ["MOONPAY_WEBHOOK_SECRET", false, "secret16"],
     ],
   },
+  {
+    name: "Speed Custom Connect credentials",
+    entries: [
+      // Required only outside production - checked conditionally below so a
+      // production deploy isn't flagged for a var it must never use.
+      ["SPEED_TEST_ACCOUNT_PASSWORD", false, "secret16"],
+      ["SPEED_CREDENTIAL_ENCRYPTION_KEY", true, "hex64"],
+    ],
+  },
 ]
 
 function validation(name, kind) {
@@ -220,6 +229,18 @@ if (dynamicAuthMode === "external_jwt") {
   warnings.push(
     "NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK=false without NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=external_jwt disables PineTree Wallet " +
       "creation entirely (no fallback, no external JWT). Set AUTH_MODE=external_jwt or leave EMAIL_FALLBACK unset/true."
+  )
+}
+
+// SPEED_TEST_ACCOUNT_PASSWORD is only required outside production - Speed
+// Custom Connect account creation fails closed without it there, but
+// production must never read it (production generates a unique password
+// per account instead).
+if (nodeEnv !== "production" && !present("SPEED_TEST_ACCOUNT_PASSWORD")) {
+  requiredFailures += 1
+  warnings.push(
+    "SPEED_TEST_ACCOUNT_PASSWORD is required outside production (NODE_ENV=" + nodeEnv + ") " +
+      "for Speed Custom Connect account creation to succeed."
   )
 }
 

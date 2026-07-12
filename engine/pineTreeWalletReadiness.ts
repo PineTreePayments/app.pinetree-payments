@@ -17,6 +17,7 @@ import {
 } from "@/database/merchantLightningProfiles"
 import { getPineTreeWalletProfile, upsertPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { saveMerchantSpeedConnection } from "@/database/merchantProviders"
+import { upsertMerchantSpeedCredential } from "@/database/merchantSpeedCredentials"
 import {
   createSpeedCustomConnectedAccountForMerchant,
   getSpeedConnectedAccountSetupStatus
@@ -133,8 +134,14 @@ function isActiveLightningProfile(profile: MerchantLightningProfile | null): boo
 
 /**
  * Speed Custom Connect requires a password at account-creation time, but
- * PineTree Wallet merchants never log into Speed directly — generate one,
- * hand it to Speed, and discard it immediately.
+ * PineTree Wallet merchants never log into Speed directly. PineTree still
+ * needs administrative access to every account it creates (e.g. to sign into
+ * Speed's portal to clean up a test account, or as a fallback when Speed
+ * requires portal auth for full account deletion) - so the password used
+ * here is retained (encrypted) by upsertMerchantSpeedCredential immediately
+ * after a fresh Speed Custom Connect create succeeds. See
+ * database/merchantSpeedCredentials.ts and
+ * providers/lightning/speedCredentialCrypto.ts.
  */
 const SPEED_PASSWORD_LOWER = "abcdefghjkmnpqrstuvwxyz"
 const SPEED_PASSWORD_UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -196,6 +203,42 @@ export function generateSpeedCustomConnectPassword(): string {
   }
 
   return `Pt9!${randomBytes(16).toString("hex").replace(/abc|123/gi, "x9")}`
+}
+
+/**
+ * Matches the codebase's one existing production/non-production convention
+ * (engine/config.ts's validateConfig) rather than introducing a second one.
+ */
+export function isProductionRuntime(): boolean {
+  return process.env.NODE_ENV === "production"
+}
+
+/**
+ * One shared password for every non-production (test/dev/staging) Speed
+ * Custom Connect account - PineTree administrators need a single password
+ * they already know to sign into or clean up test accounts, not a different
+ * generated one per account. Fails closed: a missing test password must
+ * never silently fall back to a generated one, or every test account would
+ * need its own retained credential lookup just like production.
+ */
+export function getSpeedTestAccountPassword(): string {
+  const password = String(process.env.SPEED_TEST_ACCOUNT_PASSWORD || "").trim()
+  if (!password) {
+    throw new Error(
+      "SPEED_TEST_ACCOUNT_PASSWORD is required outside production to create Speed Custom Connect accounts."
+    )
+  }
+  return password
+}
+
+/**
+ * Resolves the password used for a Speed Custom Connect /connect/custom call:
+ * the shared test password outside production, or a fresh cryptographically
+ * random password per account in production. Never the same password shared
+ * across production merchant accounts.
+ */
+export function resolveSpeedAccountPassword(): string {
+  return isProductionRuntime() ? generateSpeedCustomConnectPassword() : getSpeedTestAccountPassword()
 }
 
 async function syncLightningStatusIntoWalletProfile(
@@ -456,7 +499,7 @@ async function ensureManagedLightningForMerchantImpl(
     }
   }
 
-  const speedPassword = generateSpeedCustomConnectPassword()
+  const speedPassword = resolveSpeedAccountPassword()
   const passwordPolicyPass = speedCustomConnectPasswordPolicyPass(speedPassword)
   console.info("[pinetree-managed-lightning] speed_connect_password_generated", {
     merchant_id: merchantId,
@@ -645,8 +688,38 @@ async function ensureManagedLightningForMerchantImpl(
     })
   }
 
-  const status: MerchantLightningProfileStatus =
-    speedSetup.readiness === "ready"
+  // Only a fresh /connect/custom create actually set the account's password
+  // to speedPassword (see credential_password_used's doc comment) - never
+  // store a fabricated password for an account Speed resolved by existing-
+  // email reuse. Storage happens before the profile is marked ready so a
+  // failure here can still downgrade the outcome below instead of silently
+  // reporting full success.
+  let credentialStorageFailed = false
+  const speedAccountReference = speedSetup.speed_account_id || speedSetup.speed_connected_account_id
+  if (speedSetup.credential_password_used && speedAccountReference) {
+    try {
+      await upsertMerchantSpeedCredential({
+        merchantId,
+        speedConnectedAccountId: speedAccountReference,
+        speedLoginEmail: speedEmail,
+        password: speedPassword,
+      })
+      console.info("[pinetree-managed-lightning] speed_connect_credential_stored", {
+        merchant_id: merchantId,
+      })
+    } catch (error) {
+      credentialStorageFailed = true
+      // Never log the password itself - only that storage failed.
+      console.warn("[pinetree-managed-lightning] speed_connect_credential_store_failed", {
+        merchant_id: merchantId,
+        error: error instanceof Error ? error.message : "unknown error",
+      })
+    }
+  }
+
+  const status: MerchantLightningProfileStatus = credentialStorageFailed
+    ? "needs_attention"
+    : speedSetup.readiness === "ready"
       ? "ready"
       : speedSetup.readiness === "needs_attention"
         ? "needs_attention"
@@ -658,13 +731,15 @@ async function ensureManagedLightningForMerchantImpl(
   const isDeterministicRejection = Boolean(
     speedSetup.provider_http_status && speedSetup.provider_http_status >= 400 && speedSetup.provider_http_status < 500
   )
-  const speedConnectedAccountStatus = status === "needs_attention" && isDeterministicRejection
-    ? "speed_custom_connect_rejected"
-    : speedSetup.speed_connected_account_status
+  const speedConnectedAccountStatus = credentialStorageFailed
+    ? "speed_connect_credential_store_failed"
+    : status === "needs_attention" && isDeterministicRejection
+      ? "speed_custom_connect_rejected"
+      : speedSetup.speed_connected_account_status
   const speedFieldErrors = speedSetup.field_errors || []
   const merchantMessage = status === "needs_attention"
     ? getLightningNeedsAttentionMerchantMessage({
-        providerHttpStatus: speedSetup.provider_http_status,
+        providerHttpStatus: credentialStorageFailed ? null : speedSetup.provider_http_status,
         fieldErrorCount: speedFieldErrors.length,
       })
     : null

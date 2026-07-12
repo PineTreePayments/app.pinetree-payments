@@ -4,6 +4,19 @@
  * PineTree Wallet uses PineTree's Speed platform account for Lightning.
  * Merchants never provide Speed API keys, NWC strings, or Speed dashboard setup
  * details through the wallet setup UI.
+ *
+ * Account removal: speed_account_id / speed_connected_account_relationship_id
+ * are retained indefinitely (merchant_lightning_profiles) specifically so a
+ * connected account can be removed later. There is currently no verified
+ * Speed API endpoint in this codebase for removing/disabling a connected
+ * account - only create, list, and retrieve are implemented above. Do not add
+ * an unverified DELETE-style call against a guessed endpoint; confirm the
+ * exact contract in Speed's own API docs first. Until then, the retained
+ * credential (database/merchantSpeedCredentials.ts) is the only supported
+ * fallback for removing/cleaning up a PineTree-created Speed account, via
+ * Speed's own portal login - that is a separate operation from disconnecting
+ * the account inside PineTree Connect, not proven-equivalent to permanent
+ * account deletion.
  */
 
 import {
@@ -92,6 +105,15 @@ export type CreateOrLinkSpeedConnectedAccountResult = {
   // be retried with an unchanged profile) from a transient/provider failure
   // (5xx, timeout, network) - both otherwise collapse into "needs_attention".
   provider_http_status: number | null
+  // True only when this result came from a fresh /connect/custom call that
+  // just set the account's password to the caller-supplied value (a genuine
+  // create). False for every other path (existing-account-by-email reuse,
+  // status lookup, disabled/misconfigured/error results) where the account's
+  // real password, if any, is unknown to PineTree and must never be assumed
+  // to be the value that was passed in. Callers must gate credential storage
+  // on this flag - storing a fabricated password for a pre-existing Speed
+  // account is a correctness and security bug, not just cosmetic.
+  credential_password_used: boolean
 }
 
 const READY_SPEED_ACCOUNT_STATUSES = new Set([
@@ -194,6 +216,7 @@ function result(input: {
   providerMessage?: string | null
   fieldErrors?: SpeedFieldError[]
   providerHttpStatus?: number | null
+  credentialPasswordUsed?: boolean
 }): CreateOrLinkSpeedConnectedAccountResult {
   const providerStatus = input.speedConnectedAccountStatus || input.summary.status || input.status
   return {
@@ -213,6 +236,7 @@ function result(input: {
     readiness: input.status,
     mode: input.mode,
     used_live_api: input.usedLiveApi,
+    credential_password_used: input.credentialPasswordUsed ?? false,
   }
 }
 
@@ -325,6 +349,10 @@ export async function createSpeedCustomConnectedAccountForMerchant(
       summary,
       mode: config.mode,
       usedLiveApi: true,
+      // This branch just called POST /connect/custom with input.password - it
+      // is the one and only case where the account's real password is known
+      // to PineTree.
+      credentialPasswordUsed: true,
     })
     console.info("[speed-custom-connect] provisioning_timing", {
       merchant_id: input.merchant_id,
