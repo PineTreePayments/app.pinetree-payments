@@ -682,7 +682,7 @@ export default function SettingsPage() {
             aria-labelledby="business-profile-modal-title"
             className="flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden rounded-none border border-white/70 bg-white shadow-[0_32px_100px_rgba(15,23,42,0.30)] sm:h-auto sm:max-h-[92dvh] sm:rounded-[1.5rem]"
           >
-            <header className="shrink-0 flex items-start justify-between gap-4 border-b border-gray-100 px-5 pb-5 pt-[calc(env(safe-area-inset-top)+1.5rem)] sm:px-7 sm:pt-5">
+            <header className="shrink-0 flex items-start justify-between gap-4 border-b border-gray-100 px-5 pb-5 pt-[calc(env(safe-area-inset-top)+2rem)] sm:px-7 sm:pt-5">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 id="business-profile-modal-title" className="text-lg font-semibold text-gray-950">Business Profile</h2>

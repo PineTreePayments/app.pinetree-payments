@@ -360,15 +360,19 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
 })
 
 describe("Wallet setup card - connected rails and compact desktop layout", () => {
-  it("wallet setup card avoids the old tall stretched layout", () => {
+  it("wallet setup card keeps its width while using the slightly taller spacious layout", () => {
     const src = runtimeSrc()
     expect(src).not.toContain("min-h-[230px]")
     expect(src).not.toContain("sm:items-end")
     expect(src).not.toContain("sm:flex-row sm:items-start sm:justify-between")
-    expect(src).toContain("p-5")
-    expect(src).toContain("sm:p-6")
+    expect(src).toContain("min-h-[15rem]")
+    expect(src).toContain("sm:min-h-[16rem]")
+    expect(src).toContain("p-6")
+    expect(src).toContain("sm:p-7")
     expect(src).toContain("max-w-2xl")
     expect(src).toContain("max-w-xl")
+    expect(src).toContain("mt-4 max-w-xl")
+    expect(src).toContain("mt-8 flex justify-start")
   })
 
   it("main Connected pill is removed from the wallet setup card header area", () => {
@@ -395,16 +399,19 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(labelUsages.length).toBeGreaterThanOrEqual(1)
     const modalHeader = walletPage.slice(
       walletPage.indexOf('aria-labelledby="pinetree-wallet-modal-title"'),
-      walletPage.indexOf('aria-label="Close PineTree Wallet"')
+      walletPage.indexOf("</header>", walletPage.indexOf('aria-labelledby="pinetree-wallet-modal-title"'))
     )
     expect(modalHeader).toContain("label={walletStatus}")
+    expect(modalHeader).toContain("PineTree Wallet")
+    expect(modalHeader).toContain('aria-label="Close PineTree Wallet"')
+    expect(modalHeader).not.toContain("One merchant wallet profile")
   })
 
   it("Open/Create PineTree Wallet button remains in the content flow", () => {
     const src = runtimeSrc()
     expect(src).toContain("Open PineTree Wallet")
     expect(src).toContain("Create PineTree Wallet")
-    expect(src).toContain("mt-6 flex justify-start")
+    expect(src).toContain("mt-8 flex justify-start")
     expect(src).toContain("h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60")
   })
 

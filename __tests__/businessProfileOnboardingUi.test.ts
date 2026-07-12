@@ -111,7 +111,16 @@ describe("Business Profile onboarding UI", () => {
     expect(modalBlock).toContain("flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden")
     expect(modalBlock).toContain("sm:h-auto sm:max-h-[92dvh]")
     expect(modalBlock).toContain("shrink-0 flex items-start justify-between")
-    expect(modalBlock).toContain("pt-[calc(env(safe-area-inset-top)+1.5rem)]")
+    expect(modalBlock).toContain("pt-[calc(env(safe-area-inset-top)+2rem)]")
+    const headerBlock = modalBlock.slice(
+      modalBlock.indexOf('<header className="shrink-0 flex items-start justify-between'),
+      modalBlock.indexOf("</header>")
+    )
+    expect(headerBlock).toContain('id="business-profile-modal-title"')
+    expect(headerBlock).toContain("Business Profile")
+    expect(headerBlock).toContain("profileStatusLabel(profileStatus)")
+    expect(headerBlock).toContain("Fields marked with")
+    expect(headerBlock).toContain("Close")
     expect(modalBlock).toContain("min-h-0 flex-1 overflow-y-auto overscroll-contain")
     expect(modalBlock).toContain("[-webkit-overflow-scrolling:touch]")
     expect(modalBlock).toContain("shrink-0 flex flex-col-reverse items-center")

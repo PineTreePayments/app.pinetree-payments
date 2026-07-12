@@ -1189,8 +1189,8 @@ function WalletSetupProgress({
   const subtitle = config.rotatingSubtitles[subtitleIndex] || config.subtitle
 
   return (
-    <div className="mt-4 w-full max-w-xl overflow-hidden rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-3 sm:px-3.5" data-wallet-setup-progress>
-      <div className="flex min-w-0 items-center gap-2.5" aria-label="PineTree Wallet setup progress">
+    <div className="mt-5 w-full max-w-xl overflow-hidden rounded-xl border border-blue-100/80 bg-blue-50/80 px-4 py-4 shadow-[0_12px_32px_rgba(0,82,255,0.08)] sm:px-5 sm:py-5" data-wallet-setup-progress>
+      <div className="flex min-w-0 items-center gap-3.5" aria-label="PineTree Wallet setup progress">
         {(["preparing", "connections", "finalizing", "opening"] as WalletSetupProgressStage[]).map((item) => {
           const dot = walletSetupProgressStages[item]
           const completedOrActive = dot.dotIndex <= config.dotIndex
@@ -1199,26 +1199,26 @@ function WalletSetupProgress({
             <span
               key={item}
               aria-hidden="true"
-              className={`h-2.5 w-2.5 shrink-0 rounded-full transition-colors duration-300 motion-reduce:transition-none ${
+              className={`h-3 w-3 shrink-0 rounded-full transition-all duration-300 motion-reduce:transition-none ${
                 completedOrActive ? "bg-[#0052FF]" : "border border-blue-200 bg-white/80"
-              } ${isActive ? "motion-safe:animate-pulse shadow-[0_0_0_4px_rgba(0,82,255,0.12)]" : ""}`}
+              } ${isActive ? "motion-safe:animate-pulse shadow-[0_0_0_5px_rgba(0,82,255,0.14),0_0_20px_rgba(0,82,255,0.18)]" : ""}`}
             />
           )
         })}
       </div>
-      <div className="mt-3 flex min-w-0 items-start gap-2.5">
+      <div className="mt-4 flex min-w-0 items-start gap-3">
         {active ? (
           <Loader2
-            size={15}
+            size={16}
             aria-hidden="true"
-            className="mt-0.5 shrink-0 text-[#0052FF] motion-safe:animate-spin motion-reduce:animate-none"
+            className="mt-0.5 shrink-0 text-[#0052FF] drop-shadow-[0_0_8px_rgba(0,82,255,0.22)] motion-safe:animate-spin motion-reduce:animate-none"
           />
         ) : null}
         <div className="min-w-0 flex-1">
-          <p className="break-words text-xs font-semibold leading-5 text-blue-900">{config.label}</p>
+          <p className="break-words text-sm font-semibold leading-5 text-blue-950">{config.label}</p>
           <p
             key={`${stage}-${subtitleIndex}`}
-            className="mt-0.5 break-words text-xs leading-5 text-blue-800 transition-opacity duration-300 motion-reduce:transition-none"
+            className="mt-1 break-words text-xs leading-5 text-blue-800 transition-opacity duration-300 motion-reduce:transition-none"
           >
             {subtitle}
           </p>
@@ -7828,10 +7828,10 @@ function PineTreeWalletRuntime() {
           />
         </div>
       ) : null}
-      <article className="max-w-2xl rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-5 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-6">
+      <article className="max-w-2xl min-h-[15rem] rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:min-h-[16rem] sm:p-7">
         <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
         {!walletProvisioningInProgress ? (
-          <div className="mt-3 max-w-xl">
+          <div className="mt-4 max-w-xl">
             <div>
               <EnabledRailChips rows={walletRailRows} />
             </div>
@@ -8042,7 +8042,7 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        <div className="mt-6 flex justify-start">
+        <div className="mt-8 flex justify-start">
           {dynamicVerificationPromptReason ? (
             <button
               type="button"
@@ -8131,7 +8131,6 @@ function PineTreeWalletRuntime() {
                     className="ml-auto"
                   />
                 </div>
-                <p className="mt-1 text-xs text-gray-500">One merchant wallet profile</p>
               </div>
               <button
                 type="button"
