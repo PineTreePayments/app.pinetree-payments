@@ -925,9 +925,9 @@ export default function SettingsPage() {
               <p className="mt-0.5 text-xs text-gray-500">Authenticated session</p>
             </div>
             <IntegrationSummaryLink
-              title="Wallets"
-              value={`${integrationSummary.wallets} connected`}
-              detail="Settlement wallets"
+              title="Wallet"
+              value={integrationSummary.wallets > 0 ? "Connected" : "Not connected"}
+              detail="PineTree Wallet"
               href="/dashboard/wallets"
             />
             <IntegrationSummaryLink

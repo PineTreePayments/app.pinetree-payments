@@ -372,11 +372,11 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(src).toContain("sm:p-7")
     expect(src).toContain("max-w-2xl")
     expect(src).toContain("max-w-xl")
-    expect(src).toContain("mt-6 max-w-xl")
-    expect(src).toContain("mt-auto flex justify-end pt-7")
+    expect(src).toContain("mt-7 max-w-xl")
+    expect(src).toContain("mt-auto flex justify-center pt-8")
   })
 
-  it("front wallet card shows a balanced two-column summary without duplicating the modal overview", () => {
+  it("front wallet card shows a simple centered summary without duplicating the modal overview", () => {
     const src = runtimeSrc()
     const setupCard = src.slice(
       src.indexOf("<article className=\"max-w-2xl"),
@@ -384,14 +384,10 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     )
     const modalOverview = walletOverviewSrc()
 
-    expect(setupCard).toContain("Wallet Balance")
-    expect(src).toContain('const [frontBalanceHidden, setFrontBalanceHidden] = useState(true)')
-    expect(setupCard).toContain('frontBalanceHidden ? "••••••••" : frontCardBalanceLabel')
-    expect(setupCard).toContain('aria-label={frontBalanceHidden ? "Show wallet balance" : "Hide wallet balance"}')
-    expect(setupCard).toContain("<Eye size={14} />")
-    expect(setupCard).toContain("<EyeOff size={14} />")
+    expect(setupCard).not.toContain("Wallet Balance")
+    expect(walletPage).not.toContain("frontBalanceHidden")
     expect(setupCard).not.toContain("Last synced")
-    expect(src).toContain("formatWalletTotalBalance(walletSync.totalUsd, walletSyncing)")
+    expect(setupCard).toContain("<EnabledRailChips rows={walletRailRows} />")
     expect(setupCard).not.toContain(">TOTAL BALANCE</p>")
     expect(setupCard).not.toContain(">WALLET SUMMARY</p>")
     expect(setupCard).not.toContain("Recent withdrawals")
@@ -435,7 +431,7 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     const src = runtimeSrc()
     expect(src).toContain("Open PineTree Wallet")
     expect(src).toContain("Create PineTree Wallet")
-    expect(src).toContain("mt-auto flex justify-end pt-7")
+    expect(src).toContain("mt-auto flex justify-center pt-8")
     expect(src).toContain("h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60")
   })
 

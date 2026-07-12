@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChainEnum, useDynamicContext, useDynamicEvents, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction } from "@solana/web3.js"
-import { AlertTriangle, CheckCircle2, ChevronDown, Copy, Eye, EyeOff, Loader2, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, ChevronDown, Copy, Loader2, X } from "lucide-react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import {
@@ -2568,16 +2568,16 @@ function EnabledRailChips({
   const enabledRows = rows.filter((row) => row.enabled && row.configured)
 
   return (
-    <div>
-      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-700/80">Connected Networks</p>
+    <div className="flex flex-col items-center text-center">
+      <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-700/80">Connected Networks</p>
       {enabledRows.length === 0 ? (
         <p className="text-xs text-gray-400">None connected yet</p>
       ) : (
-        <div className="grid grid-cols-2 gap-2" aria-label="Enabled payment rails">
+        <div className="flex flex-wrap items-center justify-center gap-2.5" aria-label="Enabled payment rails">
           {enabledRows.map((rail) => (
             <span
               key={rail.label}
-              className="inline-flex items-center justify-center rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-[0_1px_0_rgba(37,99,235,0.06)]"
+              className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50/80 px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-[0_1px_0_rgba(37,99,235,0.06)]"
             >
               {rail.label}
             </span>
@@ -2708,7 +2708,6 @@ function PineTreeWalletRuntime() {
   const [sdkTimedOut, setSdkTimedOut] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
   const [walletOpening, setWalletOpening] = useState(false)
-  const [frontBalanceHidden, setFrontBalanceHidden] = useState(true)
   const [walletSetupOpeningAfterCreate, setWalletSetupOpeningAfterCreate] = useState(false)
   const [openWalletReconnectNeeded, setOpenWalletReconnectNeeded] = useState(false)
   const [activeTab, setActiveTab] = useState<WalletTab>("overview")
@@ -7809,8 +7808,6 @@ function PineTreeWalletRuntime() {
   // Main card
   // ---------------------------------------------------------------------------
 
-  const frontCardBalanceLabel = formatWalletTotalBalance(walletSync.totalUsd, walletSyncing)
-
   return (
     <>
       {businessProfileGateBlocking ? (
@@ -7825,32 +7822,8 @@ function PineTreeWalletRuntime() {
       <article className="max-w-2xl min-h-[15rem] flex flex-col rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:min-h-[16rem] sm:p-7">
         <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
         {!walletProvisioningInProgress ? (
-          <div className="mt-6 max-w-xl">
-            {hasWallet ? (
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(9rem,0.7fr)] gap-x-10 gap-y-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-700/80">Wallet Balance</p>
-                    <button
-                      type="button"
-                      onClick={() => setFrontBalanceHidden((hidden) => !hidden)}
-                      aria-label={frontBalanceHidden ? "Show wallet balance" : "Hide wallet balance"}
-                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-blue-100 bg-white/80 text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-white"
-                    >
-                      {frontBalanceHidden ? <Eye size={14} /> : <EyeOff size={14} />}
-                    </button>
-                  </div>
-                  <p className="mt-2 text-3xl font-semibold leading-tight text-gray-950">
-                    {frontBalanceHidden ? "••••••••" : frontCardBalanceLabel}
-                  </p>
-                </div>
-                <div>
-                  <EnabledRailChips rows={walletRailRows} />
-                </div>
-              </div>
-            ) : (
-              <EnabledRailChips rows={walletRailRows} />
-            )}
+          <div className="mt-7 max-w-xl">
+            <EnabledRailChips rows={walletRailRows} />
           </div>
         ) : null}
 
@@ -8058,7 +8031,7 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        <div className="mt-auto flex justify-end pt-7">
+        <div className="mt-auto flex justify-center pt-8">
           {dynamicVerificationPromptReason ? (
             <button
               type="button"
