@@ -60,8 +60,12 @@ vi.mock("@/providers/lightning/speedClient", async (importOriginal) => {
     getPineTreeSpeedConfigStatus: mocks.getPineTreeSpeedConfigStatus,
     isSpeedPlatformTreasurySweepEnabled: mocks.isSpeedPlatformTreasurySweepEnabled,
     SPEED_PLATFORM_TREASURY_SWEEP_MODE: "speed_platform_treasury_sweep",
-    // Real function, not a mock - exercises the actual country allowlist.
+    // Real functions/constants, not mocks - exercises the actual country
+    // allowlist, the documented account_type literal, and a stable
+    // (non-network) hostname helper.
     normalizeSpeedCountry: actual.normalizeSpeedCountry,
+    SPEED_CUSTOM_CONNECT_ACCOUNT_TYPE: actual.SPEED_CUSTOM_CONNECT_ACCOUNT_TYPE,
+    getSpeedApiHost: actual.getSpeedApiHost,
   }
 })
 
@@ -103,8 +107,6 @@ describe("ensureManagedLightningForMerchant", () => {
       business_country: "US",
       owner_first_name: "Ada",
       owner_last_name: "Lovelace",
-      business_type: "retail",
-      owner_phone: "+14155551234",
     })
     mocks.upsertMerchantLightningProfile.mockImplementation(async (input) =>
       lightningProfile({
@@ -163,7 +165,7 @@ describe("ensureManagedLightningForMerchant", () => {
     )
   })
 
-  it("provisions Speed Custom Connect using the saved business-owner profile when the Lightning profile is missing", async () => {
+  it("provisions Speed Custom Connect with the documented six-field contract using the saved business-owner profile", async () => {
     mocks.getMerchantLightningProfile.mockResolvedValue(null)
     mocks.getMerchantById.mockResolvedValue({
       id: merchantId,
@@ -188,20 +190,24 @@ describe("ensureManagedLightningForMerchant", () => {
     const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
     const result = await ensureManagedLightningForMerchant(merchantId)
 
+    // Exactly the documented fields, with the provider-bound country literal,
+    // owner_first_name as first_name, and owner_last_name as the last_name
+    // fallback (no DBA/legal business name on file in this test).
     expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
       expect.objectContaining({
         merchant_id: merchantId,
-        country: "US",
+        country: "United States",
         first_name: "Ada",
         last_name: "Lovelace",
         email: "merchant@example.test",
-        phone: "+14155551234",
-        account_type: "merchant",
       })
     )
+    const call = mocks.createSpeedCustomConnectedAccountForMerchant.mock.calls[0][0]
+    expect(call).not.toHaveProperty("phone")
+    expect(call).not.toHaveProperty("account_type")
+    expect(call).not.toHaveProperty("business_name")
     expect(mocks.getMerchantBusinessProfile).toHaveBeenCalledWith(merchantId)
     // A password is required by Speed's API but is generated and never persisted/returned.
-    const call = mocks.createSpeedCustomConnectedAccountForMerchant.mock.calls[0][0]
     expect(typeof call.password).toBe("string")
     expect(call.password.length).toBeGreaterThan(10)
     const { speedCustomConnectPasswordPolicyPass } = await import("@/engine/pineTreeWalletReadiness")
@@ -228,7 +234,67 @@ describe("ensureManagedLightningForMerchant", () => {
     )
   })
 
-  it("falls back to the authenticated user email when the merchant email is missing", async () => {
+  it("uses Business Profile contact_email as the primary connected-account email, ahead of the merchant account email", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: merchantId,
+      email: "legacy-account-email@example.test",
+    })
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "complete",
+      business_country: "US",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      contact_email: "contact@example.test",
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_contact",
+      speed_connected_account_relationship_id: "ca_contact",
+      speed_account_id: "acct_contact",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    await ensureManagedLightningForMerchant(merchantId)
+
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "contact@example.test" })
+    )
+  })
+
+  it("falls back to the merchant account email for legacy profiles where contact_email is absent", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({
+      id: merchantId,
+      email: "legacy-account-email@example.test",
+    })
+    // beforeEach's default businessProfile has no contact_email.
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_legacy",
+      speed_connected_account_relationship_id: "ca_legacy",
+      speed_account_id: "acct_legacy",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    await ensureManagedLightningForMerchant(merchantId)
+
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "legacy-account-email@example.test" })
+    )
+  })
+
+  it("falls back to the authenticated user email when both contact_email and merchant email are missing", async () => {
     mocks.getMerchantLightningProfile.mockResolvedValue(null)
     mocks.getMerchantById.mockResolvedValue({
       id: merchantId,
@@ -256,7 +322,7 @@ describe("ensureManagedLightningForMerchant", () => {
     )
   })
 
-  it("does not call Speed when both merchant and auth emails are missing or invalid", async () => {
+  it("does not call Speed when contact_email, merchant email, and auth email are all missing or invalid", async () => {
     mocks.getMerchantLightningProfile.mockResolvedValue(null)
     mocks.getMerchantById.mockResolvedValue({
       id: merchantId,
@@ -305,6 +371,33 @@ describe("ensureManagedLightningForMerchant", () => {
 
     expect(result.status).toBe("pending")
     expect(result.action).toBe("provisioning_incomplete")
+  })
+
+  it("becomes ready immediately when Speed returns status Active (case-insensitive), matching the documented success response", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_active",
+      speed_connected_account_relationship_id: "ca_active",
+      speed_account_id: "acct_active",
+      speed_connected_account_status: "Active",
+      setup_url: null,
+      provider_response_summary: { status: "Active", type: "custom", platform_account_id: "acct_platform" },
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.status).toBe("ready")
+    expect(result.action).toBe("provisioned")
+    expect(result.speedConnectedAccountId).toBe("acct_active")
+    // No setup_url / pending interaction - Custom Connect is not an invite flow.
+    expect(mocks.upsertMerchantLightningProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "ready", speedConnectSetupUrl: null })
+    )
   })
 
   it("checks an existing pending Speed account instead of creating a duplicate", async () => {
@@ -459,23 +552,20 @@ describe("ensureManagedLightningForMerchant", () => {
   })
 
   it("does not retry Speed automatically when a deterministic rejection is unchanged", async () => {
+    const { computeSpeedCustomConnectFingerprint } = await import("@/engine/pineTreeWalletReadiness")
     mocks.getMerchantLightningProfile.mockResolvedValue({
       ...lightningProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_rejected" }),
       provider_response_summary: {
         provider_code: "invalid_request",
         field_errors: [{ field: "email", message: "already registered" }],
         // Matches the fingerprint the engine would compute for the unchanged
-        // beforeEach business profile (US / Ada / Lovelace / retail / phone).
-        speed_request_fingerprint: (
-          await import("@/engine/pineTreeWalletReadiness")
-        ).computeSpeedCustomConnectFingerprint({
-          country: "US",
+        // beforeEach business profile (United States / Ada / Lovelace / merchant@example.test).
+        speed_request_fingerprint: computeSpeedCustomConnectFingerprint({
+          country: "United States",
+          accountType: "merchant",
           firstName: "Ada",
           lastName: "Lovelace",
-          businessName: "",
           email: "merchant@example.test",
-          accountType: "merchant",
-          phone: "+14155551234",
         }),
       },
     })
@@ -532,13 +622,11 @@ describe("ensureManagedLightningForMerchant", () => {
         provider_code: "invalid_request",
         field_errors: [],
         speed_request_fingerprint: computeSpeedCustomConnectFingerprint({
-          country: "US",
+          country: "United States",
+          accountType: "merchant",
           firstName: "Ada",
           lastName: "Lovelace",
-          businessName: "",
           email: "merchant@example.test",
-          accountType: "merchant",
-          phone: "+14155551234",
         }),
       },
     })
@@ -561,13 +649,65 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledTimes(1)
   })
 
+  it("the corrected country-literal request produces a different fingerprint than the old 'US' rejection, so the next normal attempt retries without needing forceRetry", async () => {
+    const { computeSpeedCustomConnectFingerprint } = await import("@/engine/pineTreeWalletReadiness")
+    // The OLD (now-fixed) fingerprint shape used the ISO code "US" and included
+    // phone/businessName fields that no longer exist. Even ignoring the shape
+    // change, the value itself ("US" vs "United States") now differs.
+    const staleFingerprintFromDisprovenUsAssumption = computeSpeedCustomConnectFingerprint({
+      country: "United States",
+      accountType: "merchant",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "merchant@example.test",
+    })
+    // Sanity: fingerprints for two different country literals must differ.
+    const withDifferentCountry = computeSpeedCustomConnectFingerprint({
+      country: "US",
+      accountType: "merchant",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "merchant@example.test",
+    })
+    expect(staleFingerprintFromDisprovenUsAssumption).not.toBe(withDifferentCountry)
+
+    mocks.getMerchantLightningProfile.mockResolvedValue({
+      ...lightningProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_rejected" }),
+      provider_response_summary: {
+        provider_code: "invalid_request_error",
+        field_errors: [{ field: "country", message: "Invalid Country. Your request can't be completed" }],
+        // Simulates the OLD saved fingerprint from when PineTree sent "US".
+        speed_request_fingerprint: withDifferentCountry,
+      },
+    })
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_fixed",
+      speed_connected_account_relationship_id: "ca_fixed",
+      speed_account_id: "acct_fixed",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    // No forceRetry - the corrected request's own fingerprint naturally differs
+    // from the stale "US" one, so this is allowed as a normal ensure attempt.
+    const result = await ensureManagedLightningForMerchant(merchantId)
+
+    expect(result.action).toBe("provisioned")
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledTimes(1)
+  })
+
   it("retries the exact country-rejection merchant via forceRetry, reuses the existing account by email, and never touches Base/Solana", async () => {
     const { computeSpeedCustomConnectFingerprint, ensureManagedLightningForMerchant } = await import(
       "@/engine/pineTreeWalletReadiness"
     )
     // Reproduces the saved provider_response_summary from the production
-    // rejection: a Speed-side country validation failure, fingerprinted
-    // against the (now-fixed) normalized country value.
+    // rejection: a Speed-side country validation failure.
     mocks.getMerchantLightningProfile.mockResolvedValue({
       ...lightningProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_rejected" }),
       provider_response_summary: {
@@ -575,13 +715,11 @@ describe("ensureManagedLightningForMerchant", () => {
         field_errors: [{ field: "country", message: "Invalid Country. Your request can't be completed" }],
         owner_email_present: false,
         speed_request_fingerprint: computeSpeedCustomConnectFingerprint({
-          country: "US",
+          country: "United States",
+          accountType: "merchant",
           firstName: "Ada",
           lastName: "Lovelace",
-          businessName: "",
           email: "merchant@example.test",
-          accountType: "merchant",
-          phone: "+14155551234",
         }),
       },
     })
@@ -611,7 +749,7 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(mocks.upsertPineTreeWalletProfile).not.toHaveBeenCalled()
   })
 
-  it("normalizes a 'United States' Business Profile country value to 'US' before calling Speed", async () => {
+  it("normalizes a 'United States' Business Profile country value to Speed's documented literal before calling Speed", async () => {
     mocks.getMerchantLightningProfile.mockResolvedValue(null)
     mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
     mocks.getMerchantBusinessProfile.mockResolvedValue({
@@ -619,8 +757,6 @@ describe("ensureManagedLightningForMerchant", () => {
       business_country: "United States",
       owner_first_name: "Ada",
       owner_last_name: "Lovelace",
-      business_type: "retail",
-      owner_phone: "+14155551234",
     })
     mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
       readiness: "ready",
@@ -638,12 +774,53 @@ describe("ensureManagedLightningForMerchant", () => {
     const result = await ensureManagedLightningForMerchant(merchantId)
 
     expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
-      expect.objectContaining({ country: "US" })
+      expect.objectContaining({ country: "United States" })
     )
     expect(result.action).toBe("provisioned")
   })
 
-  it("stops before calling Speed when the Business Profile country cannot be normalized for Speed (e.g. Canada)", async () => {
+  it("logs the temporary speed_custom_connect_country_diagnostic with the stored value, the provider-bound literal, and no PII", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "complete",
+      business_country: "US",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_diag",
+      speed_connected_account_relationship_id: "ca_diag",
+      speed_account_id: "acct_diag",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+    const infoSpy = vi.spyOn(console, "info")
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    await ensureManagedLightningForMerchant(merchantId)
+
+    const diagnosticCall = infoSpy.mock.calls.find(
+      (call) => call[0] === "[pinetree-managed-lightning] speed_custom_connect_country_diagnostic"
+    )
+    expect(diagnosticCall?.[1]).toEqual({
+      merchant_id: merchantId,
+      stored_country: "US",
+      provider_country: "United States",
+      account_type: "merchant",
+      api_host: expect.any(String),
+    })
+    const serialized = JSON.stringify(diagnosticCall)
+    expect(serialized).not.toContain("Ada")
+    expect(serialized).not.toContain("Lovelace")
+    expect(serialized).not.toContain("merchant@example.test")
+  })
+
+  it("stops before calling Speed when the Business Profile country cannot be normalized for Speed (e.g. Canada) - non-US countries are not supported for launch", async () => {
     mocks.getMerchantLightningProfile.mockResolvedValue(null)
     mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
     mocks.getMerchantBusinessProfile.mockResolvedValue({
@@ -651,8 +828,6 @@ describe("ensureManagedLightningForMerchant", () => {
       business_country: "CA",
       owner_first_name: "Ada",
       owner_last_name: "Lovelace",
-      business_type: "retail",
-      owner_phone: "+14155551234",
     })
     const warnSpy = vi.spyOn(console, "warn")
 
@@ -675,46 +850,6 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(countryCall?.[1]).toEqual({ merchant_id: merchantId, businessCountryPresent: true })
   })
 
-  it("stops before calling Speed when the Business Profile's business_type has no mapped Speed account_type", async () => {
-    mocks.getMerchantLightningProfile.mockResolvedValue(null)
-    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
-    mocks.getMerchantBusinessProfile.mockResolvedValue({
-      profile_status: "complete",
-      business_country: "US",
-      owner_first_name: "Ada",
-      owner_last_name: "Lovelace",
-      business_type: "some_unmapped_future_type",
-      owner_phone: "+14155551234",
-    })
-
-    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
-    const result = await ensureManagedLightningForMerchant(merchantId)
-
-    expect(result.action).toBe("needs_supported_business_type")
-    expect(result.status).toBe("needs_attention")
-    expect(mocks.createSpeedCustomConnectedAccountForMerchant).not.toHaveBeenCalled()
-  })
-
-  it("stops before calling Speed when the owner/business phone cannot be normalized to E.164", async () => {
-    mocks.getMerchantLightningProfile.mockResolvedValue(null)
-    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
-    mocks.getMerchantBusinessProfile.mockResolvedValue({
-      profile_status: "complete",
-      business_country: "US",
-      owner_first_name: "Ada",
-      owner_last_name: "Lovelace",
-      business_type: "retail",
-      owner_phone: "123",
-    })
-
-    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
-    const result = await ensureManagedLightningForMerchant(merchantId)
-
-    expect(result.action).toBe("needs_valid_phone")
-    expect(result.status).toBe("needs_attention")
-    expect(mocks.createSpeedCustomConnectedAccountForMerchant).not.toHaveBeenCalled()
-  })
-
   it("reports null providerCode and empty fieldErrors when Speed succeeds or an attempt hasn't run", async () => {
     mocks.getMerchantLightningProfile.mockResolvedValue(
       lightningProfile({ status: "ready", accountId: "acct_123", relationshipId: "ca_123", accountStatus: "active" })
@@ -728,7 +863,7 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(result.fieldErrors).toEqual([])
   })
 
-  it("passes DBA when present and pre-validated email/password policy booleans to Speed", async () => {
+  it("uses business_dba as last_name when present (Speed's own documentation example uses a business name in last_name)", async () => {
     mocks.getMerchantLightningProfile.mockResolvedValue(null)
     mocks.getMerchantById.mockResolvedValue({
       id: merchantId,
@@ -745,8 +880,6 @@ describe("ensureManagedLightningForMerchant", () => {
       owner_last_name: "Lovelace",
       legal_business_name: "PineTree Test Merchant LLC",
       business_dba: "PineTree Test Merchant",
-      business_type: "retail",
-      owner_phone: "+14155551234",
     })
     mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
       readiness: "ready",
@@ -765,14 +898,14 @@ describe("ensureManagedLightningForMerchant", () => {
 
     expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
       expect.objectContaining({
-        business_name: "PineTree Test Merchant",
+        last_name: "PineTree Test Merchant",
         email_valid: true,
         password_policy_valid: true,
       })
     )
   })
 
-  it("uses legal business name as the Speed display fallback when DBA is absent", async () => {
+  it("falls back to legal_business_name for last_name when DBA is absent", async () => {
     mocks.getMerchantLightningProfile.mockResolvedValue(null)
     mocks.getMerchantById.mockResolvedValue({
       id: merchantId,
@@ -789,8 +922,6 @@ describe("ensureManagedLightningForMerchant", () => {
       owner_last_name: "Lovelace",
       legal_business_name: "PineTree Test Merchant LLC",
       business_dba: null,
-      business_type: "retail",
-      owner_phone: "+14155551234",
     })
     mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
       readiness: "ready",
@@ -809,8 +940,39 @@ describe("ensureManagedLightningForMerchant", () => {
 
     expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
       expect.objectContaining({
-        business_name: "PineTree Test Merchant LLC",
+        last_name: "PineTree Test Merchant LLC",
       })
+    )
+  })
+
+  it("falls back to owner_last_name for last_name only when neither DBA nor legal business name is on file", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getMerchantById.mockResolvedValue({ id: merchantId, email: "merchant@example.test" })
+    mocks.getMerchantBusinessProfile.mockResolvedValue({
+      profile_status: "complete",
+      business_country: "US",
+      owner_first_name: "Ada",
+      owner_last_name: "Lovelace",
+      legal_business_name: null,
+      business_dba: null,
+    })
+    mocks.createSpeedCustomConnectedAccountForMerchant.mockResolvedValue({
+      readiness: "ready",
+      speed_connected_account_id: "acct_fallback",
+      speed_connected_account_relationship_id: "ca_fallback",
+      speed_account_id: "acct_fallback",
+      speed_connected_account_status: "active",
+      setup_url: null,
+      provider_response_summary: {},
+      error_message: null,
+      mode: "test",
+    })
+
+    const { ensureManagedLightningForMerchant } = await import("@/engine/pineTreeWalletReadiness")
+    await ensureManagedLightningForMerchant(merchantId)
+
+    expect(mocks.createSpeedCustomConnectedAccountForMerchant).toHaveBeenCalledWith(
+      expect.objectContaining({ last_name: "Lovelace", first_name: "Ada" })
     )
   })
 
@@ -828,6 +990,15 @@ describe("ensureManagedLightningForMerchant", () => {
     expect(syncFn).not.toContain("baseAddress")
     expect(syncFn).not.toContain("solanaAddress")
     expect(syncFn).not.toContain("status:")
+  })
+
+  it("Custom Connect never uses the invite/account-link flow - no reference to it anywhere in this module", () => {
+    const fs = require("node:fs")
+    const path = require("node:path")
+    const engine = fs.readFileSync(path.join(process.cwd(), "engine/pineTreeWalletReadiness.ts"), "utf8") as string
+    expect(engine).not.toContain("createOrLinkSpeedConnectedAccountForMerchant")
+    expect(engine).not.toContain("createSpeedConnectAccountLink")
+    expect(engine).not.toContain("setup_url_present")
   })
 
   it("two concurrent calls for the same merchant create only one Speed connected account", async () => {
@@ -923,48 +1094,6 @@ describe("no frontend surface calls Speed directly", () => {
   })
 })
 
-describe("normalizeUsPhoneToE164", () => {
-  it("normalizes a 10-digit US number", async () => {
-    const { normalizeUsPhoneToE164 } = await import("@/engine/pineTreeWalletReadiness")
-    expect(normalizeUsPhoneToE164("(415) 555-1234")).toBe("+14155551234")
-    expect(normalizeUsPhoneToE164("415-555-1234")).toBe("+14155551234")
-  })
-
-  it("normalizes an 11-digit number with a leading country code", async () => {
-    const { normalizeUsPhoneToE164 } = await import("@/engine/pineTreeWalletReadiness")
-    expect(normalizeUsPhoneToE164("14155551234")).toBe("+14155551234")
-  })
-
-  it("passes through an already-E.164 number unchanged", async () => {
-    const { normalizeUsPhoneToE164 } = await import("@/engine/pineTreeWalletReadiness")
-    expect(normalizeUsPhoneToE164("+14155551234")).toBe("+14155551234")
-  })
-
-  it("returns null instead of manufacturing a number for invalid input", async () => {
-    const { normalizeUsPhoneToE164 } = await import("@/engine/pineTreeWalletReadiness")
-    expect(normalizeUsPhoneToE164("123")).toBeNull()
-    expect(normalizeUsPhoneToE164("")).toBeNull()
-    expect(normalizeUsPhoneToE164(null)).toBeNull()
-    expect(normalizeUsPhoneToE164("+44 20 7946 0958")).toBeNull()
-  })
-})
-
-describe("mapBusinessTypeToSpeedAccountType", () => {
-  it("maps every known PineTree business_type UI value to a Speed account_type", async () => {
-    const { mapBusinessTypeToSpeedAccountType } = await import("@/engine/pineTreeWalletReadiness")
-    for (const type of ["retail", "restaurant", "services", "online"]) {
-      expect(mapBusinessTypeToSpeedAccountType(type)).toBe("merchant")
-    }
-  })
-
-  it("returns null for a missing or unrecognized business_type instead of guessing", async () => {
-    const { mapBusinessTypeToSpeedAccountType } = await import("@/engine/pineTreeWalletReadiness")
-    expect(mapBusinessTypeToSpeedAccountType(null)).toBeNull()
-    expect(mapBusinessTypeToSpeedAccountType("")).toBeNull()
-    expect(mapBusinessTypeToSpeedAccountType("some_future_type")).toBeNull()
-  })
-})
-
 describe("getLightningNeedsAttentionMerchantMessage", () => {
   it("returns the Business Profile message for a 4xx with field errors", async () => {
     const { getLightningNeedsAttentionMerchantMessage } = await import("@/engine/pineTreeWalletReadiness")
@@ -1017,5 +1146,18 @@ describe("Speed Custom Connect generated credentials", () => {
     expect(speedCustomConnectPasswordPolicyPass("abcABC123!!!")).toBe(false)
     expect(speedCustomConnectPasswordPolicyPass("NoSpecial12345")).toBe(false)
     expect(speedCustomConnectPasswordPolicyPass("NoNumber!!!!!")).toBe(false)
+  })
+
+  it("never logs or persists the plaintext password anywhere in this module's password lifecycle", () => {
+    const fs = require("node:fs")
+    const path = require("node:path")
+    const engine = fs.readFileSync(path.join(process.cwd(), "engine/pineTreeWalletReadiness.ts"), "utf8") as string
+    // The password variable is only ever passed to Speed (createSpeedCustomConnectedAccountForMerchant's
+    // `password:` field) and to diagnostic presence booleans - it must never
+    // appear on the same line as a console.* call.
+    const offendingLines = engine
+      .split("\n")
+      .filter((line) => /console\.(info|warn|error)/.test(line) && /speedPassword/.test(line))
+    expect(offendingLines).toEqual([])
   })
 })

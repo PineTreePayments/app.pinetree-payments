@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createHmac } from "node:crypto"
 import {
+  extractSpeedWebhookAccountId,
   isSpeedConnectedAccountWebhookPayload,
   verifySpeedWebhookSignature,
 } from "@/providers/lightning/speedClient"
@@ -36,6 +37,26 @@ describe("Speed connected-account payload detection", () => {
   it("treats a payload with no account_id as an account-level event", () => {
     expect(isSpeedConnectedAccountWebhookPayload({ data: { object: { id: "pay_1" } } })).toBe(false)
     expect(isSpeedConnectedAccountWebhookPayload(null)).toBe(false)
+  })
+})
+
+describe("extractSpeedWebhookAccountId", () => {
+  it("prefers the top-level account_id, per the official webhook routing guidance", () => {
+    expect(
+      extractSpeedWebhookAccountId({ account_id: "acct_top_level", data: { object: { account_id: "acct_nested" } } })
+    ).toBe("acct_top_level")
+  })
+
+  it("falls back to nested locations when no top-level account_id is present", () => {
+    expect(extractSpeedWebhookAccountId({ data: { object: { account_id: "acct_nested" } } })).toBe("acct_nested")
+    expect(
+      extractSpeedWebhookAccountId({ event: { data: { object: { account_id: "acct_deep_nested" } } } })
+    ).toBe("acct_deep_nested")
+  })
+
+  it("returns null for a platform-level event with no account_id anywhere", () => {
+    expect(extractSpeedWebhookAccountId({ data: { object: { id: "pay_1" } } })).toBeNull()
+    expect(extractSpeedWebhookAccountId(null)).toBeNull()
   })
 })
 

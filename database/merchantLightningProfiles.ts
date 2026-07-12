@@ -77,6 +77,27 @@ export async function getMerchantLightningProfile(
   return data as MerchantLightningProfile
 }
 
+/**
+ * Resolves which merchant a Speed connected-account webhook event belongs to
+ * by matching the event's account_id against the canonical Speed merchant
+ * account identifier saved on merchant_lightning_profiles.speed_account_id
+ * (response.account_id from a successful /connect/custom creation). Returns
+ * null for an empty id or no match - never guesses a merchant.
+ */
+export async function getMerchantIdBySpeedAccountId(accountId: string): Promise<string | null> {
+  const id = String(accountId || "").trim()
+  if (!id) return null
+
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("merchant_id")
+    .eq("speed_account_id", id)
+    .maybeSingle()
+
+  if (error || !data) return null
+  return String((data as { merchant_id: string }).merchant_id)
+}
+
 export async function upsertMerchantLightningProfile(
   input: UpsertLightningProfileInput
 ): Promise<MerchantLightningProfile> {

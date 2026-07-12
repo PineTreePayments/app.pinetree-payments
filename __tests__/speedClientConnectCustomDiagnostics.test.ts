@@ -1,33 +1,39 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 /**
- * Unit tests for the /connect/custom request path in speedClient.ts:
+ * Unit tests for the /connect/custom request path in speedClient.ts, aligned
+ * to the official Speed Custom Connect API Documentation:
+ * - The outgoing body matches the documented six-field contract exactly
+ *   (country, account_type, first_name, last_name, email, password) - no
+ *   phone, account_name, business_type, or other undocumented field.
+ * - country is normalized to Speed's documented literal "United States",
+ *   not the ISO code "US" (production proved "US" is rejected).
+ * - account_type is always the literal "merchant".
  * - SpeedApiError carries Speed's real provider_code and sanitized field
  *   errors instead of collapsing every failure into a generic message.
  * - createSpeedCustomConnectedAccount emits the safe request diagnostic
  *   (never a raw password/email) around the call.
- * - account_name is sent when a business name is available.
  */
 
 const originalEnv = process.env
 
 describe("normalizeSpeedCountry", () => {
-  it("maps known US spellings to US", async () => {
+  it("maps known US spellings to Speed's documented literal 'United States'", async () => {
     const { normalizeSpeedCountry } = await import("@/providers/lightning/speedClient")
-    expect(normalizeSpeedCountry("US")).toBe("US")
-    expect(normalizeSpeedCountry("USA")).toBe("US")
-    expect(normalizeSpeedCountry("United States")).toBe("US")
-    expect(normalizeSpeedCountry("United States of America")).toBe("US")
-    expect(normalizeSpeedCountry("united states")).toBe("US")
+    expect(normalizeSpeedCountry("US")).toBe("United States")
+    expect(normalizeSpeedCountry("USA")).toBe("United States")
+    expect(normalizeSpeedCountry("United States")).toBe("United States")
+    expect(normalizeSpeedCountry("United States of America")).toBe("United States")
+    expect(normalizeSpeedCountry("united states")).toBe("United States")
   })
 
   it("trims whitespace and collapses internal spacing before matching", async () => {
     const { normalizeSpeedCountry } = await import("@/providers/lightning/speedClient")
-    expect(normalizeSpeedCountry("  US  ")).toBe("US")
-    expect(normalizeSpeedCountry(" United   States ")).toBe("US")
+    expect(normalizeSpeedCountry("  US  ")).toBe("United States")
+    expect(normalizeSpeedCountry(" United   States ")).toBe("United States")
   })
 
-  it("rejects unsupported or ambiguous values instead of defaulting to US", async () => {
+  it("rejects unsupported or ambiguous values instead of guessing - non-US countries are not supported for the initial launch", async () => {
     const { normalizeSpeedCountry } = await import("@/providers/lightning/speedClient")
     expect(normalizeSpeedCountry("CA")).toBeNull()
     expect(normalizeSpeedCountry("Canada")).toBeNull()
@@ -35,6 +41,56 @@ describe("normalizeSpeedCountry", () => {
     expect(normalizeSpeedCountry("")).toBeNull()
     expect(normalizeSpeedCountry(null)).toBeNull()
     expect(normalizeSpeedCountry(undefined)).toBeNull()
+  })
+})
+
+describe("sanitizeSpeedErrorStructureForDiagnostics", () => {
+  it("preserves every key from Speed's error body, not just field/message, so undiscovered metadata is still visible", async () => {
+    const { sanitizeSpeedErrorStructureForDiagnostics } = await import("@/providers/lightning/speedClient")
+    const body = JSON.stringify({
+      error_code: "invalid_request_error",
+      errors: [
+        {
+          field: "country",
+          message: "Invalid Country. Your request can't be completed",
+          allowed_values: ["United States"],
+          parameter: "country",
+          expected: "United States",
+          country_id: 840,
+          details: { reason: "unsupported_region" },
+          documentation_url: "https://docs.tryspeed.com/errors/invalid-country",
+        },
+      ],
+    })
+
+    const sanitized = sanitizeSpeedErrorStructureForDiagnostics(body) as Record<string, unknown>
+    const firstError = (sanitized.errors as Record<string, unknown>[])[0]
+    expect(firstError.allowed_values).toEqual(["United States"])
+    expect(firstError.parameter).toBe("country")
+    expect(firstError.expected).toBe("United States")
+    expect(firstError.country_id).toBe(840)
+    expect(firstError.details).toEqual({ reason: "unsupported_region" })
+    expect(firstError.documentation_url).toBe("https://docs.tryspeed.com/errors/invalid-country")
+  })
+
+  it("redacts sensitive substrings in string leaves at any depth", async () => {
+    const { sanitizeSpeedErrorStructureForDiagnostics } = await import("@/providers/lightning/speedClient")
+    const body = JSON.stringify({
+      error_message: "Authorization failed for key sk_live_should_not_leak",
+      nested: { detail: "contact merchant@example.test for help" },
+    })
+
+    const serialized = JSON.stringify(sanitizeSpeedErrorStructureForDiagnostics(body))
+    expect(serialized).not.toContain("sk_live_should_not_leak")
+    expect(serialized).not.toContain("merchant@example.test")
+    expect(serialized).toContain("sk_live_[redacted]")
+    expect(serialized).toContain("[redacted-email]")
+  })
+
+  it("returns null for an unparseable body instead of throwing", async () => {
+    const { sanitizeSpeedErrorStructureForDiagnostics } = await import("@/providers/lightning/speedClient")
+    expect(sanitizeSpeedErrorStructureForDiagnostics("not json")).toBeNull()
+    expect(sanitizeSpeedErrorStructureForDiagnostics("")).toBeNull()
   })
 })
 
@@ -56,38 +112,55 @@ describe("speedClient /connect/custom", () => {
     vi.unstubAllGlobals()
   })
 
-  it("succeeds with a valid payload and includes account_name when a business name is present", async () => {
+  it("sends exactly the six documented fields, with country as the literal 'United States' and account_type as 'merchant'", async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ id: "ca_1", account_id: "acct_1", status: "Active" }), { status: 200 })
+      new Response(
+        JSON.stringify({
+          id: "ca_1",
+          object: "connected_account",
+          platform_account_id: "acct_platform",
+          account_id: "acct_1",
+          type: "custom",
+          status: "Active",
+        }),
+        { status: 200 }
+      )
     )
 
     const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
     const account = await createSpeedCustomConnectedAccount({
       country: "US",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      email: "merchant@example.test",
+      firstName: "USER",
+      lastName: "CVS",
+      email: "user@example.com",
       password: "temporary-secret",
-      businessName: "PineTree Test Merchant LLC",
     })
 
     expect(account.account_id).toBe("acct_1")
-    const [, init] = fetchMock.mock.calls[0]
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("https://api.speed.test/connect/custom")
     const body = JSON.parse(String(init.body))
-    expect(body.account_name).toBe("PineTree Test Merchant LLC")
-    expect(body.email).toBe("merchant@example.test")
+    expect(body).toEqual({
+      country: "United States",
+      account_type: "merchant",
+      first_name: "USER",
+      last_name: "CVS",
+      email: "user@example.com",
+      password: "temporary-secret",
+    })
+    expect(Object.keys(body).sort()).toEqual(
+      ["account_type", "country", "email", "first_name", "last_name", "password"].sort()
+    )
   })
 
-  it("normalizes a recognized US country spelling to 'US' in the final request body", async () => {
+  it("never includes phone, account_name, business_type, or any other undocumented field in the request body", async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ id: "ca_country", account_id: "acct_country", status: "Active" }), {
-        status: 200,
-      })
+      new Response(JSON.stringify({ id: "ca_2", account_id: "acct_2", status: "Active" }), { status: 200 })
     )
 
     const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
     await createSpeedCustomConnectedAccount({
-      country: "United States",
+      country: "US",
       firstName: "Ada",
       lastName: "Lovelace",
       email: "merchant@example.test",
@@ -96,7 +169,11 @@ describe("speedClient /connect/custom", () => {
 
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String(init.body))
-    expect(body.country).toBe("US")
+    expect(body).not.toHaveProperty("phone")
+    expect(body).not.toHaveProperty("account_name")
+    expect(body).not.toHaveProperty("business_type")
+    expect(body).not.toHaveProperty("business_name")
+    expect(body).not.toHaveProperty("address")
   })
 
   it("rejects an unsupported country locally without ever calling Speed", async () => {
@@ -113,25 +190,6 @@ describe("speedClient /connect/custom", () => {
     ).rejects.toThrow("country is not supported")
 
     expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it("omits account_name when no business name is available", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ id: "ca_2", account_id: "acct_2", status: "Active" }), { status: 200 })
-    )
-
-    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
-    await createSpeedCustomConnectedAccount({
-      country: "US",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      email: "merchant@example.test",
-      password: "temporary-secret",
-    })
-
-    const [, init] = fetchMock.mock.calls[0]
-    const body = JSON.parse(String(init.body))
-    expect(body).not.toHaveProperty("account_name")
   })
 
   it("captures Speed's provider_code and per-field errors array shape from a 400 response", async () => {
@@ -200,7 +258,7 @@ describe("speedClient /connect/custom", () => {
             code: "validation_failed",
             data: {
               field_errors: [
-                { field: "account_name", error_message: "Business name is required" },
+                { field: "last_name", error_message: "Last name is required" },
               ],
             },
           },
@@ -222,7 +280,7 @@ describe("speedClient /connect/custom", () => {
       const speedError = error as InstanceType<typeof SpeedApiError>
       expect(speedError.providerCode).toBe("validation_failed")
       expect(speedError.fieldErrors).toEqual([
-        { field: "account_name", message: "Business name is required" },
+        { field: "last_name", message: "Last name is required" },
       ])
       expect(speedError.message).toBe("Speed API returned 400")
       return true
@@ -276,48 +334,7 @@ describe("speedClient /connect/custom", () => {
     })
   })
 
-  it("sends phone and account_type when provided, and omits phone when absent", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ id: "ca_phone", account_id: "acct_phone", status: "Active" }), { status: 200 })
-    )
-
-    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
-    await createSpeedCustomConnectedAccount({
-      country: "US",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      email: "merchant@example.test",
-      password: "temporary-secret",
-      phone: "+14155551234",
-      accountType: "merchant",
-    })
-
-    const [, init] = fetchMock.mock.calls[0]
-    const body = JSON.parse(String(init.body))
-    expect(body.phone).toBe("+14155551234")
-    expect(body.account_type).toBe("merchant")
-
-    fetchMock.mockClear()
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ id: "ca_no_phone", account_id: "acct_no_phone", status: "Active" }), {
-        status: 200,
-      })
-    )
-    await createSpeedCustomConnectedAccount({
-      country: "US",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      email: "merchant@example.test",
-      password: "temporary-secret",
-    })
-    const [, secondInit] = fetchMock.mock.calls[0]
-    const secondBody = JSON.parse(String(secondInit.body))
-    expect(secondBody).not.toHaveProperty("phone")
-    // Falls back to the legacy default when no mapped account_type is passed.
-    expect(secondBody.account_type).toBe("merchant")
-  })
-
-  it("logs the request diagnostic with presence/policy booleans and never the raw password or email", async () => {
+  it("logs the request diagnostic with presence/policy booleans and never the raw password, email, first name, or last name", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ id: "ca_3", account_id: "acct_3", status: "Active" }), { status: 200 })
     )
@@ -327,10 +344,9 @@ describe("speedClient /connect/custom", () => {
     await createSpeedCustomConnectedAccount({
       country: "US",
       firstName: "Ada",
-      lastName: "Lovelace",
+      lastName: "PineTree Test Merchant LLC",
       email: "merchant@example.test",
       password: "temporary-secret-value",
-      businessName: "PineTree Test Merchant LLC",
       emailValid: true,
       passwordPolicyValid: true,
     })
@@ -346,35 +362,13 @@ describe("speedClient /connect/custom", () => {
       passwordPolicyValid: true,
       firstNamePresent: true,
       lastNamePresent: true,
-      businessNamePresent: true,
       countryPresent: true,
     })
     const serialized = JSON.stringify(diagnosticCalls)
     expect(serialized).not.toContain("temporary-secret-value")
     expect(serialized).not.toContain("merchant@example.test")
-
-    info.mockRestore()
-  })
-
-  it("never logs the phone value in the request diagnostic, only its presence", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ id: "ca_4", account_id: "acct_4", status: "Active" }), { status: 200 })
-    )
-    const info = vi.spyOn(console, "info").mockImplementation(() => undefined)
-
-    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
-    await createSpeedCustomConnectedAccount({
-      country: "US",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      email: "merchant@example.test",
-      password: "temporary-secret",
-      phone: "+14155551234",
-    })
-
-    const diagnosticCalls = info.mock.calls.filter((call) => call[0] === "[speed] speed_connect_custom_request_diagnostic")
-    expect(diagnosticCalls[0][1]).toMatchObject({ phonePresent: true })
-    expect(JSON.stringify(diagnosticCalls)).not.toContain("+14155551234")
+    expect(serialized).not.toContain("Ada")
+    expect(serialized).not.toContain("PineTree Test Merchant LLC")
 
     info.mockRestore()
   })
@@ -425,5 +419,57 @@ describe("speedClient /connect/custom", () => {
     })
 
     info.mockRestore()
+  })
+
+  it("logs the full sanitized error structure for a rejected /connect/custom request, including metadata parseSpeedErrorBody would otherwise drop", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error_code: "invalid_request_error",
+          errors: [
+            {
+              field: "country",
+              message: "Invalid Country. Your request can't be completed",
+              allowed_values: ["United States"],
+              country_id: 840,
+            },
+          ],
+        }),
+        { status: 400 }
+      )
+    )
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
+    await createSpeedCustomConnectedAccount({
+      country: "US",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "merchant@example.test",
+      password: "temporary-secret",
+    }).catch(() => undefined)
+
+    const detailCall = warnSpy.mock.calls.find((call) => call[0] === "[speed] speed_custom_connect_error_detail")
+    expect(detailCall).toBeTruthy()
+    expect(detailCall?.[1]).toMatchObject({ status: 400 })
+    const sanitizedBody = detailCall?.[1].sanitizedErrorBody as { errors: Array<Record<string, unknown>> }
+    expect(sanitizedBody.errors[0].allowed_values).toEqual(["United States"])
+    expect(sanitizedBody.errors[0].country_id).toBe(840)
+
+    warnSpy.mockRestore()
+  })
+
+  it("never logs this diagnostic for non-/connect/custom endpoints", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ error_code: "invalid_request", error_message: "bad request" }), { status: 400 })
+    )
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    const { createSpeedConnectAccountLink } = await import("@/providers/lightning/speedClient")
+    await createSpeedConnectAccountLink({}).catch(() => undefined)
+
+    expect(warnSpy.mock.calls.some((call) => call[0] === "[speed] speed_custom_connect_error_detail")).toBe(false)
+
+    warnSpy.mockRestore()
   })
 })

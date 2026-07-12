@@ -125,20 +125,23 @@ export type SpeedConnectAccountLink = {
   link?: string
 }
 
+/**
+ * Matches the official Speed Custom Connect API Documentation's documented
+ * six-field /connect/custom request body exactly:
+ * { country, account_type, first_name, last_name, email, password }.
+ * `account_type` is always the literal "merchant" - it is not a parameter
+ * here, never derived from PineTree's business_type. No other field
+ * (phone, account_name, address, etc.) is part of this documented contract.
+ */
 export type CreateSpeedCustomConnectedAccountParams = {
   country: string
   firstName: string
+  // Business name (DBA, or legal business name) or the owner's last name as a
+  // final defensive fallback - Speed's documentation explicitly permits a
+  // business name in last_name (its own example uses "CVS").
   lastName: string
   email: string
   password: string
-  businessName?: string | null
-  // E.164 phone (e.g. +14155551234). Normalization/validation happens in the
-  // caller (pineTreeWalletReadiness.ts) - this client never manufactures or
-  // reformats a phone number, only sends it through or omits it.
-  phone?: string | null
-  // Speed's account_type enum value, pre-mapped by the caller from PineTree's
-  // business_type UI label - this client never sends PineTree's raw label.
-  accountType?: string | null
   // Pre-computed by the caller (pineTreeWalletReadiness.ts is the single source
   // of truth for these policies) - carried through only so the request
   // diagnostic can report real values without duplicating validation logic here.
@@ -456,9 +459,11 @@ export function parseSpeedErrorBody(body: string): {
       ? row.field
       : typeof row.param === "string"
         ? row.param
-        : typeof row.name === "string"
-          ? row.name
-          : null
+        : typeof row.parameter === "string"
+          ? row.parameter
+          : typeof row.name === "string"
+            ? row.name
+            : null
     addError(row.error_message ?? row.message ?? row.description ?? row.error, field)
 
     for (const key of [
@@ -478,6 +483,51 @@ export function parseSpeedErrorBody(body: string): {
   return { providerCode, fieldErrors }
 }
 
+const DIAGNOSTIC_SANITIZE_MAX_DEPTH = 6
+const DIAGNOSTIC_SANITIZE_MAX_KEYS_PER_OBJECT = 30
+const DIAGNOSTIC_SANITIZE_MAX_ARRAY_ITEMS = 20
+
+function sanitizeSpeedErrorValueForDiagnostics(value: unknown, depth: number): unknown {
+  if (depth > DIAGNOSTIC_SANITIZE_MAX_DEPTH) return "[truncated]"
+  if (value == null) return value
+  if (typeof value === "string") return sanitizeSpeedFieldErrorMessage(value) ?? ""
+  if (typeof value === "number" || typeof value === "boolean") return value
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, DIAGNOSTIC_SANITIZE_MAX_ARRAY_ITEMS)
+      .map((item) => sanitizeSpeedErrorValueForDiagnostics(item, depth + 1))
+  }
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {}
+    const entries = Object.entries(value as Record<string, unknown>).slice(0, DIAGNOSTIC_SANITIZE_MAX_KEYS_PER_OBJECT)
+    for (const [key, entryValue] of entries) {
+      out[key] = sanitizeSpeedErrorValueForDiagnostics(entryValue, depth + 1)
+    }
+    return out
+  }
+  return String(value)
+}
+
+/**
+ * Preserves Speed's ENTIRE error response structure (every key, not just a
+ * flattened field/message pair) with every string leaf redacted the same way
+ * as parseSpeedErrorBody. Unlike parseSpeedErrorBody - which intentionally
+ * flattens to {field, message} for the common case - this is for temporary
+ * diagnostic logging only, so a rejection carrying metadata the flattener
+ * doesn't know about yet (e.g. allowed_values, parameter, expected,
+ * country_id, details, documentation_url) is still fully visible in logs.
+ * Never throws; unparseable bodies return null.
+ */
+export function sanitizeSpeedErrorStructureForDiagnostics(body: string): unknown {
+  try {
+    if (!body) return null
+    const parsed = JSON.parse(body)
+    return sanitizeSpeedErrorValueForDiagnostics(parsed, 0)
+  } catch {
+    return null
+  }
+}
+
 /** Hostname only (never the full URL/path) - safe to include in logs. */
 export function getSpeedApiHost(): string {
   try {
@@ -488,27 +538,35 @@ export function getSpeedApiHost(): string {
 }
 
 /**
- * Explicit allowlist of country spellings Speed's /connect/custom endpoint is
- * known to accept, mapped to the ISO-style two-letter code Speed expects.
- * Deliberately narrow: PineTree's general Business Profile country list
- * (US/CA/MX/GB/AU, see engine/businessProfileLocation.ts) is broader than what
- * Speed Custom Connect actually supports today - a merchant with a
- * PineTree-valid, non-US business_country produced Speed's own
- * "Invalid Country. Your request can't be completed" rejection. Only add an
- * entry here once it's confirmed to work against Speed's real API.
+ * The exact literal Speed's /connect/custom `country` field expects, per the
+ * official Speed Custom Connect API Documentation (confirmed example body
+ * uses `"country": "United States"`). Earlier attempts guessed the ISO-style
+ * two-letter code `"US"` - Speed's own documentation proves that assumption
+ * was wrong; production rejected `"US"` with `invalid_request_error` /
+ * "Invalid Country. Your request can't be completed" twice.
+ */
+export const SPEED_COUNTRY_UNITED_STATES = "United States" as const
+
+/**
+ * Explicit allowlist of PineTree country spellings that map to Speed's
+ * documented United States literal. Deliberately narrow and US-only for the
+ * initial launch - PineTree's general Business Profile country list
+ * (US/CA/MX/GB/AU, see engine/businessProfileLocation.ts) is broader than
+ * what this endpoint is documented to support today. Only add another
+ * country once it's confirmed against Speed's official documentation.
  */
 const SPEED_COUNTRY_SYNONYMS: Record<string, string> = {
-  US: "US",
-  USA: "US",
-  "UNITED STATES": "US",
-  "UNITED STATES OF AMERICA": "US",
+  US: SPEED_COUNTRY_UNITED_STATES,
+  USA: SPEED_COUNTRY_UNITED_STATES,
+  "UNITED STATES": SPEED_COUNTRY_UNITED_STATES,
+  "UNITED STATES OF AMERICA": SPEED_COUNTRY_UNITED_STATES,
 }
 
 /**
- * Normalizes a PineTree country value to the exact code Speed's /connect/custom
- * expects. Returns null - never a guess, never a silent US default - for
- * anything not on the explicit allowlist above, so the caller can stop before
- * issuing a request Speed is guaranteed to reject.
+ * Normalizes a PineTree country value to the exact literal Speed's
+ * /connect/custom expects (`"United States"`). Returns null - never a guess -
+ * for anything not on the explicit allowlist above, so the caller can stop
+ * before issuing a request Speed is guaranteed to reject.
  */
 export function normalizeSpeedCountry(value?: string | null): string | null {
   const trimmed = String(value || "").trim()
@@ -563,6 +621,20 @@ async function speedRequestWithStatus<T>(
       apiHost: getSpeedApiHost(),
       elapsedMs: Date.now() - startedAt,
     })
+
+    // TEMPORARY diagnostic: parseSpeedErrorBody flattens each error to
+    // {field, message} and silently drops any sibling metadata Speed's body
+    // might carry (allowed_values, parameter, expected, country_id, details,
+    // documentation_url, ...). Log the full structure - every key, not just
+    // field/message - so a real rejection reveals whatever Speed actually
+    // sent instead of only what today's flattener knows to look for. Remove
+    // once Speed's /connect/custom country contract is confirmed.
+    if (path === "/connect/custom") {
+      console.warn("[speed] speed_custom_connect_error_detail", {
+        status: response.status,
+        sanitizedErrorBody: sanitizeSpeedErrorStructureForDiagnostics(body),
+      })
+    }
 
     if (isSpeedTransferPercentageValidationMessage(body)) {
       throw new Error(SPEED_TRANSFER_SPLIT_ERROR)
@@ -832,6 +904,9 @@ export async function createSpeedConnectAccountLink(params: {
   })
 }
 
+/** Speed's documented account_type literal for Custom Connect - never derived from PineTree's business_type. */
+export const SPEED_CUSTOM_CONNECT_ACCOUNT_TYPE = "merchant" as const
+
 function speedConnectCustomDiagnostic(input: {
   requestStarted: boolean
   emailPresent: boolean
@@ -840,10 +915,7 @@ function speedConnectCustomDiagnostic(input: {
   passwordPolicyValid: boolean
   firstNamePresent: boolean
   lastNamePresent: boolean
-  businessNamePresent: boolean
   countryPresent: boolean
-  phonePresent: boolean
-  accountTypePresent: boolean
   providerStatus: number | null
   providerCode: string | null
   providerFieldErrorCount: number
@@ -851,6 +923,14 @@ function speedConnectCustomDiagnostic(input: {
   return { endpoint: "/connect/custom", ...input }
 }
 
+/**
+ * Creates a Speed Custom Connect connected account. Sends exactly the six
+ * fields documented in the official Speed Custom Connect API Documentation -
+ * country, account_type, first_name, last_name, email, password - and
+ * nothing else. No phone, account_name, address, or other optional field is
+ * part of this documented contract, so none is ever included, even when
+ * present/truthy on the caller's side.
+ */
 export async function createSpeedCustomConnectedAccount(
   params: CreateSpeedCustomConnectedAccountParams
 ): Promise<SpeedConnectedAccountObject> {
@@ -864,9 +944,6 @@ export async function createSpeedCustomConnectedAccount(
   const lastName = String(params.lastName || "").trim()
   const email = String(params.email || "").trim().toLowerCase()
   const password = String(params.password || "").trim()
-  const businessName = String(params.businessName || "").trim()
-  const phone = String(params.phone || "").trim()
-  const accountType = String(params.accountType || "").trim()
 
   if (!country) throw new Error("Speed custom connected account country is not supported.")
   if (!firstName) throw new Error("Speed custom connected account first name is required.")
@@ -885,14 +962,11 @@ export async function createSpeedCustomConnectedAccount(
     passwordPolicyValid: params.passwordPolicyValid ?? Boolean(password),
     firstNamePresent: Boolean(firstName),
     lastNamePresent: Boolean(lastName),
-    businessNamePresent: Boolean(businessName),
     countryPresent: Boolean(country),
-    phonePresent: Boolean(phone),
-    accountTypePresent: Boolean(accountType),
   }
 
-  // Diagnostics only - never the password, email, or phone value itself, only
-  // presence and policy-pass booleans computed by the caller.
+  // Diagnostics only - never the password, email, first/last name value
+  // itself, only presence and policy-pass booleans computed by the caller.
   console.info(
     "[speed] speed_connect_custom_request_diagnostic",
     speedConnectCustomDiagnostic({
@@ -909,13 +983,11 @@ export async function createSpeedCustomConnectedAccount(
       method: "POST",
       body: JSON.stringify({
         country,
-        account_type: accountType || "merchant",
+        account_type: SPEED_CUSTOM_CONNECT_ACCOUNT_TYPE,
         first_name: firstName,
         last_name: lastName,
         email,
         password,
-        ...(businessName ? { account_name: businessName } : {}),
-        ...(phone ? { phone } : {}),
       })
     })
     console.info(
@@ -993,11 +1065,23 @@ function readSpeedWebhookField(payload: unknown, path: string[]): unknown {
  * never carry this field.
  */
 export function isSpeedConnectedAccountWebhookPayload(payload: unknown): boolean {
+  return Boolean(extractSpeedWebhookAccountId(payload))
+}
+
+/**
+ * Extracts the account_id a Speed webhook event carries, preferring the
+ * top-level field (per the official webhook routing guidance: route
+ * connected-account events using the top-level event account_id) and falling
+ * back to the nested locations Speed has also been observed to use. Returns
+ * null when no account_id is present (a platform-level event).
+ */
+export function extractSpeedWebhookAccountId(payload: unknown): string | null {
   const accountId =
     readSpeedWebhookField(payload, ["account_id"]) ||
     readSpeedWebhookField(payload, ["data", "object", "account_id"]) ||
     readSpeedWebhookField(payload, ["event", "data", "object", "account_id"])
-  return Boolean(accountId && String(accountId).trim())
+  const trimmed = String(accountId || "").trim()
+  return trimmed || null
 }
 
 function resolveSpeedWebhookSecret(payload: unknown): string {

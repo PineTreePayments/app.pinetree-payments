@@ -28,6 +28,15 @@ export type CreateOrLinkSpeedConnectedAccountInput = {
   pinetree_reference_id: string
 }
 
+/**
+ * Matches the official Speed Custom Connect API Documentation's documented
+ * /connect/custom request exactly: country, account_type (always "merchant",
+ * not a parameter here), first_name, last_name, email, password. `last_name`
+ * is expected to already be the caller's fully-resolved value (DBA, legal
+ * business name, or owner last name fallback) - Speed's own documentation
+ * example uses a business name ("CVS") in last_name. No phone, account_name,
+ * business_type, or address field is part of this contract.
+ */
 export type CreateSpeedCustomConnectedAccountForMerchantInput = {
   merchant_id: string
   country: string
@@ -35,13 +44,6 @@ export type CreateSpeedCustomConnectedAccountForMerchantInput = {
   last_name: string
   email: string
   password: string
-  business_name?: string | null
-  // E.164-normalized phone, pre-validated by the caller. Never manufactured
-  // here - omitted from the Speed request entirely when not provided.
-  phone?: string | null
-  // Speed's account_type enum value, pre-mapped by the caller from PineTree's
-  // business_type UI label via an explicit mapping table.
-  account_type?: string | null
   // Pre-computed policy checks from the caller (single source of truth in
   // pineTreeWalletReadiness.ts) - forwarded only for request diagnostics.
   email_valid?: boolean
@@ -306,9 +308,6 @@ export async function createSpeedCustomConnectedAccountForMerchant(
       lastName: input.last_name,
       email: input.email,
       password: input.password,
-      businessName: input.business_name,
-      phone: input.phone,
-      accountType: input.account_type,
       emailValid: input.email_valid,
       passwordPolicyValid: input.password_policy_valid,
     })
@@ -355,10 +354,8 @@ export async function createSpeedCustomConnectedAccountForMerchant(
         request_presence: {
           email: Boolean(input.email),
           password: Boolean(input.password),
-          business_name: Boolean(input.business_name),
           first_name: Boolean(input.first_name),
           last_name: Boolean(input.last_name),
-          phone: Boolean(input.phone),
         },
         api_host: getSpeedApiHost(),
         elapsed_ms: Date.now() - startedAt,

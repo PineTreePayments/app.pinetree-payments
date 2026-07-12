@@ -69,12 +69,12 @@ describe("Speed treasury-sweep invoice creation", () => {
     })
   })
 
-  it("creates a Speed Custom Connect merchant account with the documented payload", async () => {
+  it("creates a Speed Custom Connect merchant account with the official documented payload (country as the literal 'United States')", async () => {
     await createSpeedCustomConnectedAccount({
       country: "us",
-      firstName: "Ada",
-      lastName: "Lovelace",
-      email: "ADA@example.test",
+      firstName: "USER",
+      lastName: "CVS",
+      email: "USER@example.com",
       password: "temporary-secret"
     })
 
@@ -85,11 +85,11 @@ describe("Speed treasury-sweep invoice creation", () => {
     expect(url).toBe("https://api.tryspeed.test/connect/custom")
     expect(init?.method).toBe("POST")
     expect(body).toEqual({
-      country: "US",
+      country: "United States",
       account_type: "merchant",
-      first_name: "Ada",
-      last_name: "Lovelace",
-      email: "ada@example.test",
+      first_name: "USER",
+      last_name: "CVS",
+      email: "user@example.com",
       password: "temporary-secret"
     })
   })

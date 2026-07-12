@@ -25,8 +25,10 @@ import { getMerchantBusinessProfile } from "@/engine/businessProfile"
 import { withOperationTimeout, OperationTimeoutError } from "@/engine/promiseTimeout"
 import {
   getPineTreeSpeedConfigStatus,
+  getSpeedApiHost,
   isSpeedPlatformTreasurySweepEnabled,
   normalizeSpeedCountry,
+  SPEED_CUSTOM_CONNECT_ACCOUNT_TYPE,
   SPEED_PLATFORM_TREASURY_SWEEP_MODE,
   type SpeedFieldError,
 } from "@/providers/lightning/speedClient"
@@ -38,8 +40,6 @@ export type EnsureManagedLightningAction =
   | "provisioning_incomplete"
   | "needs_business_profile"
   | "needs_business_owner_profile"
-  | "needs_valid_phone"
-  | "needs_supported_business_type"
   | "needs_valid_country"
   | "rejection_unchanged"
   | "treasury_sweep_mode"
@@ -66,68 +66,29 @@ export type EnsureManagedLightningOptions = {
   forceRetry?: boolean
 }
 
-const SPEED_BUSINESS_TYPE_TO_ACCOUNT_TYPE: Record<string, string> = {
-  retail: "merchant",
-  restaurant: "merchant",
-  services: "merchant",
-  online: "merchant",
-}
-
 /**
- * Maps PineTree's Business Profile `business_type` UI label to the enum value
- * Speed's /connect/custom `account_type` field expects. Returns null for a
- * missing/unrecognized value so the caller can stop before issuing a request
- * Speed is guaranteed to reject, rather than forwarding PineTree's raw label.
- */
-export function mapBusinessTypeToSpeedAccountType(businessType?: string | null): string | null {
-  const key = String(businessType || "").trim().toLowerCase()
-  if (!key) return null
-  return SPEED_BUSINESS_TYPE_TO_ACCOUNT_TYPE[key] ?? null
-}
-
-const US_PHONE_10_DIGIT_RE = /^\d{10}$/
-
-/**
- * Normalizes a US phone number to E.164 (+1XXXXXXXXXX). Accepts 10-digit
- * national numbers, 11-digit numbers with a leading country-code 1, or an
- * already-E.164 +1 number. Returns null for anything else instead of
- * manufacturing a number - the caller must treat null as "reject locally".
- */
-export function normalizeUsPhoneToE164(value?: string | null): string | null {
-  const raw = String(value || "").trim()
-  if (!raw) return null
-  if (/^\+1\d{10}$/.test(raw)) return raw
-  const digits = raw.replace(/\D/g, "")
-  if (US_PHONE_10_DIGIT_RE.test(digits)) return `+1${digits}`
-  if (digits.length === 11 && digits.startsWith("1") && US_PHONE_10_DIGIT_RE.test(digits.slice(1))) {
-    return `+1${digits.slice(1)}`
-  }
-  return null
-}
-
-/**
- * Stable fingerprint of the Business Profile fields that feed the Speed
- * /connect/custom request. Used to decide whether a previously-rejected
- * profile has actually changed before allowing another automatic attempt.
+ * Stable fingerprint of the exact fields that feed the Speed /connect/custom
+ * request body (country, account_type, first_name, last_name, email). Used to
+ * decide whether a previously-rejected profile has actually changed before
+ * allowing another automatic attempt. Deliberately mirrors the documented
+ * six-field contract (password is generated fresh per attempt and excluded) -
+ * a fix to how any of these fields is derived changes the fingerprint too,
+ * so a corrected request is never suppressed by a stale rejection.
  */
 export function computeSpeedCustomConnectFingerprint(input: {
   country: string
+  accountType: string
   firstName: string
   lastName: string
-  businessName: string
   email: string
-  accountType: string
-  phone: string
 }): string {
   return createHash("sha256")
     .update(JSON.stringify([
       input.country,
+      input.accountType,
       input.firstName,
       input.lastName,
-      input.businessName,
       input.email,
-      input.accountType,
-      input.phone,
     ]))
     .digest("hex")
     .slice(0, 32)
@@ -450,17 +411,24 @@ async function ensureManagedLightningForMerchantImpl(
     }
   }
 
+  // Business Profile contact_email is the primary connected-account login
+  // email - it's a required, merchant-confirmed field. merchant.email/authEmail
+  // are a fallback only for legacy profiles saved before contact_email existed.
+  const contactEmail = String(businessProfile.contact_email || "").trim().toLowerCase()
   const merchantEmail = String(merchant?.email || "").trim().toLowerCase()
   const authEmail = String(options.authEmail || "").trim().toLowerCase()
-  const speedEmail = isValidSpeedCustomConnectEmail(merchantEmail)
-    ? merchantEmail
-    : isValidSpeedCustomConnectEmail(authEmail)
-      ? authEmail
-      : null
+  const speedEmail = isValidSpeedCustomConnectEmail(contactEmail)
+    ? contactEmail
+    : isValidSpeedCustomConnectEmail(merchantEmail)
+      ? merchantEmail
+      : isValidSpeedCustomConnectEmail(authEmail)
+        ? authEmail
+        : null
 
   if (!speedEmail) {
     console.warn("[pinetree-managed-lightning] speed_connect_missing_email", {
       merchant_id: merchantId,
+      contactEmailPresent: Boolean(contactEmail),
       merchantEmailPresent: Boolean(merchantEmail),
       authEmailPresent: Boolean(authEmail),
     })
@@ -557,75 +525,29 @@ async function ensureManagedLightningForMerchantImpl(
     }
   }
 
-  const speedAccountType = mapBusinessTypeToSpeedAccountType(businessProfile.business_type)
-  if (!speedAccountType) {
-    console.warn("[pinetree-managed-lightning] speed_business_type_unsupported", {
-      merchant_id: merchantId,
-      businessTypePresent: Boolean(businessProfile.business_type),
-    })
-    const lightningProfile = await upsertMerchantLightningProfile({
-      merchantId,
-      status: "needs_attention",
-      speedConnectedAccountStatus: "speed_business_type_unsupported",
-      providerErrorMessage: "Review your Business Profile information to finish Bitcoin setup.",
-    })
-    await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
-    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
-      merchant_id: merchantId,
-      status: lightningProfile.status,
-      safeReason: "business_type_unsupported",
-    })
-    return {
-      status: lightningProfile.status,
-      action: "needs_supported_business_type",
-      speedConnectedAccountId: null,
-      speedConnectedAccountRelationshipId: null,
-      speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
-      providerCode: null,
-      fieldErrors: [],
-      merchantMessage: "Review your Business Profile information to finish Bitcoin setup.",
-    }
-  }
+  // TEMPORARY diagnostic: country is not secret/personal data. Records the
+  // exact outgoing provider-bound value alongside what was actually stored,
+  // so a future Speed rejection is traceable without guessing. Remove once
+  // production has proven a successful Active account creation.
+  console.info("[pinetree-managed-lightning] speed_custom_connect_country_diagnostic", {
+    merchant_id: merchantId,
+    stored_country: businessProfile.business_country,
+    provider_country: speedCountry,
+    account_type: SPEED_CUSTOM_CONNECT_ACCOUNT_TYPE,
+    api_host: getSpeedApiHost(),
+  })
 
-  const speedPhone = normalizeUsPhoneToE164(businessProfile.owner_phone || businessProfile.business_phone)
-  if (!speedPhone) {
-    console.warn("[pinetree-managed-lightning] speed_phone_invalid", {
-      merchant_id: merchantId,
-      phonePresent: Boolean(businessProfile.owner_phone || businessProfile.business_phone),
-    })
-    const lightningProfile = await upsertMerchantLightningProfile({
-      merchantId,
-      status: "needs_attention",
-      speedConnectedAccountStatus: "speed_phone_invalid",
-      providerErrorMessage: "Review your Business Profile information to finish Bitcoin setup.",
-    })
-    await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
-    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
-      merchant_id: merchantId,
-      status: lightningProfile.status,
-      safeReason: "phone_invalid",
-    })
-    return {
-      status: lightningProfile.status,
-      action: "needs_valid_phone",
-      speedConnectedAccountId: null,
-      speedConnectedAccountRelationshipId: null,
-      speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
-      providerCode: null,
-      fieldErrors: [],
-      merchantMessage: "Review your Business Profile information to finish Bitcoin setup.",
-    }
-  }
-
-  const speedBusinessName = businessProfile.business_dba || businessProfile.legal_business_name || ""
+  // last_name carries the business name (Speed's own documentation example
+  // uses a business name, "CVS") - DBA first, legal business name next, and
+  // the owner's last name only as a final defensive fallback if neither
+  // business name field is on file.
+  const speedLastName = businessProfile.business_dba || businessProfile.legal_business_name || businessProfile.owner_last_name!
   const requestFingerprint = computeSpeedCustomConnectFingerprint({
     country: speedCountry,
+    accountType: SPEED_CUSTOM_CONNECT_ACCOUNT_TYPE,
     firstName: businessProfile.owner_first_name!,
-    lastName: businessProfile.owner_last_name!,
-    businessName: speedBusinessName,
+    lastName: speedLastName,
     email: speedEmail,
-    accountType: speedAccountType,
-    phone: speedPhone,
   })
 
   // A deterministic Speed validation rejection (4xx) must not be retried
@@ -668,12 +590,9 @@ async function ensureManagedLightningForMerchantImpl(
         merchant_id: merchantId,
         country: speedCountry,
         first_name: businessProfile.owner_first_name!,
-        last_name: businessProfile.owner_last_name!,
+        last_name: speedLastName,
         email: speedEmail,
         password: speedPassword,
-        business_name: speedBusinessName,
-        phone: speedPhone,
-        account_type: speedAccountType,
         email_valid: isValidSpeedCustomConnectEmail(speedEmail),
         password_policy_valid: passwordPolicyPass,
       }),
