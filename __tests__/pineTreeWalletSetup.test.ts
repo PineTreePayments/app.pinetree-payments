@@ -246,7 +246,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('setWalletCreationStep("provisioning_wallet")')
     expect(page).toContain('setWalletCreationStep("idle")')
     expect(page).toContain('status: setupStarted ? "resume_missing_profile" : "new_wallet_required"')
-    expect(page).toContain('if (profileState.kind === "none") return "create_wallet"')
+    expect(page).toContain('if (profileState.kind === "none" || !profileHasDynamicAddresses) return "create_wallet"')
     expect(page).not.toContain('if (setupStarted && json.profile?.status !== "ready")')
   })
 
@@ -640,6 +640,53 @@ describe("PineTree embedded wallet setup", () => {
     expect(createButtonBranch).toContain("bg-[#0052FF]")
     expect(createButtonBranch).not.toContain("Complete Business Profile")
     expect(createButtonBranch.indexOf("businessProfileGateBlocking ? \"Create PineTree Wallet\"")).toBeLessThan(createButtonBranch.indexOf("logoutPending || walletCreationInProgress ? \"Creating PineTree Wallet...\""))
+  })
+
+  it("keeps pre-creation merchants with Speed ready in create-wallet state instead of Needs attention", () => {
+    const derivedState = page.slice(
+      page.indexOf("// Derived state - wallet profile"),
+      page.indexOf("// walletStatus is derived from walletSetupPrimaryState")
+    )
+    const resolverBody = page.slice(
+      page.indexOf("const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {"),
+      page.indexOf("return \"idle\"\n  }, [")
+    )
+    const ctaStart = page.indexOf(") : hasWallet ? (")
+    const ctaBlock = page.slice(ctaStart, ctaStart + 1400)
+
+    expect(derivedState).toContain("const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned ?? btcPayoutReady")
+    expect(derivedState).toContain("const hasWallet = profileState.kind === \"loaded\" && (baseReady || solanaReady)")
+    expect(derivedState).not.toContain("baseReady || solanaReady || btcPayoutReady || bitcoinReady")
+    expect(resolverBody).toContain('if (profileState.kind === "none" || !profileHasDynamicAddresses) return "create_wallet"')
+    expect(resolverBody).not.toContain('lightningProfileState.profile.status === "needs_attention"')
+    expect(page).toContain('walletSetupPrimaryState === "create_wallet" ? "Create wallet" :')
+    expect(ctaBlock).toContain("hasWallet ? (")
+    expect(ctaBlock).toContain("Open PineTree Wallet")
+    expect(ctaBlock).toContain("Create PineTree Wallet")
+    expect(ctaBlock).toContain("disabled={businessProfileGateBlocking || syncing || logoutPending || walletCreationInProgress}")
+  })
+
+  it("clicking Create still starts the core orchestrator before any Speed outcome can block it", () => {
+    const createFn = page.slice(
+      page.indexOf("function handleCreateWallet()"),
+      page.indexOf("// Single orchestrator for Create PineTree Wallet and Try Again.")
+    )
+    const orchestratorFn = page.slice(
+      page.indexOf("async function createPineTreeWalletSetup("),
+      page.indexOf("// Kicks off core Dynamic wallet setup")
+    )
+    const coreFn = page.slice(
+      page.indexOf("async function startCoreDynamicWallet("),
+      page.indexOf("// Automatic Speed/Lightning provisioning")
+    )
+
+    expect(createFn).toContain('emitWalletSetupDebugEvent("wallet_create_clicked"')
+    expect(createFn).toContain("void createPineTreeWalletSetup({ retry: false })")
+    expect(orchestratorFn).toContain('emitWalletSetupDebugEvent("wallet_setup_orchestrator_started"')
+    expect(orchestratorFn).toContain("await Promise.allSettled([")
+    expect(orchestratorFn).toContain("startCoreDynamicWallet(options),")
+    expect(orchestratorFn).toContain("provisionSpeedLightning(),")
+    expect(coreFn).toContain('emitWalletSetupDebugEvent("wallet_core_setup_started"')
   })
 
   it("Speed provisioning never throws into or fails core wallet setup", () => {
@@ -1895,7 +1942,8 @@ describe("PineTree embedded wallet setup", () => {
   it("PineTree Wallet can be created with Base/Solana active while BTC payout sync is internal", () => {
     // hasWallet is true once Base or Solana is active — Lightning pending does not block it
     expect(page).toContain("const hasWallet = profileState.kind")
-    expect(page).toContain("baseReady || solanaReady || btcPayoutReady || bitcoinReady")
+    expect(page).toContain("baseReady || solanaReady")
+    expect(page).not.toContain("baseReady || solanaReady || btcPayoutReady || bitcoinReady")
     // lightningPending is a valid state for an active wallet
     expect(page).not.toContain("lightningPending")
     expect(page).not.toContain("lightningRetryable")

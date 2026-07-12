@@ -705,7 +705,7 @@ describe("PineTree Dynamic provisioning flow", () => {
       'if (walletSetupFailureReason === "provider_sync_failed") return "rail_sync_needed"',
       'if (repairOrSetupIncomplete) return "reconnect_needed"',
       'if (walletCreationStep === "failed" || walletCreationStep === "timeout") return "failed"',
-      'if (profileState.kind === "none") return "create_wallet"',
+      'if (profileState.kind === "none" || !profileHasDynamicAddresses) return "create_wallet"',
     ]
     let cursor = -1
     for (const line of order) {

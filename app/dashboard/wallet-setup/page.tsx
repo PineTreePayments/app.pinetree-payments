@@ -6049,8 +6049,10 @@ function PineTreeWalletRuntime() {
   const profileHasDynamicAddresses = baseReady || solanaReady
   const businessProfileGateReady = businessProfileReadiness.kind === "loaded" && businessProfileReadiness.complete
   const businessProfileGateBlocking = !businessProfileGateReady
-  // Wallet exists once a PineTree embedded wallet address is available.
-  const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady || btcPayoutReady || bitcoinReady)
+  // Wallet exists only once a core PineTree embedded wallet address is available.
+  // Speed/Bitcoin readiness can be active before core wallet creation and must not
+  // turn the setup CTA into Open/Reconnect or global Needs attention.
+  const hasWallet = profileState.kind === "loaded" && (baseReady || solanaReady)
   const walletProvisioningInProgress =
     pendingSync &&
     !provisioningRetryExhausted &&
@@ -6469,7 +6471,7 @@ function PineTreeWalletRuntime() {
     if (walletSetupFailureReason === "provider_sync_failed") return "rail_sync_needed"
     if (repairOrSetupIncomplete) return "reconnect_needed"
     if (walletCreationStep === "failed" || walletCreationStep === "timeout") return "failed"
-    if (profileState.kind === "none") return "create_wallet"
+    if (profileState.kind === "none" || !profileHasDynamicAddresses) return "create_wallet"
     return "idle"
   }, [
     dynamicProfileReady,
@@ -6483,6 +6485,7 @@ function PineTreeWalletRuntime() {
     repairOrSetupIncomplete,
     walletCreationStep,
     profileState,
+    profileHasDynamicAddresses,
     openWalletReconnectNeeded,
   ])
 
