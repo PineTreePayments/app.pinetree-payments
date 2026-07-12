@@ -682,7 +682,7 @@ export default function SettingsPage() {
             aria-labelledby="business-profile-modal-title"
             className="flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden rounded-none border border-white/70 bg-white shadow-[0_32px_100px_rgba(15,23,42,0.30)] sm:h-auto sm:max-h-[92dvh] sm:rounded-[1.5rem]"
           >
-            <header className="shrink-0 flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 pt-[calc(1.25rem+env(safe-area-inset-top))] sm:px-7 sm:pt-5">
+            <header className="shrink-0 flex items-start justify-between gap-4 border-b border-gray-100 px-5 pb-5 pt-[calc(env(safe-area-inset-top)+1rem)] sm:px-7 sm:pt-5">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 id="business-profile-modal-title" className="text-lg font-semibold text-gray-950">Business Profile</h2>
@@ -702,12 +702,7 @@ export default function SettingsPage() {
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [-webkit-overflow-scrolling:touch] sm:px-7">
-              <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-blue-900">
-                <p className="text-xs font-semibold">Payment activation</p>
-                <p className="mt-0.5 text-xs leading-5">Complete the required details below to activate payments.</p>
-              </div>
-
-              <div className="mt-4 space-y-5">
+              <div className="space-y-5">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Business Information</p>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -738,12 +733,12 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <footer className="shrink-0 flex flex-col-reverse gap-2 border-t border-gray-100 px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-end sm:px-7 sm:pb-4">
+            <footer className="shrink-0 flex flex-col-reverse items-center gap-2 border-t border-gray-100 px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:flex-row sm:justify-center sm:px-7 sm:pb-4">
               <button
                 type="button"
                 onClick={() => setBusinessProfileOpen(false)}
                 disabled={saving}
-                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+                className="inline-flex min-h-11 min-w-[8.5rem] items-center justify-center rounded-xl border border-gray-200 bg-white px-5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -751,7 +746,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => void saveBusinessProfile()}
                 disabled={saving || !schemaReady}
-                className="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+                className="inline-flex min-h-11 min-w-[14rem] items-center justify-center rounded-xl bg-blue-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
               >
                 {saving ? "Saving..." : "Save Business Profile"}
               </button>
@@ -775,7 +770,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setBusinessProfileOpen(true)}
-              className="inline-flex min-h-9 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              className="inline-flex min-h-11 w-auto min-w-[10rem] items-center justify-center rounded-xl bg-blue-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
             >
               {profileActionLabel(profileStatus)}
             </button>

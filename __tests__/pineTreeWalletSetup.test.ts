@@ -118,7 +118,8 @@ describe("PineTree embedded wallet setup", () => {
   // -------------------------------------------------------------------------
 
   it("presents one merchant PineTree Wallet profile", () => {
-    expect(page).toContain(">PineTree Wallet</h1>")
+    expect(page).toContain('<DashboardSection title="MERCHANT WALLET" titleTone="blue">')
+    expect(page).not.toContain(">PineTree Wallet</h1>")
     expect(page).toContain(">PineTree Wallet</h2>")
     expect(page).toContain("One merchant wallet profile")
     expect(page).toContain("Create PineTree Wallet")
@@ -1541,11 +1542,13 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain(">Setup pending</p>")
   })
 
-  it("removes the top Merchant Wallet eyebrow while keeping title and description", () => {
-    expect(page).not.toContain("Merchant wallet</p>")
-    expect(page).not.toContain("MERCHANT WALLET")
-    expect(page).toContain(">PineTree Wallet</h1>")
-    expect(page).toContain("Create and open your merchant wallet.")
+  it("uses a clean merchant wallet hierarchy without redundant descriptive copy", () => {
+    expect(page).toContain('<DashboardSection title="MERCHANT WALLET" titleTone="blue">')
+    expect(page).toContain(">PineTree Wallet</h2>")
+    expect(page).not.toContain(">PineTree Wallet</h1>")
+    expect(page).not.toContain("Create and open your merchant wallet.")
+    expect(page).not.toContain("One merchant wallet for receiving funds and managing payments.")
+    expect(page).toContain("<EnabledRailChips rows={walletRailRows} />")
   })
 
   it("overview shows wallet summary balances instead of duplicating receive addresses", () => {
@@ -1731,6 +1734,13 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('aria-label="Destination address"')
     expect(page).toContain('aria-label="Withdrawal amount"')
     expect(page).toContain("Review withdrawal")
+    const reviewButton = page.slice(
+      page.indexOf("onClick={missingRuntimeSigner && onFinishSetup ? onFinishSetup : onReview}"),
+      page.indexOf('{reviewing ? "Reviewing..."')
+    )
+    expect(reviewButton).toContain("inline-flex h-11 min-w-[12rem]")
+    expect(reviewButton).toContain("px-6")
+    expect(reviewButton).not.toContain("w-full")
     expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals")
     expect(page).not.toContain("Withdrawal coming soon")
     expect(page).not.toContain("Withdrawal disabled")

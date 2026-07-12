@@ -67,7 +67,8 @@ describe("Business Profile onboarding UI", () => {
     expect(businessSection).toContain("Business and owner details required for payment activation.")
     expect(businessSection).toContain("flex items-center justify-between gap-3")
     expect(businessSection).toContain("shrink-0 rounded-full border px-1.5 py-px text-[10px]")
-    expect(businessSection).toContain("inline-flex min-h-9 w-full items-center justify-center rounded-xl bg-blue-600 px-3 py-1.5 text-xs")
+    expect(businessSection).toContain("inline-flex min-h-11 w-auto min-w-[10rem] items-center justify-center rounded-xl bg-blue-600 px-6 text-sm")
+    expect(businessSection).not.toContain("w-full")
     expect(businessSection).not.toContain("inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm")
     expect(businessSection).not.toContain("Required business and owner information for payment activation and PineTree Wallet Lightning setup.")
     expect(businessSection).not.toContain("Complete this profile before activating payments.")
@@ -105,9 +106,10 @@ describe("Business Profile onboarding UI", () => {
     expect(modalBlock).toContain("flex h-[100dvh] max-h-[100dvh] w-full max-w-4xl flex-col overflow-hidden")
     expect(modalBlock).toContain("sm:h-auto sm:max-h-[92dvh]")
     expect(modalBlock).toContain("shrink-0 flex items-start justify-between")
+    expect(modalBlock).toContain("pt-[calc(env(safe-area-inset-top)+1rem)]")
     expect(modalBlock).toContain("min-h-0 flex-1 overflow-y-auto overscroll-contain")
     expect(modalBlock).toContain("[-webkit-overflow-scrolling:touch]")
-    expect(modalBlock).toContain("shrink-0 flex flex-col-reverse")
+    expect(modalBlock).toContain("shrink-0 flex flex-col-reverse items-center")
     expect(settings).not.toContain("document.body.style.overflow")
 
     expect(overlayManager).toContain('const OVERLAY_SELECTOR = \'[data-pinetree-overlay="true"]\'')
@@ -132,19 +134,39 @@ describe("Business Profile onboarding UI", () => {
     expect(toneFn).not.toContain("bg-amber")
   })
 
-  it("Business Profile modal banner uses shorter payment activation copy without Lightning retry text", () => {
+  it("Business Profile modal removes redundant payment activation card while keeping required helper text", () => {
     const settings = read("app/dashboard/settings/page.tsx")
     const modalBlock = settings.slice(
       settings.indexOf('aria-labelledby="business-profile-modal-title"'),
       settings.indexOf('<DashboardSection title="Business Profile"')
     )
 
-    expect(modalBlock).toContain("Payment activation")
-    expect(modalBlock).toContain("Complete the required details below to activate payments.")
-    expect(modalBlock).toContain("px-3 py-2")
-    expect(modalBlock).toContain("text-xs font-semibold")
+    expect(modalBlock).toContain("Fields marked with")
+    expect(modalBlock).toContain("Business Information")
+    expect(modalBlock).toContain("Owner Information")
+    expect(modalBlock).not.toContain("Payment activation")
+    expect(modalBlock).not.toContain("Complete the required details below to activate payments.")
     expect(modalBlock).not.toContain("Payment activation requirement")
     expect(modalBlock).not.toContain("retry PineTree Wallet Lightning setup")
+  })
+
+  it("Business Profile modal footer keeps Save and Cancel compact without changing save behavior", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+    const modalBlock = settings.slice(
+      settings.indexOf('aria-labelledby="business-profile-modal-title"'),
+      settings.indexOf('<DashboardSection title="Business Profile"')
+    )
+    const footerBlock = modalBlock.slice(
+      modalBlock.indexOf('<footer className="shrink-0 flex flex-col-reverse items-center'),
+      modalBlock.indexOf("</footer>")
+    )
+
+    expect(modalBlock).toContain("onClick={() => void saveBusinessProfile()}")
+    expect(modalBlock).toContain("disabled={saving || !schemaReady}")
+    expect(modalBlock).toContain('{saving ? "Saving..." : "Save Business Profile"}')
+    expect(footerBlock).toContain("inline-flex min-h-11 min-w-[14rem]")
+    expect(footerBlock).toContain("inline-flex min-h-11 min-w-[8.5rem]")
+    expect(footerBlock).not.toContain("w-full")
   })
 
   it("Business Profile modal marks only shared required fields with red asterisks", () => {
@@ -183,7 +205,9 @@ describe("Business Profile onboarding UI", () => {
     expect(sharedBanner).toContain("/dashboard/settings?section=business-profile&return=${returnDestination}")
     expect(wallet).toContain('returnDestination="wallet"')
     expect(wallet).toContain(">PineTree Wallet</h2>")
-    expect(wallet).toContain("One merchant wallet for receiving funds and managing payments.")
+    expect(wallet).toContain('<DashboardSection title="MERCHANT WALLET" titleTone="blue">')
+    expect(wallet).not.toContain("Create and open your merchant wallet.")
+    expect(wallet).not.toContain("One merchant wallet for receiving funds and managing payments.")
     expect(wallet).toContain("<EnabledRailChips rows={walletRailRows} />")
     expect(wallet).toContain("Create PineTree Wallet")
     expect(wallet).toContain("businessProfileGateBlocking ? \"Create PineTree Wallet\"")

@@ -334,6 +334,19 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(reviewScreen).not.toContain("window.confirm")
   })
 
+  it("withdrawal form uses a compact centered Review withdrawal action", () => {
+    const src = withdrawalFormSrc()
+    const reviewButton = src.slice(
+      src.indexOf("onClick={missingRuntimeSigner && onFinishSetup ? onFinishSetup : onReview}"),
+      src.indexOf('{reviewing ? "Reviewing..."')
+    )
+
+    expect(reviewButton).toContain("inline-flex h-11 min-w-[12rem]")
+    expect(reviewButton).toContain("px-6")
+    expect(reviewButton).not.toContain("w-full")
+    expect(src).toContain("flex flex-col items-center gap-2 sm:flex-row sm:justify-center")
+  })
+
   it("withdraw validation and pending review states are not yellow warning blocks", () => {
     const src = withdrawalFormSrc()
     expect(src).not.toContain("border-amber")

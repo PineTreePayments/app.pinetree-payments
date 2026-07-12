@@ -34,7 +34,6 @@ import {
 import {
   DashboardSection,
   ProviderStatusPill,
-  dashboardPageTitleClass,
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
@@ -2197,12 +2196,12 @@ function WithdrawalFormShell({
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
         <button
           type="button"
           onClick={missingRuntimeSigner && onFinishSetup ? onFinishSetup : onReview}
           disabled={reviewDisabled}
-          className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
+          className="inline-flex h-11 min-w-[12rem] items-center justify-center rounded-lg bg-[#0052FF] px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
         >
           {reviewing ? "Reviewing..." : missingRuntimeSigner ? "Reconnect PineTree Wallet" : "Review withdrawal"}
         </button>
@@ -7833,10 +7832,7 @@ function PineTreeWalletRuntime() {
         <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
         {!walletProvisioningInProgress ? (
           <div className="mt-3 max-w-xl">
-            <p className="text-sm leading-6 text-gray-600">
-              One merchant wallet for receiving funds and managing payments.
-            </p>
-            <div className="mt-4">
+            <div>
               <EnabledRailChips rows={walletRailRows} />
             </div>
           </div>
@@ -8258,14 +8254,7 @@ export default function PineTreeWalletPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className={dashboardPageTitleClass}>PineTree Wallet</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
-          Create and open your merchant wallet.
-        </p>
-      </div>
-
-      <DashboardSection title="Wallet setup" titleTone="blue">
+      <DashboardSection title="MERCHANT WALLET" titleTone="blue">
         {!infrastructure.configured ? (
           <WalletSetupUnavailable kind="missing-env" />
         ) : infrastructure.sdkUnavailable ? (
