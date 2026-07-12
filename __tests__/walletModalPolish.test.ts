@@ -373,10 +373,10 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(src).toContain("max-w-2xl")
     expect(src).toContain("max-w-xl")
     expect(src).toContain("mt-6 max-w-xl")
-    expect(src).toContain("mt-auto flex justify-start pt-7")
+    expect(src).toContain("mt-auto flex justify-end pt-7")
   })
 
-  it("front wallet card adds compact hidden balance and sync details without duplicating the modal overview", () => {
+  it("front wallet card shows a balanced two-column summary without duplicating the modal overview", () => {
     const src = runtimeSrc()
     const setupCard = src.slice(
       src.indexOf("<article className=\"max-w-2xl"),
@@ -390,7 +390,7 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(setupCard).toContain('aria-label={frontBalanceHidden ? "Show wallet balance" : "Hide wallet balance"}')
     expect(setupCard).toContain("<Eye size={14} />")
     expect(setupCard).toContain("<EyeOff size={14} />")
-    expect(setupCard).toContain("Last synced")
+    expect(setupCard).not.toContain("Last synced")
     expect(src).toContain("formatWalletTotalBalance(walletSync.totalUsd, walletSyncing)")
     expect(setupCard).not.toContain(">TOTAL BALANCE</p>")
     expect(setupCard).not.toContain(">WALLET SUMMARY</p>")
@@ -435,7 +435,7 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     const src = runtimeSrc()
     expect(src).toContain("Open PineTree Wallet")
     expect(src).toContain("Create PineTree Wallet")
-    expect(src).toContain("mt-auto flex justify-start pt-7")
+    expect(src).toContain("mt-auto flex justify-end pt-7")
     expect(src).toContain("h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60")
   })
 
@@ -455,12 +455,12 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(actionBlock).not.toContain("border border-gray-200 bg-white px-4")
   })
 
-  it("EnabledRailChips renders Connected rails label above active rail pills", () => {
+  it("EnabledRailChips renders Connected Networks label above active rail pills", () => {
     const chipsSrc = walletPage.slice(
       walletPage.indexOf("function EnabledRailChips("),
       walletPage.indexOf("function PineTreeWalletRuntime(")
     )
-    expect(chipsSrc).toContain("Connected rails")
+    expect(chipsSrc).toContain("Connected Networks")
     expect(chipsSrc).toContain("None connected yet")
     expect(chipsSrc).toContain("row.enabled && row.configured")
     expect(chipsSrc).toContain('aria-label="Enabled payment rails"')

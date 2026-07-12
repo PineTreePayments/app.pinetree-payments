@@ -488,7 +488,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain(') : walletSetupPrimaryState === "email_mismatch" ? (')
     expect(page).toContain('"Try Again"')
     const ctaBlock = page.slice(
-      page.indexOf('<div className="mt-auto flex justify-start pt-7">'),
+      page.indexOf('<div className="mt-auto flex justify-end pt-7">'),
       page.indexOf(") : hasWallet ? (")
     )
     expect(ctaBlock).not.toContain("Create PineTree Wallet")
@@ -640,7 +640,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain('walletSetupPrimaryState === "email_mismatch" ? "Older setup found" :')
     expect(page).toContain("PineTree found an older wallet setup for this account. Please retry after the previous test wallet is cleared.")
     const ctaBlock = page.slice(
-      page.indexOf('<div className="mt-auto flex justify-start pt-7">'),
+      page.indexOf('<div className="mt-auto flex justify-end pt-7">'),
       page.indexOf(') : walletSetupPrimaryState === "reconnect_needed" ? (')
     )
     expect(ctaBlock).toContain("Try Again")
@@ -759,7 +759,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("ready profile still shows Base/Solana chips and Open PineTree Wallet", () => {
     expect(page).toContain("<EnabledRailChips rows={walletRailRows} />")
     const ctaBlock = page.slice(
-      page.indexOf('<div className="mt-auto flex justify-start pt-7">'),
+      page.indexOf('<div className="mt-auto flex justify-end pt-7">'),
       page.indexOf(") : showProvisioningRetryOnly ? null : (")
     )
     expect(ctaBlock).toContain("hasWallet ? (")
@@ -798,7 +798,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(mismatchIndex).toBeGreaterThan(-1)
     expect(repairIndex).toBeGreaterThan(mismatchIndex)
     const mismatchBranch = page.slice(
-      page.indexOf('<div className="mt-auto flex justify-start pt-7">'),
+      page.indexOf('<div className="mt-auto flex justify-end pt-7">'),
       page.indexOf(') : walletSetupPrimaryState === "reconnect_needed" ? (')
     )
     expect(mismatchBranch).not.toContain("Repair PineTree Wallet setup")
@@ -820,7 +820,7 @@ describe("PineTree Dynamic provisioning flow", () => {
   it("ready profile with a matching Dynamic session shows Ready and Open PineTree Wallet only", () => {
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
     const ctaChain = page.slice(
-      page.indexOf('<div className="mt-auto flex justify-start pt-7">'),
+      page.indexOf('<div className="mt-auto flex justify-end pt-7">'),
       page.indexOf(") : showProvisioningRetryOnly ? null : (")
     )
     // When primaryState is "ready", every earlier CTA branch (mismatch/unverified/
@@ -907,7 +907,7 @@ describe("PineTree Dynamic provisioning flow", () => {
       page.indexOf(') : walletSetupPrimaryState === "failed" ? (')
     )
     const identityCta = page.slice(
-      page.indexOf('<div className="mt-auto flex justify-start pt-7">'),
+      page.indexOf('<div className="mt-auto flex justify-end pt-7">'),
       page.indexOf(') : walletSetupPrimaryState === "reconnect_needed" ? (')
     )
     expect(identityCta).toContain("handleUsePineTreeAccountEmail")

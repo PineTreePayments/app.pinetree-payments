@@ -2569,15 +2569,15 @@ function EnabledRailChips({
 
   return (
     <div>
-      <p className="mb-1.5 text-xs font-semibold text-gray-500">Connected rails</p>
+      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-700/80">Connected Networks</p>
       {enabledRows.length === 0 ? (
         <p className="text-xs text-gray-400">None connected yet</p>
       ) : (
-        <div className="flex flex-wrap items-center gap-2.5" aria-label="Enabled payment rails">
+        <div className="grid grid-cols-2 gap-2" aria-label="Enabled payment rails">
           {enabledRows.map((rail) => (
             <span
               key={rail.label}
-              className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-[0_1px_0_rgba(37,99,235,0.06)]"
+              className="inline-flex items-center justify-center rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-[0_1px_0_rgba(37,99,235,0.06)]"
             >
               {rail.label}
             </span>
@@ -7809,7 +7809,6 @@ function PineTreeWalletRuntime() {
   // Main card
   // ---------------------------------------------------------------------------
 
-  const frontCardLastSynced = formatLastSynced(walletSync.lastSyncedAt)
   const frontCardBalanceLabel = formatWalletTotalBalance(walletSync.totalUsd, walletSyncing)
 
   return (
@@ -7827,11 +7826,8 @@ function PineTreeWalletRuntime() {
         <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
         {!walletProvisioningInProgress ? (
           <div className="mt-6 max-w-xl">
-            <div>
-              <EnabledRailChips rows={walletRailRows} />
-            </div>
             {hasWallet ? (
-              <div className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,0.9fr)_minmax(9rem,0.55fr)]">
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(9rem,0.7fr)] gap-x-10 gap-y-4">
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-700/80">Wallet Balance</p>
@@ -7844,18 +7840,17 @@ function PineTreeWalletRuntime() {
                       {frontBalanceHidden ? <Eye size={14} /> : <EyeOff size={14} />}
                     </button>
                   </div>
-                  <p className="mt-1 text-xl font-semibold leading-tight text-gray-950">
+                  <p className="mt-2 text-3xl font-semibold leading-tight text-gray-950">
                     {frontBalanceHidden ? "••••••••" : frontCardBalanceLabel}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-700/80">Last synced</p>
-                  <p className="mt-1 text-sm font-semibold leading-5 text-gray-950">
-                    {walletSyncing ? "Syncing..." : frontCardLastSynced ?? "Pending sync"}
-                  </p>
+                  <EnabledRailChips rows={walletRailRows} />
                 </div>
               </div>
-            ) : null}
+            ) : (
+              <EnabledRailChips rows={walletRailRows} />
+            )}
           </div>
         ) : null}
 
@@ -8063,7 +8058,7 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        <div className="mt-auto flex justify-start pt-7">
+        <div className="mt-auto flex justify-end pt-7">
           {dynamicVerificationPromptReason ? (
             <button
               type="button"
