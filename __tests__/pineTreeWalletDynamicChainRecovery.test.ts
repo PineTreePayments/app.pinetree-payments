@@ -213,7 +213,7 @@ describe("Chain create is bounded by a true PineTree-side deadline, not just the
     expect(implFn).toContain("if (!pastTerminalSuccess) {\n                  solanaWalletCreateFailedRef.current = settled.status === \"rejected\"")
 
     const helperFn = page.slice(
-      page.indexOf("const logStaleDynamicCreateSettlement = useCallback"),
+      page.indexOf("const logDynamicCreateLateResultIgnored = useCallback"),
       page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback")
     )
     expect(helperFn).toContain("const stillCurrentGeneration = walletRuntimeRefreshMetaRef.current[refreshMode]?.generation === generation")
@@ -230,7 +230,6 @@ describe("Chain create is bounded by a true PineTree-side deadline, not just the
     // longer inline in implFn, but it must still exist and be whitelisted.
     for (const event of [
       "wallet_dynamic_chain_create_late_settlement_ignored",
-      "wallet_dynamic_stale_generation_ignored",
       "wallet_dynamic_late_result_ignored",
     ]) {
       expect(page).toContain(event)
@@ -323,7 +322,7 @@ describe("Stale Dynamic create/hydration work is ignored once setup terminally s
     page.indexOf("// Single-flight wrapper")
   )
   const helperFn = page.slice(
-    page.indexOf("const logStaleDynamicCreateSettlement = useCallback"),
+    page.indexOf("const logDynamicCreateLateResultIgnored = useCallback"),
     page.indexOf("const refreshDynamicWalletRuntimeImpl = useCallback")
   )
   const supersededFn = page.slice(
@@ -368,12 +367,67 @@ describe("Stale Dynamic create/hydration work is ignored once setup terminally s
     expect(implFn).toContain("void initialCreateCall.settlement.then((settled) => {")
   })
 
-  it("a late settlement past terminal success is ignored - no nonce bump, no failure ref flip, just a safe diagnostic", () => {
-    expect(helperFn).toContain("const pastTerminalSuccess =\n      walletCoreSetupTerminalGenerationRef.current !== null &&\n      generation <= walletCoreSetupTerminalGenerationRef.current")
-    expect(helperFn).toContain('if (pastTerminalSuccess) {\n      console.info("[pinetree-wallets] wallet_dynamic_late_result_ignored", diagnostic)')
-    expect(helperFn).toContain("emitWalletSetupDebugEvent(\"wallet_dynamic_late_result_ignored\", diagnostic)\n      return")
-    // A superseded-but-not-yet-terminal generation gets its own distinct event.
-    expect(helperFn).toContain('if (!stillCurrentGeneration) {\n      console.info("[pinetree-wallets] wallet_dynamic_stale_generation_ignored", diagnostic)')
+  it("a late bounded create settlement after terminal success is ignored with the required diagnostic shape", () => {
+    expect(helperFn).toContain("const logDynamicCreateLateResultIgnored = useCallback")
+    expect(helperFn).toContain("const currentGeneration = walletRuntimeRefreshGenerationRef.current")
+    expect(helperFn).toContain("const stillCurrentGeneration = walletRuntimeRefreshMetaRef.current[params.refreshMode]?.generation === params.generation")
+    expect(helperFn).toContain("params.generation <= walletCoreSetupTerminalGenerationRef.current")
+    expect(helperFn).toContain("if (stillCurrentGeneration && !pastTerminalSuccess) return false")
+    for (const field of [
+      "merchantId",
+      "generation: params.generation",
+      "ageMs: Date.now() - params.startedAt",
+      "settlement: params.settlement",
+      "terminalStatus: pastTerminalSuccess ? \"ready\" : \"not_terminal\"",
+      "currentGeneration",
+    ]) {
+      expect(helperFn).toContain(field)
+    }
+    expect(helperFn).toContain('console.info("[pinetree-wallets] wallet_dynamic_late_result_ignored", diagnostic)')
+    expect(helperFn).toContain("emitWalletSetupDebugEvent(\"wallet_dynamic_late_result_ignored\", diagnostic)")
+    expect(helperFn).toContain("return true")
+    expect(helperFn).not.toContain("wallet_dynamic_stale_generation_ignored")
+  })
+
+  it("a stale generation timeout after wallet_setup_ready is ignored before the normal timeout event can emit", () => {
+    const initialTimeoutBlock = implFn.slice(
+      implFn.indexOf("if (logDynamicCreateLateResultIgnored({", implFn.indexOf("const initialCreateOutcome = await initialCreateCall.result")),
+      implFn.indexOf('console.warn("[pinetree-wallets] wallet_dynamic_create_embedded_wallet_timed_out"')
+    )
+    expect(initialTimeoutBlock).toContain("logDynamicCreateLateResultIgnored({")
+    expect(initialTimeoutBlock).toContain('label: "waas_create"')
+    expect(initialTimeoutBlock).toContain("generation: initialCreateGeneration")
+    expect(initialTimeoutBlock).toContain("startedAt: initialCreateStartedAt")
+    expect(initialTimeoutBlock).toContain('settlement: "timeout"')
+    expect(initialTimeoutBlock).toContain("return true")
+  })
+
+  it("a current active generation timeout still emits the normal timeout event and observes the detached SDK promise", () => {
+    const initialTimeoutBlock = implFn.slice(
+      implFn.indexOf('settlement: "timeout"'),
+      implFn.indexOf("})\n              }\n            } finally", implFn.indexOf('settlement: "timeout"'))
+    )
+    expect(initialTimeoutBlock).toContain("wallet_dynamic_create_embedded_wallet_timed_out")
+    expect(initialTimeoutBlock).toContain("void initialCreateCall.settlement.then((settled) => {")
+    expect(initialTimeoutBlock).toContain("logStaleDynamicCreateSettlement({")
+  })
+
+  it("late resolve and late reject after success are ignored before create success or failure state changes", () => {
+    for (const label of ["waas_create", "base", "solana"]) {
+      expect(implFn).toContain(`label: "${label}"`)
+    }
+    expect(implFn).toContain("settlement: initialCreateOutcome.status === \"fulfilled\" ? \"resolve\" : \"reject\"")
+    expect(implFn).toContain("settlement: baseCreateOutcome.status === \"fulfilled\" ? \"resolve\" : \"reject\"")
+    expect(implFn).toContain("settlement: solanaCreateOutcome.status === \"fulfilled\" ? \"resolve\" : \"reject\"")
+    expect(implFn.indexOf("settlement: initialCreateOutcome.status === \"fulfilled\" ? \"resolve\" : \"reject\"")).toBeLessThan(
+      implFn.indexOf("wallet_dynamic_create_embedded_wallet_complete")
+    )
+    expect(implFn.indexOf("settlement: baseCreateOutcome.status === \"fulfilled\" ? \"resolve\" : \"reject\"")).toBeLessThan(
+      implFn.indexOf("baseWalletCreateFailedRef.current = false")
+    )
+    expect(implFn.indexOf("settlement: solanaCreateOutcome.status === \"fulfilled\" ? \"resolve\" : \"reject\"")).toBeLessThan(
+      implFn.indexOf("solanaWalletCreateFailedRef.current = false")
+    )
   })
 
   it("a late throw from the outer refresh attempt is also ignored once setup already succeeded - never reported as a fresh failure", () => {

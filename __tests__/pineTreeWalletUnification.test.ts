@@ -200,6 +200,7 @@ describe("Providers page canonical wallet mode", () => {
 
 describe("pinetree_wallet_rail_syncs migration", () => {
   const migration = read("database/migrations/20260623_create_pinetree_wallet_rail_syncs.sql")
+  const repairMigration = read("database/migrations/20260711_repair_pinetree_wallet_rail_syncs.sql")
 
   it("creates the pinetree_wallet_rail_syncs table", () => {
     expect(migration).toContain("CREATE TABLE IF NOT EXISTS pinetree_wallet_rail_syncs")
@@ -214,5 +215,16 @@ describe("pinetree_wallet_rail_syncs migration", () => {
 
   it("enforces uniqueness of merchant_id + rail combination", () => {
     expect(migration).toContain("UNIQUE (merchant_id, rail)")
+  })
+
+  it("includes an idempotent production repair for the final PostgREST rail-sync schema", () => {
+    expect(repairMigration).toContain("create table if not exists public.pinetree_wallet_rail_syncs")
+    expect(repairMigration).toContain("add column if not exists merchant_id uuid")
+    expect(repairMigration).toContain("add column if not exists synced_address text")
+    expect(repairMigration).toContain("check (rail in ('solana', 'base', 'bitcoin_lightning'))")
+    expect(repairMigration).toContain("create unique index if not exists pinetree_wallet_rail_syncs_merchant_id_rail_key")
+    expect(repairMigration).toContain("grant select, insert, update, delete on table public.pinetree_wallet_rail_syncs to service_role")
+    expect(repairMigration).toContain("notify pgrst, 'reload schema'")
+    expect(repairMigration).not.toContain("drop table")
   })
 })

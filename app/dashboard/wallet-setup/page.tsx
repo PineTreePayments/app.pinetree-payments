@@ -4164,26 +4164,51 @@ function PineTreeWalletRuntime() {
     return pastTerminalSuccess || supersededByNewerGeneration
   }, [])
 
+  const logDynamicCreateLateResultIgnored = useCallback((params: {
+    reason: string
+    refreshMode: "normal_hydration" | "approval_wallet_hydration"
+    label: string
+    generation: number
+    startedAt: number
+    settlement: "timeout" | "resolve" | "reject"
+  }) => {
+    const currentGeneration = walletRuntimeRefreshGenerationRef.current
+    const stillCurrentGeneration = walletRuntimeRefreshMetaRef.current[params.refreshMode]?.generation === params.generation
+    const pastTerminalSuccess =
+      walletCoreSetupTerminalGenerationRef.current !== null &&
+      params.generation <= walletCoreSetupTerminalGenerationRef.current
+    if (stillCurrentGeneration && !pastTerminalSuccess) return false
+
+    const diagnostic = {
+      merchantId,
+      reason: params.reason,
+      label: params.label,
+      generation: params.generation,
+      ageMs: Date.now() - params.startedAt,
+      settlement: params.settlement,
+      terminalStatus: pastTerminalSuccess ? "ready" : "not_terminal",
+      currentGeneration,
+    }
+    console.info("[pinetree-wallets] wallet_dynamic_late_result_ignored", diagnostic)
+    emitWalletSetupDebugEvent("wallet_dynamic_late_result_ignored", diagnostic)
+    return true
+  }, [merchantId])
+
   // Shared handler for a Dynamic chain-create call that only settles after this refresh
   // attempt already moved on (timed out locally, or the whole page navigated past it). A
   // fulfilled result still nudges the runtime hydration nonce so the real wallet appears
-  // on screen, but the outcome itself is never reported as a fresh setup failure once a
-  // newer generation has taken over or setup has already terminally succeeded - the exact
-  // production bug where a 129s-old createWalletAccount call finally threw and logged
-  // "wallet_dynamic_wallets_refresh_complete" with threw:true well after wallet_setup_ready
-  // had already fired for a later attempt.
+  // on screen only when the generation is still active; stale/superseded settlements are
+  // reduced to one safe wallet_dynamic_late_result_ignored diagnostic.
   const logStaleDynamicCreateSettlement = useCallback((params: {
     reason: string
     refreshMode: "normal_hydration" | "approval_wallet_hydration"
     label: string
     generation: number
+    startedAt: number
     settled: BoundedProviderCallSettlement<unknown>
   }) => {
-    const { reason, refreshMode, label, generation, settled } = params
+    const { reason, refreshMode, label, generation, startedAt, settled } = params
     const stillCurrentGeneration = walletRuntimeRefreshMetaRef.current[refreshMode]?.generation === generation
-    const pastTerminalSuccess =
-      walletCoreSetupTerminalGenerationRef.current !== null &&
-      generation <= walletCoreSetupTerminalGenerationRef.current
     const diagnostic = {
       reason,
       label,
@@ -4191,14 +4216,14 @@ function PineTreeWalletRuntime() {
       settledStatus: settled.status,
       stillCurrentGeneration,
     }
-    if (pastTerminalSuccess) {
-      console.info("[pinetree-wallets] wallet_dynamic_late_result_ignored", diagnostic)
-      emitWalletSetupDebugEvent("wallet_dynamic_late_result_ignored", diagnostic)
-      return
-    }
-    if (!stillCurrentGeneration) {
-      console.info("[pinetree-wallets] wallet_dynamic_stale_generation_ignored", diagnostic)
-      emitWalletSetupDebugEvent("wallet_dynamic_stale_generation_ignored", diagnostic)
+    if (logDynamicCreateLateResultIgnored({
+      reason,
+      refreshMode,
+      label,
+      generation,
+      startedAt,
+      settlement: settled.status === "fulfilled" ? "resolve" : "reject",
+    })) {
       return
     }
     console.info("[pinetree-wallets] wallet_dynamic_chain_create_late_settlement_ignored", diagnostic)
@@ -4206,7 +4231,7 @@ function PineTreeWalletRuntime() {
     if (settled.status === "fulfilled") {
       setDynamicWalletRuntimeRefreshNonce((value) => value + 1)
     }
-  }, [])
+  }, [logDynamicCreateLateResultIgnored])
 
   const refreshDynamicWalletRuntimeImpl = useCallback(async (reason: string, options?: { requireApprovalWallet?: boolean }, generation = 0) => {
     if (!sdkHasLoaded || !user) return false
@@ -4311,11 +4336,25 @@ function PineTreeWalletRuntime() {
               // succeeded through a later attempt. A timeout here means the
               // underlying provider call is now detached (kept running in the
               // background, uncancelled); its eventual settlement is handled below.
+              const initialCreateStartedAt = Date.now()
               const initialCreateCall = runWithBoundedTimeout(
                 () => createWalletAccount(requiredChains),
                 dynamicChainCreateTimeoutMs
               )
               const initialCreateOutcome = await initialCreateCall.result
+              if (
+                initialCreateOutcome.status !== "timeout" &&
+                logDynamicCreateLateResultIgnored({
+                  reason,
+                  refreshMode,
+                  label: "waas_create",
+                  generation: initialCreateGeneration,
+                  startedAt: initialCreateStartedAt,
+                  settlement: initialCreateOutcome.status === "fulfilled" ? "resolve" : "reject",
+                })
+              ) {
+                return true
+              }
               if (initialCreateOutcome.status === "fulfilled") {
                 console.info("[pinetree-wallets] wallet_dynamic_create_embedded_wallet_complete", { reason })
                 emitWalletSetupDebugEvent("wallet_dynamic_create_embedded_wallet_complete", { reason, path: "waas_create" })
@@ -4323,6 +4362,16 @@ function PineTreeWalletRuntime() {
               } else if (initialCreateOutcome.status === "rejected") {
                 throw initialCreateOutcome.reason
               } else {
+                if (logDynamicCreateLateResultIgnored({
+                  reason,
+                  refreshMode,
+                  label: "waas_create",
+                  generation: initialCreateGeneration,
+                  startedAt: initialCreateStartedAt,
+                  settlement: "timeout",
+                })) {
+                  return true
+                }
                 console.warn("[pinetree-wallets] wallet_dynamic_create_embedded_wallet_timed_out", {
                   reason,
                   timeoutMs: dynamicChainCreateTimeoutMs,
@@ -4339,6 +4388,7 @@ function PineTreeWalletRuntime() {
                     refreshMode,
                     label: "waas_create",
                     generation: initialCreateGeneration,
+                    startedAt: initialCreateStartedAt,
                     settled,
                   })
                 })
@@ -4412,6 +4462,7 @@ function PineTreeWalletRuntime() {
             // awaiting indefinitely - Dynamic's createWalletAccount has no documented
             // AbortSignal support, so a timeout here means the underlying provider call
             // is now detached (kept running in the background, uncancelled).
+            const baseCreateStartedAt = Date.now()
             const baseCreateCall = runWithBoundedTimeout(
               // ChainEnum.Evm ("EVM") is the exact value the installed
               // @dynamic-labs/sdk-react-core WalletCreationRequirement type expects -
@@ -4421,6 +4472,19 @@ function PineTreeWalletRuntime() {
             )
             const baseCreateOutcome = await baseCreateCall.result
             baseWalletCreateGuardRef.current = null
+            if (
+              baseCreateOutcome.status !== "timeout" &&
+              logDynamicCreateLateResultIgnored({
+                reason,
+                refreshMode,
+                label: "base",
+                generation: baseCreateGeneration,
+                startedAt: baseCreateStartedAt,
+                settlement: baseCreateOutcome.status === "fulfilled" ? "resolve" : "reject",
+              })
+            ) {
+              return true
+            }
             if (baseCreateOutcome.status === "fulfilled") {
               baseWalletCreateFailedRef.current = false
               console.info("[pinetree-wallets] wallet_dynamic_base_create_complete", { reason })
@@ -4441,6 +4505,16 @@ function PineTreeWalletRuntime() {
               console.warn("[pinetree-wallets] wallet_dynamic_base_create_failed", diagnostic)
               emitWalletSetupDebugEvent("wallet_dynamic_base_create_failed", diagnostic)
             } else {
+              if (logDynamicCreateLateResultIgnored({
+                reason,
+                refreshMode,
+                label: "base",
+                generation: baseCreateGeneration,
+                startedAt: baseCreateStartedAt,
+                settlement: "timeout",
+              })) {
+                return true
+              }
               // Timed out locally. Do not start a duplicate create merely because this
               // local deadline expired - mark the chain detached so the next hydration
               // attempt inspects fresh credential/runtime state instead of creating
@@ -4472,6 +4546,7 @@ function PineTreeWalletRuntime() {
                   refreshMode,
                   label: "base",
                   generation: baseCreateGeneration,
+                  startedAt: baseCreateStartedAt,
                   settled,
                 })
               })
@@ -4491,12 +4566,26 @@ function PineTreeWalletRuntime() {
             emitWalletSetupDebugEvent("wallet_dynamic_solana_create_started", { reason })
             setCoreSetupStageLabel("Creating Solana wallet")
             refreshStage = "create_wallet_account"
+            const solanaCreateStartedAt = Date.now()
             const solanaCreateCall = runWithBoundedTimeout(
               () => createWalletAccount([{ chain: ChainEnum.Sol }]),
               dynamicChainCreateTimeoutMs
             )
             const solanaCreateOutcome = await solanaCreateCall.result
             solanaWalletCreateGuardRef.current = null
+            if (
+              solanaCreateOutcome.status !== "timeout" &&
+              logDynamicCreateLateResultIgnored({
+                reason,
+                refreshMode,
+                label: "solana",
+                generation: solanaCreateGeneration,
+                startedAt: solanaCreateStartedAt,
+                settlement: solanaCreateOutcome.status === "fulfilled" ? "resolve" : "reject",
+              })
+            ) {
+              return true
+            }
             if (solanaCreateOutcome.status === "fulfilled") {
               solanaWalletCreateFailedRef.current = false
               console.info("[pinetree-wallets] wallet_dynamic_solana_create_complete", { reason })
@@ -4514,6 +4603,16 @@ function PineTreeWalletRuntime() {
                 errorName: classified.errorName ?? "unknown_error",
               })
             } else {
+              if (logDynamicCreateLateResultIgnored({
+                reason,
+                refreshMode,
+                label: "solana",
+                generation: solanaCreateGeneration,
+                startedAt: solanaCreateStartedAt,
+                settlement: "timeout",
+              })) {
+                return true
+              }
               solanaWalletCreateDetachedRef.current = true
               console.warn("[pinetree-wallets] wallet_dynamic_solana_create_timed_out", {
                 reason,
@@ -4538,6 +4637,7 @@ function PineTreeWalletRuntime() {
                   refreshMode,
                   label: "solana",
                   generation: solanaCreateGeneration,
+                  startedAt: solanaCreateStartedAt,
                   settled,
                 })
               })
@@ -4732,6 +4832,7 @@ function PineTreeWalletRuntime() {
     getWaasWallets,
     getWaasWalletsByCredentials,
     initializeWaas,
+    logDynamicCreateLateResultIgnored,
     needsAutoCreateWalletChains,
     primaryWallet,
     refreshDynamicUser,
