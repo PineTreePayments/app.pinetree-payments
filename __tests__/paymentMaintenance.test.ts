@@ -218,6 +218,66 @@ describe("no-cron payment maintenance", () => {
     expect(reconcileTransactionForPayment).toHaveBeenCalledWith("pay-confirmed", "CONFIRMED")
   })
 
+  it("throttles concurrent watcher rechecks for the same payment into one underlying call", async () => {
+    vi.mocked(getPaymentById).mockResolvedValue(payment("PROCESSING"))
+    vi.mocked(runPaymentWatcher).mockResolvedValue(true)
+
+    // Both calls are structurally identical async functions with the same
+    // number of prior awaits, so they interleave deterministically: the
+    // first to start is always the first to reach the watcher-throttle
+    // check and register the in-flight promise the second one then reuses.
+    const [firstResult, secondResult] = await Promise.all([
+      ensurePaymentFresh("pay-1"),
+      ensurePaymentFresh("pay-1"),
+    ])
+
+    expect(runPaymentWatcher).toHaveBeenCalledTimes(1)
+    expect(firstResult).toMatchObject({ action: "watcher_recheck", detected: true })
+    expect(secondResult).toMatchObject({ action: "watcher_recheck", detected: true })
+  })
+
+  it("skips a fresh watcher call when one just ran a moment ago for the same payment", async () => {
+    vi.mocked(getPaymentById).mockResolvedValue(payment("PROCESSING"))
+    vi.mocked(runPaymentWatcher).mockResolvedValue(true)
+
+    const first = await ensurePaymentFresh("pay-1")
+    expect(first).toMatchObject({ action: "watcher_recheck", detected: true })
+
+    const second = await ensurePaymentFresh("pay-1")
+    expect(second).toMatchObject({ action: "watcher_recheck", detected: false })
+
+    expect(runPaymentWatcher).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not throttle a different payment even while one payment's watcher is cooling down", async () => {
+    vi.mocked(getPaymentById).mockImplementation(async (id: string) =>
+      payment("PROCESSING", { id })
+    )
+    vi.mocked(runPaymentWatcher).mockResolvedValue(false)
+
+    await ensurePaymentFresh("pay-1")
+    await ensurePaymentFresh("pay-2")
+
+    expect(runPaymentWatcher).toHaveBeenCalledTimes(2)
+    expect(runPaymentWatcher).toHaveBeenCalledWith("pay-1", undefined)
+    expect(runPaymentWatcher).toHaveBeenCalledWith("pay-2", undefined)
+  })
+
+  it("never throttles an explicit forceWatcher recheck (e.g. a customer-submitted tx hash)", async () => {
+    const freshTimestamp = new Date().toISOString()
+    vi.mocked(getPaymentById).mockResolvedValue(
+      payment("PENDING", { created_at: freshTimestamp, updated_at: freshTimestamp })
+    )
+    vi.mocked(runPaymentWatcher).mockResolvedValue(true)
+
+    await ensurePaymentFresh("pay-1", { txHash: "0xabc", forceWatcher: true })
+    await ensurePaymentFresh("pay-1", { txHash: "0xdef", forceWatcher: true })
+
+    expect(runPaymentWatcher).toHaveBeenCalledTimes(2)
+    expect(runPaymentWatcher).toHaveBeenCalledWith("pay-1", { txHash: "0xabc" })
+    expect(runPaymentWatcher).toHaveBeenCalledWith("pay-1", { txHash: "0xdef" })
+  })
+
   it("keeps payment-state decisions out of route files", () => {
     const routeFiles = [
       "app/api/payments/status/route.ts",

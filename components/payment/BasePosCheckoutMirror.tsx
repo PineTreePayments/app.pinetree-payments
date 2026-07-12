@@ -29,6 +29,7 @@ type Props = {
   selectedAsset: "ETH" | "USDC"
   usdAmount: number
   checkoutToken: string
+  paymentStatus?: string
   onExecutionStarted?: () => void
   onCancel?: () => void
   onPaymentCreated?: () => void
@@ -36,6 +37,13 @@ type Props = {
 
 function isValidPairingUri(uri: string): boolean {
   return uri.startsWith("wc:") && uri.includes("@2")
+}
+
+const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
+
+function normalizeTerminalStatus(status?: string): string {
+  const normalized = String(status || "").trim().toUpperCase()
+  return TERMINAL_PAYMENT_STATUSES.has(normalized) ? normalized : ""
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -198,10 +206,12 @@ export default function BasePosCheckoutMirror({
   intentId,
   selectedAsset,
   checkoutToken,
+  paymentStatus,
   onExecutionStarted,
   onCancel,
   onPaymentCreated,
 }: Props) {
+  const terminalStatus = normalizeTerminalStatus(paymentStatus)
   const [session, setSession] = useState<PosBaseSession | null>(null)
   const [selectNetworkError, setSelectNetworkError] = useState("")
   const [paymentReady, setPaymentReady] = useState(false)
@@ -267,14 +277,18 @@ export default function BasePosCheckoutMirror({
   //   1s — pairingUri not yet available (fast catch-up while POS generates URI)
   //   1s — within 30s burst window after customer taps Connect (detect wallet ASAP)
   //   3s — steady state
+  // Stops immediately once the overall payment reaches a terminal state - this
+  // used to rely entirely on the parent unmounting the component on terminal
+  // status, which left no internal guard if that ever changed.
   useEffect(() => {
     if (!paymentReady) return
+    if (terminalStatus) return
     const isBurst = Date.now() < burstUntil
     const ms = !pairingReady || isBurst ? 1000 : 3000
     void pollSession()
     const timer = setInterval(() => void pollSession(), ms)
     return () => clearInterval(timer)
-  }, [paymentReady, pollSession, pairingReady, burstUntil])
+  }, [paymentReady, pollSession, pairingReady, burstUntil, terminalStatus])
 
   // Notify parent when the POS enters active execution (wallet connected or beyond)
   useEffect(() => {

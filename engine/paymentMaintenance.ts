@@ -18,6 +18,21 @@ import { sweepStalePayments, type StalePaymentSweepSummary } from "./stalePaymen
 const DEFAULT_THROTTLE_MS = 60_000
 const DEFAULT_WATCHER_TIMEOUT_MS = 4_000
 
+// Multiple pollers (POS terminal, a customer's own browser tab, a merchant
+// dashboard refresh) can all ask "is this payment fresh?" for the same
+// paymentId within the same few seconds. Without this throttle, each one
+// would independently trigger a live blockchain/NWC/provider check via
+// runPaymentWatcher - the single most expensive step in this file, and the
+// one most likely to hit provider rate limits under load. Single-flight
+// (share the in-flight promise) plus a short per-payment cooldown collapses
+// concurrent/rapid callers into one real provider check.
+const WATCHER_THROTTLE_MS = 3_000
+
+type WatcherThrottleEntry = {
+  lastRunAt: number
+  inFlight: Promise<boolean> | null
+}
+
 type MaintenanceLease = {
   lastStartedAt: number
   running: boolean
@@ -25,6 +40,7 @@ type MaintenanceLease = {
 
 const globalWithMaintenance = globalThis as typeof globalThis & {
   __pinetreePaymentMaintenanceLease?: MaintenanceLease
+  __pinetreePaymentWatcherThrottle?: Map<string, WatcherThrottleEntry>
 }
 
 function getMaintenanceLease(): MaintenanceLease {
@@ -33,6 +49,46 @@ function getMaintenanceLease(): MaintenanceLease {
     running: false
   }
   return globalWithMaintenance.__pinetreePaymentMaintenanceLease
+}
+
+function getWatcherThrottleMap(): Map<string, WatcherThrottleEntry> {
+  globalWithMaintenance.__pinetreePaymentWatcherThrottle ??= new Map()
+  return globalWithMaintenance.__pinetreePaymentWatcherThrottle
+}
+
+/**
+ * Runs runPaymentWatcher for a payment, but collapses concurrent callers
+ * onto one in-flight request and skips a fresh provider check entirely if
+ * one just ran a moment ago - unless bypass is set (an explicit,
+ * user-initiated recheck, e.g. a customer submitting a transaction hash,
+ * must never be silently throttled).
+ */
+function runPaymentWatcherThrottled(
+  paymentId: string,
+  watcherOptions: { txHash?: string } | undefined,
+  bypassThrottle: boolean
+): Promise<boolean> {
+  const throttleMap = getWatcherThrottleMap()
+  const existing = throttleMap.get(paymentId)
+
+  if (existing?.inFlight) {
+    return existing.inFlight
+  }
+
+  if (!bypassThrottle && existing && Date.now() - existing.lastRunAt < WATCHER_THROTTLE_MS) {
+    return Promise.resolve(false)
+  }
+
+  const run = runPaymentWatcher(paymentId, watcherOptions).finally(() => {
+    const entry = throttleMap.get(paymentId)
+    if (entry) {
+      entry.lastRunAt = Date.now()
+      entry.inFlight = null
+    }
+  })
+
+  throttleMap.set(paymentId, { lastRunAt: existing?.lastRunAt ?? 0, inFlight: run })
+  return run
 }
 
 export type PaymentMaintenanceSummary = {
@@ -115,7 +171,10 @@ export async function ensurePaymentFresh(
     (previousStatus === "PENDING" && (hasEvidence || options?.forceWatcher))
   ) {
     const watcherOptions = options?.txHash ? { txHash: options.txHash } : undefined
-    const detected = await runPaymentWatcher(paymentId, watcherOptions)
+    // An explicit forceWatcher call or a freshly-submitted txHash is a
+    // deliberate, user-driven recheck request - never throttle those.
+    const bypassThrottle = Boolean(options?.forceWatcher || options?.txHash)
+    const detected = await runPaymentWatcherThrottled(paymentId, watcherOptions, bypassThrottle)
     action = "watcher_recheck"
     const refreshed = await getPaymentById(paymentId)
     return {
@@ -250,4 +309,5 @@ export function resetPaymentMaintenanceLeaseForTests(): void {
     lastStartedAt: 0,
     running: false
   }
+  globalWithMaintenance.__pinetreePaymentWatcherThrottle = new Map()
 }

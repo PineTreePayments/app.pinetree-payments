@@ -24,6 +24,11 @@ export default function DashboardLayout({
 
   /* -----------------------------
   SESSION CHECK
+  Runs on every navigation (cheap - supabase.auth.getSession() is a local
+  read, not a network call, unless the token needs a refresh) so a signed-out
+  user is bounced immediately regardless of which dashboard page they click
+  into. Does NOT re-fetch admin role here - that only needs to happen once
+  per layout mount, not once per navigation (see ADMIN ROLE effect below).
   ----------------------------- */
 
   useEffect(() => {
@@ -47,12 +52,31 @@ export default function DashboardLayout({
       }
 
       setUserEmail(data.session.user.email ?? "")
+    }
+
+    checkSession()
+  }, [pathname, router])
+
+  /* -----------------------------
+  ADMIN ROLE
+  Fetched once per layout mount (the dashboard layout persists across
+  in-app navigation - it does not remount per page), not once per
+  navigation. isAdmin only gates one sidebar nav item, so a session's worth
+  of staleness is fine.
+  ----------------------------- */
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadAdminStatus() {
+      const { data } = await supabase.auth.getSession()
+      if (!data.session) return
 
       try {
         const meRes = await fetch("/api/admin/me", {
           headers: { Authorization: `Bearer ${data.session.access_token}` },
         })
-        if (meRes.ok) {
+        if (!cancelled && meRes.ok) {
           const meData = await meRes.json()
           setIsAdmin(meData.isAdmin === true)
         }
@@ -61,8 +85,12 @@ export default function DashboardLayout({
       }
     }
 
-    checkSession()
-  }, [pathname, router])
+    loadAdminStatus()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   /* -----------------------------
   CLOSE MENUS ON ROUTE CHANGE

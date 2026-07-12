@@ -685,6 +685,10 @@ export default function PayClient() {
   }, [phantomError])
 
   // ── Poll intent status once a payment has been created ────────────────────
+  // This is a fallback behind the Realtime subscription above (which keeps
+  // delivering events even while the tab is backgrounded - the websocket
+  // connection isn't throttled the way timers are), so skipping a poll tick
+  // while hidden doesn't create a responsiveness gap.
 
   useEffect(() => {
     if (!intentId) return
@@ -693,6 +697,7 @@ export default function PayClient() {
     if (isTerminal) return
 
     const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") return
       void loadIntentCallback()
     }, 5000)
 
@@ -708,11 +713,29 @@ export default function PayClient() {
     if (isTerminalPaymentStatus(normalizedPaymentStatus)) return
 
     const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") return
       void loadIntentCallback()
     }, 5000)
 
     return () => clearInterval(interval)
   }, [intentId, loadIntentCallback, intentPayload?.paymentId, normalizedPaymentStatus])
+
+  // ── Catch up immediately when the tab regains visibility, instead of
+  //    waiting up to 5s for the next poll tick ───────────────────────────────
+
+  useEffect(() => {
+    if (!intentId) return
+    if (isTerminalPaymentStatus(normalizedPaymentStatus)) return
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        void loadIntentCallback()
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange)
+  }, [intentId, loadIntentCallback, normalizedPaymentStatus])
 
   // ── Wallet-browser mode: Phantom provider flow ────────────────────────────
 
@@ -1181,7 +1204,7 @@ export default function PayClient() {
     if (isTerminal) return
 
     const channel = supabase
-      .channel("payments")
+      .channel(`pay-payment-${paymentId}`)
       .on(
         "postgres_changes",
         {
@@ -1207,7 +1230,11 @@ export default function PayClient() {
       .subscribe()
 
     return () => {
-      void channel.unsubscribe()
+      // removeChannel (not unsubscribe) also drops the channel from the
+      // client's internal registry - this effect re-subscribes with a fresh
+      // per-payment topic on every status transition, so a plain
+      // unsubscribe() would leak a stale channel entry per transition.
+      void supabase.removeChannel(channel)
     }
   }, [intentPayload?.paymentId, normalizedPaymentStatus, loadIntentCallback])
 
@@ -1531,6 +1558,7 @@ export default function PayClient() {
                               intentId={intentId!}
                               selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
                               usdAmount={displayAmount}
+                              paymentStatus={normalizedPaymentStatus}
                               checkoutToken={checkoutToken}
                               onExecutionStarted={() => setBaseExecutionActive(true)}
                               onCancel={resetBaseRailSelectionOnly}
