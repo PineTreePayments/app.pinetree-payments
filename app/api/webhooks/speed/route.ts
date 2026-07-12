@@ -4,6 +4,7 @@ import { loadProviders } from "@/engine/loadProviders"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { extractSpeedWebhookAccountId, isSpeedConnectedAccountWebhookPayload } from "@/providers/lightning/speedClient"
 import { getMerchantIdBySpeedAccountId } from "@/database/merchantLightningProfiles"
+import { scheduleLightningSweepProcessing } from "@/lib/api/lightningSweepMaintenance"
 
 export async function GET() {
   return NextResponse.json({ ok: true, provider: "speed", endpoint: "speed" })
@@ -45,6 +46,12 @@ export async function POST(req: NextRequest) {
       headers: Object.fromEntries(req.headers),
       rawBody
     })
+
+    // Cheap and idempotent when there's nothing queued - never blocks this
+    // response, and the lease inside scheduleLightningSweepProcessing
+    // collapses overlapping ticks on a warm instance. The actual Speed
+    // Instant Send call (once configured) never happens inside this request.
+    scheduleLightningSweepProcessing("webhook:speed")
 
     return NextResponse.json({ received: true })
   } catch (error) {

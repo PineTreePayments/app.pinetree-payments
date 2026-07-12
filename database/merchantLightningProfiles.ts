@@ -18,6 +18,11 @@ export type MerchantLightningProfile = {
   speed_connected_account_id: string | null
   speed_connected_account_relationship_id: string | null
   speed_account_id: string | null
+  // Provider-confirmed X-Speed-Account header value for Instant Send calls -
+  // deliberately separate from speed_account_id/speed_connected_account_relationship_id.
+  // NULL until Speed confirms the ca_ vs acct_ identifier format. See
+  // providers/lightning/speedHeaderAccountResolver.ts - never inferred automatically.
+  speed_header_account_id: string | null
   speed_connected_account_status: string | null
   speed_connect_setup_url: string | null
   provider_response_summary: Record<string, unknown> | null
@@ -35,6 +40,7 @@ export type UpsertLightningProfileInput = {
   speedConnectedAccountId?: string | null
   speedConnectedAccountRelationshipId?: string | null
   speedAccountId?: string | null
+  speedHeaderAccountId?: string | null
   speedConnectedAccountStatus?: string | null
   speedConnectSetupUrl?: string | null
   providerResponseSummary?: Record<string, unknown> | null
@@ -118,6 +124,9 @@ export async function upsertMerchantLightningProfile(
     speed_account_id: input.speedAccountId !== undefined
       ? input.speedAccountId
       : existing?.speed_account_id ?? null,
+    speed_header_account_id: input.speedHeaderAccountId !== undefined
+      ? input.speedHeaderAccountId
+      : existing?.speed_header_account_id ?? null,
     speed_connected_account_status: input.speedConnectedAccountStatus !== undefined
       ? input.speedConnectedAccountStatus
       : existing?.speed_connected_account_status ?? null,

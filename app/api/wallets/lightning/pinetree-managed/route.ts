@@ -17,6 +17,8 @@ import {
   type MerchantLightningProfileStatus,
 } from "@/database/merchantLightningProfiles"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
+import { hasProcessableLightningSweepForMerchant } from "@/database/merchantLightningSweeps"
+import { scheduleLightningSweepProcessing } from "@/lib/api/lightningSweepMaintenance"
 import { ensureManagedLightningForMerchant } from "@/engine/pineTreeWalletReadiness"
 import { withOperationTimeout, OperationTimeoutError } from "@/engine/promiseTimeout"
 import {
@@ -98,6 +100,16 @@ export async function GET(req: NextRequest) {
     }
 
     const profile = await getMerchantLightningProfile(merchantId)
+
+    // Bounded, best-effort: only schedules a processing pass (via after(),
+    // never blocking this response) when this merchant actually has a
+    // sweep due for another attempt. No client-side polling anywhere drives
+    // this - it only ever fires from a page load or focus refetch the
+    // merchant already triggered themselves.
+    if (await hasProcessableLightningSweepForMerchant(merchantId)) {
+      scheduleLightningSweepProcessing("wallet_page_load", { limit: 2 })
+    }
+
     return NextResponse.json({ profile: safeLightningProfile(profile) })
   } catch (error) {
     return NextResponse.json(

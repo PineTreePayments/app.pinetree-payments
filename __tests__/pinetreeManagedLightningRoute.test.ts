@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   ensureManagedLightningForMerchant: vi.fn(),
   getPineTreeSpeedConfigStatus: vi.fn(),
   isSpeedPlatformTreasurySweepEnabled: vi.fn(),
+  hasProcessableLightningSweepForMerchant: vi.fn(),
+  scheduleLightningSweepProcessing: vi.fn(),
 }))
 
 vi.mock("@/lib/api/merchantAuth", () => ({
@@ -36,6 +38,14 @@ vi.mock("@/providers/lightning/speedClient", () => ({
 
 vi.mock("@/engine/pineTreeWalletReadiness", () => ({
   ensureManagedLightningForMerchant: mocks.ensureManagedLightningForMerchant,
+}))
+
+vi.mock("@/database/merchantLightningSweeps", () => ({
+  hasProcessableLightningSweepForMerchant: mocks.hasProcessableLightningSweepForMerchant,
+}))
+
+vi.mock("@/lib/api/lightningSweepMaintenance", () => ({
+  scheduleLightningSweepProcessing: mocks.scheduleLightningSweepProcessing,
 }))
 
 function request(searchParams?: Record<string, string>) {
@@ -293,6 +303,7 @@ describe("GET /api/wallets/lightning/pinetree-managed", () => {
     mocks.requireMerchantIdFromRequest.mockResolvedValue(merchantId)
     mocks.requireMerchantAuthFromRequest.mockResolvedValue({ merchantId, email: "auth@example.test", source: "supabase" })
     mocks.getRouteErrorStatus.mockReturnValue(500)
+    mocks.hasProcessableLightningSweepForMerchant.mockResolvedValue(false)
     vi.spyOn(console, "info").mockImplementation(() => undefined)
   })
 
@@ -328,5 +339,45 @@ describe("GET /api/wallets/lightning/pinetree-managed", () => {
     expect(response.status).toBe(200)
     expect(body.profile.status).toBe("ready")
     expect(mocks.ensureManagedLightningForMerchant).not.toHaveBeenCalled()
+  })
+
+  it("schedules bounded sweep processing only when a sweep is actually due for this merchant", async () => {
+    mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(false)
+    mocks.getMerchantLightningProfile.mockResolvedValue(savedProfile({ status: "ready" }))
+    mocks.hasProcessableLightningSweepForMerchant.mockResolvedValue(true)
+
+    const { GET } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
+    await GET(request())
+
+    expect(mocks.hasProcessableLightningSweepForMerchant).toHaveBeenCalledWith(merchantId)
+    expect(mocks.scheduleLightningSweepProcessing).toHaveBeenCalledWith("wallet_page_load", { limit: 2 })
+  })
+
+  it("does not schedule sweep processing when nothing is due", async () => {
+    mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(false)
+    mocks.getMerchantLightningProfile.mockResolvedValue(savedProfile({ status: "ready" }))
+    mocks.hasProcessableLightningSweepForMerchant.mockResolvedValue(false)
+
+    const { GET } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
+    await GET(request())
+
+    expect(mocks.scheduleLightningSweepProcessing).not.toHaveBeenCalled()
+  })
+
+  it("never checks for a processable sweep in treasury-sweep mode (nothing to sweep in that mode)", async () => {
+    mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(true)
+    mocks.getPineTreeSpeedConfigStatus.mockReturnValue({ configured: true, missing: [] })
+    mocks.getPineTreeWalletProfile.mockResolvedValue({
+      id: "wallet_1",
+      merchant_id: merchantId,
+      btc_address: "bc1ptestmerchant",
+      btc_payout_enabled: true,
+    })
+
+    const { GET } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
+    await GET(request())
+
+    expect(mocks.hasProcessableLightningSweepForMerchant).not.toHaveBeenCalled()
+    expect(mocks.scheduleLightningSweepProcessing).not.toHaveBeenCalled()
   })
 })

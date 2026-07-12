@@ -116,6 +116,18 @@ async function ensurePineTreeLightningSettlementJob(paymentId: string, payload: 
   await ensureLightningSettlementJobForConfirmedSpeedPayment({ paymentId, payload })
 }
 
+/**
+ * Idempotently queues a merchant_lightning_sweeps row for a confirmed Speed
+ * Lightning payment (speed_connect_split mode only - see
+ * engine/lightningSweep.ts). Only queues the sweep here; actual processing
+ * is deferred to a bounded after() pass triggered by the webhook route so a
+ * live provider call never happens inside this request.
+ */
+async function ensureLightningSweepQueued(paymentId: string): Promise<void> {
+  const { ensureLightningSweepForConfirmedPayment } = await import("./lightningSweep")
+  await ensureLightningSweepForConfirmedPayment({ paymentId })
+}
+
 async function resolvePaymentIdFromEvent(input: {
   translatedEvent: TranslatedEvent | null
   payload: unknown
@@ -338,6 +350,7 @@ export async function processWebhook({
     if (provider === SPEED_PROVIDER_NAME && event.event === "payment.confirmed") {
       await ensureSpeedTreasurySweepPayoutJob(paymentId, payload)
       await ensurePineTreeLightningSettlementJob(paymentId, payload)
+      await ensureLightningSweepQueued(paymentId)
     }
     console.info("[eventProcessor] idempotent:terminal_state_skip", {
       provider,
@@ -421,6 +434,7 @@ export async function processWebhook({
       if (provider === SPEED_PROVIDER_NAME) {
         await ensureSpeedTreasurySweepPayoutJob(paymentId, payload)
         await ensurePineTreeLightningSettlementJob(paymentId, payload)
+        await ensureLightningSweepQueued(paymentId)
       }
     }
 

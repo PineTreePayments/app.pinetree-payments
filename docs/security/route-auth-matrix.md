@@ -169,6 +169,10 @@ HMAC-signed state cookie pattern (mirrors Shopify OAuth). The start route is bro
 | `/api/admin/support/feedback` | GET | ADMIN |
 | `/api/admin/speed-credentials` | GET | ADMIN — non-secret credential metadata only (status, account id, login email, timestamps); never the password |
 | `/api/admin/speed-credentials/[merchantId]/reveal` | POST | ADMIN — decrypts and returns the retained Speed password; requires explicit `{ confirm: true }`, audited (`lightning.speed_credential_revealed`), `Cache-Control: no-store` |
+| `/api/admin/lightning-sweeps` | GET | ADMIN — non-secret sweep metadata list; never the raw invoice or provider payload |
+| `/api/admin/lightning-sweeps/[sweepId]` | GET | ADMIN — single sweep detail, same non-secret summary |
+| `/api/admin/lightning-sweeps/[sweepId]/retry` | POST | ADMIN — requeues a non-confirmed, non-in-flight sweep; audited (`lightning.sweep_retried`) |
+| `/api/admin/lightning-sweeps/[sweepId]/cancel` | POST | ADMIN — cancels a sweep that has never been sent to the provider; audited (`lightning.sweep_canceled`) |
 
 ---
 

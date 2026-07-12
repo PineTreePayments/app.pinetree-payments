@@ -141,6 +141,23 @@ const groups = [
       ["SPEED_CREDENTIAL_ENCRYPTION_KEY", true, "hex64"],
     ],
   },
+  {
+    name: "Automatic Lightning sweep (Speed Instant Send - placeholder contract)",
+    entries: [
+      // All optional and expected blank/false by default - the feature
+      // fails closed without any of these. SPEED_INSTANT_SEND_ENDPOINT /
+      // SPEED_CONNECTED_BALANCE_ENDPOINT / SPEED_HEADER_ACCOUNT_ID_PREFIX
+      // are placeholders until Speed supplies the exact contract.
+      ["SPEED_LIGHTNING_SWEEP_ENABLED", false, "boolean"],
+      ["SPEED_INSTANT_SEND_ENDPOINT", false, "url"],
+      ["SPEED_CONNECTED_BALANCE_ENDPOINT", false, "url"],
+      ["SPEED_HEADER_ACCOUNT_ID_PREFIX", false, "text"],
+      ["SPEED_SWEEP_MIN_SATS", false, "text"],
+      ["SPEED_SWEEP_FEE_RESERVE_SATS", false, "text"],
+      ["SPEED_SWEEP_MAX_ATTEMPTS", false, "text"],
+      ["SPEED_SWEEP_RETRY_BASE_SECONDS", false, "text"],
+    ],
+  },
 ]
 
 function validation(name, kind) {

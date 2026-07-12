@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   processWebhook: vi.fn(),
   loadProviders: vi.fn(),
   getMerchantIdBySpeedAccountId: vi.fn(),
+  scheduleLightningSweepProcessing: vi.fn(),
 }))
 
 vi.mock("@/engine/eventProcessor", () => ({ processWebhook: mocks.processWebhook }))
@@ -22,6 +23,9 @@ vi.mock("@/database/merchantLightningProfiles", () => ({
   getMerchantIdBySpeedAccountId: mocks.getMerchantIdBySpeedAccountId,
 }))
 vi.mock("@/database/merchantProviders", () => ({ SPEED_PROVIDER_NAME: "lightning_speed" }))
+vi.mock("@/lib/api/lightningSweepMaintenance", () => ({
+  scheduleLightningSweepProcessing: mocks.scheduleLightningSweepProcessing,
+}))
 
 describe("POST /api/webhooks/speed - connected-account event routing", () => {
   beforeEach(() => {
@@ -68,5 +72,15 @@ describe("POST /api/webhooks/speed - connected-account event routing", () => {
 
     expect(response.status).toBe(200)
     expect(mocks.processWebhook).toHaveBeenCalled()
+  })
+
+  it("schedules bounded, deferred Lightning sweep processing after every successfully processed webhook", async () => {
+    const { POST } = await import("@/app/api/webhooks/speed/route")
+    const body = JSON.stringify({ type: "payment.paid" })
+    await POST(
+      new Request("https://app.test/api/webhooks/speed", { method: "POST", body }) as unknown as import("next/server").NextRequest
+    )
+
+    expect(mocks.scheduleLightningSweepProcessing).toHaveBeenCalledWith("webhook:speed")
   })
 })
