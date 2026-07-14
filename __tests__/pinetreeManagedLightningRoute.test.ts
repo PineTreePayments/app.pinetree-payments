@@ -137,7 +137,7 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     const response = await POST(request())
     const body = await response.json()
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(422)
     expect(body.status).toBe("needs_attention")
     expect(body.providerCode).toBe("invalid_request")
     expect(body.fieldErrors).toEqual([{ field: "email", message: "already registered" }])
@@ -185,7 +185,7 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     )
   })
 
-  it("Speed failure (needs_attention/retryable) never turns into a non-200 response - the wallet page never sees a hard failure from Lightning alone", async () => {
+  it("returns a non-2xx response for terminal Speed provider rejection", async () => {
     mocks.ensureManagedLightningForMerchant.mockResolvedValue({
       status: "needs_attention",
       action: "provisioning_incomplete",
@@ -202,7 +202,7 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     const { POST } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
     const response = await POST(request())
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(422)
   })
 
   it("does not call Speed again while a provisioning attempt is already in flight (single call per request)", async () => {
@@ -249,7 +249,7 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     expect(body.setup_status).toBe("needs_attention")
   })
 
-  it("returns a sanitized retryable status when provider provisioning fails", async () => {
+  it("returns a sanitized failed status when provider provisioning fails", async () => {
     mocks.ensureManagedLightningForMerchant.mockRejectedValue(
       new Error("Speed secret provider failure: sk_live_do_not_expose")
     )
@@ -259,9 +259,9 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     const response = await POST(request())
     const body = await response.json()
 
-    expect(response.status).toBe(200)
-    expect(body.setup_status).toBe("retryable")
-    expect(body.message).toBe("Wallet setup is still processing. Please try again shortly.")
+    expect(response.status).toBe(500)
+    expect(body.setup_status).toBe("failed")
+    expect(body.message).toBe("Bitcoin setup could not be completed. Please retry after review.")
     expect(JSON.stringify(body)).not.toContain("Speed")
     expect(JSON.stringify(body)).not.toContain("sk_live")
   })
@@ -278,8 +278,8 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
       const response = await responsePromise
       const body = await response.json()
 
-      expect(response.status).toBe(200)
-      expect(body.setup_status).toBe("retryable")
+      expect(response.status).toBe(202)
+      expect(body.setup_status).toBe("incomplete")
     } finally {
       vi.useRealTimers()
     }

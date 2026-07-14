@@ -4,6 +4,16 @@ const supabase = supabaseAdmin || supabaseAnon
 
 const TABLE = "merchant_lightning_profiles"
 
+function speedAccountId(value?: string | null): string | null {
+  const id = String(value || "").trim()
+  return id.startsWith("acct_") ? id : null
+}
+
+function speedRelationshipId(value?: string | null): string | null {
+  const id = String(value || "").trim()
+  return id.startsWith("ca_") ? id : null
+}
+
 export type MerchantLightningProfileStatus =
   | "not_configured"
   | "pending"
@@ -119,14 +129,11 @@ export async function upsertMerchantLightningProfile(
       ? input.speedConnectedAccountId
       : existing?.speed_connected_account_id ?? null,
     speed_connected_account_relationship_id: input.speedConnectedAccountRelationshipId !== undefined
-      ? input.speedConnectedAccountRelationshipId
-      : existing?.speed_connected_account_relationship_id ?? null,
+      ? speedRelationshipId(input.speedConnectedAccountRelationshipId)
+      : speedRelationshipId(existing?.speed_connected_account_relationship_id),
     speed_account_id: input.speedAccountId !== undefined
-      ? input.speedAccountId
-      : existing?.speed_account_id ?? null,
-    speed_header_account_id: input.speedHeaderAccountId !== undefined
-      ? input.speedHeaderAccountId
-      : existing?.speed_header_account_id ?? null,
+      ? speedAccountId(input.speedAccountId)
+      : speedAccountId(existing?.speed_account_id),
     speed_connected_account_status: input.speedConnectedAccountStatus !== undefined
       ? input.speedConnectedAccountStatus
       : existing?.speed_connected_account_status ?? null,
@@ -144,6 +151,20 @@ export async function upsertMerchantLightningProfile(
     last_checked_at: now,
     updated_at: now,
     ...(existing ? {} : { created_at: now }),
+  }
+
+  // speed_header_account_id is for a later Instant Send contract question and
+  // is not required for Custom Connect intake. Some restored production
+  // schemas do not have the column yet, so only write it when explicitly set
+  // or when an existing selected row proves the column is present.
+  if (
+    input.speedHeaderAccountId !== undefined ||
+    (existing && Object.prototype.hasOwnProperty.call(existing, "speed_header_account_id"))
+  ) {
+    ;(row as Record<string, unknown>).speed_header_account_id =
+      input.speedHeaderAccountId !== undefined
+        ? input.speedHeaderAccountId
+        : existing?.speed_header_account_id ?? null
   }
 
   const { data, error } = await supabase

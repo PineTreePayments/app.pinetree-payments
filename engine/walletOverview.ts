@@ -297,14 +297,16 @@ async function getLightningPaymentRails(
     getMerchantNwcStatus(merchantId)
   ])
   const speedAccountId = String(speedStatus?.accountId || "").trim()
+  const speedProviderStatus = String(speedStatus?.accountStatus || "").trim().toLowerCase()
+  const speedConnected = Boolean(speedAccountId && speedProviderStatus === "active")
 
   console.info("[lightning/walletOverview] Lightning rails loaded", {
     merchantId,
-    speedConnected: Boolean(speedAccountId),
+    speedConnected,
     nwcConnected: Boolean(nwcStatus)
   })
 
-  if (speedAccountId) {
+  if (speedConnected) {
     return [{
       id: speedStatus?.providerRowId || "lightning-speed",
       type: "bitcoin_lightning",

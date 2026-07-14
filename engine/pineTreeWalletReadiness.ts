@@ -7,7 +7,7 @@
  * merchants never see a Speed signup/OAuth flow.
  */
 
-import { createHash, randomBytes, randomInt } from "node:crypto"
+import { createHash } from "node:crypto"
 import { getMerchantById } from "@/database/merchants"
 import {
   getMerchantLightningProfile,
@@ -17,7 +17,7 @@ import {
 } from "@/database/merchantLightningProfiles"
 import { getPineTreeWalletProfile, upsertPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { saveMerchantSpeedConnection } from "@/database/merchantProviders"
-import { upsertMerchantSpeedCredential } from "@/database/merchantSpeedCredentials"
+import { getMerchantSpeedCredentialMetadata } from "@/database/merchantSpeedCredentials"
 import {
   createSpeedCustomConnectedAccountForMerchant,
   getSpeedConnectedAccountSetupStatus
@@ -37,6 +37,7 @@ import {
 export type EnsureManagedLightningAction =
   | "already_active"
   | "existing_account_checked"
+  | "existing_credential_recovered"
   | "provisioned"
   | "provisioning_incomplete"
   | "needs_business_profile"
@@ -113,56 +114,23 @@ export function getLightningNeedsAttentionMerchantMessage(input: {
   return "Bitcoin setup needs attention."
 }
 
-const ACTIVE_SPEED_ACCOUNT_STATUSES = new Set([
-  "active",
-  "ready",
-  "ready_for_payments",
-  "approved",
-  "enabled",
-  "connected",
-  "verified",
-])
 const SPEED_CUSTOM_CONNECT_TIMEOUT_MS = 10_000
 
-/** A profile counts as active only when it has a real account id AND an active-looking status. */
+/** A profile counts as active only when it has acct_ account id AND Speed status active. */
 function isActiveLightningProfile(profile: MerchantLightningProfile | null): boolean {
   if (!profile) return false
-  const accountId = String(profile.speed_account_id || profile.speed_connected_account_id || "").trim()
+  const accountId = speedAccountId(profile.speed_account_id)
   const status = String(profile.speed_connected_account_status || "").trim().toLowerCase()
-  return Boolean(accountId) && (profile.status === "ready" || ACTIVE_SPEED_ACCOUNT_STATUSES.has(status))
+  return Boolean(accountId) && status === "active"
 }
 
 /**
  * Speed Custom Connect requires a password at account-creation time, but
- * PineTree Wallet merchants never log into Speed directly. PineTree still
- * needs administrative access to every account it creates (e.g. to sign into
- * Speed's portal to clean up a test account, or as a fallback when Speed
- * requires portal auth for full account deletion) - so the password used
- * here is retained (encrypted) by upsertMerchantSpeedCredential immediately
- * after a fresh Speed Custom Connect create succeeds. See
- * database/merchantSpeedCredentials.ts and
- * providers/lightning/speedCredentialCrypto.ts.
+ * PineTree Wallet merchants never log into Speed directly. For the MVP,
+ * PineTree resolves one unified server-side password from Vercel and never
+ * persists that password in Supabase.
  */
-const SPEED_PASSWORD_LOWER = "abcdefghjkmnpqrstuvwxyz"
-const SPEED_PASSWORD_UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ"
-const SPEED_PASSWORD_NUMBER = "23456789"
-const SPEED_PASSWORD_SPECIAL = "!#$%&()*+-.:;=?@[]^_{}~"
-const SPEED_PASSWORD_ALL = `${SPEED_PASSWORD_LOWER}${SPEED_PASSWORD_UPPER}${SPEED_PASSWORD_NUMBER}${SPEED_PASSWORD_SPECIAL}`
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-function pick(chars: string) {
-  return chars[randomInt(0, chars.length)]
-}
-
-function shuffle(chars: string[]) {
-  for (let index = chars.length - 1; index > 0; index -= 1) {
-    const swapIndex = randomInt(0, index + 1)
-    const current = chars[index]
-    chars[index] = chars[swapIndex]
-    chars[swapIndex] = current
-  }
-  return chars
-}
 
 export function isValidSpeedCustomConnectEmail(value?: string | null): boolean {
   const email = String(value || "").trim().toLowerCase()
@@ -184,61 +152,70 @@ export function speedCustomConnectPasswordPolicyPass(value?: string | null): boo
   return true
 }
 
-export function generateSpeedCustomConnectPassword(): string {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const chars = [
-      pick(SPEED_PASSWORD_LOWER),
-      pick(SPEED_PASSWORD_UPPER),
-      pick(SPEED_PASSWORD_NUMBER),
-      pick(SPEED_PASSWORD_SPECIAL),
-    ]
-    while (chars.length < 20) {
-      const next = pick(SPEED_PASSWORD_ALL)
-      const lastTwo = chars.slice(-2)
-      if (lastTwo.length === 2 && lastTwo[0] === next && lastTwo[1] === next) continue
-      chars.push(next)
-    }
-    const password = shuffle(chars).join("")
-    if (speedCustomConnectPasswordPolicyPass(password)) return password
-  }
-
-  return `Pt9!${randomBytes(16).toString("hex").replace(/abc|123/gi, "x9")}`
-}
-
 /**
- * Matches the codebase's one existing production/non-production convention
- * (engine/config.ts's validateConfig) rather than introducing a second one.
+ * One unified server-side password for Speed Custom Connect accounts. PineTree
+ * administrators manage it in Vercel; it is never logged, returned to the
+ * browser, or stored in Supabase.
  */
-export function isProductionRuntime(): boolean {
-  return process.env.NODE_ENV === "production"
-}
-
-/**
- * One shared password for every non-production (test/dev/staging) Speed
- * Custom Connect account - PineTree administrators need a single password
- * they already know to sign into or clean up test accounts, not a different
- * generated one per account. Fails closed: a missing test password must
- * never silently fall back to a generated one, or every test account would
- * need its own retained credential lookup just like production.
- */
-export function getSpeedTestAccountPassword(): string {
-  const password = String(process.env.SPEED_TEST_ACCOUNT_PASSWORD || "").trim()
+export function resolveSpeedAccountPassword(): string {
+  const password = String(process.env.SPEED_CONNECTED_ACCOUNT_PASSWORD || "").trim()
   if (!password) {
     throw new Error(
-      "SPEED_TEST_ACCOUNT_PASSWORD is required outside production to create Speed Custom Connect accounts."
+      "SPEED_CONNECTED_ACCOUNT_PASSWORD is required to create Speed Custom Connect accounts."
     )
   }
   return password
 }
 
-/**
- * Resolves the password used for a Speed Custom Connect /connect/custom call:
- * the shared test password outside production, or a fresh cryptographically
- * random password per account in production. Never the same password shared
- * across production merchant accounts.
- */
-export function resolveSpeedAccountPassword(): string {
-  return isProductionRuntime() ? generateSpeedCustomConnectPassword() : getSpeedTestAccountPassword()
+function normalizeSpeedProviderStatus(value?: string | null): string | null {
+  const normalized = String(value || "").trim().toLowerCase()
+  return normalized || null
+}
+
+function isActiveSpeedStatus(value?: string | null): boolean {
+  return normalizeSpeedProviderStatus(value) === "active"
+}
+
+function speedAccountId(value?: string | null): string | null {
+  const id = String(value || "").trim()
+  return id.startsWith("acct_") ? id : null
+}
+
+function speedRelationshipId(value?: string | null): string | null {
+  const id = String(value || "").trim()
+  return id.startsWith("ca_") ? id : null
+}
+
+function deriveSpeedIntakeStatus(input: {
+  speedAccountId?: string | null
+  providerStatus?: string | null
+  fallback: MerchantLightningProfileStatus
+}): MerchantLightningProfileStatus {
+  if (input.speedAccountId && isActiveSpeedStatus(input.providerStatus)) return "ready"
+  if (input.fallback === "needs_attention") return "needs_attention"
+  return "pending"
+}
+
+function logSpeedProvisioningDiagnostic(input: {
+  merchantId: string
+  speedRequestAttempted: boolean
+  speedRequestCompleted: boolean
+  speedResponseOk: boolean
+  connectionIdPresent: boolean
+  accountIdPresent: boolean
+  providerStatusPresent: boolean
+  providerStatusNormalized: string | null
+  unifiedPasswordConfigured: boolean
+  credentialResolved: boolean
+  profileUpsertAttempted: boolean
+  profileUpsertSucceeded: boolean
+  readinessEvaluated: boolean
+  finalSpeedConnected: boolean
+  failureStage: string | null
+  safeErrorCode: string | null
+  elapsedMs: number
+}) {
+  console.info("[pinetree-managed-lightning] speed_custom_connect_stage_diagnostic", input)
 }
 
 async function syncLightningStatusIntoWalletProfile(
@@ -292,9 +269,8 @@ async function ensureManagedLightningForMerchantImpl(
     return {
       status: "ready",
       action: "already_active",
-      speedConnectedAccountId:
-        existing!.speed_account_id || existing!.speed_connected_account_id,
-      speedConnectedAccountRelationshipId: existing!.speed_connected_account_relationship_id,
+      speedConnectedAccountId: speedAccountId(existing!.speed_account_id) || existing!.speed_connected_account_id,
+      speedConnectedAccountRelationshipId: speedRelationshipId(existing!.speed_connected_account_relationship_id),
       speedConnectedAccountStatus: existing!.speed_connected_account_status,
       providerCode: null,
       fieldErrors: [],
@@ -373,25 +349,45 @@ async function ensureManagedLightningForMerchantImpl(
     }
   }
 
-  const existingAccountId = String(existing?.speed_account_id || existing?.speed_connected_account_id || "").trim()
-  const existingRelationshipId = String(existing?.speed_connected_account_relationship_id || "").trim()
+  const existingAccountId = speedAccountId(existing?.speed_account_id) || speedAccountId(existing?.speed_connected_account_id)
+  const existingRelationshipId = speedRelationshipId(existing?.speed_connected_account_relationship_id) || speedRelationshipId(existing?.speed_connected_account_id)
   if (existingAccountId || existingRelationshipId) {
     const checked = await getSpeedConnectedAccountSetupStatus({
       connectedAccountId: existingRelationshipId || null,
       accountId: existingAccountId || null,
     })
+    const checkedProviderStatus = normalizeSpeedProviderStatus(checked.speed_connected_account_status)
+    const checkedAccountId = speedAccountId(checked.speed_account_id) || existingAccountId
+    const checkedRelationshipId = speedRelationshipId(checked.speed_connected_account_relationship_id) || existingRelationshipId
+    const checkedStatus = deriveSpeedIntakeStatus({
+      speedAccountId: checkedAccountId,
+      providerStatus: checkedProviderStatus,
+      fallback: checked.readiness,
+    })
     const lightningProfile = await upsertMerchantLightningProfile({
       merchantId,
-      status: checked.readiness,
-      speedConnectedAccountId: checked.speed_connected_account_id || existingAccountId || null,
-      speedConnectedAccountRelationshipId:
-        checked.speed_connected_account_relationship_id || existingRelationshipId || null,
-      speedAccountId: checked.speed_account_id || existing?.speed_account_id || null,
-      speedConnectedAccountStatus: checked.speed_connected_account_status,
+      status: checkedStatus,
+      speedConnectedAccountId: checkedAccountId || checkedRelationshipId || null,
+      speedConnectedAccountRelationshipId: checkedRelationshipId,
+      speedAccountId: checkedAccountId,
+      speedConnectedAccountStatus: checkedProviderStatus || checked.speed_connected_account_status,
       speedConnectSetupUrl: checked.setup_url,
       providerResponseSummary: checked.provider_response_summary,
       providerErrorMessage: checked.error_message,
     })
+    if (lightningProfile.speed_account_id) {
+      await saveMerchantSpeedConnection(merchantId, {
+        accountId: lightningProfile.speed_account_id,
+        accountStatus: lightningProfile.speed_connected_account_status || undefined,
+        setupStatus: lightningProfile.status === "ready" ? "ready_for_payments" : lightningProfile.status,
+        mode: checked.mode,
+        enabled: lightningProfile.status === "ready",
+        notes: [
+          "PineTree created this Speed Custom Connect merchant account server-side.",
+          "Payments use the connected account account_id, not the ca_ relationship id.",
+        ],
+      })
+    }
     await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
     console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_existing", {
       merchant_id: merchantId,
@@ -415,12 +411,114 @@ async function ensureManagedLightningForMerchantImpl(
       status: lightningProfile.status,
       action: "existing_account_checked",
       speedConnectedAccountId:
-        lightningProfile.speed_account_id || lightningProfile.speed_connected_account_id,
-      speedConnectedAccountRelationshipId: lightningProfile.speed_connected_account_relationship_id,
+        speedAccountId(lightningProfile.speed_account_id) || lightningProfile.speed_connected_account_id,
+      speedConnectedAccountRelationshipId: speedRelationshipId(lightningProfile.speed_connected_account_relationship_id),
       speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
       providerCode: null,
       fieldErrors: [],
       merchantMessage: null,
+    }
+  }
+
+  const credentialMetadata = await getMerchantSpeedCredentialMetadata(merchantId).catch(() => null)
+  const credentialAccountReference = String(credentialMetadata?.speed_connected_account_id || "").trim()
+  const credentialAccountId = speedAccountId(credentialAccountReference)
+  const credentialRelationshipId = speedRelationshipId(credentialAccountReference)
+  if (credentialAccountId || credentialRelationshipId) {
+    const recoveryStartedAt = Date.now()
+    let profileUpsertAttempted = false
+    let profileUpsertSucceeded = false
+    try {
+      const checked = await getSpeedConnectedAccountSetupStatus({
+        connectedAccountId: credentialRelationshipId,
+        accountId: credentialAccountId,
+      })
+      const checkedProviderStatus = normalizeSpeedProviderStatus(checked.speed_connected_account_status)
+      const checkedAccountId = speedAccountId(checked.speed_account_id) || credentialAccountId
+      const checkedRelationshipId = speedRelationshipId(checked.speed_connected_account_relationship_id) || credentialRelationshipId
+      const checkedStatus = deriveSpeedIntakeStatus({
+        speedAccountId: checkedAccountId,
+        providerStatus: checkedProviderStatus,
+        fallback: checked.readiness,
+      })
+      profileUpsertAttempted = true
+      const lightningProfile = await upsertMerchantLightningProfile({
+        merchantId,
+        status: checkedStatus,
+        speedConnectedAccountId: checkedAccountId || checkedRelationshipId,
+        speedConnectedAccountRelationshipId: checkedRelationshipId,
+        speedAccountId: checkedAccountId,
+        speedConnectedAccountStatus: checkedProviderStatus || checked.speed_connected_account_status,
+        speedConnectSetupUrl: checked.setup_url,
+        providerResponseSummary: checked.provider_response_summary,
+        providerErrorMessage: checked.error_message,
+      })
+      profileUpsertSucceeded = true
+      if (lightningProfile.speed_account_id) {
+        await saveMerchantSpeedConnection(merchantId, {
+          accountId: lightningProfile.speed_account_id,
+          accountStatus: lightningProfile.speed_connected_account_status || undefined,
+          setupStatus: lightningProfile.status === "ready" ? "ready_for_payments" : lightningProfile.status,
+          mode: checked.mode,
+          enabled: lightningProfile.status === "ready",
+          notes: [
+            "PineTree recovered this Speed Custom Connect merchant account from local server-side metadata.",
+            "Payments use the connected account account_id, not the ca_ relationship id.",
+          ],
+        })
+      }
+      await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
+      logSpeedProvisioningDiagnostic({
+        merchantId,
+        speedRequestAttempted: false,
+        speedRequestCompleted: false,
+        speedResponseOk: Boolean(checkedAccountId && isActiveSpeedStatus(checkedProviderStatus)),
+        connectionIdPresent: Boolean(lightningProfile.speed_connected_account_relationship_id),
+        accountIdPresent: Boolean(lightningProfile.speed_account_id),
+        providerStatusPresent: Boolean(lightningProfile.speed_connected_account_status),
+        providerStatusNormalized: normalizeSpeedProviderStatus(lightningProfile.speed_connected_account_status),
+        unifiedPasswordConfigured: Boolean(String(process.env.SPEED_CONNECTED_ACCOUNT_PASSWORD || "").trim()),
+        credentialResolved: true,
+        profileUpsertAttempted,
+        profileUpsertSucceeded,
+        readinessEvaluated: true,
+        finalSpeedConnected: Boolean(lightningProfile.speed_account_id && isActiveSpeedStatus(lightningProfile.speed_connected_account_status)),
+        failureStage: lightningProfile.status === "ready" ? null : "existing_credential_recovery_incomplete",
+        safeErrorCode: checked.speed_connected_account_status || null,
+        elapsedMs: Date.now() - recoveryStartedAt,
+      })
+      return {
+        status: lightningProfile.status,
+        action: "existing_credential_recovered",
+        speedConnectedAccountId:
+          speedAccountId(lightningProfile.speed_account_id) || lightningProfile.speed_connected_account_id,
+        speedConnectedAccountRelationshipId: speedRelationshipId(lightningProfile.speed_connected_account_relationship_id),
+        speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
+        providerCode: null,
+        fieldErrors: [],
+        merchantMessage: lightningProfile.status === "needs_attention" ? "Bitcoin setup needs attention." : null,
+      }
+    } catch (error) {
+      logSpeedProvisioningDiagnostic({
+        merchantId,
+        speedRequestAttempted: false,
+        speedRequestCompleted: false,
+        speedResponseOk: false,
+        connectionIdPresent: Boolean(credentialRelationshipId),
+        accountIdPresent: Boolean(credentialAccountId),
+        providerStatusPresent: false,
+        providerStatusNormalized: null,
+        unifiedPasswordConfigured: Boolean(String(process.env.SPEED_CONNECTED_ACCOUNT_PASSWORD || "").trim()),
+        credentialResolved: true,
+        profileUpsertAttempted,
+        profileUpsertSucceeded,
+        readinessEvaluated: false,
+        finalSpeedConnected: false,
+        failureStage: "existing_credential_recovery_failed",
+        safeErrorCode: "recovery_failed",
+        elapsedMs: Date.now() - recoveryStartedAt,
+      })
+      throw error
     }
   }
 
@@ -501,8 +599,9 @@ async function ensureManagedLightningForMerchantImpl(
 
   const speedPassword = resolveSpeedAccountPassword()
   const passwordPolicyPass = speedCustomConnectPasswordPolicyPass(speedPassword)
-  console.info("[pinetree-managed-lightning] speed_connect_password_generated", {
+  console.info("[pinetree-managed-lightning] speed_connect_password_resolved", {
     merchant_id: merchantId,
+    unifiedPasswordConfigured: Boolean(String(process.env.SPEED_CONNECTED_ACCOUNT_PASSWORD || "").trim()),
     passwordPolicyPass,
   })
   console.info("[pinetree-managed-lightning] speed_connect_payload_validated", {
@@ -688,42 +787,14 @@ async function ensureManagedLightningForMerchantImpl(
     })
   }
 
-  // Only a fresh /connect/custom create actually set the account's password
-  // to speedPassword (see credential_password_used's doc comment) - never
-  // store a fabricated password for an account Speed resolved by existing-
-  // email reuse. Storage happens before the profile is marked ready so a
-  // failure here can still downgrade the outcome below instead of silently
-  // reporting full success.
-  let credentialStorageFailed = false
-  const speedAccountReference = speedSetup.speed_account_id || speedSetup.speed_connected_account_id
-  if (speedSetup.credential_password_used && speedAccountReference) {
-    try {
-      await upsertMerchantSpeedCredential({
-        merchantId,
-        speedConnectedAccountId: speedAccountReference,
-        speedLoginEmail: speedEmail,
-        password: speedPassword,
-      })
-      console.info("[pinetree-managed-lightning] speed_connect_credential_stored", {
-        merchant_id: merchantId,
-      })
-    } catch (error) {
-      credentialStorageFailed = true
-      // Never log the password itself - only that storage failed.
-      console.warn("[pinetree-managed-lightning] speed_connect_credential_store_failed", {
-        merchant_id: merchantId,
-        error: error instanceof Error ? error.message : "unknown error",
-      })
-    }
-  }
-
-  const status: MerchantLightningProfileStatus = credentialStorageFailed
-    ? "needs_attention"
-    : speedSetup.readiness === "ready"
-      ? "ready"
-      : speedSetup.readiness === "needs_attention"
-        ? "needs_attention"
-        : "pending"
+  const normalizedSpeedStatus = normalizeSpeedProviderStatus(speedSetup.speed_connected_account_status)
+  const createdAccountId = speedAccountId(speedSetup.speed_account_id)
+  const createdRelationshipId = speedRelationshipId(speedSetup.speed_connected_account_relationship_id)
+  const status = deriveSpeedIntakeStatus({
+    speedAccountId: createdAccountId,
+    providerStatus: normalizedSpeedStatus,
+    fallback: speedSetup.readiness,
+  })
 
   // A 4xx from Speed is a deterministic validation rejection - distinguish it
   // from a generic/transient failure so the fingerprint-unchanged retry gate
@@ -731,15 +802,13 @@ async function ensureManagedLightningForMerchantImpl(
   const isDeterministicRejection = Boolean(
     speedSetup.provider_http_status && speedSetup.provider_http_status >= 400 && speedSetup.provider_http_status < 500
   )
-  const speedConnectedAccountStatus = credentialStorageFailed
-    ? "speed_connect_credential_store_failed"
-    : status === "needs_attention" && isDeterministicRejection
+  const speedConnectedAccountStatus = status === "needs_attention" && isDeterministicRejection
       ? "speed_custom_connect_rejected"
-      : speedSetup.speed_connected_account_status
+      : normalizedSpeedStatus || speedSetup.speed_connected_account_status
   const speedFieldErrors = speedSetup.field_errors || []
   const merchantMessage = status === "needs_attention"
     ? getLightningNeedsAttentionMerchantMessage({
-        providerHttpStatus: credentialStorageFailed ? null : speedSetup.provider_http_status,
+        providerHttpStatus: speedSetup.provider_http_status,
         fieldErrorCount: speedFieldErrors.length,
       })
     : null
@@ -747,9 +816,9 @@ async function ensureManagedLightningForMerchantImpl(
   const lightningProfile = await upsertMerchantLightningProfile({
     merchantId,
     status,
-    speedConnectedAccountId: speedSetup.speed_account_id || speedSetup.speed_connected_account_id,
-    speedConnectedAccountRelationshipId: speedSetup.speed_connected_account_relationship_id,
-    speedAccountId: speedSetup.speed_account_id,
+    speedConnectedAccountId: createdAccountId || createdRelationshipId,
+    speedConnectedAccountRelationshipId: createdRelationshipId,
+    speedAccountId: createdAccountId,
     speedConnectedAccountStatus,
     speedConnectSetupUrl: speedSetup.setup_url,
     // Persist Speed's own error code, sanitized field errors, and the request
@@ -784,6 +853,26 @@ async function ensureManagedLightningForMerchantImpl(
 
   await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
 
+  logSpeedProvisioningDiagnostic({
+    merchantId,
+    speedRequestAttempted: true,
+    speedRequestCompleted: true,
+    speedResponseOk: Boolean(createdAccountId && isActiveSpeedStatus(speedConnectedAccountStatus)),
+    connectionIdPresent: Boolean(createdRelationshipId),
+    accountIdPresent: Boolean(createdAccountId),
+    providerStatusPresent: Boolean(speedConnectedAccountStatus),
+    providerStatusNormalized: normalizeSpeedProviderStatus(speedConnectedAccountStatus),
+    unifiedPasswordConfigured: Boolean(String(process.env.SPEED_CONNECTED_ACCOUNT_PASSWORD || "").trim()),
+    credentialResolved: Boolean(speedPassword),
+    profileUpsertAttempted: true,
+    profileUpsertSucceeded: true,
+    readinessEvaluated: true,
+    finalSpeedConnected: Boolean(lightningProfile.speed_account_id && isActiveSpeedStatus(lightningProfile.speed_connected_account_status)),
+    failureStage: lightningProfile.status === "ready" ? null : "speed_custom_connect_incomplete",
+    safeErrorCode: speedConnectedAccountStatus || null,
+    elapsedMs: Date.now() - speedStartedAt,
+  })
+
   console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_created", {
     merchant_id: merchantId,
     status: lightningProfile.status,
@@ -805,8 +894,8 @@ async function ensureManagedLightningForMerchantImpl(
   return {
     status: lightningProfile.status,
     action: status === "ready" ? "provisioned" : "provisioning_incomplete",
-    speedConnectedAccountId: lightningProfile.speed_account_id || lightningProfile.speed_connected_account_id,
-    speedConnectedAccountRelationshipId: lightningProfile.speed_connected_account_relationship_id,
+    speedConnectedAccountId: speedAccountId(lightningProfile.speed_account_id) || lightningProfile.speed_connected_account_id,
+    speedConnectedAccountRelationshipId: speedRelationshipId(lightningProfile.speed_connected_account_relationship_id),
     speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
     providerCode: speedSetup.provider_code ?? null,
     fieldErrors: speedSetup.field_errors || [],

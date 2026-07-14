@@ -180,7 +180,12 @@ export async function POST(req: NextRequest) {
         })
       }
       const profile = await getMerchantLightningProfile(merchantId).catch(() => null)
-      const retryableStatus = profile?.status === "needs_attention" ? "needs_attention" : "retryable"
+      const isTimeout = error instanceof OperationTimeoutError
+      const retryableStatus = isTimeout
+        ? "incomplete"
+        : profile?.status === "needs_attention"
+          ? "failed"
+          : "failed"
       return NextResponse.json({
         profile: safeLightningProfile(profile),
         setup_status: retryableStatus,
@@ -188,11 +193,15 @@ export async function POST(req: NextRequest) {
         providerCode: null,
         fieldErrors: [],
         merchantMessage: null,
-        message: "Wallet setup is still processing. Please try again shortly.",
-      })
+        message: isTimeout
+          ? "Wallet setup is still processing. Please try again shortly."
+          : "Bitcoin setup could not be completed. Please retry after review.",
+      }, { status: isTimeout ? 202 : 500 })
     }
 
     const profile = await getMerchantLightningProfile(merchantId)
+    const responseStatus =
+      profile?.status === "needs_attention" && ensureResult?.providerCode ? 422 : 200
     return NextResponse.json({
       profile: safeLightningProfile(profile),
       setup_status: profile?.status || "pending",
@@ -204,7 +213,7 @@ export async function POST(req: NextRequest) {
       fieldErrors: ensureResult?.fieldErrors ?? [],
       // Canned, merchant-safe copy only - never Speed's raw provider message.
       merchantMessage: ensureResult?.merchantMessage ?? null,
-    })
+    }, { status: responseStatus })
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to enable Lightning" },
