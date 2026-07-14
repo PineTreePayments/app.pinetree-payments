@@ -143,7 +143,7 @@ type SyncedBalanceAsset = {
   balance: number | null
   usdValue: number | null
   lastSyncedAt: string | null
-  status: "synced" | "pending_sync" | "config_missing"
+  status: "synced" | "pending_sync" | "config_missing" | "unavailable" | "stale"
 }
 
 type PineTreeWalletSyncResponse = {
@@ -190,14 +190,39 @@ type PineTreeWalletProfile = {
 type MerchantLightningProfile = {
   id: string
   merchant_id: string
-  provider: "speed"
   status: "not_configured" | "pending" | "ready" | "needs_attention"
-  speed_connected_account_id: string | null
-  speed_connected_account_status: string | null
+  rail?: "bitcoin"
+  display_name?: "Bitcoin"
+  connected?: boolean
+  speed_connected_account_id?: string | null
+  speed_connected_account_status?: string | null
   setup_source: "pinetree_managed"
   // Canned, merchant-safe copy for a needs_attention profile - never Speed's
   // raw provider message.
   provider_error_message?: string | null
+}
+
+type ManagedLightningRail = {
+  rail: "bitcoin"
+  display_name: "Bitcoin"
+  status: "not_configured" | "pending" | "ready" | "needs_attention" | "failed" | "incomplete"
+  connected: boolean
+  withdrawal_available: boolean
+  balance: {
+    asset: "BTC"
+    amount: string | null
+    usd_value: string | null
+    status: "synced" | "pending_sync" | "config_missing" | "unavailable" | "stale"
+  }
+  message: string | null
+}
+
+type ManagedLightningResponse = {
+  profile: MerchantLightningProfile | null
+  rail?: ManagedLightningRail
+  setup_status?: "not_configured" | "pending" | "ready" | "needs_attention" | "failed" | "incomplete"
+  status?: "not_configured" | "pending" | "ready" | "needs_attention" | "failed" | "incomplete"
+  merchantMessage?: string | null
 }
 
 type ProfileState =
@@ -3257,8 +3282,20 @@ function PineTreeWalletRuntime() {
 
       // Lightning profile is non-critical; don't block wallet display on failure
       if (lightningRes.ok) {
-        const json = (await lightningRes.json()) as { profile: MerchantLightningProfile | null }
-        setLightningProfileState(json.profile ? { kind: "loaded", profile: json.profile } : { kind: "none" })
+        const json = (await lightningRes.json()) as ManagedLightningResponse
+        const normalizedProfile = json.profile
+          ? {
+              ...json.profile,
+              status: json.rail?.status === "failed" || json.rail?.status === "incomplete"
+                ? json.profile.status
+                : json.rail?.status ?? json.profile.status,
+              rail: json.rail?.rail,
+              display_name: json.rail?.display_name,
+              connected: json.rail?.connected,
+              provider_error_message: json.rail?.message ?? json.merchantMessage ?? json.profile.provider_error_message,
+            }
+          : null
+        setLightningProfileState(normalizedProfile ? { kind: "loaded", profile: normalizedProfile } : { kind: "none" })
       } else {
         setLightningProfileState({ kind: "none" })
       }
@@ -7315,27 +7352,39 @@ function PineTreeWalletRuntime() {
         credentials: "include",
         cache: "no-store",
       })
-      if (!res.ok) {
-        emitWalletSetupDebugEvent("wallet_speed_setup_failed", { status: res.status })
+      const json = (await res.json().catch(() => ({ profile: null }))) as ManagedLightningResponse
+      const normalizedProfile = json.profile
+        ? {
+            ...json.profile,
+            status: json.rail?.status === "failed" || json.rail?.status === "incomplete"
+              ? json.profile.status
+              : json.rail?.status ?? json.profile.status,
+            rail: json.rail?.rail,
+            display_name: json.rail?.display_name,
+            connected: json.rail?.connected,
+            provider_error_message: json.rail?.message ?? json.merchantMessage ?? json.profile.provider_error_message,
+          }
+        : null
+      if (normalizedProfile) {
+        setLightningProfileState({ kind: "loaded", profile: normalizedProfile })
+      }
+      if (!res.ok && json.status !== "needs_attention") {
+        emitWalletSetupDebugEvent("wallet_bitcoin_setup_failed", { status: res.status })
         return "failed"
       }
-      const json = (await res.json()) as { profile: MerchantLightningProfile | null }
-      if (json.profile) {
-        setLightningProfileState({ kind: "loaded", profile: json.profile })
-      }
-      const status = json.profile?.status
+      const status = json.rail?.status ?? json.profile?.status ?? json.status
       if (status === "ready") {
-        emitWalletSetupDebugEvent("wallet_speed_setup_success", {})
+        emitWalletSetupDebugEvent("wallet_bitcoin_setup_success", {})
         return "ready"
       }
       if (status === "needs_attention") {
-        emitWalletSetupDebugEvent("wallet_speed_setup_failed", { reason: "needs_attention" })
+        emitWalletSetupDebugEvent("wallet_bitcoin_setup_failed", { reason: "needs_attention" })
         return "needs_attention"
       }
-      emitWalletSetupDebugEvent("wallet_speed_setup_pending", {})
+      emitWalletSetupDebugEvent("wallet_bitcoin_setup_pending", {})
       return "pending"
     } catch {
-      emitWalletSetupDebugEvent("wallet_speed_setup_failed", { reason: "request_threw" })
+      emitWalletSetupDebugEvent("wallet_bitcoin_setup_failed", { reason: "request_threw" })
       return "failed"
     } finally {
       speedProvisionInFlightRef.current = false

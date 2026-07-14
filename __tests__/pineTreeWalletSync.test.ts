@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({
   getMarketPricesUSD: vi.fn(),
   listRecentWalletWithdrawalsForActivity: vi.fn(),
   cancelStaleUnsignedWithdrawalReviews: vi.fn(),
+  getMerchantProviders: vi.fn(),
+  getMerchantLightningProfile: vi.fn(),
+  getPineTreeSpeedConfigStatus: vi.fn(),
 }))
 
 vi.mock("@/database/pineTreeWalletProfiles", () => ({
@@ -37,6 +40,18 @@ vi.mock("@/database/walletWithdrawalRequests", () => ({
   cancelStaleUnsignedWithdrawalReviews: mocks.cancelStaleUnsignedWithdrawalReviews,
 }))
 
+vi.mock("@/database/merchants", () => ({
+  getMerchantProviders: mocks.getMerchantProviders,
+}))
+
+vi.mock("@/database/merchantLightningProfiles", () => ({
+  getMerchantLightningProfile: mocks.getMerchantLightningProfile,
+}))
+
+vi.mock("@/providers/lightning/speedClient", () => ({
+  getPineTreeSpeedConfigStatus: mocks.getPineTreeSpeedConfigStatus,
+}))
+
 import {
   getPineTreeWalletBalanceSnapshot,
   syncPineTreeWalletBalances,
@@ -58,6 +73,7 @@ describe("PineTree Wallet balance sync", () => {
       btc_address: null,
       bitcoin_onchain_address: null,
       bitcoin_lightning_address: null,
+      status: "ready",
     })
     mocks.getWalletBalances.mockImplementation(async () => storedRows)
     mocks.upsertMerchantAssetBalances.mockImplementation(async (merchantId, balances, timestamp) => {
@@ -76,6 +92,9 @@ describe("PineTree Wallet balance sync", () => {
     mocks.getMarketPricesUSD.mockResolvedValue({ SOL: 100, ETH: 2000, BTC: 60000 })
     mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([])
     mocks.cancelStaleUnsignedWithdrawalReviews.mockResolvedValue({ canceled: 0 })
+    mocks.getMerchantProviders.mockResolvedValue([])
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+    mocks.getPineTreeSpeedConfigStatus.mockReturnValue({ configured: true, missing: [] })
     global.fetch = vi.fn(async () => ({
       json: async () => ({ result: { value: 2_000_000_000 } }),
     })) as unknown as typeof fetch
@@ -283,5 +302,65 @@ describe("PineTree Wallet balance sync", () => {
     expect(result.recentActivity[0].label).not.toContain("(")
     expect(result.recentActivity[0].label).not.toContain("Withdrawal:")
     expect(result.recentActivity[0].rail).toBe("bitcoin")
+  })
+
+  it("returns normalized provider-agnostic rail contract without stale BTC balances", async () => {
+    storedRows = [
+      {
+        id: "btc-stale",
+        merchant_id: "merchant_1",
+        asset: "BTC",
+        balance: 0.5,
+        last_updated: "2026-07-01T00:00:00.000Z",
+      },
+      {
+        id: "base-usdc",
+        merchant_id: "merchant_1",
+        asset: "BASE_USDC",
+        balance: 10,
+        last_updated: "2026-07-01T00:00:00.000Z",
+      },
+    ]
+    mocks.getMerchantLightningProfile.mockResolvedValue({
+      status: "ready",
+      speed_account_id: "acct_live_123",
+      speed_connected_account_status: "Active",
+    })
+    mocks.getMerchantProviders.mockResolvedValue([
+      { provider: "base", enabled: true, status: "connected" },
+      { provider: "solana", enabled: true, status: "connected" },
+      { provider: "lightning_speed", enabled: true, status: "connected" },
+    ])
+
+    const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
+    const serialized = JSON.stringify(result.rails)
+
+    expect(result.status).toBe("ready")
+    expect(result.totalUsd).toBe(10)
+    expect(result.total_balance_usd).toBe("10.00")
+    expect(result.rails).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        rail: "bitcoin",
+        display_name: "Bitcoin",
+        connected: true,
+        withdrawal_available: false,
+        balance: {
+          asset: "BTC",
+          amount: null,
+          usd_value: null,
+          status: "unavailable",
+        },
+      }),
+    ]))
+    expect(result.balances.bitcoin[0]).toMatchObject({
+      asset: "BTC",
+      balance: null,
+      usdValue: null,
+      status: "unavailable",
+    })
+    expect(serialized).not.toContain("speed")
+    expect(serialized).not.toContain("dynamic")
+    expect(serialized).not.toContain("nwc")
+    expect(serialized).not.toContain("provider")
   })
 })

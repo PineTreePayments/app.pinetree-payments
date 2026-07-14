@@ -112,8 +112,19 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
       { authEmail: "auth@example.test", forceRetry: false }
     )
     expect(body.profile.status).toBe("ready")
-    expect(body.profile.speed_connected_account_id).toBe("acct_123")
-    expect(body.profile.speed_connected_account_relationship_id).toBe("ca_123")
+    expect(body.rail).toMatchObject({
+      rail: "bitcoin",
+      display_name: "Bitcoin",
+      connected: true,
+      withdrawal_available: false,
+      balance: { asset: "BTC", amount: null, usd_value: null, status: "unavailable" },
+    })
+    expect(body.profile.speed_connected_account_id).toBeUndefined()
+    expect(body.profile.speed_connected_account_relationship_id).toBeUndefined()
+    expect(body.profile.speed_account_id).toBeUndefined()
+    expect(body.profile.speed_connected_account_status).toBeUndefined()
+    expect(JSON.stringify(body)).not.toContain("acct_123")
+    expect(JSON.stringify(body)).not.toContain("ca_123")
     expect(JSON.stringify(body)).not.toContain("sk_test")
     expect(JSON.stringify(body)).not.toContain("sk_live")
   })
@@ -145,6 +156,12 @@ describe("POST /api/wallets/lightning/pinetree-managed", () => {
     // Existing fields are preserved for backward compatibility.
     expect(body.setup_status).toBe("needs_attention")
     expect(body.profile.status).toBe("needs_attention")
+    expect(body.rail).toMatchObject({
+      rail: "bitcoin",
+      display_name: "Bitcoin",
+      connected: false,
+      balance: { asset: "BTC", amount: null, usd_value: null, status: "pending_sync" },
+    })
   })
 
   it("passes forceRetry through to ensureManagedLightningForMerchant only when ?retry=true is present", async () => {
@@ -323,6 +340,8 @@ describe("GET /api/wallets/lightning/pinetree-managed", () => {
 
     expect(response.status).toBe(200)
     expect(body.profile.status).toBe("ready")
+    expect(body.profile.provider).toBeUndefined()
+    expect(body.profile.speed_account_id).toBeUndefined()
     expect(mocks.ensureManagedLightningForMerchant).not.toHaveBeenCalled()
   })
 

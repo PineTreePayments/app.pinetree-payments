@@ -4,6 +4,7 @@ import type {
   WalletWithdrawalRequestRecord,
 } from "@/database/walletWithdrawalRequests"
 import { isBitcoinWithdrawalExecutionConfigured } from "@/providers/wallets/bitcoinNetworkProvider"
+import { isDynamicBtcLegacyEnabled } from "@/lib/pinetreeDynamicBtcLegacy"
 
 export type WithdrawalSignerInput = {
   merchantId: string
@@ -67,7 +68,12 @@ export function dynamicBrowserWithdrawalSigner(): WithdrawalSigner {
       return dynamicEnvironmentConfigured() && (
         input.rail === "base" ||
         input.rail === "solana" ||
-        (input.rail === "bitcoin" && input.asset === "BTC" && isBitcoinWithdrawalExecutionConfigured())
+        (
+          input.rail === "bitcoin" &&
+          input.asset === "BTC" &&
+          isDynamicBtcLegacyEnabled() &&
+          isBitcoinWithdrawalExecutionConfigured()
+        )
       )
     },
     async createWithdrawalReview(input) {

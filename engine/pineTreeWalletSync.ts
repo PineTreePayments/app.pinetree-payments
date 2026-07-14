@@ -9,6 +9,7 @@ import {
 } from "@/database/walletWithdrawalRequests"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
+import { PINETREE_INTERNAL_RAIL_PROVIDER, type PineTreeWalletRail } from "@/lib/pinetreeRailProviderMapping"
 
 export type PineTreeBalanceAsset = {
   key: "BASE_ETH" | "BASE_USDC" | "SOLANA_SOL" | "SOLANA_USDC" | "BTC"
@@ -17,7 +18,20 @@ export type PineTreeBalanceAsset = {
   balance: number | null
   usdValue: number | null
   lastSyncedAt: string | null
-  status: "synced" | "pending_sync" | "config_missing"
+  status: "synced" | "pending_sync" | "config_missing" | "unavailable" | "stale"
+}
+
+export type PineTreeNormalizedRail = {
+  rail: PineTreeWalletRail
+  display_name: "Base" | "Solana" | "Bitcoin"
+  connected: boolean
+  balance: {
+    asset: "USDC" | "BTC"
+    amount: string | null
+    usd_value: string | null
+    status: PineTreeBalanceAsset["status"]
+  }
+  withdrawal_available: boolean
 }
 
 export type PineTreeWalletSyncResult = {
@@ -31,6 +45,9 @@ export type PineTreeWalletSyncResult = {
     solana: PineTreeBalanceAsset[]
     bitcoin: PineTreeBalanceAsset[]
   }
+  status: "missing" | "pending" | "ready" | "needs_attention"
+  total_balance_usd: string | null
+  rails: PineTreeNormalizedRail[]
   totalUsd: number | null
   lastSyncedAt: string | null
   recentActivity: Array<{
@@ -65,6 +82,41 @@ function latestTimestamp(values: Array<string | null>) {
     .filter((value) => Number.isFinite(value))
   if (dates.length === 0) return null
   return new Date(Math.max(...dates)).toISOString()
+}
+
+function formatDecimal(value: number | null): string | null {
+  if (value === null || !Number.isFinite(value)) return null
+  return String(value)
+}
+
+function formatUsd(value: number | null): string | null {
+  if (value === null || !Number.isFinite(value)) return null
+  return value.toFixed(2)
+}
+
+function normalizeSpeedStatus(value?: string | null): string | null {
+  const normalized = String(value || "").trim().toLowerCase()
+  return normalized || null
+}
+
+function isActiveSpeedAccount(input: {
+  speedAccountId?: string | null
+  speedStatus?: string | null
+}): boolean {
+  return String(input.speedAccountId || "").trim().startsWith("acct_") &&
+    normalizeSpeedStatus(input.speedStatus) === "active"
+}
+
+function walletStatus(input: {
+  profileStatus?: string | null
+  baseReady: boolean
+  solanaReady: boolean
+  bitcoinReady: boolean
+}): PineTreeWalletSyncResult["status"] {
+  if (input.profileStatus === "needs_attention") return "needs_attention"
+  if (input.baseReady && input.solanaReady && input.bitcoinReady && input.profileStatus === "ready") return "ready"
+  if (!input.profileStatus || input.profileStatus === "not_created") return "missing"
+  return "pending"
 }
 
 async function fetchSolanaSolBalance(address: string): Promise<number> {
@@ -193,14 +245,9 @@ export async function getPineTreeWalletBalanceSnapshot(
     setup_status?: string
   }
   const speedConfig = getPineTreeSpeedConfigStatus()
-  const speedAccountReady = Boolean(
-    lightningProfile?.status === "ready" ||
-    (
-      String(speedCredentials.speed_account_id || speedCredentials.account_id || "").trim() &&
-      (String(speedCredentials.setup_status || "").trim() === "ready" ||
-        String(speedCredentials.setup_status || "").trim() === "ready_for_payments")
-    )
-  )
+  const speedAccountId = String(lightningProfile?.speed_account_id || speedCredentials.speed_account_id || speedCredentials.account_id || "").trim()
+  const speedStatus = lightningProfile?.speed_connected_account_status || speedCredentials.setup_status || ""
+  const speedAccountReady = isActiveSpeedAccount({ speedAccountId, speedStatus })
   const railReadiness = buildPineTreeRailReadiness({
     providers,
     walletProfile: profile,
@@ -218,11 +265,14 @@ export async function getPineTreeWalletBalanceSnapshot(
   const toBalance = (def: typeof BALANCE_DEFS[number]): PineTreeBalanceAsset => {
     const key = balanceKey(def.rail, def.asset)
     const row = byAsset.get(key)
-    const balance = row ? Number(row.balance ?? 0) : null
+    const rowBalance = row ? Number(row.balance ?? 0) : null
+    const balance = def.rail === "bitcoin" ? null : rowBalance
     const price = def.asset === "USDC" ? 1 : def.asset === "SOL" ? prices.SOL : def.asset === "ETH" ? prices.ETH : prices.BTC
 
     let status: PineTreeBalanceAsset["status"]
-    if (row) {
+    if (def.rail === "bitcoin") {
+      status = speedAccountReady ? "unavailable" : "pending_sync"
+    } else if (row) {
       status = "synced"
     } else if (def.rail === "base" && hasBaseAddress && !baseConfigured) {
       status = "config_missing"
@@ -267,12 +317,69 @@ export async function getPineTreeWalletBalanceSnapshot(
     }
   })
 
+  const baseReady = railReadiness.base.walletProvisioned
+  const solanaReady = railReadiness.solana.walletProvisioned
+  const bitcoinReady = railReadiness.bitcoin_lightning.walletProvisioned
+  const normalizedRails: PineTreeNormalizedRail[] = [
+    {
+      rail: "base",
+      display_name: "Base",
+      connected: baseReady,
+      balance: (() => {
+        const usdc = all.find((item) => item.rail === "base" && item.asset === "USDC")
+        return {
+          asset: "USDC" as const,
+          amount: formatDecimal(usdc?.balance ?? null),
+          usd_value: formatUsd(usdc?.usdValue ?? null),
+          status: usdc?.status ?? "pending_sync",
+        }
+      })(),
+      withdrawal_available: railReadiness.base.withdrawalReady,
+    },
+    {
+      rail: "solana",
+      display_name: "Solana",
+      connected: solanaReady,
+      balance: (() => {
+        const usdc = all.find((item) => item.rail === "solana" && item.asset === "USDC")
+        return {
+          asset: "USDC" as const,
+          amount: formatDecimal(usdc?.balance ?? null),
+          usd_value: formatUsd(usdc?.usdValue ?? null),
+          status: usdc?.status ?? "pending_sync",
+        }
+      })(),
+      withdrawal_available: railReadiness.solana.withdrawalReady,
+    },
+    {
+      rail: "bitcoin",
+      display_name: "Bitcoin",
+      connected: bitcoinReady,
+      balance: {
+        asset: "BTC",
+        amount: null,
+        usd_value: null,
+        status: bitcoinReady ? "unavailable" : "pending_sync",
+      },
+      withdrawal_available: false,
+    },
+  ]
+  void PINETREE_INTERNAL_RAIL_PROVIDER
+
   return {
     readiness: {
-      base: railReadiness.base.walletProvisioned,
-      solana: railReadiness.solana.walletProvisioned,
-      bitcoin: railReadiness.bitcoin_lightning.walletProvisioned,
+      base: baseReady,
+      solana: solanaReady,
+      bitcoin: bitcoinReady,
     },
+    status: walletStatus({
+      profileStatus: profile?.status,
+      baseReady,
+      solanaReady,
+      bitcoinReady,
+    }),
+    total_balance_usd: formatUsd(totalUsd),
+    rails: normalizedRails,
     balances: {
       base: all.filter((item) => item.rail === "base"),
       solana: all.filter((item) => item.rail === "solana"),

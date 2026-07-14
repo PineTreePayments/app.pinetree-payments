@@ -34,6 +34,7 @@ import {
   type WithdrawalSigner,
 } from "@/providers/wallets/withdrawalSigner"
 import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
+import { isDynamicBtcLegacyEnabled } from "@/lib/pinetreeDynamicBtcLegacy"
 
 export type CreateWalletWithdrawalReviewInput = {
   rail: string
@@ -247,6 +248,9 @@ export async function createWalletWithdrawalReview(
   signer: WithdrawalSigner = createDefaultWithdrawalSigner()
 ): Promise<CreateWalletWithdrawalReviewResult> {
   const validated = validateWalletWithdrawalInput(input)
+  if (validated.rail === "bitcoin" && !isDynamicBtcLegacyEnabled()) {
+    throw Object.assign(new Error("Bitcoin withdrawals are not available yet."), { status: 409 })
+  }
   const [profile, providers, lightningProfile] = await Promise.all([
     getPineTreeWalletProfile(merchantId),
     import("@/database/merchants").then((mod) => mod.getMerchantProviders(merchantId)).catch(() => []),
@@ -531,6 +535,9 @@ export async function prepareDynamicWalletWithdrawal(
     destinationAddress: request.destination_address,
     amountDecimal: request.amount_decimal,
   })
+  if (validated.rail === "bitcoin" && !isDynamicBtcLegacyEnabled()) {
+    throw Object.assign(new Error("Bitcoin wallet approval is not available yet."), { status: 409 })
+  }
   const sourceAddress = getSourceAddressForRail(profile, validated.rail)
 
   if (hasReusablePreparedPayload) {
@@ -624,6 +631,9 @@ export async function completeDynamicWalletWithdrawal(
   }
 
   if (request.rail === "bitcoin") {
+    if (!isDynamicBtcLegacyEnabled()) {
+      throw Object.assign(new Error("Bitcoin wallet approval is not available yet."), { status: 409 })
+    }
     const signedPsbtBase64 = String(input.signedPsbtBase64 || input.signedPayload?.signedPsbt || "").trim()
     if (!signedPsbtBase64) {
       throw Object.assign(new Error("Signed Bitcoin PSBT is required."), { status: 400 })
@@ -763,6 +773,9 @@ async function buildDynamicWithdrawalPayload(input: {
   sourceAddressType?: string | null
 }): Promise<Omit<PreparedDynamicWithdrawal, "request" | "approvalMethod" | "provider">> {
   if (input.rail === "bitcoin") {
+    if (!isDynamicBtcLegacyEnabled()) {
+      throw Object.assign(new Error("Bitcoin wallet approval is not available yet."), { status: 409 })
+    }
     if (input.asset !== "BTC") {
       throw Object.assign(new Error("Unsupported rail/asset combination."), { status: 400 })
     }

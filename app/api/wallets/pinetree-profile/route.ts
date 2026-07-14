@@ -11,6 +11,7 @@ import {
 import { getMerchantByAuthUserId, getMerchantById } from "@/database/merchants"
 import { syncPineTreeWalletProfileProviders } from "@/database/pineTreeWalletProfileProviderSync"
 import { provisionMerchantBitcoinAddress } from "@/engine/pineTreeBitcoinAddressProvisioning"
+import { isDynamicBtcLegacyEnabled } from "@/lib/pinetreeDynamicBtcLegacy"
 import { assertMerchantBusinessProfileComplete } from "@/engine/businessProfile"
 import { withOperationTimeout } from "@/engine/promiseTimeout"
 
@@ -363,7 +364,15 @@ export async function POST(req: NextRequest) {
       body.solana_address
     )
 
-    const bitcoinProvisioning = hasBtcAddressInput && normalizedBtcAddress
+    const dynamicBtcLegacyEnabled = isDynamicBtcLegacyEnabled()
+    if (hasBtcAddressInput && !dynamicBtcLegacyEnabled) {
+      console.info("[pinetree-wallets] dynamic_btc_profile_input_ignored", {
+        merchantId,
+        btcAddressInputPresent: true,
+        dynamicBtcLegacyEnabled: false,
+      })
+    }
+    const bitcoinProvisioning = dynamicBtcLegacyEnabled && hasBtcAddressInput && normalizedBtcAddress
       ? await provisionMerchantBitcoinAddress({
         merchantId,
         existingProfile,
@@ -386,7 +395,7 @@ export async function POST(req: NextRequest) {
       baseAddress: "base_address" in body ? (body.base_address as string | null) : undefined,
       solanaAddress: "solana_address" in body ? (body.solana_address as string | null) : undefined,
       bitcoinLightningAddress: "bitcoin_lightning_address" in body ? (body.bitcoin_lightning_address as string | null) : undefined,
-      bitcoinOnchainAddress: "bitcoin_onchain_address" in body ? (body.bitcoin_onchain_address as string | null) : undefined,
+      bitcoinOnchainAddress: dynamicBtcLegacyEnabled && "bitcoin_onchain_address" in body ? (body.bitcoin_onchain_address as string | null) : undefined,
       bitcoinLightningStatus: "bitcoin_lightning_status" in body ? (body.bitcoin_lightning_status as "not_configured" | "pending" | "ready" | "needs_attention" | undefined) : undefined,
       bitcoinLightningProvider: "bitcoin_lightning_provider" in body ? (body.bitcoin_lightning_provider as string | null) : undefined,
       bitcoinLightningAccountId: "bitcoin_lightning_account_id" in body ? (body.bitcoin_lightning_account_id as string | null) : undefined,

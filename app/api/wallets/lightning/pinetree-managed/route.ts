@@ -44,18 +44,32 @@ function safeLightningProfile(profile: MerchantLightningProfile | null) {
   return {
     id: profile.id,
     merchant_id: profile.merchant_id,
-    provider: profile.provider,
     status: profile.status,
-    speed_connected_account_id: profile.speed_connected_account_id,
-    speed_connected_account_relationship_id: profile.speed_connected_account_relationship_id,
-    speed_account_id: profile.speed_account_id,
-    speed_connected_account_status: profile.speed_connected_account_status,
-    setup_url: profile.speed_connect_setup_url,
     receive_mode: profile.receive_mode,
     setup_source: profile.setup_source,
     last_checked_at: profile.last_checked_at,
     created_at: profile.created_at,
     updated_at: profile.updated_at,
+  }
+}
+
+function normalizedLightningRail(profile: MerchantLightningProfile | null) {
+  const accountId = String(profile?.speed_account_id || "").trim()
+  const providerStatus = String(profile?.speed_connected_account_status || "").trim().toLowerCase()
+  const connected = accountId.startsWith("acct_") && providerStatus === "active"
+  return {
+    rail: "bitcoin" as const,
+    display_name: "Bitcoin" as const,
+    status: profile?.status || "pending",
+    connected,
+    withdrawal_available: false,
+    balance: {
+      asset: "BTC" as const,
+      amount: null,
+      usd_value: null,
+      status: connected ? "unavailable" as const : "pending_sync" as const,
+    },
+    message: profile?.provider_error_message || null,
   }
 }
 
@@ -76,17 +90,10 @@ export async function GET(req: NextRequest) {
           ? "pending"
           : "ready"
 
-      return NextResponse.json({
-        profile: {
+      const syntheticProfile = {
           id: profile?.id || `pinetree-wallet:${merchantId}:lightning`,
           merchant_id: merchantId,
-          provider: "speed",
           status,
-          speed_connected_account_id: null,
-          speed_connected_account_relationship_id: null,
-          speed_account_id: null,
-          speed_connected_account_status: null,
-          setup_url: null,
           receive_mode: "invoice",
           setup_source: "pinetree_managed",
           settlement_mode: SPEED_PLATFORM_TREASURY_SWEEP_MODE,
@@ -96,6 +103,11 @@ export async function GET(req: NextRequest) {
           created_at: profile?.created_at || null,
           updated_at: profile?.updated_at || null,
         }
+      return NextResponse.json({
+        profile: syntheticProfile,
+        rail: normalizedLightningRail(null),
+        setup_status: status,
+        status,
       })
     }
 
@@ -110,7 +122,12 @@ export async function GET(req: NextRequest) {
       scheduleLightningSweepProcessing("wallet_page_load", { limit: 2 })
     }
 
-    return NextResponse.json({ profile: safeLightningProfile(profile) })
+    return NextResponse.json({
+      profile: safeLightningProfile(profile),
+      rail: normalizedLightningRail(profile),
+      setup_status: profile?.status || "pending",
+      status: profile?.status || "pending",
+    })
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to load Lightning profile" },
@@ -188,6 +205,7 @@ export async function POST(req: NextRequest) {
           : "failed"
       return NextResponse.json({
         profile: safeLightningProfile(profile),
+        rail: normalizedLightningRail(profile),
         setup_status: retryableStatus,
         status: retryableStatus,
         providerCode: null,
@@ -204,6 +222,7 @@ export async function POST(req: NextRequest) {
       profile?.status === "needs_attention" && ensureResult?.providerCode ? 422 : 200
     return NextResponse.json({
       profile: safeLightningProfile(profile),
+      rail: normalizedLightningRail(profile),
       setup_status: profile?.status || "pending",
       // Structured outcome for the calling client - status mirrors setup_status;
       // providerCode/fieldErrors surface Speed's own /connect/custom validation
