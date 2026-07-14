@@ -8,7 +8,6 @@
  */
 
 import { createHash } from "node:crypto"
-import { getMerchantById } from "@/database/merchants"
 import {
   getMerchantLightningProfile,
   upsertMerchantLightningProfile,
@@ -135,6 +134,14 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 export function isValidSpeedCustomConnectEmail(value?: string | null): boolean {
   const email = String(value || "").trim().toLowerCase()
   return email.length <= 320 && EMAIL_RE.test(email)
+}
+
+export function buildManagedSpeedEmail(merchantId: string): string {
+  const compactMerchantId = String(merchantId || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "")
+  if (!compactMerchantId) {
+    throw new Error("Valid merchant id is required to create a managed Speed email.")
+  }
+  return `speed-${compactMerchantId}@speed.pinetree-payments.com`
 }
 
 export function speedCustomConnectPasswordPolicyPass(value?: string | null): boolean {
@@ -381,6 +388,7 @@ async function ensureManagedLightningForMerchantImpl(
         accountStatus: lightningProfile.speed_connected_account_status || undefined,
         setupStatus: lightningProfile.status === "ready" ? "ready_for_payments" : lightningProfile.status,
         mode: checked.mode,
+        managedAccountEmail: String(checked.provider_response_summary?.managed_account_email || "") || undefined,
         enabled: lightningProfile.status === "ready",
         notes: [
           "PineTree created this Speed Custom Connect merchant account server-side.",
@@ -460,6 +468,7 @@ async function ensureManagedLightningForMerchantImpl(
           accountStatus: lightningProfile.speed_connected_account_status || undefined,
           setupStatus: lightningProfile.status === "ready" ? "ready_for_payments" : lightningProfile.status,
           mode: checked.mode,
+          managedAccountEmail: String(checked.provider_response_summary?.managed_account_email || "") || undefined,
           enabled: lightningProfile.status === "ready",
           notes: [
             "PineTree recovered this Speed Custom Connect merchant account from local server-side metadata.",
@@ -522,10 +531,7 @@ async function ensureManagedLightningForMerchantImpl(
     }
   }
 
-  const [merchant, businessProfile] = await Promise.all([
-    getMerchantById(merchantId),
-    getMerchantBusinessProfile(merchantId),
-  ])
+  const businessProfile = await getMerchantBusinessProfile(merchantId)
 
   if (businessProfile.profile_status !== "complete") {
     const lightningProfile = await upsertMerchantLightningProfile({
@@ -552,50 +558,7 @@ async function ensureManagedLightningForMerchantImpl(
     }
   }
 
-  // Business Profile contact_email is the primary connected-account login
-  // email - it's a required, merchant-confirmed field. merchant.email/authEmail
-  // are a fallback only for legacy profiles saved before contact_email existed.
-  const contactEmail = String(businessProfile.contact_email || "").trim().toLowerCase()
-  const merchantEmail = String(merchant?.email || "").trim().toLowerCase()
-  const authEmail = String(options.authEmail || "").trim().toLowerCase()
-  const speedEmail = isValidSpeedCustomConnectEmail(contactEmail)
-    ? contactEmail
-    : isValidSpeedCustomConnectEmail(merchantEmail)
-      ? merchantEmail
-      : isValidSpeedCustomConnectEmail(authEmail)
-        ? authEmail
-        : null
-
-  if (!speedEmail) {
-    console.warn("[pinetree-managed-lightning] speed_connect_missing_email", {
-      merchant_id: merchantId,
-      contactEmailPresent: Boolean(contactEmail),
-      merchantEmailPresent: Boolean(merchantEmail),
-      authEmailPresent: Boolean(authEmail),
-    })
-    const lightningProfile = await upsertMerchantLightningProfile({
-      merchantId,
-      status: "needs_attention",
-      speedConnectedAccountStatus: "speed_connect_missing_email",
-      providerErrorMessage: "Lightning provisioning needs a valid merchant email.",
-    })
-    await syncLightningStatusIntoWalletProfile(merchantId, lightningProfile)
-    console.info("[pinetree-managed-lightning] wallet_lightning_auto_provision_skipped", {
-      merchant_id: merchantId,
-      status: lightningProfile.status,
-      safeReason: "missing_valid_email",
-    })
-    return {
-      status: lightningProfile.status,
-      action: "provisioning_incomplete",
-      speedConnectedAccountId: null,
-      speedConnectedAccountRelationshipId: null,
-      speedConnectedAccountStatus: lightningProfile.speed_connected_account_status,
-      providerCode: null,
-      fieldErrors: [],
-      merchantMessage: null,
-    }
-  }
+  const speedEmail = buildManagedSpeedEmail(merchantId)
 
   const speedPassword = resolveSpeedAccountPassword()
   const passwordPolicyPass = speedCustomConnectPasswordPolicyPass(speedPassword)
@@ -828,6 +791,7 @@ async function ensureManagedLightningForMerchantImpl(
     // Profile actually changed before allowing another automatic attempt.
     providerResponseSummary: {
       ...speedSetup.provider_response_summary,
+      managed_account_email: speedEmail,
       ...(speedSetup.provider_code ? { provider_code: speedSetup.provider_code } : {}),
       ...(speedFieldErrors.length > 0 ? { field_errors: speedFieldErrors } : {}),
       speed_request_fingerprint: requestFingerprint,
@@ -843,6 +807,7 @@ async function ensureManagedLightningForMerchantImpl(
       accountStatus: lightningProfile.speed_connected_account_status || undefined,
       setupStatus: status === "ready" ? "ready_for_payments" : status,
       mode: speedSetup.mode,
+      managedAccountEmail: speedEmail,
       enabled: status === "ready",
       notes: [
         "PineTree created this Speed Custom Connect merchant account server-side.",

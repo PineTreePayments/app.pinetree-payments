@@ -32,6 +32,7 @@ export const SPEED_PROVIDER_NAME = "lightning_speed"
 type SpeedCredentials = {
   speed_account_id?: string
   speed_account_status?: string
+  speed_managed_account_email?: string
   payout_destination?: string
   payout_type?: string
   setup_status?: string
@@ -115,6 +116,7 @@ export async function saveMerchantSpeedConnection(
     payoutType?: string
     setupStatus?: string
     mode?: SpeedMode
+    managedAccountEmail?: string
     notes?: string[]
     enabled?: boolean
   }
@@ -124,6 +126,7 @@ export async function saveMerchantSpeedConnection(
   const credentials: SpeedCredentials = {
     speed_account_id: params.accountId || undefined,
     speed_account_status: params.accountStatus || (params.accountId ? "configured" : "pending"),
+    speed_managed_account_email: params.managedAccountEmail || undefined,
     payout_destination: params.payoutDestination || undefined,
     payout_type: params.payoutType || undefined,
     setup_status: params.setupStatus || "pending_speed_connect_confirmation",

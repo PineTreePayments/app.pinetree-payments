@@ -78,6 +78,7 @@ export type SpeedConnectedAccountSummary = {
   status: string | null
   type: string | null
   setup_url_present?: boolean
+  managed_account_email?: string
   source: "existing_connected_account" | "invite_account_link" | "not_configured" | "error"
 }
 
