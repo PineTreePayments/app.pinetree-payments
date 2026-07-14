@@ -286,6 +286,20 @@ type WithdrawalDiagnostics = {
   willOpenDynamicModal: boolean
 }
 
+type ProviderSheetGateOptions = {
+  selectedRail?: WithdrawalRail | null
+  explicitUserAction?: boolean
+  signatureRequired?: boolean
+}
+
+type ProviderSheetGateState = {
+  walletReady: boolean
+  profileReady: boolean
+  baseReady: boolean
+  solanaReady: boolean
+  bitcoinReady: boolean
+}
+
 type WithdrawalAssetOption = {
   rail: WithdrawalRail
   asset: WithdrawalAsset
@@ -2820,12 +2834,20 @@ function PineTreeWalletRuntime() {
   const [withdrawalApprovalError, setWithdrawalApprovalError] = useState("")
   const [reviewingWithdrawal, setReviewingWithdrawal] = useState(false)
   const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
+  const [withdrawalAuthorizationRecoveryOpen, setWithdrawalAuthorizationRecoveryOpen] = useState(false)
   const [withdrawalReconnectPending, setWithdrawalReconnectPending] = useState(false)
   const withdrawalReconnectSourceRef = useRef<string | null>(null)
   const dynamicHydrationAttemptRef = useRef<string | null>(null)
   const dynamicWalletRuntimeCountRef = useRef(0)
   const dynamicApprovalAvailableRef = useRef(false)
   const dynamicProfileReadyRef = useRef(false)
+  const providerSheetGateStateRef = useRef<ProviderSheetGateState>({
+    walletReady: false,
+    profileReady: false,
+    baseReady: false,
+    solanaReady: false,
+    bitcoinReady: false,
+  })
   const lastWalletSetupPrimaryStateRef = useRef<WalletSetupPrimaryState | null>(null)
   const repairProfileIdRef = useRef<string | null>(null)
   const pendingWalletProvisionAttemptRef = useRef<string | null>(null)
@@ -3742,7 +3764,43 @@ function PineTreeWalletRuntime() {
     recordWalletSetupFailure,
   ])
 
-  const openDynamicEmailFallbackAuth = useCallback((reason: string) => {
+  const providerSheetDiagnosticPayload = useCallback((reason: string, options?: ProviderSheetGateOptions) => {
+    const readiness = providerSheetGateStateRef.current
+    return {
+      reason,
+      selectedRail: options?.selectedRail ?? null,
+      explicitUserAction: Boolean(options?.explicitUserAction),
+      walletReady: readiness.walletReady,
+      profileReady: readiness.profileReady,
+      baseReady: readiness.baseReady,
+      solanaReady: readiness.solanaReady,
+      bitcoinReady: readiness.bitcoinReady,
+      signatureRequired: Boolean(options?.signatureRequired),
+      runtimeUserPresent: Boolean(user),
+      runtimeWalletCount: dynamicWalletRuntimeCountRef.current,
+    }
+  }, [user])
+
+  const logProviderSheetOpenRequested = useCallback((reason: string, options?: ProviderSheetGateOptions) => {
+    const payload = providerSheetDiagnosticPayload(reason, options)
+    console.info("[pinetree-wallets] wallet_provider_sheet_open_requested", payload)
+    emitWalletSetupDebugEvent("wallet_provider_sheet_open_requested", payload)
+    return payload
+  }, [providerSheetDiagnosticPayload])
+
+  const openDynamicEmailFallbackAuth = useCallback((reason: string, options?: ProviderSheetGateOptions) => {
+    const gate = logProviderSheetOpenRequested(reason, options)
+    if (gate.walletReady && !gate.signatureRequired) {
+      const suppressed = {
+        reason,
+        walletReady: gate.walletReady,
+        signatureRequired: gate.signatureRequired,
+        explicitUserAction: gate.explicitUserAction,
+      }
+      console.info("[pinetree-wallets] wallet_provider_sheet_open_suppressed", suppressed)
+      emitWalletSetupDebugEvent("wallet_provider_sheet_open_suppressed", suppressed)
+      return false
+    }
     setDynamicVerificationPromptReason(null)
     if (pineTreeControlledDynamicAuthAvailable) {
       const token = accessTokenRef.current
@@ -4226,6 +4284,7 @@ function PineTreeWalletRuntime() {
   }, [
     blockDynamicEmailFallbackAuth,
     dynamicAuthConfig,
+    logProviderSheetOpenRequested,
     logWalletCreationStep,
     pineTreeControlledDynamicAuthAvailable,
     recordWalletSetupFailure,
@@ -4274,7 +4333,7 @@ function PineTreeWalletRuntime() {
       reason,
       merchantEmailPresent: Boolean(merchantEmail),
     })
-    openDynamicEmailFallbackAuth(reason)
+    openDynamicEmailFallbackAuth(reason, { explicitUserAction: true })
   }, [
     dynamicVerificationPromptReason,
     logWalletCreationStep,
@@ -4282,9 +4341,9 @@ function PineTreeWalletRuntime() {
     openDynamicEmailFallbackAuth,
   ])
 
-  const scheduleDynamicEmailFallbackAuth = useCallback((reason: string) => {
+  const scheduleDynamicEmailFallbackAuth = useCallback((reason: string, options?: ProviderSheetGateOptions) => {
     window.setTimeout(() => {
-      openDynamicEmailFallbackAuth(reason)
+      openDynamicEmailFallbackAuth(reason, options)
     }, 0)
   }, [openDynamicEmailFallbackAuth])
 
@@ -6439,6 +6498,9 @@ function PineTreeWalletRuntime() {
     ) {
       return false
     }
+    if (!dynamicSignerWithdrawalRails.includes(withdrawalReview.review.rail)) {
+      return false
+    }
     const sourceAddress = getWithdrawalSourceAddress(profile, withdrawalReview.review.rail)
     return Boolean(
       findDynamicApprovalWalletForSource(
@@ -6457,11 +6519,16 @@ function PineTreeWalletRuntime() {
   const withdrawalDiagnostics = useMemo((): WithdrawalDiagnostics => {
     const railState = walletRailRows.find((row) => row.rail === withdrawalRail)
     const sourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
-    const browserWalletAddresses = [
-      ...(wallets as unknown[]),
-      primaryWallet,
-    ].filter(Boolean).flatMap((wallet) => getDynamicWalletAddresses(wallet as DynamicWalletLike))
-    const matchingWallet = findDynamicWalletForSource(wallets as unknown[], primaryWallet, sourceAddress || "", withdrawalRail)
+    const usesDynamicSigner = dynamicSignerWithdrawalRails.includes(withdrawalRail)
+    const browserWalletAddresses = usesDynamicSigner
+      ? [
+          ...(wallets as unknown[]),
+          primaryWallet,
+        ].filter(Boolean).flatMap((wallet) => getDynamicWalletAddresses(wallet as DynamicWalletLike))
+      : []
+    const matchingWallet = usesDynamicSigner
+      ? findDynamicWalletForSource(wallets as unknown[], primaryWallet, sourceAddress || "", withdrawalRail)
+      : null
     const dynamicMethodAvailable = matchingWallet ? dynamicWalletSupportsRail(matchingWallet, withdrawalRail) : false
     const addressMismatch = Boolean(
       sourceAddress &&
@@ -6643,6 +6710,16 @@ function PineTreeWalletRuntime() {
     profileHasDynamicAddresses,
     openWalletReconnectNeeded,
   ])
+
+  useEffect(() => {
+    providerSheetGateStateRef.current = {
+      walletReady: walletSetupPrimaryState === "ready",
+      profileReady: Boolean(profile?.status === "ready"),
+      baseReady,
+      solanaReady,
+      bitcoinReady,
+    }
+  }, [baseReady, bitcoinReady, profile?.status, solanaReady, walletSetupPrimaryState])
 
   useEffect(() => {
     if (walletSetupPrimaryState === "failed") {
@@ -7092,6 +7169,15 @@ function PineTreeWalletRuntime() {
   }
 
   function handleFinishWalletSetup() {
+    if (providerSheetGateStateRef.current.walletReady) {
+      openDynamicEmailFallbackAuth("finish_embedded_wallet_setup", {
+        selectedRail: withdrawalRail,
+        explicitUserAction: false,
+        signatureRequired: false,
+      })
+      setWithdrawalAuthorizationRecoveryOpen(true)
+      return
+    }
     void beginWalletSetupRepair("finish_embedded_wallet_setup")
   }
 
@@ -7241,12 +7327,26 @@ function PineTreeWalletRuntime() {
 
     // No Dynamic wallets are active. Trigger the Dynamic auth flow to reconnect the session.
     // The post-reconnect useEffect will re-run address matching once wallets load.
+    if (providerSheetGateStateRef.current.walletReady) {
+      openDynamicEmailFallbackAuth("withdrawal_reconnect", {
+        selectedRail: withdrawalRail,
+        explicitUserAction: false,
+        signatureRequired: false,
+      })
+      setWithdrawalReconnectPending(false)
+      setWithdrawalApprovalError(pineTreeSignerReconnectMessage)
+      return
+    }
     setWithdrawalReconnectPending(true)
     setWithdrawalScreen(withdrawalReview ? "review" : "form")
     void syncProfileFromDynamic()
     setShowDynamicUserProfile(false)
     setShowAuthFlow(false)
-    scheduleDynamicEmailFallbackAuth("withdrawal_reconnect")
+    scheduleDynamicEmailFallbackAuth("withdrawal_reconnect", {
+      selectedRail: withdrawalRail,
+      explicitUserAction: true,
+      signatureRequired: false,
+    })
   }
 
   function handleCreateWallet() {
@@ -7698,11 +7798,17 @@ function PineTreeWalletRuntime() {
 
     const _debugRail = withdrawalReview?.review.rail
     const _debugApprovalMethod = withdrawalReview?.review.approvalMethod
-    if (_debugApprovalMethod === "dynamic_browser") {
+    const _debugRailUsesDynamicSigner = Boolean(_debugRail && dynamicSignerWithdrawalRails.includes(_debugRail))
+    if (_debugApprovalMethod === "dynamic_browser" && _debugRailUsesDynamicSigner) {
+      logProviderSheetOpenRequested("withdrawal_submit_before_signing", {
+        selectedRail: _debugRail ?? null,
+        explicitUserAction: true,
+        signatureRequired: true,
+      })
       await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })
     }
     const _debugSourceAddress = _debugRail ? getWithdrawalSourceAddress(profile, _debugRail) : null
-    const _debugMatchingWallet = _debugRail
+    const _debugMatchingWallet = _debugRail && _debugRailUsesDynamicSigner
       ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, _debugRail, _debugSourceAddress)
       : null
     if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet) {
@@ -7711,6 +7817,9 @@ function PineTreeWalletRuntime() {
           ? solanaWithdrawalReconnectMessage
           : pineTreeSignerReconnectMessage
       )
+      if (_debugRail === "base" || _debugRail === "solana") {
+        setWithdrawalAuthorizationRecoveryOpen(true)
+      }
       setWithdrawalScreen("failed")
       return
     }
@@ -7820,7 +7929,11 @@ function PineTreeWalletRuntime() {
       setWithdrawalScreen("failed")
       return
     } catch (error) {
-      setWithdrawalApprovalError(sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined))
+      const safeMessage = sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined)
+      setWithdrawalApprovalError(safeMessage)
+      if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana")) {
+        setWithdrawalAuthorizationRecoveryOpen(true)
+      }
       setWithdrawalScreen("failed")
     } finally {
       setSubmittingWithdrawal(false)
@@ -8143,6 +8256,50 @@ function PineTreeWalletRuntime() {
 
       {process.env.NODE_ENV !== "production" ? (
         <WalletDiagnosticsPanel wallets={wallets} sdkNetworkGroups={dynamicNetworkAddresses} />
+      ) : null}
+
+      {withdrawalAuthorizationRecoveryOpen ? (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setWithdrawalAuthorizationRecoveryOpen(false)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pinetree-withdrawal-auth-recovery-title"
+            className="w-full max-w-[26rem] rounded-[1.25rem] border border-white/70 bg-white px-5 py-5 shadow-[0_28px_80px_rgba(15,23,42,0.28)]"
+          >
+            <h2 id="pinetree-withdrawal-auth-recovery-title" className="text-base font-semibold text-gray-950">
+              We couldn't authorize this withdrawal
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.
+            </p>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setWithdrawalAuthorizationRecoveryOpen(false)
+                  void handleSubmitWithdrawal()
+                }}
+                disabled={submittingWithdrawal || !withdrawalReview}
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-2"
+              >
+                Try Again
+              </button>
+              <button
+                type="button"
+                onClick={() => setWithdrawalAuthorizationRecoveryOpen(false)}
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 sm:order-1"
+              >
+                Cancel
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       {walletOpen ? (

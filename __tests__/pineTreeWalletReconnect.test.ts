@@ -8,12 +8,13 @@ const page = fs.readFileSync(
 )
 
 describe("PineTree Wallet reconnect flow", () => {
-  it("Open PineTree Wallet triggers Dynamic auth/connect when signer context is missing", () => {
+  it("Open PineTree Wallet suppresses provider auth when the PineTree Wallet is already ready", () => {
     expect(page).toContain("async function handleWithdrawalReconnect()")
     expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_reconnect_before_lookup",')
-    expect(page).toContain("setShowDynamicUserProfile(false)")
-    expect(page).toContain("setShowAuthFlow(false)")
-    expect(page).toContain('scheduleDynamicEmailFallbackAuth("withdrawal_reconnect")')
+    expect(page).toContain("if (providerSheetGateStateRef.current.walletReady) {")
+    expect(page).toContain('openDynamicEmailFallbackAuth("withdrawal_reconnect", {')
+    expect(page).toContain("signatureRequired: false")
+    expect(page).toContain("wallet_provider_sheet_open_suppressed")
   })
 
   it("reconnect refreshes Dynamic wallet/profile state before returning to review", () => {
@@ -23,6 +24,41 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain("await syncProfileFromDynamic()")
     expect(page).toContain('setWithdrawalScreen(withdrawalReview ? "review" : "form")')
     expect(page).toContain("setWithdrawalReconnectPending(true)")
+  })
+
+  it("logs safe provider sheet diagnostics and only allows Base/Solana final authorization to require signing", () => {
+    expect(page).toContain("type ProviderSheetGateOptions")
+    expect(page).toContain("wallet_provider_sheet_open_requested")
+    expect(page).toContain("selectedRail")
+    expect(page).toContain("explicitUserAction")
+    expect(page).toContain("walletReady")
+    expect(page).toContain("profileReady")
+    expect(page).toContain("baseReady")
+    expect(page).toContain("solanaReady")
+    expect(page).toContain("bitcoinReady")
+    expect(page).toContain("signatureRequired")
+    expect(page).toContain("runtimeUserPresent")
+    expect(page).toContain("runtimeWalletCount")
+    expect(page).toContain('logProviderSheetOpenRequested("withdrawal_submit_before_signing", {')
+    expect(page).toContain("explicitUserAction: true")
+    expect(page).toContain("signatureRequired: true")
+    expect(page).toContain('if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
+  })
+
+  it("keeps Bitcoin out of Dynamic authorization recovery", () => {
+    expect(page).toContain("if (_debugRail === \"base\" || _debugRail === \"solana\") {")
+    expect(page).toContain("setWithdrawalAuthorizationRecoveryOpen(true)")
+    expect(page).toContain("const usesDynamicSigner = dynamicSignerWithdrawalRails.includes(withdrawalRail)")
+    expect(page).toContain("const _debugRailUsesDynamicSigner = Boolean(_debugRail && dynamicSignerWithdrawalRails.includes(_debugRail))")
+    expect(page).not.toContain('selectedRail: "bitcoin"')
+  })
+
+  it("shows PineTree-branded withdrawal authorization recovery without changing ready state", () => {
+    expect(page).toContain("We couldn't authorize this withdrawal")
+    expect(page).toContain("Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.")
+    expect(page).toContain("Try Again")
+    expect(page).toContain("Cancel")
+    expect(page).not.toContain("setWalletSetupPrimaryState")
   })
 
   it("reconnect and signing lookup use all Dynamic wallets plus primary wallet", () => {

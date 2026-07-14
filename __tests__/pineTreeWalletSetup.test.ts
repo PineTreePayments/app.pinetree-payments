@@ -2532,7 +2532,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(reconnectFn).toContain("syncProfileFromDynamic")
   })
 
-  it("reconnect handler triggers Dynamic auth flow when no wallets are loaded", () => {
+  it("reconnect handler suppresses Dynamic auth flow for already-ready wallets", () => {
     // When no Dynamic wallets are active (wallets[] empty, no primaryWallet), the handler
     // opens the temporary Dynamic email fallback and then waits
     // for wallets to update — it does NOT just navigate to the overview tab.
@@ -2540,7 +2540,10 @@ describe("PineTree embedded wallet setup", () => {
       page.indexOf("function handleWithdrawalReconnect()"),
       page.indexOf("function handleCreateWallet()")
     )
-    expect(reconnectFn).toContain('scheduleDynamicEmailFallbackAuth("withdrawal_reconnect")')
+    expect(reconnectFn).toContain("if (providerSheetGateStateRef.current.walletReady) {")
+    expect(reconnectFn).toContain('openDynamicEmailFallbackAuth("withdrawal_reconnect", {')
+    expect(reconnectFn).toContain("signatureRequired: false")
+    expect(page).toContain("wallet_provider_sheet_open_suppressed")
   })
 
   it("no Wallet approval pill appears in withdrawal review or failure screens", () => {
@@ -2609,7 +2612,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(dynamicSignerLookup).toContain("normalizedCandidate === normalizedSource")
   })
 
-  it("reconnect with wallets loaded but address mismatch opens Dynamic auth before failing", () => {
+  it("reconnect with wallets loaded but address mismatch respects the ready-state provider gate", () => {
     // When handleWithdrawalReconnect runs and Dynamic wallets are already loaded but none
     // match the DB source address, it opens the temporary fallback and lets the reconnect
     // effect validate the refreshed wallet list.
@@ -2617,9 +2620,10 @@ describe("PineTree embedded wallet setup", () => {
       page.indexOf("async function handleWithdrawalReconnect()"),
       page.indexOf("function handleCreateWallet()")
     )
+    expect(reconnectFn).toContain("if (providerSheetGateStateRef.current.walletReady) {")
     expect(reconnectFn).toContain("setWithdrawalReconnectPending(true)")
-    expect(reconnectFn).toContain("setShowDynamicUserProfile(false)")
-    expect(reconnectFn).toContain('scheduleDynamicEmailFallbackAuth("withdrawal_reconnect")')
+    expect(reconnectFn).toContain('scheduleDynamicEmailFallbackAuth("withdrawal_reconnect", {')
+    expect(reconnectFn).toContain("explicitUserAction: true")
     expect(page).toContain("This browser is connected to a different PineTree Wallet session. Restore the PineTree Wallet used for this merchant, then try again.")
   })
 
