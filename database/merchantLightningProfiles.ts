@@ -35,6 +35,7 @@ export type MerchantLightningProfile = {
   speed_header_account_id: string | null
   speed_connected_account_status: string | null
   speed_connect_setup_url: string | null
+  managed_account_email: string | null
   provider_response_summary: Record<string, unknown> | null
   provider_error_message: string | null
   receive_mode: "invoice"
@@ -53,6 +54,7 @@ export type UpsertLightningProfileInput = {
   speedHeaderAccountId?: string | null
   speedConnectedAccountStatus?: string | null
   speedConnectSetupUrl?: string | null
+  managedAccountEmail?: string | null
   providerResponseSummary?: Record<string, unknown> | null
   providerErrorMessage?: string | null
 }
@@ -140,6 +142,9 @@ export async function upsertMerchantLightningProfile(
     speed_connect_setup_url: input.speedConnectSetupUrl !== undefined
       ? input.speedConnectSetupUrl
       : existing?.speed_connect_setup_url ?? null,
+    managed_account_email: input.managedAccountEmail !== undefined
+      ? input.managedAccountEmail
+      : existing?.managed_account_email ?? null,
     provider_response_summary: input.providerResponseSummary !== undefined
       ? input.providerResponseSummary
       : existing?.provider_response_summary ?? null,

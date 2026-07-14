@@ -380,6 +380,18 @@ export async function createSpeedCustomConnectedAccountForMerchant(
         provider_code: error.providerCode,
         provider_message: error.providerMessage,
         field_errors: error.fieldErrors,
+        email_validation: error.fieldErrors
+          .filter((fieldError) => fieldError.field === "email")
+          .map((fieldError) => ({
+            field: fieldError.field,
+            validationCode: fieldError.validationCode ?? null,
+            validationRule: fieldError.validationRule ?? null,
+            duplicateEmail: Boolean(fieldError.duplicateEmail),
+            malformedFormat: Boolean(fieldError.malformedFormat),
+            unsupportedDomain: Boolean(fieldError.unsupportedDomain),
+            emailLength: Boolean(fieldError.emailLength),
+            emailDeliverability: Boolean(fieldError.emailDeliverability),
+          })),
         request_presence: {
           email: Boolean(input.email),
           password: Boolean(input.password),

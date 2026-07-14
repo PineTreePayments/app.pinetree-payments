@@ -141,7 +141,7 @@ export function buildManagedSpeedEmail(merchantId: string): string {
   if (!compactMerchantId) {
     throw new Error("Valid merchant id is required to create a managed Speed email.")
   }
-  return `speed-${compactMerchantId}@speed.pinetree-payments.com`
+  return `speed-${compactMerchantId}@pinetree-payments.com`
 }
 
 export function speedCustomConnectPasswordPolicyPass(value?: string | null): boolean {
@@ -784,6 +784,7 @@ async function ensureManagedLightningForMerchantImpl(
     speedAccountId: createdAccountId,
     speedConnectedAccountStatus,
     speedConnectSetupUrl: speedSetup.setup_url,
+    managedAccountEmail: speedEmail,
     // Persist Speed's own error code, sanitized field errors, and the request
     // fingerprint alongside the existing response summary so a rejected
     // /connect/custom attempt is diagnosable from the saved row (not just the

@@ -94,6 +94,47 @@ describe("sanitizeSpeedErrorStructureForDiagnostics", () => {
   })
 })
 
+describe("parseSpeedErrorBody email validation classification", () => {
+  it("extracts safe field message details and classifies duplicate email errors", async () => {
+    const { parseSpeedErrorBody } = await import("@/providers/lightning/speedClient")
+    const parsed = parseSpeedErrorBody(JSON.stringify({
+      error_code: "invalid_request_error",
+      errors: [{ field: "email", code: "email_exists", rule: "unique", message: "Email is already registered" }],
+    }))
+
+    expect(parsed.providerCode).toBe("invalid_request_error")
+    expect(parsed.fieldErrors[0]).toMatchObject({
+      field: "email",
+      message: "Email is already registered",
+      validationCode: "email_exists",
+      validationRule: "unique",
+      duplicateEmail: true,
+      malformedFormat: false,
+      unsupportedDomain: false,
+      emailLength: false,
+      emailDeliverability: false,
+    })
+  })
+
+  it("classifies unsupported-domain, malformed, length, and deliverability email validations without leaking emails", async () => {
+    const { parseSpeedErrorBody } = await import("@/providers/lightning/speedClient")
+    const parsed = parseSpeedErrorBody(JSON.stringify({
+      errors: [
+        { field: "email", message: "We don't accept sign-ups from <speed.pinetree-payments.com>. Please use a different email address!" },
+        { field: "email", message: "Invalid email format for merchant@example.test" },
+        { field: "email", message: "Email length exceeds maximum characters" },
+        { field: "email", message: "Email mailbox is not deliverable; MX lookup failed" },
+      ],
+    }))
+
+    expect(parsed.fieldErrors[0]).toMatchObject({ unsupportedDomain: true })
+    expect(parsed.fieldErrors[1]).toMatchObject({ malformedFormat: true, message: "Invalid email format for [redacted-email]" })
+    expect(parsed.fieldErrors[2]).toMatchObject({ emailLength: true })
+    expect(parsed.fieldErrors[3]).toMatchObject({ emailDeliverability: true })
+    expect(JSON.stringify(parsed)).not.toContain("merchant@example.test")
+  })
+})
+
 describe("speedClient /connect/custom", () => {
   let fetchMock: ReturnType<typeof vi.fn>
 
@@ -151,6 +192,43 @@ describe("speedClient /connect/custom", () => {
     expect(Object.keys(body).sort()).toEqual(
       ["account_type", "country", "email", "first_name", "last_name", "password"].sort()
     )
+  })
+
+  it("logs safe pre-fetch email metadata and required-field presence without logging the email or password", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ id: "ca_1", account_id: "acct_1", status: "Active" }),
+        { status: 200 }
+      )
+    )
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined)
+
+    const { createSpeedCustomConnectedAccount } = await import("@/providers/lightning/speedClient")
+    await createSpeedCustomConnectedAccount({
+      country: "US",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      email: "speed-18215ad9c5874be5baf46bef03cb81fc@pinetree-payments.com",
+      password: "temporary-secret",
+    })
+
+    const prefetchCall = info.mock.calls.find((call) => call[0] === "[speed] speed_connect_custom_prefetch_diagnostic")
+    expect(prefetchCall?.[1]).toMatchObject({
+      emailPresent: true,
+      emailTotalLength: 60,
+      emailLocalPartLength: 38,
+      emailDomainLength: 21,
+      emailHasAtSign: true,
+      emailHasWhitespace: false,
+      emailUsesManagedRootDomain: true,
+      emailLocalPartAlphanumericHyphenOnly: true,
+      passwordConfigured: true,
+      requiredFieldsPresent: true,
+    })
+    expect(JSON.stringify(info.mock.calls)).not.toContain("speed-18215ad9c5874be5baf46bef03cb81fc")
+    expect(JSON.stringify(info.mock.calls)).not.toContain("temporary-secret")
+
+    info.mockRestore()
   })
 
   it("never includes phone, account_name, business_type, or any other undocumented field in the request body", async () => {
@@ -217,8 +295,16 @@ describe("speedClient /connect/custom", () => {
       const speedError = error as InstanceType<typeof SpeedApiError>
       expect(speedError.status).toBe(400)
       expect(speedError.providerCode).toBe("invalid_request")
-      expect(speedError.fieldErrors).toEqual([
-        { field: "email", message: "email already registered" },
+      expect(speedError.fieldErrors).toMatchObject([
+        {
+          field: "email",
+          message: "email already registered",
+          duplicateEmail: true,
+          malformedFormat: false,
+          unsupportedDomain: false,
+          emailLength: false,
+          emailDeliverability: false,
+        },
         { field: null, message: "password too weak" },
       ])
       return true
@@ -244,7 +330,7 @@ describe("speedClient /connect/custom", () => {
     ).rejects.toSatisfy((error: unknown) => {
       const speedError = error as InstanceType<typeof SpeedApiError>
       expect(speedError.providerCode).toBe("validation_error")
-      expect(speedError.fieldErrors).toEqual([{ field: null, message: "Country is required" }])
+      expect(speedError.fieldErrors).toMatchObject([{ field: null, message: "Country is required" }])
       expect(speedError.providerMessage).toBe("Country is required")
       return true
     })
@@ -279,7 +365,7 @@ describe("speedClient /connect/custom", () => {
     ).rejects.toSatisfy((error: unknown) => {
       const speedError = error as InstanceType<typeof SpeedApiError>
       expect(speedError.providerCode).toBe("validation_failed")
-      expect(speedError.fieldErrors).toEqual([
+      expect(speedError.fieldErrors).toMatchObject([
         { field: "last_name", message: "Last name is required" },
       ])
       expect(speedError.message).toBe("Speed API returned 400")

@@ -349,6 +349,13 @@ function safeSpeedErrorCode(status: number, body: string) {
 export type SpeedFieldError = {
   field: string | null
   message: string
+  validationCode?: string | null
+  validationRule?: string | null
+  duplicateEmail?: boolean
+  malformedFormat?: boolean
+  unsupportedDomain?: boolean
+  emailLength?: boolean
+  emailDeliverability?: boolean
 }
 
 /**
@@ -399,6 +406,32 @@ function sanitizeSpeedFieldErrorMessage(value: unknown): string | null {
     .slice(0, 200)
 }
 
+function classifySpeedEmailValidation(message: string): Pick<
+  SpeedFieldError,
+  "duplicateEmail" | "malformedFormat" | "unsupportedDomain" | "emailLength" | "emailDeliverability"
+> {
+  const normalized = message.toLowerCase()
+  return {
+    duplicateEmail:
+      /\b(duplicate|already\s+(registered|exists|used|taken)|in\s+use|email\s+(exists|taken))\b/.test(normalized),
+    malformedFormat:
+      /\b(invalid|malformed|format|valid email|email address is invalid)\b/.test(normalized),
+    unsupportedDomain:
+      /\b(domain|disposable|temporary email|not accept|don't accept|do not accept|different email address|unsupported)\b/.test(normalized),
+    emailLength:
+      /\b(length|too long|too short|maximum|max|characters?)\b/.test(normalized),
+    emailDeliverability:
+      /\b(deliverable|deliverability|mailbox|mx|dns|bounce|receive|verify|verification)\b/.test(normalized),
+  }
+}
+
+function sanitizeSpeedValidationCode(value: unknown): string | null {
+  const safe = sanitizeSpeedFieldErrorMessage(value)
+  if (!safe) return null
+  const normalized = safe.toLowerCase().replace(/[^a-z0-9_.:-]+/g, "_").slice(0, 80)
+  return normalized || null
+}
+
 /**
  * Extracts Speed's provider error code and per-field validation messages from a
  * failed response body, tolerating whatever shape Speed actually returns
@@ -424,7 +457,7 @@ export function parseSpeedErrorBody(body: string): {
   let providerCode: string | null = null
   const seen = new Set<string>()
 
-  function addError(value: unknown, field?: string | null) {
+  function addError(value: unknown, field?: string | null, meta?: Record<string, unknown>) {
     if (fieldErrors.length >= 10) return
     const safe = sanitizeSpeedFieldErrorMessage(value)
     if (!safe) return
@@ -432,7 +465,19 @@ export function parseSpeedErrorBody(body: string): {
     const key = `${fieldName || ""}|${safe}`
     if (seen.has(key)) return
     seen.add(key)
-    fieldErrors.push({ field: fieldName || null, message: safe })
+    const validationCode = sanitizeSpeedValidationCode(
+      meta?.validation_code ?? meta?.validationCode ?? meta?.code ?? meta?.error_code ?? meta?.type ?? null
+    )
+    const validationRule = sanitizeSpeedValidationCode(
+      meta?.rule ?? meta?.validation_rule ?? meta?.validationRule ?? meta?.reason ?? null
+    )
+    fieldErrors.push({
+      field: fieldName || null,
+      message: safe,
+      validationCode,
+      validationRule,
+      ...(fieldName === "email" || /\bemail\b/i.test(safe) ? classifySpeedEmailValidation(safe) : {}),
+    })
   }
 
   function visit(value: unknown, depth = 0) {
@@ -464,7 +509,7 @@ export function parseSpeedErrorBody(body: string): {
           : typeof row.name === "string"
             ? row.name
             : null
-    addError(row.error_message ?? row.message ?? row.description ?? row.error, field)
+    addError(row.error_message ?? row.message ?? row.description ?? row.error, field, row)
 
     for (const key of [
       "errors",
@@ -575,6 +620,32 @@ export function normalizeSpeedCountry(value?: string | null): string | null {
   return SPEED_COUNTRY_SYNONYMS[normalized] ?? null
 }
 
+function getConnectCustomRequestMetadata(body: unknown) {
+  let parsed: Record<string, unknown> | null = null
+  try {
+    parsed = typeof body === "string" ? JSON.parse(body) : null
+  } catch {
+    parsed = null
+  }
+
+  const email = String(parsed?.email || "")
+  const [localPart = "", domain = ""] = email.split("@")
+  const requiredFields = ["country", "account_type", "first_name", "last_name", "email", "password"]
+
+  return {
+    emailPresent: Boolean(email),
+    emailTotalLength: email.length,
+    emailLocalPartLength: localPart.length,
+    emailDomainLength: domain.length,
+    emailHasAtSign: email.includes("@"),
+    emailHasWhitespace: /\s/.test(email),
+    emailUsesManagedRootDomain: domain.toLowerCase() === "pinetree-payments.com",
+    emailLocalPartAlphanumericHyphenOnly: /^[a-z0-9-]+$/.test(localPart),
+    passwordConfigured: Boolean(String(parsed?.password || "")),
+    requiredFieldsPresent: Boolean(parsed && requiredFields.every((field) => Boolean(String(parsed?.[field] || "")))),
+  }
+}
+
 async function speedRequestWithStatus<T>(
   path: string,
   init?: Omit<RequestInit, "headers"> & { headers?: Record<string, string> }
@@ -584,6 +655,9 @@ async function speedRequestWithStatus<T>(
   let response: Response
 
   try {
+    if (path === "/connect/custom") {
+      console.info("[speed] speed_connect_custom_prefetch_diagnostic", getConnectCustomRequestMetadata(init?.body))
+    }
     response = await fetch(`${config.apiBaseUrl}${path}`, {
       ...init,
       headers: {

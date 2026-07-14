@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const merchantId = "71478b11-ed12-4dbf-8466-52807995bac0"
-const managedSpeedEmail = "speed-71478b11ed124dbf846652807995bac0@speed.pinetree-payments.com"
+const managedSpeedEmail = "speed-71478b11ed124dbf846652807995bac0@pinetree-payments.com"
 
 const mocks = vi.hoisted(() => ({
   getMerchantById: vi.fn(),
@@ -245,6 +245,7 @@ describe("ensureManagedLightningForMerchant", () => {
         speedConnectedAccountRelationshipId: "ca_456",
         speedAccountId: "acct_456",
         speedConnectedAccountStatus: "active",
+        managedAccountEmail: managedSpeedEmail,
         providerResponseSummary: expect.objectContaining({
           managed_account_email: managedSpeedEmail,
         }),
@@ -714,13 +715,13 @@ describe("ensureManagedLightningForMerchant", () => {
     )
   })
 
-  it("does not retry Speed automatically when a deterministic rejection is unchanged", async () => {
+  it("does not retry /connect/custom automatically when a duplicate-email rejection is unchanged", async () => {
     const { computeSpeedCustomConnectFingerprint } = await import("@/engine/pineTreeWalletReadiness")
     mocks.getMerchantLightningProfile.mockResolvedValue({
       ...lightningProfile({ status: "needs_attention", accountStatus: "speed_custom_connect_rejected" }),
       provider_response_summary: {
         provider_code: "invalid_request",
-        field_errors: [{ field: "email", message: "already registered" }],
+        field_errors: [{ field: "email", message: "already registered", duplicateEmail: true }],
         // Matches the fingerprint the engine would compute for the unchanged
         // beforeEach business profile and managed Speed email.
         speed_request_fingerprint: computeSpeedCustomConnectFingerprint({
@@ -1312,7 +1313,13 @@ describe("Speed Custom Connect unified credentials", () => {
     const { buildManagedSpeedEmail } = await import("@/engine/pineTreeWalletReadiness")
 
     expect(buildManagedSpeedEmail("828dd361-3cb3-46ac-a920-b3196e5e7c95")).toBe(
-      "speed-828dd3613cb346aca920b3196e5e7c95@speed.pinetree-payments.com"
+      "speed-828dd3613cb346aca920b3196e5e7c95@pinetree-payments.com"
+    )
+    expect(buildManagedSpeedEmail("18215ad9-c587-4be5-baf4-6bef03cb81fc")).toBe(
+      "speed-18215ad9c5874be5baf46bef03cb81fc@pinetree-payments.com"
+    )
+    expect(buildManagedSpeedEmail("18215ad9-c587-4be5-baf4-6bef03cb81fc")).not.toContain(
+      "@speed.pinetree-payments.com"
     )
   })
 
