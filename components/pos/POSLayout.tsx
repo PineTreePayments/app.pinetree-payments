@@ -337,11 +337,13 @@ export default function POSLayout({ terminalContext }: Props) {
     if (intentId) {
       setCanceling(true)
       try {
-        await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}/cancel`, {
+        const response = await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}/cancel`, {
           method: "POST",
           headers: posAuthHeaders(terminalContext?.sessionToken),
         })
+        if (!response.ok) throw new Error("Unable to cancel sale")
       } catch {
+        return
         // best-effort — always reset local state even if the API call fails
       } finally {
         setCanceling(false)

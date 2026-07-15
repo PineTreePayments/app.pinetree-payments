@@ -4,7 +4,7 @@
  * Covers all six scenarios required by the payment state fix:
  *
  *   1. Stale PENDING with no provider reference → becomes INCOMPLETE
- *   2. PENDING with provider reference → NOT marked incomplete
+ *   2. Provider-created reference alone → eligible for cleanup
  *   3. PROCESSING with tx hash → stays PROCESSING (sweep never touches it)
  *   4. CONFIRMED is never downgraded (canonical status guard)
  *   5. FAILED is never converted to INCOMPLETE (Rule 11)
@@ -163,6 +163,21 @@ describe("Scenario 1 — stale PENDING, no provider reference → INCOMPLETE", (
     })).resolves.toBe(false)
   })
 
+  it("lets concurrently arrived submission evidence win over expiration", async () => {
+    mockGetPaymentById.mockResolvedValue(makePayment("PENDING", {
+      provider_reference: undefined,
+      updatedAt: new Date(Date.now() - 10 * 60 * 1_000).toISOString(),
+    }))
+    vi.mocked(mockUpdatePaymentStatus).mockRejectedValueOnce(
+      new Error("Cannot mark payment INCOMPLETE after provider or transaction evidence exists")
+    )
+
+    await expect(markPaymentIncomplete("pay-001", {
+      providerEvent: "maintenance.checkout_timeout",
+      minimumAgeMs: 5 * 60 * 1_000,
+    })).resolves.toBe(false)
+  })
+
   it("CREATED also eligible when no evidence (state machine steps through PENDING first)", async () => {
     mockGetPaymentById
       .mockResolvedValueOnce(makePayment("CREATED", {
@@ -185,9 +200,9 @@ describe("Scenario 1 — stale PENDING, no provider reference → INCOMPLETE", (
   })
 })
 
-// ── 2. PENDING with provider reference → NOT marked incomplete ────────────────
+// ── 2. Provider-created references are not submission evidence ───────────────
 
-describe("Scenario 2 — PENDING with provider reference → not marked INCOMPLETE", () => {
+describe("Scenario 2 — provider-created references do not block cleanup", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockGetPaymentById.mockReset()
@@ -195,7 +210,7 @@ describe("Scenario 2 — PENDING with provider reference → not marked INCOMPLE
     mockGetTransactionByPaymentId.mockResolvedValue(null)
   })
 
-  it("ineligible: PENDING with provider_reference set", async () => {
+  it("eligible: stale PENDING with only provider_reference set", async () => {
     mockGetPaymentById.mockResolvedValue(makePayment("PENDING", {
       provider_reference: "solana_sig_abc123",
       updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1_000).toISOString(),
@@ -205,11 +220,11 @@ describe("Scenario 2 — PENDING with provider reference → not marked INCOMPLE
       minimumAgeMs: 5 * 60 * 1_000,
     })
 
-    expect(eligibility.eligible).toBe(false)
-    expect(eligibility.reason).toBe("payment_has_processing_evidence")
+    expect(eligibility.eligible).toBe(true)
+    expect(eligibility.reason).toBe("pending_no_activity_timeout")
   })
 
-  it("markPaymentIncomplete returns false (no status change) when provider_reference present", async () => {
+  it("marks stale PENDING incomplete when provider_reference is the only evidence", async () => {
     mockGetPaymentById.mockResolvedValue(makePayment("PENDING", {
       provider_reference: "0xtxhash",
       updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1_000).toISOString(),
@@ -219,8 +234,8 @@ describe("Scenario 2 — PENDING with provider reference → not marked INCOMPLE
       minimumAgeMs: 5 * 60 * 1_000,
     })
 
-    expect(changed).toBe(false)
-    expect(vi.mocked(mockUpdatePaymentStatus)).not.toHaveBeenCalledWith(
+    expect(changed).toBe(true)
+    expect(vi.mocked(mockUpdatePaymentStatus)).toHaveBeenCalledWith(
       "pay-001",
       "INCOMPLETE",
       expect.anything()

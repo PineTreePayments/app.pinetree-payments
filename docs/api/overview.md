@@ -42,6 +42,6 @@ Public developer API routes are under `/api/v1`. Dashboard, POS, provider webhoo
 | `/api/reports/...` | Internal dashboard/reporting | Dashboard session | Report generation, PDF, email, download. |
 | `/api/inventory/...`, `/api/shopify/...`, `/api/woocommerce/...` | Internal commerce integration | Dashboard/session/provider auth | Inventory and commerce integration flows. |
 | `/api/debug/...` | Internal/dev only | Environment or route-specific protections | Debug-only diagnostics. Not public API docs. |
-| `/api/cron/...` | Internal scheduled jobs | Cron secret/deployment context | Payment checks, cleanup, stale sweep, balances. |
+| `/api/cron/...` | Internal maintenance | Cron secret/deployment context | One scheduled sweep plus manual maintenance routes; see [Background Jobs](../architecture.md#background-jobs-authoritative). |
 
 Debug routes are intentionally not included in public API endpoint reference pages.

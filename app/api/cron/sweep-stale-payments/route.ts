@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { sweepStalePayments } from "@/engine/stalePaymentSweep"
 
-// Same CRON_SECRET guard used by /api/cron/check-payments and /api/cron/update-balances.
-// Set CRON_SECRET in your environment (Vercel env vars or equivalent).
+export const maxDuration = 60
+
+// Supabase Cron reads the bearer value from Supabase Vault. This route validates
+// the matching CRON_SECRET stored in the Vercel production environment.
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
   if (!secret) {
@@ -16,9 +18,8 @@ function isAuthorized(req: NextRequest): boolean {
 /**
  * POST /api/cron/sweep-stale-payments
  *
- * Runs a bounded engine sweep. Every candidate is reloaded and checked for
- * provider references, hashes/signatures, invoices, and processing events
- * before the canonical status helper may mark it INCOMPLETE.
+ * Sole production stale-payment scheduler target. Supabase pg_cron invokes
+ * this POST route every minute through net.http_post.
  */
 export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) {

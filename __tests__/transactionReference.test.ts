@@ -8,7 +8,7 @@ describe("transaction reference formatting", () => {
   it.each([
     ["base", "0x36a1dcde", "Base Pay \u00b7 0x36a1dcde"],
     ["solana", "5WG3qBN7", "Solana Pay \u00b7 5WG3qBN7"],
-    ["speed", "pi_mpx8q5fw1", "Speed \u00b7 pi_mpx8q5fw1"],
+    ["speed", "pi_mpx8q5fw1", "Bitcoin Lightning \u00b7 pi_mpx8q5fw1"],
     ["shift4", "abc123", "Shift4 \u00b7 abc123"]
   ])("labels %s references with the provider display name", (provider, reference, expected) => {
     expect(formatProviderReference(provider, reference)).toBe(expected)

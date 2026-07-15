@@ -1,5 +1,7 @@
 import { supabaseAdmin, supabase } from "@/database"
 import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
+import { resolveTransactionDisplayStatus } from "@/lib/utils/canonicalPaymentStatus"
+import { resolveLifecycleDisplayStatus, type TransactionLifecycleEvent } from "@/lib/transactionDisplay"
 
 const db = supabaseAdmin || supabase
 
@@ -30,6 +32,8 @@ type TransactionRow = {
   total_amount?: number | string | null
   payments: PaymentRow | PaymentRow[] | null
   created_at?: string
+  terminal_at?: string | null
+  terminal_reason?: string | null
 }
 
 export type TransactionsChartRow = {
@@ -237,6 +241,30 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
     throw new Error(`Failed to load transactions: ${txError.message}`)
   }
 
+  const dashboardPaymentIds = ((txData || []) as TransactionRow[])
+    .map((transaction) => String(transaction.payment_id || "").trim())
+    .filter(Boolean)
+  const lifecycleEventsByPaymentId = new Map<string, TransactionLifecycleEvent[]>()
+  if (dashboardPaymentIds.length) {
+    const { data: lifecycleEvents, error: lifecycleError } = await db
+      .from("payment_events")
+      .select("payment_id,event_type,provider_event,raw_payload,created_at")
+      .in("payment_id", dashboardPaymentIds)
+      .in("event_type", ["payment.cancelled", "payment.expired", "payment.incomplete"])
+      .order("created_at", { ascending: true })
+
+    if (lifecycleError) {
+      throw new Error(`Failed to load transaction lifecycle events: ${lifecycleError.message}`)
+    }
+    for (const event of lifecycleEvents || []) {
+      const paymentId = String(event.payment_id || "").trim()
+      if (!paymentId) continue
+      const existing = lifecycleEventsByPaymentId.get(paymentId) || []
+      existing.push(event)
+      lifecycleEventsByPaymentId.set(paymentId, existing)
+    }
+  }
+
   const startOfDay = new Date()
   startOfDay.setHours(0, 0, 0, 0)
 
@@ -256,6 +284,23 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
   const confirmed = safePayments.filter((p) => p.status === "CONFIRMED").length
 
   const transactions = ((txData || []) as TransactionRow[]).map((transaction) => {
+    const authoritativePayment = Array.isArray(transaction.payments)
+      ? transaction.payments[0]
+      : transaction.payments
+    const rawAuthoritativeStatus = String(authoritativePayment?.status || transaction.status || "").toUpperCase()
+    const knownStatus = ["CREATED", "PENDING", "PROCESSING", "CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED", "CANCELLED", "REFUNDED"].includes(rawAuthoritativeStatus)
+    const canonicalStatus = knownStatus
+      ? resolveTransactionDisplayStatus(transaction.status, authoritativePayment?.status)
+      : "UNKNOWN"
+    const lifecycleEvents = lifecycleEventsByPaymentId.get(String(transaction.payment_id || "")) || []
+    const terminalEvent = lifecycleEvents[lifecycleEvents.length - 1]
+    const status = resolveLifecycleDisplayStatus(
+      canonicalStatus,
+      lifecycleEvents
+    )
+    const terminalPayload = terminalEvent?.raw_payload && typeof terminalEvent.raw_payload === "object"
+      ? terminalEvent.raw_payload as Record<string, unknown>
+      : null
     const payments = Array.isArray(transaction.payments)
       ? transaction.payments.map((payment) => ({
           ...payment,
@@ -270,7 +315,10 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
 
     return {
       ...transaction,
-      displayStatus: getPaymentStatusLabel(transaction.status),
+      status,
+      terminal_at: terminalEvent?.created_at || null,
+      terminal_reason: String(terminalPayload?.reason || terminalEvent?.provider_event || "").trim() || null,
+      displayStatus: getPaymentStatusLabel(status),
       payments
     }
   })

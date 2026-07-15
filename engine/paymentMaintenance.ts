@@ -92,9 +92,20 @@ function runPaymentWatcherThrottled(
 }
 
 export type PaymentMaintenanceSummary = {
+  runId: string
+  startedAt: string
+  completedAt: string
   skipped: boolean
   skipReason?: "already_running" | "recently_run"
   sweep: StalePaymentSweepSummary | null
+  candidatesScanned: number
+  expired: number
+  canceledReconciled: number
+  incomplete: number
+  transactionSnapshotsReconciled: number
+  skippedSubmittedEvidence: number
+  skippedTerminal: number
+  failures: number
   watcherCandidates: number
   watcherChecks: number
   watcherErrors: number
@@ -206,9 +217,22 @@ export async function runPaymentMaintenanceTick(options?: {
   const lease = getMaintenanceLease()
   const now = options?.now ?? Date.now()
   const throttleMs = Math.max(1_000, options?.throttleMs ?? DEFAULT_THROTTLE_MS)
+  const runId = crypto.randomUUID()
+  const startedAt = new Date(now).toISOString()
 
   const emptySummary = {
+    runId,
+    startedAt,
+    completedAt: startedAt,
     sweep: null,
+    candidatesScanned: 0,
+    expired: 0,
+    canceledReconciled: 0,
+    incomplete: 0,
+    transactionSnapshotsReconciled: 0,
+    skippedSubmittedEvidence: 0,
+    skippedTerminal: 0,
+    failures: 0,
     watcherCandidates: 0,
     watcherChecks: 0,
     watcherErrors: 0,
@@ -254,12 +278,13 @@ export async function runPaymentMaintenanceTick(options?: {
 
     let watcherChecks = 0
     let watcherErrors = 0
-    for (const paymentId of watchable) {
+    const watcherTimeoutMs = Math.max(
+      500,
+      options?.watcherTimeoutMs ?? DEFAULT_WATCHER_TIMEOUT_MS
+    )
+    await Promise.all(watchable.map(async (paymentId) => {
       try {
-        await runWatcherWithTimeout(
-          paymentId,
-          Math.max(500, options?.watcherTimeoutMs ?? DEFAULT_WATCHER_TIMEOUT_MS)
-        )
+        await runWatcherWithTimeout(paymentId, watcherTimeoutMs)
         watcherChecks += 1
       } catch (error) {
         watcherErrors += 1
@@ -268,9 +293,10 @@ export async function runPaymentMaintenanceTick(options?: {
           error: error instanceof Error ? error.message : String(error)
         })
       }
-    }
+    }))
 
     let reconciled = 0
+    let canceledReconciled = 0
     let reconcileErrors = 0
     const terminalCandidates = await getTerminalPaymentMaintenanceCandidates(
       options?.reconcileLimit ?? 10
@@ -280,7 +306,16 @@ export async function runPaymentMaintenanceTick(options?: {
       if (!isTerminalPaymentStatus(status)) continue
       try {
         const result = await reconcileTransactionForPayment(payment.id, status)
-        if (!result.skipped) reconciled += 1
+        if (!result.skipped) {
+          reconciled += 1
+          const events = await getPaymentEvents(payment.id).catch(() => [])
+          if (events.some((event) => event.event_type === "payment.cancelled")) {
+            canceledReconciled += 1
+          }
+        }
+        if (result.skipReason?.startsWith("fetch_error:") || result.skipReason?.startsWith("update_error:")) {
+          reconcileErrors += 1
+        }
       } catch (error) {
         reconcileErrors += 1
         console.warn("[payment-maintenance] transaction reconciliation failed", {
@@ -290,15 +325,30 @@ export async function runPaymentMaintenanceTick(options?: {
       }
     }
 
-    return {
+    const completedAt = new Date(options?.now ?? Date.now()).toISOString()
+    const failures = sweep.failures + watcherErrors + reconcileErrors
+    const summary: PaymentMaintenanceSummary = {
+      runId,
+      startedAt,
+      completedAt,
       skipped: false,
       sweep,
+      candidatesScanned: sweep.scanned,
+      expired: sweep.expired,
+      canceledReconciled,
+      incomplete: sweep.incomplete,
+      transactionSnapshotsReconciled: reconciled,
+      skippedSubmittedEvidence: sweep.skippedSubmittedEvidence,
+      skippedTerminal: sweep.skippedTerminal,
+      failures,
       watcherCandidates: watchable.length,
       watcherChecks,
       watcherErrors,
       reconciled,
       reconcileErrors
     }
+    console.info("[payment-maintenance] run completed", summary)
+    return summary
   } finally {
     lease.running = false
   }

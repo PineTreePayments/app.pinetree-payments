@@ -1,4 +1,5 @@
 import { cashTransactionSecondaryLabel } from "@/lib/transactionRailDisplay"
+import { normalizeTransactionAsset, type TransactionDisplayMetadata } from "@/lib/transactionDisplay"
 
 export function formatDashboardProvider(provider: string | null | undefined) {
   const normalized = String(provider || "").trim().toLowerCase()
@@ -8,16 +9,17 @@ export function formatDashboardProvider(provider: string | null | undefined) {
     solana: "Solana Pay",
     shift4: "Shift4",
     base: "Base Pay",
-    lightning: "Lightning",
-    lightning_speed: "Speed",
-    tryspeed: "Speed",
-    try_speed: "Speed",
-    speed_lightning: "Speed",
-    lightning_nwc: "NWC",
-    nwc_lightning: "NWC",
+    stripe: "Stripe",
+    lightning: "Bitcoin Lightning",
+    lightning_speed: "Bitcoin Lightning",
+    tryspeed: "Bitcoin Lightning",
+    try_speed: "Bitcoin Lightning",
+    speed_lightning: "Bitcoin Lightning",
+    lightning_nwc: "Bitcoin Lightning",
+    nwc_lightning: "Bitcoin Lightning",
     cash: "Cash",
-    speed: "Speed",
-    nwc: "NWC",
+    speed: "Bitcoin Lightning",
+    nwc: "Bitcoin Lightning",
     phantom: "Phantom",
     solflare: "Solflare",
     metamask: "MetaMask",
@@ -43,11 +45,11 @@ export function formatDashboardNetwork(network: string | null | undefined) {
     solana: "Solana",
     base: "Base",
     ethereum: "Ethereum",
-    bitcoin_lightning: "Lightning",
-    btc_lightning: "Lightning",
-    lightning_btc: "Lightning",
-    lightning: "Lightning",
-    "bitcoin lightning": "Lightning"
+    bitcoin_lightning: "Bitcoin Lightning",
+    btc_lightning: "Bitcoin Lightning",
+    lightning_btc: "Bitcoin Lightning",
+    lightning: "Bitcoin Lightning",
+    "bitcoin lightning": "Bitcoin Lightning"
   }
 
   if (labels[normalized]) return labels[normalized]
@@ -60,9 +62,18 @@ export function formatDashboardNetwork(network: string | null | undefined) {
 
 export function formatTransactionSecondaryLabel(
   provider: string | null | undefined,
-  network: string | null | undefined
+  network: string | null | undefined,
+  payment?: {
+    currency?: string | null
+    metadata?: TransactionDisplayMetadata
+  } | null
 ) {
-  return cashTransactionSecondaryLabel(provider) || formatDashboardNetwork(network)
+  return cashTransactionSecondaryLabel(provider) || normalizeTransactionAsset({
+    provider,
+    network,
+    currency: payment?.currency,
+    metadata: payment?.metadata
+  })
 }
 
 export function mostFrequentKey(counts: Record<string, number>) {

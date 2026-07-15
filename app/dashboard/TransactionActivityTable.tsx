@@ -16,6 +16,7 @@ import {
   formatTransactionSecondaryLabel
 } from "@/components/dashboard/displayHelpers"
 import { getPaymentAssetDisplay } from "@/lib/paymentAssetDisplay"
+import { normalizeTransactionAsset } from "@/lib/transactionDisplay"
 
 export type DashboardPaymentSummary = {
   id?: string | null
@@ -51,6 +52,8 @@ export type DashboardTransactionRow = {
   channel?: string | null
   payments?: DashboardPaymentSummary | DashboardPaymentSummary[] | null
   created_at?: string | null
+  terminal_at?: string | null
+  terminal_reason?: string | null
 }
 
 function parseTimestamp(value: string) {
@@ -128,7 +131,15 @@ function buildDetailRows(input: {
   )
 
   const assetRows: DetailDisplayRow[] = []
-  if (assetDisplay.assetLabel) assetRows.push({ label: "Asset", value: assetDisplay.assetLabel })
+  assetRows.push({
+    label: "Asset",
+    value: assetDisplay.assetLabel || normalizeTransactionAsset({
+      provider: tx.provider,
+      network: tx.network,
+      currency: payment?.currency,
+      metadata: payment?.metadata ?? null
+    })
+  })
   if (assetDisplay.amountPaidLabel) assetRows.push({ label: "Amount Paid", value: assetDisplay.amountPaidLabel })
   if (assetDisplay.rateLabel) assetRows.push({ label: "Rate at Payment", value: assetDisplay.rateLabel })
 
@@ -142,14 +153,23 @@ function buildDetailRows(input: {
 
   const tailRows: DetailDisplayRow[] = [
     { label: "Status", value: statusLabel },
-    { label: "Date / Time", value: formatChicagoDateTime(statusTime) },
+    { label: "Created At", value: formatChicagoDateTime(statusTime) },
+    ...(tx.terminal_at ? [{
+      label: tx.status === "CANCELED" ? "Canceled At" : tx.status === "EXPIRED" ? "Expired At" : "Completed At",
+      value: formatChicagoDateTime(tx.terminal_at)
+    }] : []),
+    ...(tx.terminal_reason && tx.status !== "CONFIRMED"
+      ? [{ label: "Reason", value: tx.terminal_reason }]
+      : []),
     { label: "Channel", value: tx.channel || null }
   ]
 
   if (provider === "cash") {
     return [
       ...coreRows,
-      { label: "Payment Method", value: "Cash" },
+      ...assetRows,
+      { label: "Network", value: "-" },
+      { label: "Provider", value: "Cash" },
       ...tailRows,
       { label: "Cash Reference", value: formatTransactionReference(tx), mono: true }
     ]
@@ -167,7 +187,7 @@ function buildDetailRows(input: {
     return [
       ...coreRows,
       ...assetRows,
-      { label: "Network", value: "Lightning" },
+      { label: "Network", value: "Bitcoin Lightning" },
       { label: "Provider", value: providerName(tx.provider) },
       ...tailRows,
       { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true },
@@ -304,7 +324,7 @@ export default function TransactionActivityTable({
           const payment = getPayment(tx)
           const statusTime = tx.created_at || payment?.created_at || null
           const reference = formatTransactionReference(tx)
-          const secondaryLabel = formatTransactionSecondaryLabel(tx.provider, tx.network)
+          const secondaryLabel = formatTransactionSecondaryLabel(tx.provider, tx.network, payment)
 
           return (
             <button
@@ -367,7 +387,7 @@ export default function TransactionActivityTable({
               <th className="px-4 py-3 font-medium">Date / Time</th>
               <th className="px-4 py-3 font-medium">Amount</th>
               <th className="px-4 py-3 font-medium">Currency</th>
-              <th className="px-4 py-3 font-medium">Network</th>
+              <th className="px-4 py-3 font-medium">Asset</th>
               <th className="px-4 py-3 font-medium">Provider</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Reference</th>
@@ -414,7 +434,7 @@ export default function TransactionActivityTable({
                   </td>
 
                   <td className="px-4 py-4 text-gray-700 whitespace-nowrap">
-                    {formatTransactionSecondaryLabel(tx.provider, tx.network)}
+                    {formatTransactionSecondaryLabel(tx.provider, tx.network, payment)}
                   </td>
 
                   <td className="px-4 py-4 text-gray-900 whitespace-nowrap">

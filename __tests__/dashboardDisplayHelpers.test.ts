@@ -6,12 +6,19 @@ import {
 
 describe("transaction activity secondary labels", () => {
   it.each([
-    ["base", "base", "Base"],
-    ["solana", "solana", "Solana"],
-    ["speed", "bitcoin_lightning", "Lightning"],
-    ["cash", null, "USD"]
-  ])("formats %s on %s as %s", (provider, network, expected) => {
-    expect(formatTransactionSecondaryLabel(provider, network)).toBe(expected)
+    ["base", "base", { metadata: { selectedAsset: "ETH" } }, "ETH"],
+    ["base", "base", { metadata: { selectedAsset: "USDC" } }, "USDC"],
+    ["solana", "solana", { metadata: { selectedAsset: "SOL" } }, "SOL"],
+    ["solana", "solana", { metadata: { selectedAsset: "USDC" } }, "USDC"],
+    ["speed", "bitcoin_lightning", null, "BTC"],
+    ["stripe", "stripe", { currency: "USD" }, "USD"],
+    ["cash", null, { currency: "USD" }, "USD"]
+  ])("formats %s on %s as %s", (provider, network, payment, expected) => {
+    expect(formatTransactionSecondaryLabel(provider, network, payment)).toBe(expected)
+  })
+
+  it("does not silently substitute a crypto network for a missing asset", () => {
+    expect(formatTransactionSecondaryLabel("solana", "solana", null)).toBe("Unknown asset")
   })
 
   it("does not depend on a stored cash network value", () => {

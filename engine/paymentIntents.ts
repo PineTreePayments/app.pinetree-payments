@@ -619,14 +619,21 @@ export async function selectPaymentIntentNetworkEngine(input: {
 export async function cancelPaymentIntentEngine(intentId: string): Promise<void> {
   const intent = await getPaymentIntentById(intentId)
   if (!intent) throw new Error("Payment intent not found")
+  if (intent.status === "EXPIRED") return
 
   // Mark the linked payment INCOMPLETE before expiring the intent so the
   // realtime subscription on the hosted checkout fires immediately.
   if (intent.payment_id) {
-    await markPaymentIncomplete(intent.payment_id, {
+    const payment = await getPaymentById(intent.payment_id)
+    const status = String(payment?.status || "").toUpperCase()
+    if (status === "CONFIRMED" || status === "PROCESSING" || status === "FAILED") {
+      return
+    }
+    const changed = await markPaymentIncomplete(intent.payment_id, {
       providerEvent: "terminal_cancel",
       rawPayload: { reason: "merchant_canceled", intentId }
     })
+    if (!changed && status !== "INCOMPLETE") return
   }
 
   // Expire the intent so any subsequent select-network calls are rejected.

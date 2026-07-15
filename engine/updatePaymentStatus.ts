@@ -106,13 +106,33 @@ export async function updatePaymentStatus(
   // Validate the transition is allowed
   assertValidTransition(currentStatus, nextStatus)
 
+  if (process.env.NODE_ENV !== "production") {
+    const paymentMetadata = payment.metadata && typeof payment.metadata === "object"
+      ? payment.metadata as Record<string, unknown>
+      : null
+    const split = paymentMetadata?.split && typeof paymentMetadata.split === "object"
+      ? paymentMetadata.split as Record<string, unknown>
+      : null
+    console.info("[payment-state-transition]", {
+      paymentId,
+      intentId: String(paymentMetadata?.paymentIntentId || "") || null,
+      previousStatus: currentStatus,
+      nextStatus,
+      source: metadata?.providerEvent || "engine",
+      provider: payment.provider,
+      network: payment.network || null,
+      asset: String(split?.asset || split?.nativeSymbol || paymentMetadata?.selectedAsset || "") || null,
+      timestamp: new Date().toISOString()
+    })
+  }
+
   // Update the payment status in database with a compare-and-set guard. If an
   // overlapping watcher/webhook already moved this payment, this call fails
   // before creating a duplicate lifecycle event.
   const updatedPayment = await updatePaymentStatusInDb(paymentId, nextStatus, currentStatus)
 
   // Create a payment event for audit trail
-  const eventType = statusToEventType(nextStatus)
+  const eventType = statusToEventType(nextStatus, metadata)
   const eventId = crypto.randomUUID()
 
   await createPaymentEvent({
@@ -203,7 +223,15 @@ export async function updatePaymentStatus(
   return updatedPayment
 }
 
-function statusToEventType(status: PaymentStatus): PaymentEventType {
+function statusToEventType(
+  status: PaymentStatus,
+  metadata?: { providerEvent?: string; rawPayload?: unknown }
+): PaymentEventType {
+  if (status === "INCOMPLETE") {
+    const providerEvent = String(metadata?.providerEvent || "").toLowerCase()
+    if (/cancel|user_rejected/.test(providerEvent)) return "payment.cancelled"
+    if (/expir|timeout/.test(providerEvent)) return "payment.expired"
+  }
   const mapping: Record<PaymentStatus, PaymentEventType> = {
     CREATED: "payment.created",
     PENDING: "payment.pending",

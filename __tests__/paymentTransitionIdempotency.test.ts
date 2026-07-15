@@ -38,6 +38,7 @@ import {
   updatePaymentStatus as updatePaymentStatusInDb
 } from "@/database"
 import { processPaymentEvent } from "@/engine/eventProcessor"
+import { updatePaymentStatus } from "@/engine/updatePaymentStatus"
 
 const mockGetPayment = vi.mocked(getPaymentById)
 const mockDbUpdate = vi.mocked(updatePaymentStatusInDb)
@@ -93,6 +94,21 @@ describe("overlapping payment transition idempotency", () => {
     expect(mockCreateEvent).toHaveBeenCalledWith(expect.objectContaining({
       payment_id: "pay-1",
       event_type: "payment.processing"
+    }))
+  })
+
+  it("records explicit cancellation distinctly from generic incomplete state", async () => {
+    mockDbUpdate.mockResolvedValueOnce({ ...pendingPayment, status: "INCOMPLETE" })
+
+    await updatePaymentStatus("pay-1", "INCOMPLETE", {
+      providerEvent: "terminal_cancel",
+      rawPayload: { reason: "merchant_canceled" }
+    })
+
+    expect(mockCreateEvent).toHaveBeenCalledWith(expect.objectContaining({
+      payment_id: "pay-1",
+      event_type: "payment.cancelled",
+      provider_event: "terminal_cancel"
     }))
   })
 })

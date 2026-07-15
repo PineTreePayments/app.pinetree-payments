@@ -15,6 +15,7 @@ describe("shared payment status display", () => {
     ["FAILED",     "Failed",     "failed",     "x-circle"],
     ["INCOMPLETE", "Incomplete", "incomplete", "x-circle"],
     ["EXPIRED",    "Expired",    "expired",    "x-circle"],
+    ["CANCELED",   "Canceled",   "canceled",   "x-circle"],
   ])("%s displays as %s", (status, label, tone, icon) => {
     const display = getPaymentDisplayStatus(status)
 
@@ -33,7 +34,7 @@ describe("shared payment status display", () => {
     ["completed", "Confirmed"],
     ["declined",  "Failed"],
     ["rejected",  "Failed"],
-    ["cancelled", "Incomplete"],
+    ["cancelled", "Canceled"],
     ["abandoned", "Incomplete"],
     ["timed out", "Expired"],
   ])("normalizes provider wording %s without changing stored state", (status, label) => {
@@ -43,7 +44,7 @@ describe("shared payment status display", () => {
   })
 
   it("does not leak unknown provider wording", () => {
-    expect(getPaymentStatusLabel("SOME_FUTURE_PROVIDER_STATE")).toBe("Waiting")
+    expect(getPaymentStatusLabel("SOME_FUTURE_PROVIDER_STATE")).toBe("Unknown")
   })
 
   it("keeps display normalization independent of record age", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { WalletNetwork } from "@/engine/providerMappings"
 
 /**
@@ -47,7 +47,13 @@ vi.mock("@/lib/pinetreeRailReadiness", () => ({
   getPineTreeRailReadinessDiagnostics: vi.fn(),
 }))
 
-const { isProviderAvailableForCheckout, walletNetworkToProviderKey } = await import("@/engine/paymentIntents")
+const {
+  cancelPaymentIntentEngine,
+  isProviderAvailableForCheckout,
+  walletNetworkToProviderKey
+} = await import("@/engine/paymentIntents")
+const paymentIntentDb = await import("@/database")
+const paymentStateActions = await import("@/engine/paymentStateActions")
 
 describe("walletNetworkToProviderKey", () => {
   it("maps stripe to its own provider key, distinct from every crypto rail", () => {
@@ -137,5 +143,58 @@ describe("isProviderAvailableForCheckout", () => {
     expect(isProviderAvailableForCheckout("solana", enabled)).toBe(false)
     expect(isProviderAvailableForCheckout("base", enabled)).toBe(false)
     expect(isProviderAvailableForCheckout("bitcoin_lightning", enabled)).toBe(false)
+  })
+})
+
+describe("cancelPaymentIntentEngine", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("cancels an active payment and expires its intent", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+      id: "intent-1",
+      payment_id: "payment-1",
+      status: "SELECTED"
+    } as never)
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({ status: "PENDING" } as never)
+    vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
+
+    await cancelPaymentIntentEngine("intent-1")
+
+    expect(paymentStateActions.markPaymentIncomplete).toHaveBeenCalledWith(
+      "payment-1",
+      expect.objectContaining({ providerEvent: "terminal_cancel" })
+    )
+    expect(paymentIntentDb.expirePaymentIntent).toHaveBeenCalledWith("intent-1")
+  })
+
+  it.each(["PROCESSING", "FAILED", "CONFIRMED"])(
+    "does not cancel or expire a %s payment",
+    async (status) => {
+      vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+        id: "intent-1",
+        payment_id: "payment-1",
+        status: "SELECTED"
+      } as never)
+      vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({ status } as never)
+
+      await cancelPaymentIntentEngine("intent-1")
+
+      expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+      expect(paymentIntentDb.expirePaymentIntent).not.toHaveBeenCalled()
+    }
+  )
+
+  it("is idempotent for an already expired intent", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+      id: "intent-1",
+      status: "EXPIRED"
+    } as never)
+
+    await cancelPaymentIntentEngine("intent-1")
+
+    expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+    expect(paymentIntentDb.expirePaymentIntent).not.toHaveBeenCalled()
   })
 })

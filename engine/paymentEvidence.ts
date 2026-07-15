@@ -16,17 +16,10 @@ const PROCESSING_EVENT_TYPES = new Set([
 const EVIDENCE_KEYS = new Set([
   "txhash",
   "transactionhash",
-  "transactionid",
   "signature",
   "providersignature",
-  "providertransactionid",
-  "providerreference",
-  "invoiceid",
-  "invoice",
-  "chargeid",
-  "paymenthash",
-  "lightningpaymenthash",
-  "lightninginvoice"
+  "submittedtransactionid",
+  "submittedtxhash"
 ])
 
 function hasEvidenceValue(value: unknown): boolean {
@@ -59,7 +52,8 @@ export function paymentHasProcessingEvidence(input: {
   transaction?: Pick<Transaction, "provider_transaction_id"> | null
   events?: Array<Pick<PaymentEvent, "event_type" | "raw_payload">>
 }): boolean {
-  if (hasEvidenceValue(input.payment.provider_reference)) return true
+  // Provider references and invoice identifiers are created while the payment
+  // is still awaiting the customer; they are not proof that funds were sent.
   if (hasEvidenceValue(input.transaction?.provider_transaction_id)) return true
   if (metadataHasPaymentEvidence(input.payment.metadata)) return true
 

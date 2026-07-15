@@ -100,7 +100,8 @@ export async function markPaymentIncomplete(
     const message = error instanceof Error ? error.message : String(error)
     if (
       !message.includes("Invalid payment transition") &&
-      !message.includes("Concurrent payment transition skipped")
+      !message.includes("Concurrent payment transition skipped") &&
+      !message.includes("Cannot mark payment INCOMPLETE after provider or transaction evidence exists")
     ) {
       throw error
     }

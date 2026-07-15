@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { refreshAllWalletBalancesEngine } from "@/engine/walletOverview"
 
 // Mirror the same CRON_SECRET guard used by /api/cron/check-payments.
-// Set CRON_SECRET in Vercel env vars so only Vercel Cron (or an authorised
-// caller) can trigger a full balance refresh. Without it, any unauthenticated
+// Set CRON_SECRET in Vercel env vars so only an authorised internal caller can
+// trigger a full balance refresh. Without it, any unauthenticated
 // request would cause N × RPC calls across all merchant wallets.
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET

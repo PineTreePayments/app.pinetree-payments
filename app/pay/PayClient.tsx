@@ -1637,11 +1637,27 @@ export default function PayClient() {
               <Button
                 variant="danger"
                 fullWidth
-                onClick={() => {
+                onClick={async () => {
                   if (checkoutSessionId) {
                     postHostedCheckoutEvent(checkoutSessionId, "canceled", "canceled")
                     postHostedCheckoutEvent(checkoutSessionId, "closed", "canceled")
                     emittedCheckoutEventRef.current = `${checkoutSessionId}:closed`
+                  }
+                  if (intentId && checkoutTokenRef.current) {
+                    try {
+                      const response = await fetch(
+                        `/api/payment-intents/${encodeURIComponent(intentId)}/cancel`,
+                        {
+                          method: "POST",
+                          headers: { Authorization: `Bearer ${checkoutTokenRef.current}` },
+                          keepalive: true,
+                        }
+                      )
+                      if (!response.ok) throw new Error("Payment cancellation failed")
+                    } catch {
+                      setIntentLoadError("Unable to cancel this payment. Please try again.")
+                      return
+                    }
                   }
                   window.close()
                 }}

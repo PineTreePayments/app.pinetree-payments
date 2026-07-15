@@ -22,5 +22,5 @@ include `PineTree-Signature`, `PineTree-Timestamp`, `PineTree-Event-Id`, and
 `PineTree-Event-Schema: payments-v1`; `PineTree-Webhook-Version` is sent as a legacy alias and legacy `X-PineTree-*` headers remain.
 
 Expired completed idempotency claims can be removed through the protected
-protected cleanup helper. Vercel cron is not available on the current plan, so
-no automatic schedule is configured.
+cleanup helper. Production schedules and manual maintenance routes are defined
+canonically in [Background Jobs](../architecture.md#background-jobs-authoritative).

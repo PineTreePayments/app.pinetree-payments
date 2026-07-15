@@ -33,10 +33,18 @@ vi.mock("@/engine/reconcileTransaction", () => ({
 
 vi.mock("@/engine/stalePaymentSweep", () => ({
   sweepStalePayments: vi.fn().mockResolvedValue({
+    runId: "sweep-1",
+    durationMs: 1,
     scanned: 0,
     markedIncomplete: 0,
+    expired: 0,
+    incomplete: 0,
     expiredIntents: 0,
     skipped: 0,
+    skippedSubmittedEvidence: 0,
+    skippedTerminal: 0,
+    skippedConcurrent: 0,
+    failures: 0,
     cutoff: "2026-06-08T00:00:00.000Z"
   })
 }))
@@ -80,7 +88,7 @@ function payment(status: PaymentStatus, overrides: Record<string, unknown> = {})
   }
 }
 
-describe("no-cron payment maintenance", () => {
+describe("payment maintenance", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(getPaymentById).mockReset()
@@ -92,16 +100,24 @@ describe("no-cron payment maintenance", () => {
     vi.mocked(markPaymentIncomplete).mockResolvedValue(false)
     vi.mocked(reconcileTransactionForPayment).mockResolvedValue({ skipped: true } as never)
     vi.mocked(sweepStalePayments).mockResolvedValue({
+      runId: "sweep-1",
+      durationMs: 1,
       scanned: 0,
       markedIncomplete: 0,
+      expired: 0,
+      incomplete: 0,
       expiredIntents: 0,
       skipped: 0,
+      skippedSubmittedEvidence: 0,
+      skippedTerminal: 0,
+      skippedConcurrent: 0,
+      failures: 0,
       cutoff: "2026-06-08T00:00:00.000Z"
     })
     resetPaymentMaintenanceLeaseForTests()
   })
 
-  it("does not require a Vercel cron schedule", () => {
+  it("does not define a duplicate Vercel scheduler", () => {
     const config = JSON.parse(fs.readFileSync(path.join(repoRoot, "vercel.json"), "utf8"))
     expect(config.crons).toBeUndefined()
   })
@@ -119,10 +135,18 @@ describe("no-cron payment maintenance", () => {
     let releaseSweep: (() => void) | undefined
     vi.mocked(sweepStalePayments).mockImplementationOnce(() => new Promise((resolve) => {
       releaseSweep = () => resolve({
+        runId: "sweep-1",
+        durationMs: 1,
         scanned: 0,
         markedIncomplete: 0,
+        expired: 0,
+        incomplete: 0,
         expiredIntents: 0,
         skipped: 0,
+        skippedSubmittedEvidence: 0,
+        skippedTerminal: 0,
+        skippedConcurrent: 0,
+        failures: 0,
         cutoff: "2026-06-08T00:00:00.000Z"
       })
     }))
@@ -153,8 +177,11 @@ describe("no-cron payment maintenance", () => {
 
   it("rechecks stale PENDING with evidence instead of marking incomplete", async () => {
     vi.mocked(getPaymentById)
-      .mockResolvedValueOnce(payment("PENDING", { provider_reference: "sig-123" }))
-      .mockResolvedValueOnce(payment("PROCESSING", { provider_reference: "sig-123" }))
+      .mockResolvedValueOnce(payment("PENDING"))
+      .mockResolvedValueOnce(payment("PROCESSING"))
+    vi.mocked(getTransactionByPaymentId).mockResolvedValue({
+      provider_transaction_id: "sig-123"
+    } as never)
     vi.mocked(runPaymentWatcher).mockResolvedValue(true)
 
     const result = await ensurePaymentFresh("pay-1")
@@ -200,6 +227,7 @@ describe("no-cron payment maintenance", () => {
     vi.mocked(getTerminalPaymentMaintenanceCandidates).mockResolvedValue([
       { id: "pay-confirmed", status: "CONFIRMED" }
     ] as never)
+    vi.mocked(getPaymentEvents).mockResolvedValue([{ event_type: "payment.cancelled" }] as never)
     vi.mocked(reconcileTransactionForPayment).mockResolvedValue({
       transactionId: "tx-1",
       previousStatus: "PENDING",
@@ -212,7 +240,10 @@ describe("no-cron payment maintenance", () => {
     expect(result).toMatchObject({
       skipped: false,
       watcherChecks: 1,
-      reconciled: 1
+      reconciled: 1,
+      transactionSnapshotsReconciled: 1,
+      canceledReconciled: 1,
+      failures: 0
     })
     expect(runPaymentWatcher).toHaveBeenCalledWith("pay-processing")
     expect(reconcileTransactionForPayment).toHaveBeenCalledWith("pay-confirmed", "CONFIRMED")
@@ -293,6 +324,12 @@ describe("no-cron payment maintenance", () => {
       const source = fs.readFileSync(path.join(repoRoot, route), "utf8")
       expect(source).not.toMatch(/markPaymentIncomplete|updatePaymentStatus|paymentHasProcessingEvidence|CHECKOUT_TIMEOUT_MS/)
     }
+  })
+
+  it("does not create a duplicate repository scheduler", () => {
+    const config = fs.readFileSync(path.join(repoRoot, "vercel.json"), "utf8")
+
+    expect(config).not.toMatch(/\*\/5|0\/5|\* \* \* \* \*/)
   })
 
   it("detect route delegates lifecycle decisions to the Engine helper", () => {

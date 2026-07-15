@@ -197,6 +197,7 @@ HMAC-signed state cookie pattern (mirrors Shopify OAuth). The start route is bro
 | `/api/webhooks/moonpay/off-ramp` | POST | PUBLIC_PROVIDER_WEBHOOK (MoonPay `Moonpay-Signature-V2`) | Off-ramp status intake only; no wallet signing, crypto broadcast, or fund movement. |
 | `/api/webhooks/provider` | POST | WEBHOOK (delegates to `processWebhook` → adapter `verifyWebhook`) | No explicit route-level sig check; security depends on engine |
 | `/api/cron/check-payments` | GET | CRON (`CRON_SECRET` bearer) | Scheduled cron **removed from vercel.json** (Phase 3C). Route kept for manual use. Rejects if `CRON_SECRET` not set. |
+| `/api/cron/sweep-stale-payments` | POST | CRON (`CRON_SECRET` bearer) | Sole production recurring schedule target; see [Background Jobs](../architecture.md#background-jobs-authoritative). |
 | `/api/cron/update-balances` | GET | CRON (`CRON_SECRET` bearer) | Not scheduled; dev backdoor when no secret set |
 
 ---
@@ -231,8 +232,8 @@ Routes with no authentication that accept mutations or manage session state. Rem
 
 ---
 
-## Cron Schedule Change (Phase 3C)
+## Background Jobs
 
-`vercel.json` previously scheduled `/api/cron/check-payments` daily at midnight (`0 0 * * *`).
-
-This was **removed** per the architecture preference: payment monitoring is webhook/detect-driven, not cron-driven. The route code is preserved and protected by `CRON_SECRET`. Re-enable by restoring the `crons` block to `vercel.json` if needed.
+Recurring schedules, manual maintenance routes, removed jobs, deferred workers,
+and future background-job architecture are documented canonically in
+[Background Jobs](../architecture.md#background-jobs-authoritative).

@@ -154,15 +154,15 @@ describe("canonical payment lifecycle", () => {
 })
 
 describe("payment evidence guards", () => {
-  it("protects provider-referenced payments from stale cleanup", () => {
+  it("does not mistake a provider-created operation reference for submitted funds", () => {
     expect(paymentHasProcessingEvidence({
       payment: { provider_reference: "charge-123", metadata: null },
       transaction: null,
       events: []
-    })).toBe(true)
+    })).toBe(false)
   })
 
-  it("protects tx hashes, signatures, invoices, and processing events", () => {
+  it("protects tx hashes, signatures, and processing events but not unpaid invoices", () => {
     expect(paymentHasProcessingEvidence({
       payment: {
         provider_reference: undefined,
@@ -179,7 +179,7 @@ describe("payment evidence guards", () => {
       },
       transaction: null,
       events: []
-    })).toBe(true)
+    })).toBe(false)
 
     expect(paymentHasProcessingEvidence({
       payment: { provider_reference: undefined, metadata: null },

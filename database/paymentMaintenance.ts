@@ -3,6 +3,31 @@ import { supabaseAdmin, supabase as supabaseAnon } from "./supabase"
 
 const db = supabaseAdmin || supabaseAnon
 
+export type StalePaymentMaintenanceCandidate = Pick<Payment, "id" | "updated_at">
+
+export async function getStalePaymentMaintenanceCandidates(input: {
+  cutoff: string
+  limit: number
+  offset: number
+}): Promise<StalePaymentMaintenanceCandidate[]> {
+  const boundedLimit = Math.max(1, Math.min(input.limit, 100))
+  const boundedOffset = Math.max(0, input.offset)
+  const { data, error } = await db
+    .from("payments")
+    .select("id,updated_at")
+    .in("status", ["CREATED", "PENDING"])
+    .lt("updated_at", input.cutoff)
+    .order("updated_at", { ascending: true })
+    .order("id", { ascending: true })
+    .range(boundedOffset, boundedOffset + boundedLimit - 1)
+
+  if (error) {
+    throw new Error(`Failed to load stale payment candidates: ${error.message}`)
+  }
+
+  return (data || []) as StalePaymentMaintenanceCandidate[]
+}
+
 export async function getPaymentMaintenanceCandidates(limit: number): Promise<Payment[]> {
   const boundedLimit = Math.max(1, Math.min(limit, 25))
   const { data, error } = await db

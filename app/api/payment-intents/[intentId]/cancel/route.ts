@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { cancelPaymentIntentEngine } from "@/engine/paymentIntents"
 import { verifyTerminalSession } from "@/lib/api/terminalAuth"
+import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
 import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
+import { getPaymentIntentById } from "@/database/paymentIntents"
 
 type Params = { params: Promise<{ intentId: string }> }
 
@@ -15,10 +17,25 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   try {
+    let authorizedMerchantId: string | null = null
     if (token.startsWith("pts_")) {
-      verifyTerminalSession(token) // throws on invalid/expired
+      authorizedMerchantId = verifyTerminalSession(token).mid
+    } else if (token.startsWith("pco_")) {
+      const claims = verifyCheckoutSession(token)
+      const { intentId } = await params
+      if (claims.iid !== String(intentId || "").trim()) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
     } else {
-      await requireMerchantIdFromRequest(req) // throws on invalid/missing
+      authorizedMerchantId = await requireMerchantIdFromRequest(req)
+    }
+
+    if (authorizedMerchantId) {
+      const { intentId } = await params
+      const intent = await getPaymentIntentById(String(intentId || "").trim())
+      if (!intent || intent.merchant_id !== authorizedMerchantId) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
     }
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

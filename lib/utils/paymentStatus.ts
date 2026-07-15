@@ -13,12 +13,14 @@ export type PaymentStatusTone =
   | "failed"
   | "incomplete"
   | "expired"
+  | "canceled"
+  | "unknown"
 
 export type PaymentStatusIcon = "clock" | "spinner" | "check-circle" | "x-circle" | "minus"
 
 export type PaymentDisplayStatus = {
   status: string
-  label: "Waiting" | "Processing" | "Confirmed" | "Failed" | "Incomplete" | "Expired"
+  label: "Waiting" | "Processing" | "Confirmed" | "Failed" | "Incomplete" | "Expired" | "Canceled" | "Unknown"
   message: string
   tone: PaymentStatusTone
   icon: PaymentStatusIcon
@@ -84,6 +86,24 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     iconClassName: "text-red-600",
     iconBgClassName: "bg-red-50",
   },
+  canceled: {
+    label: "Canceled",
+    message: "The payment was canceled before completion.",
+    tone: "canceled",
+    icon: "x-circle",
+    classes: "border border-gray-300 bg-gray-100 text-gray-800",
+    iconClassName: "text-gray-600",
+    iconBgClassName: "bg-gray-50",
+  },
+  unknown: {
+    label: "Unknown",
+    message: "The payment status is not recognized.",
+    tone: "unknown",
+    icon: "minus",
+    classes: "border border-gray-300 bg-gray-100 text-gray-800",
+    iconClassName: "text-gray-600",
+    iconBgClassName: "bg-gray-50",
+  },
 }
 
 function displayToneForStatus(normalizedStatus: string): PaymentStatusTone {
@@ -99,17 +119,18 @@ function displayToneForStatus(normalizedStatus: string): PaymentStatusTone {
   if (["FAILED", "ERROR", "REJECTED", "DECLINED", "DENIED"].includes(normalizedStatus)) {
     return "failed"
   }
-  if (["INCOMPLETE", "CANCELED", "CANCELLED", "ABANDONED"].includes(normalizedStatus)) {
+  if (["INCOMPLETE", "ABANDONED"].includes(normalizedStatus)) {
     return "incomplete"
   }
+  if (["CANCELED", "CANCELLED"].includes(normalizedStatus)) return "canceled"
   if (["EXPIRED", "TIMED_OUT", "TIMEOUT"].includes(normalizedStatus)) {
     return "expired"
   }
-  return "waiting"
+  return "unknown"
 }
 
 export function getPaymentDisplayStatus(status: string | null | undefined): PaymentDisplayStatus {
-  const normalizedStatus = String(status || "PENDING").trim().toUpperCase().replace(/[\s-]+/g, "_")
+  const normalizedStatus = String(status || "UNKNOWN").trim().toUpperCase().replace(/[\s-]+/g, "_")
   const config = STATUS_DISPLAY[displayToneForStatus(normalizedStatus)]
   return { status: normalizedStatus, ...config }
 }

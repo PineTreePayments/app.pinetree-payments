@@ -15,13 +15,13 @@ export function formatTransactionProviderLabel(provider: string | null | undefin
     normalized === "tryspeed" ||
     normalized === "try_speed" ||
     normalized === "speed_lightning"
-  ) return "Speed"
+  ) return "Bitcoin Lightning"
 
   if (
     normalized === "lightning_nwc" ||
     normalized === "nwc" ||
     normalized === "nwc_lightning"
-  ) return "NWC"
+  ) return "Bitcoin Lightning"
 
   if (
     normalized === "lightning" ||
@@ -29,12 +29,13 @@ export function formatTransactionProviderLabel(provider: string | null | undefin
     normalized === "bitcoin lightning" ||
     normalized === "btc_lightning" ||
     normalized === "lightning_btc"
-  ) return "Lightning"
+  ) return "Bitcoin Lightning"
 
   if (normalized === "solana") return "Solana Pay"
   if (normalized === "base") return "Base Pay"
   if (normalized === "coinbase") return "Coinbase Business"
   if (normalized === "shift4") return "Shift4"
+  if (normalized === "stripe") return "Stripe"
   if (normalized === "cash") return "Cash"
 
   return String(provider || "Unknown")
