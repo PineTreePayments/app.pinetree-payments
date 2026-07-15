@@ -8,10 +8,10 @@
 import { getMerchantDefaultProvider, getMerchantProviders } from "@/database/merchants"
 import type { PaymentAdapterId } from "@/types/payment"
 import { normalizeProvider, normalizeWalletNetwork } from "./providerMappings"
-import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "./providerRegistry"
+import { getProviderMetadata, isProviderHealthy, providerSupportsFeeAtPaymentTime } from "@/providers/registry"
 import { loadProviders } from "./loadProviders"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
-import { merchantProviderCanProcessPayments } from "@/lib/providers/cardProviderReadiness"
+import { merchantProviderCanProcessPayments } from "@/providers/cardProviderReadiness"
 import {
   getPineTreeSpeedConfigStatus,
   isSpeedPlatformTreasurySweepEnabled

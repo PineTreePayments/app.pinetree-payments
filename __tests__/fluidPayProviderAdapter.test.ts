@@ -6,7 +6,7 @@ import {
   getPaymentStatus,
   translateEvent,
   verifyWebhook
-} from "@/lib/providers/fluidpay"
+} from "@/providers/fluidpay"
 
 describe("Fluid Pay provider scaffold", () => {
   it("fails closed for payment creation without verified official docs", async () => {
@@ -26,4 +26,3 @@ describe("Fluid Pay provider scaffold", () => {
     expect(translateEvent()).toBeNull()
   })
 })
-

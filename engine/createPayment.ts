@@ -6,7 +6,7 @@
  */
 
 import { chooseBestAdapter } from "./providerSelector"
-import { getProvider } from "./providerRegistry"
+import { getProvider } from "@/providers/registry"
 import { type PaymentAdapterId, getAdapterCredentialKey } from "@/types/payment"
 import {
   createPayment as createPaymentRecord,

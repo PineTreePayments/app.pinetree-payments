@@ -91,8 +91,9 @@ describe("card provider setup UI", () => {
 
     expect(source).toContain('if (applicationStatus === "Approved") return "Connected"')
     expect(source).toContain('if (applicationStatus === "Denied") return "Denied"')
-    expect(source).toContain('applicationStatus === "approved"')
-    expect(source).toContain('applicationStatus === "denied"')
+    expect(source).toContain('onboardingStatus === "complete"')
+    expect(source).toContain('onboardingStatus === "denied"')
+    expect(source).toContain("cardReadiness")
   })
 
   it("keeps merchant-facing card setup free of technical processor wording", () => {

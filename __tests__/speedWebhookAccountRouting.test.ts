@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   loadProviders: vi.fn(),
   getMerchantIdBySpeedAccountId: vi.fn(),
   scheduleLightningSweepProcessing: vi.fn(),
+  normalizeSpeedWebhookForWallet: vi.fn(),
 }))
 
 vi.mock("@/engine/eventProcessor", () => ({ processWebhook: mocks.processWebhook }))
@@ -26,12 +27,19 @@ vi.mock("@/database/merchantProviders", () => ({ SPEED_PROVIDER_NAME: "lightning
 vi.mock("@/lib/api/lightningSweepMaintenance", () => ({
   scheduleLightningSweepProcessing: mocks.scheduleLightningSweepProcessing,
 }))
+// Wallet-activity normalization is additive and separately tested in
+// __tests__/speedWalletWebhookNormalizer.test.ts - stubbed here so this
+// existing routing-behavior test never depends on its real DB access.
+vi.mock("@/engine/wallet/speedWalletWebhookNormalizer", () => ({
+  normalizeSpeedWebhookForWallet: mocks.normalizeSpeedWebhookForWallet,
+}))
 
 describe("POST /api/webhooks/speed - connected-account event routing", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.loadProviders.mockResolvedValue(undefined)
     mocks.processWebhook.mockResolvedValue(undefined)
+    mocks.normalizeSpeedWebhookForWallet.mockResolvedValue({ handled: false, reason: "test_stub" })
     vi.spyOn(console, "info").mockImplementation(() => undefined)
   })
 

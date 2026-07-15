@@ -1,10 +1,15 @@
 import { supabaseAdmin, supabase } from "@/database"
 import { refreshWalletBalancesEngine } from "./walletOverview"
 import { loadProviders } from "./loadProviders"
-import { getProviderMetadata } from "./providerRegistry"
+import { getProviderMetadata } from "@/providers/registry"
 import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
+import {
+  canCardProviderProcessPayments,
+  isLegacyCardProviderApproved,
+  isStripeConnectReady
+} from "@/providers/cardProviderReadiness"
 import {
   buildPineTreeRailReadiness,
   getPineTreeRailReadinessDiagnostics,
@@ -40,6 +45,13 @@ export type ProviderRow = {
     ready: boolean
     missingPermissions: string[]
     reason: string | null
+  } | null
+  cardReadiness?: {
+    connected: boolean
+    enabled: boolean
+    readyForPayments: boolean
+    onboardingStatus: "not_started" | "pending" | "complete" | "denied"
+    unavailableReason: string | null
   } | null
 }
 
@@ -224,31 +236,71 @@ function getLightningDashboardStatus(row?: ProviderRow | null): LightningDashboa
   return "connected"
 }
 
-function sanitizeApplicationCardProviderRow(row: ProviderRow): ProviderRow {
+function getApplicationCardOnboardingStatus(row: ProviderRow): NonNullable<ProviderRow["cardReadiness"]>["onboardingStatus"] {
   const credentials = row.credentials || {}
+  const providerId = String(row.provider || "").trim().toLowerCase()
+  const applicationStatus = String(credentials.application_status || row.status || "").trim().toLowerCase()
+
+  if (applicationStatus === "denied" || applicationStatus === "declined" || applicationStatus === "rejected") {
+    return "denied"
+  }
+
+  if (providerId === "shift4") {
+    if (isLegacyCardProviderApproved(row)) return "complete"
+  } else if (providerId === "fluidpay") {
+    if (isLegacyCardProviderApproved(row)) return "complete"
+  }
+
+  if (
+    applicationStatus === "pending" ||
+    applicationStatus === "setup_started" ||
+    Boolean(credentials.setup_started_at || credentials.setup_submitted_at || credentials.setup_returned_at)
+  ) {
+    return "pending"
+  }
+
+  return "not_started"
+}
+
+function getStripeOnboardingStatus(row: ProviderRow): NonNullable<ProviderRow["cardReadiness"]>["onboardingStatus"] {
+  const credentials = row.credentials || {}
+  if (isStripeConnectReady(row)) return "complete"
+  if (credentials.details_submitted === true || Boolean(String(credentials.stripe_account_id || "").trim())) {
+    return "pending"
+  }
+  return "not_started"
+}
+
+function buildCardReadiness(row: ProviderRow): NonNullable<ProviderRow["cardReadiness"]> {
+  const providerId = String(row.provider || "").trim().toLowerCase()
+  const onboardingStatus = providerId === "stripe"
+    ? getStripeOnboardingStatus(row)
+    : getApplicationCardOnboardingStatus(row)
+  const readyForPayments = canCardProviderProcessPayments(row)
+  const connected = onboardingStatus === "complete"
+
   return {
-    ...row,
-    credentials: {
-      application_status: String(credentials.application_status || ""),
-      setup_started_at: String(credentials.setup_started_at || ""),
-      setup_submitted_at: String(credentials.setup_submitted_at || ""),
-      setup_returned_at: String(credentials.setup_returned_at || ""),
-      provider_model: String(credentials.provider_model || "")
-    }
+    connected,
+    enabled: row.enabled !== false,
+    readyForPayments,
+    onboardingStatus,
+    unavailableReason: readyForPayments
+      ? null
+      : onboardingStatus === "pending"
+        ? "Provider setup is pending."
+        : onboardingStatus === "denied"
+          ? "Provider setup was denied."
+          : "Provider setup has not started."
   }
 }
 
-function sanitizeStripeProviderRow(row: ProviderRow): ProviderRow {
-  const credentials = row.credentials || {}
+function sanitizeCardProviderRow(row: ProviderRow): ProviderRow {
   return {
     ...row,
     credentials: {
-      stripe_account_id: String(credentials.stripe_account_id || ""),
-      details_submitted: credentials.details_submitted === true,
-      charges_enabled: credentials.charges_enabled === true,
-      payouts_enabled: credentials.payouts_enabled === true,
-      provider_model: String(credentials.provider_model || "")
-    }
+      provider_model: String(row.credentials?.provider_model || "")
+    },
+    cardReadiness: buildCardReadiness(row)
   }
 }
 
@@ -270,26 +322,16 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
     )
     .map((row) => {
       if (row.provider === "stripe") {
-        return sanitizeStripeProviderRow(row)
+        return sanitizeCardProviderRow(row)
       }
 
       if (row.provider === "fluidpay") {
-        return sanitizeApplicationCardProviderRow(row)
+        return sanitizeCardProviderRow(row)
       }
 
-      if (row.provider !== "shift4") return row
+      if (row.provider === "shift4") return sanitizeCardProviderRow(row)
 
-      return {
-        ...row,
-        credentials: {
-          account_reference: String(row.credentials?.account_reference || ""),
-          merchant_approval_status: String(row.credentials?.merchant_approval_status || ""),
-          api_status: String(row.credentials?.api_status || ""),
-          webhook_status: String(row.credentials?.webhook_status || ""),
-          notes: String(row.credentials?.notes || ""),
-          provider_model: "shift4_merchant_account"
-        }
-      }
+      return row
     })
 
   // ── NWC Lightning (Advanced) ──────────────────────────────────────────────

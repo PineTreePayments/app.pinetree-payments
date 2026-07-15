@@ -18,9 +18,16 @@ import { getMerchantProviders } from "@/database/merchants"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
-import { merchantProviderCanProcessPayments } from "@/lib/providers/cardProviderReadiness"
+import { merchantProviderCanProcessPayments } from "@/providers/cardProviderReadiness"
 import { buildPineTreeRailReadiness, getPineTreeRailReadinessDiagnostics } from "@/lib/pinetreeRailReadiness"
+import { getPaymentRailDefinition } from "@/types/payment"
 
+// Deliberately NOT derived from the full canonical rail set
+// (types/payment.ts's PAYMENT_RAIL_DEFINITIONS has 6 networks, including
+// fluidpay) - fluidpay is not yet wired into checkout/POS network
+// resolution below, so it stays excluded here until that's implemented and
+// tested. This is a genuinely narrower, intentionally scoped subset, not a
+// duplicate of the canonical list.
 const SUPPORTED_NETWORKS: WalletNetwork[] = ["solana", "base", "shift4", "stripe", "bitcoin_lightning"]
 const PAYMENT_DETAILS_TIMEOUT_MS = Number(process.env.PAYMENT_DETAILS_TIMEOUT_MS || 12000)
 
@@ -100,16 +107,22 @@ function resolveSupportedAssetForNetwork(network: WalletNetwork, asset?: string)
   return normalizedAsset
 }
 
-function walletNetworkToProviderKey(network: WalletNetwork): string | null {
-  if (network === "solana") return "solana"
-  if (network === "base") return "base"
-  if (network === "shift4") return "shift4"
-  if (network === "stripe") return "stripe"
-  if (network === "bitcoin_lightning") return "lightning"
-  return null
+// Exported for direct classification tests - see
+// __tests__/paymentNetworkClassification.test.ts. This is the single place
+// a wallet network (solana/base/shift4/stripe/bitcoin_lightning) maps to the
+// merchant_providers row that must be connected+enabled for it to be
+// eligible - card and crypto networks are always distinct keys here, never
+// merged. The actual key values come from the canonical rail definitions
+// (types/payment.ts's providerCapability field) rather than being
+// hardcoded a second time here; the SUPPORTED_NETWORKS guard preserves the
+// existing, deliberate exclusion of fluidpay (see the comment above that
+// constant) even though fluidpay has its own canonical rail definition.
+export function walletNetworkToProviderKey(network: WalletNetwork): string | null {
+  if (!SUPPORTED_NETWORKS.includes(network)) return null
+  return getPaymentRailDefinition(network).providerCapability
 }
 
-function isProviderAvailableForCheckout(
+export function isProviderAvailableForCheckout(
   network: WalletNetwork,
   enabledProviders: Set<string>
 ): boolean {

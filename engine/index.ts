@@ -61,7 +61,7 @@ export {
   isProviderHealthy,
   setProviderHealth,
   getProviderHealthStatus
-} from "./providerRegistry"
+} from "@/providers/registry"
 
 export { chooseBestAdapter, getAvailableNetworks } from "./providerSelector"
 export { runProviderHealthChecks } from "./providerHealth"

@@ -18,4 +18,4 @@ export { basePayAdapter } from "./basePay"
 export { speedAdapter } from "./lightning/speedAdapter"
 export { nwcAdapter } from "./lightning/nwcAdapter"
 
-export { getProvider, registerProvider } from "../engine/providerRegistry"
+export { getProvider, registerProvider } from "./registry"

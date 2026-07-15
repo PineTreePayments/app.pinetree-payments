@@ -28,7 +28,7 @@ vi.mock("@/engine/webhookDelivery", () => ({
   deliverWebhook: vi.fn().mockResolvedValue(undefined)
 }))
 
-vi.mock("@/engine/providerRegistry", () => ({
+vi.mock("@/providers/registry", () => ({
   getProvider: vi.fn()
 }))
 

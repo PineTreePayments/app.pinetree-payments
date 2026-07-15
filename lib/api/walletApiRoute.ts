@@ -1,0 +1,55 @@
+import { NextRequest, NextResponse } from "next/server"
+import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
+import {
+  WalletApiRouteError,
+  walletError,
+  walletErrorHttpStatus,
+  walletOk,
+} from "@/engine/wallet/walletErrors"
+
+export function walletErrorResponse(error: unknown): NextResponse {
+  if (error instanceof WalletApiRouteError) {
+    return NextResponse.json(walletError(error.code, error.message, error.retryable), {
+      status: walletErrorHttpStatus(error.code),
+    })
+  }
+  console.error("[wallet-api] unhandled error", error instanceof Error ? error.message : error)
+  return NextResponse.json(walletError("INTERNAL_ERROR", "Something went wrong. Please try again."), {
+    status: 500,
+  })
+}
+
+/**
+ * Authenticates the request, resolves the PineTree merchant id, and runs
+ * `handler(merchantId)`, wrapping the result/error in the shared
+ * {ok,data}/{ok,error} envelope. Every generic app/api/wallets/* route uses
+ * this - never accept a merchant/account id supplied by the client. Routes
+ * must call an engine/wallet/* function from the handler, never fetch()
+ * another route or a provider-specific endpoint directly.
+ */
+export async function withWalletMerchant<T>(
+  req: NextRequest,
+  handler: (merchantId: string) => Promise<T>
+): Promise<NextResponse> {
+  let merchantId: string
+  try {
+    merchantId = await requireMerchantIdFromRequest(req)
+  } catch {
+    return NextResponse.json(walletError("UNAUTHORIZED", "Unauthorized."), { status: 401 })
+  }
+
+  try {
+    const data = await handler(merchantId)
+    return NextResponse.json(walletOk(data))
+  } catch (error) {
+    return walletErrorResponse(error)
+  }
+}
+
+export function requireIdempotencyKey(req: NextRequest): string {
+  const key = req.headers.get("idempotency-key")?.trim()
+  if (!key) {
+    throw new WalletApiRouteError("IDEMPOTENCY_KEY_REQUIRED", "An Idempotency-Key header is required for this request.")
+  }
+  return key
+}

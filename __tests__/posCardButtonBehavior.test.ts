@@ -25,8 +25,9 @@ describe("POS Card button behavior", () => {
     expect(pos).toContain('setStatus("failed")')
   })
 
-  it("limits POS card intents to Stripe instead of Shift4", () => {
-    expect(engine).toContain("allowedNetworks: preferredNetwork ? [preferredNetwork] : undefined")
+  it("limits POS card intents to Stripe instead of Shift4, and limits POS crypto intents to the canonical crypto-only rails (never Stripe)", () => {
+    expect(engine).toContain("allowedNetworks: requestedAllowedNetworks")
+    expect(engine).toContain('preferredNetwork ? [preferredNetwork] : getRailsForCategory("crypto")')
     expect(engine).toContain('preferredNetwork === "stripe"')
   })
 

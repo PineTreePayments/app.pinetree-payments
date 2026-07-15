@@ -9,7 +9,7 @@
  */
 
 import type { ProviderAdapter, ProviderCapabilities, LightningInvoiceRequest, LightningInvoiceStatus } from "@/types/provider"
-import { registerProvider } from "@/engine/providerRegistry"
+import { registerProvider } from "@/providers/registry"
 import { makeNwcInvoice, validateNwcUri } from "./nwcClient"
 import QRCode from "qrcode"
 

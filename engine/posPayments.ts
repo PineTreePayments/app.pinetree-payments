@@ -6,6 +6,7 @@ import { createPaymentIntentEngine } from "./paymentIntents"
 import {
   normalizeWalletNetwork
 } from "./providerMappings"
+import { getRailsForCategory } from "@/types/payment"
 import { PINETREE_FEE } from "./config"
 import { chooseBestAdapter } from "./providerSelector"
 import { calculatePosTotals, type PosTotalBreakdown, type TerminalTaxConfig } from "./posTotals"
@@ -233,6 +234,24 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
   const totals = await calculatePosTotalsForTerminal(merchantId, terminalId, subtotalAmount)
   const merchantAmount = totals.subtotalAmount + totals.taxAmount
   const preferredNetwork = normalizeWalletNetwork(input.terminal.preferredNetwork)
+  // Category resolver (canonical, merchant-agnostic) identifies the possible
+  // crypto rails; createPaymentIntentEngine below intersects them against
+  // this specific merchant's actual available/ready rails. The frontend
+  // never computes this intersection itself.
+  const requestedAllowedNetworks = preferredNetwork ? [preferredNetwork] : getRailsForCategory("crypto")
+
+  if (process.env.NODE_ENV !== "production") {
+    // Dev-only diagnostic proving the POS "Crypto" tap is restricted to
+    // crypto rails before the intent is created - no credentials, account
+    // ids, or customer data, only rail/category identifiers.
+    console.info("[pos-payment-intent] rail_filter_diagnostic", {
+      screen: "components/pos/POSLayout.tsx",
+      route: "engine/posPayments.ts:createPosPaymentIntentEngine",
+      requestedCategory: preferredNetwork ? "card" : "crypto",
+      preferredNetwork: preferredNetwork || null,
+      allowedNetworks: requestedAllowedNetworks,
+    })
+  }
 
   let intent: Awaited<ReturnType<typeof createPaymentIntentEngine>>
   try {
@@ -241,7 +260,18 @@ export async function createPosPaymentIntentEngine(input: CreatePosPaymentInput)
       amount: merchantAmount,
       currency: input.currency || "USD",
       terminalId: input.terminal.terminalId,
-      allowedNetworks: preferredNetwork ? [preferredNetwork] : undefined,
+      // ROOT CAUSE FIX: the POS "Card" button explicitly restricts to
+      // ["stripe"] via preferredNetwork, but the "Crypto" button never sent
+      // a preferredNetwork at all - allowedNetworks was left `undefined`,
+      // which createPaymentIntentEngine treats as "no restriction," i.e.
+      // every network the merchant has enabled, including Stripe/card
+      // rails. The resulting intent (and its QR code / /pay?intent=... page)
+      // then offered Card as one of the options inside what the merchant
+      // initiated as a Crypto-only payment - this is the exact mechanism
+      // behind "Stripe appears inside Crypto." Restrict explicitly to
+      // crypto-only rails whenever the request did not ask for a specific
+      // (card) network.
+      allowedNetworks: requestedAllowedNetworks,
       metadata: {
         subtotalAmount,
         taxAmount: totals.taxAmount,

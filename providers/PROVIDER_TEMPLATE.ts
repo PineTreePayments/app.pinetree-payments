@@ -8,7 +8,7 @@
  */
 
 import { BaseProviderAdapter } from "./BaseAdapter"
-import { registerProvider } from "@/engine/providerRegistry"
+import { registerProvider } from "@/providers/registry"
 import type { PaymentStatus, ProviderAdapterMetadata } from "@/types/provider"
 
 class ProviderNameAdapter extends BaseProviderAdapter {

@@ -1,5 +1,9 @@
 import { supabase, supabaseAdmin } from "@/database"
-import { StripeClient } from "@/lib/providers/stripe/client"
+import {
+  createStripeConnectedAccount,
+  createStripeOnboardingLink,
+  retrieveStripeConnectedAccount
+} from "@/providers/stripe"
 
 const db = supabaseAdmin || supabase
 
@@ -82,18 +86,15 @@ export async function startStripeConnectOnboarding(args: {
   const existing = await getConnectCredentials(args.merchantId)
   let stripeAccountId = String(existing.stripe_account_id || "").trim()
 
-  const client = new StripeClient()
-
   if (!stripeAccountId) {
-    const account = await client.createConnectedAccount({ type: "express" })
+    const account = await createStripeConnectedAccount()
     stripeAccountId = account.id
   }
 
-  const link = await client.createAccountLink({
-    account: stripeAccountId,
-    return_url: returnUrl,
-    refresh_url: refreshUrl,
-    type: "account_onboarding"
+  const link = await createStripeOnboardingLink({
+    accountId: stripeAccountId,
+    returnUrl,
+    refreshUrl
   })
 
   const now = new Date().toISOString()
@@ -111,7 +112,13 @@ export async function startStripeConnectOnboarding(args: {
 export async function syncStripeConnectAccount(args: {
   merchantId: string
 }): Promise<
-  | { ok: true; status: string; enabled: boolean; details_submitted: boolean; charges_enabled: boolean; payouts_enabled: boolean }
+  | {
+      ok: true
+      status: string
+      enabled: boolean
+      readyForPayments: boolean
+      onboardingStatus: "pending" | "complete"
+    }
   | { ok: false; error: string }
 > {
   const existing = await getConnectCredentials(args.merchantId)
@@ -121,22 +128,21 @@ export async function syncStripeConnectAccount(args: {
     return { ok: false, error: "No Stripe connected account found for this merchant." }
   }
 
-  const client = new StripeClient()
-  const account = await client.retrieveConnectedAccount(stripeAccountId)
+  const account = await retrieveStripeConnectedAccount(stripeAccountId)
 
   const { status, enabled } = getStripeConnectStatus({
     stripe_account_id: stripeAccountId,
-    details_submitted: account.details_submitted,
-    charges_enabled: account.charges_enabled,
-    payouts_enabled: account.payouts_enabled
+    details_submitted: account.detailsSubmitted,
+    charges_enabled: account.chargesEnabled,
+    payouts_enabled: account.payoutsEnabled
   })
 
   const credentials: StripeConnectCredentials = {
     ...existing,
     stripe_account_id: stripeAccountId,
-    details_submitted: account.details_submitted,
-    charges_enabled: account.charges_enabled,
-    payouts_enabled: account.payouts_enabled,
+    details_submitted: account.detailsSubmitted,
+    charges_enabled: account.chargesEnabled,
+    payouts_enabled: account.payoutsEnabled,
     connect_last_synced_at: new Date().toISOString()
   }
 
@@ -146,9 +152,8 @@ export async function syncStripeConnectAccount(args: {
     ok: true,
     status,
     enabled,
-    details_submitted: account.details_submitted,
-    charges_enabled: account.charges_enabled,
-    payouts_enabled: account.payouts_enabled
+    readyForPayments: enabled,
+    onboardingStatus: enabled ? "complete" : "pending"
   }
 }
 

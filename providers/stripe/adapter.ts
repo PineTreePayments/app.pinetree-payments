@@ -1,13 +1,13 @@
 import { ProviderAdapter } from "@/types/provider"
-import { registerProvider, setProviderHealth } from "../engine/providerRegistry"
+import { registerProvider, setProviderHealth } from "../registry"
+import { createPayment as createStripePayment } from "./payments"
 import {
-  createPayment as createStripePayment,
-  getPaymentStatus as getStripePaymentStatus,
   STRIPE_DISPLAY_NAME,
-  STRIPE_PROVIDER_ID,
-  translateEvent as translateStripeEvent,
-  verifyWebhook as verifyStripeWebhook
-} from "@/lib/providers/stripe"
+  STRIPE_PROVIDER_ID
+} from "./constants"
+import { getPaymentStatus as getStripePaymentStatus } from "./paymentStatus"
+import { translateEvent as translateStripeEvent } from "./translateEvent"
+import { verifyWebhook as verifyStripeWebhook } from "./verifyWebhook"
 
 export const stripeAdapter: ProviderAdapter = {
   metadata: {

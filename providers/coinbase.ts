@@ -6,8 +6,8 @@
  */
 
 import { ProviderAdapter } from "@/types/provider"
-import { registerProvider } from "../engine/providerRegistry"
-import { setProviderHealth } from "../engine/providerRegistry"
+import { registerProvider } from "./registry"
+import { setProviderHealth } from "./registry"
 import crypto from "crypto"
 
 /**

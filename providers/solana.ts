@@ -6,7 +6,7 @@
  */
 
 import { ProviderAdapter } from "@/types/provider"
-import { registerProvider } from "../engine/providerRegistry"
+import { registerProvider } from "./registry"
 
 /**
  * Solana Pay URI parameters

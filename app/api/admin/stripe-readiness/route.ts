@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
-import { getProviderMetadata } from "@/engine/providerRegistry"
+import { getProviderMetadata } from "@/providers/registry"
 import { loadProviders } from "@/engine/loadProviders"
 
 export async function GET(req: NextRequest) {

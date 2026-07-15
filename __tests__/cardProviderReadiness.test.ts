@@ -3,7 +3,7 @@ import {
   canCardProviderProcessPayments,
   isLegacyCardProviderApproved,
   isStripeConnectReady
-} from "@/lib/providers/cardProviderReadiness"
+} from "@/providers/cardProviderReadiness"
 
 const activeStripe = {
   provider: "stripe",

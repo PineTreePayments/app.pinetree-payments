@@ -7,7 +7,7 @@ import {
   getPaymentStatus,
   translateEvent,
   verifyWebhook
-} from "@/lib/providers/shift4"
+} from "@/providers/shift4"
 
 describe("Shift4 provider adapter", () => {
   beforeEach(() => {
@@ -265,7 +265,7 @@ describe("Shift4 provider adapter", () => {
 
   it("registers Shift4 in the provider registry", async () => {
     await import("@/providers/shift4")
-    const { getProviderMetadata } = await import("@/engine/providerRegistry")
+    const { getProviderMetadata } = await import("@/providers/registry")
 
     expect(getProviderMetadata("shift4")).toMatchObject({
       adapterId: "shift4",

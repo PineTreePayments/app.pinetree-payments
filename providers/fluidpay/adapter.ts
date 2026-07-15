@@ -1,13 +1,13 @@
 import { ProviderAdapter } from "@/types/provider"
-import { registerProvider, setProviderHealth } from "../engine/providerRegistry"
+import { registerProvider, setProviderHealth } from "../registry"
+import { createPayment as createFluidPayPayment } from "./payments"
 import {
-  createPayment as createFluidPayPayment,
   FLUIDPAY_DISPLAY_NAME,
-  FLUIDPAY_PROVIDER_ID,
-  getPaymentStatus as getFluidPayPaymentStatus,
-  translateEvent as translateFluidPayEvent,
-  verifyWebhook as verifyFluidPayWebhook
-} from "@/lib/providers/fluidpay"
+  FLUIDPAY_PROVIDER_ID
+} from "./constants"
+import { getPaymentStatus as getFluidPayPaymentStatus } from "./paymentStatus"
+import { translateEvent as translateFluidPayEvent } from "./translateEvent"
+import { verifyWebhook as verifyFluidPayWebhook } from "./verifyWebhook"
 
 export const fluidPayAdapter: ProviderAdapter = {
   metadata: {

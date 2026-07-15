@@ -32,7 +32,7 @@ vi.mock("@/providers/lightning/speedClient", () => ({
   }))
 }))
 
-vi.mock("@/engine/providerRegistry", () => ({
+vi.mock("@/providers/registry", () => ({
   getProviderMetadata: vi.fn(() => null)
 }))
 

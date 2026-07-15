@@ -8,7 +8,7 @@ import {
   normalizeStripePaymentStatus,
   translateEvent,
   verifyWebhook
-} from "@/lib/providers/stripe"
+} from "@/providers/stripe"
 
 function stripeSignature(rawBody: string, secret: string, timestamp = Math.floor(Date.now() / 1000)) {
   const signature = crypto

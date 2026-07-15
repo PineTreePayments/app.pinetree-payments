@@ -18,7 +18,7 @@ import {
   getPineTreeTreasuryWallet
 } from "./config"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
-import { isProviderHealthy } from "./providerRegistry"
+import { isProviderHealthy } from "@/providers/registry"
 import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
 import { getMerchantBusinessProfile } from "./businessProfile"
 

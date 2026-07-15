@@ -1,6 +1,6 @@
 import { Shift4Client } from "./client"
 import { SHIFT4_CHARGES_PATH } from "./constants"
-import { normalizeShift4PaymentStatus } from "./createPayment"
+import { normalizeShift4PaymentStatus } from "./payments"
 import type { Shift4PaymentStatus } from "./types"
 
 type GetPaymentStatusOptions = {

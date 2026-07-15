@@ -1,4 +1,4 @@
-import { isProviderHealthy } from "./providerRegistry"
+import { isProviderHealthy } from "@/providers/registry"
 import { loadProviders } from "./loadProviders"
 import { createPayment } from "./createPayment"
 

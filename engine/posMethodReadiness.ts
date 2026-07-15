@@ -1,9 +1,14 @@
 import { getMerchantProviders } from "@/database/merchants"
 import { getMerchantAvailableNetworks } from "./paymentIntents"
 import type { WalletNetwork } from "./providerMappings"
-import { canCardProviderProcessPayments } from "@/lib/providers/cardProviderReadiness"
+import { canCardProviderProcessPayments } from "@/providers/cardProviderReadiness"
+import { getRailsForCategory } from "@/types/payment"
 
-const CRYPTO_RAILS: WalletNetwork[] = ["solana", "base", "bitcoin_lightning"]
+// Derived from the canonical rail definitions (types/payment.ts) rather
+// than a manually maintained array - see docs/architecture.md's "No
+// duplicate logic allowed" rule and the Stripe-as-crypto POS bug this
+// prevents from recurring.
+const CRYPTO_RAILS: WalletNetwork[] = getRailsForCategory("crypto")
 
 function normalizeProviderId(provider?: string | null) {
   return String(provider || "").toLowerCase().trim()

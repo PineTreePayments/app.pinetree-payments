@@ -20,7 +20,7 @@ vi.mock("@/database/merchantProviders", () => ({
 }))
 
 import { chooseBestAdapter, getAvailableNetworks } from "@/engine/providerSelector"
-import { registerProvider } from "@/engine/providerRegistry"
+import { registerProvider } from "@/providers/registry"
 import type { ProviderAdapter } from "@/types/provider"
 
 const stripeTestAdapter: ProviderAdapter = {

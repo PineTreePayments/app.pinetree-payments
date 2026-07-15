@@ -1,5 +1,5 @@
 import { StripeClient } from "./client"
-import { normalizeStripePaymentStatus } from "./createPayment"
+import { normalizeStripePaymentStatus } from "./payments"
 
 export async function getPaymentStatus(providerReference: string) {
   const client = new StripeClient()

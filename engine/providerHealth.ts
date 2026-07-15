@@ -16,7 +16,7 @@
 import {
   setProviderHealth,
   getAllProviders
-} from "./providerRegistry"
+} from "@/providers/registry"
 
 /**
  * Run a health check for every registered provider and update the registry.

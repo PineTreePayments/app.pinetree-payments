@@ -37,7 +37,7 @@ export default function StripeConnectReturnPage() {
           return
         }
 
-        setSyncStatus(payload.charges_enabled ? "connected" : "pending")
+        setSyncStatus(payload.readyForPayments ? "connected" : "pending")
       } catch (err) {
         setErrorMessage(err instanceof Error ? err.message : "Unexpected error updating Stripe status.")
         setSyncStatus("error")

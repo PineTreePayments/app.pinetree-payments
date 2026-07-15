@@ -5,6 +5,7 @@ import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { extractSpeedWebhookAccountId, isSpeedConnectedAccountWebhookPayload } from "@/providers/lightning/speedClient"
 import { getMerchantIdBySpeedAccountId } from "@/database/merchantLightningProfiles"
 import { scheduleLightningSweepProcessing } from "@/lib/api/lightningSweepMaintenance"
+import { normalizeSpeedWebhookForWallet } from "@/engine/wallet/speedWalletWebhookNormalizer"
 
 export async function GET() {
   return NextResponse.json({ ok: true, provider: "speed", endpoint: "speed" })
@@ -46,6 +47,20 @@ export async function POST(req: NextRequest) {
       headers: Object.fromEntries(req.headers),
       rawBody
     })
+
+    // Additive wallet-activity normalization only - must never affect the
+    // payment.created/payment.paid handling above, which already succeeded
+    // by this point. Failures here are logged and swallowed.
+    try {
+      const result = await normalizeSpeedWebhookForWallet(payload, Object.fromEntries(req.headers))
+      if (result.handled) {
+        console.info("[webhooks/speed] wallet_activity_normalized", { reason: result.reason })
+      }
+    } catch (walletError) {
+      console.error("[webhooks/speed] wallet_activity_normalization_failed", {
+        error: walletError instanceof Error ? walletError.message : String(walletError),
+      })
+    }
 
     // Cheap and idempotent when there's nothing queued - never blocks this
     // response, and the lease inside scheduleLightningSweepProcessing

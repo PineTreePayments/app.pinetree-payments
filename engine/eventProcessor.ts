@@ -5,7 +5,7 @@
  * verifyWebhook() -> translateEvent() -> engine/eventProcessor -> DB updates/events
  */
 
-import { getProvider } from "./providerRegistry"
+import { getProvider } from "@/providers/registry"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { getPaymentById, getPaymentByProviderReference, upsertLedgerEntry } from "@/database"
 import { PaymentStatus, normalizeToStrictPaymentStatus } from "./paymentStateMachine"

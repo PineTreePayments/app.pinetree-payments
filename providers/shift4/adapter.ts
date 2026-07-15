@@ -1,14 +1,13 @@
 import { ProviderAdapter } from "@/types/provider"
-import { registerProvider } from "../engine/providerRegistry"
-import { setProviderHealth } from "../engine/providerRegistry"
+import { registerProvider, setProviderHealth } from "../registry"
+import { createPayment as createShift4Payment } from "./payments"
 import {
-  createPayment as createShift4Payment,
-  getPaymentStatus as getShift4PaymentStatus,
   SHIFT4_DISPLAY_NAME,
-  SHIFT4_PROVIDER_ID,
-  translateEvent as translateShift4Event,
-  verifyWebhook as verifyShift4Webhook
-} from "@/lib/providers/shift4"
+  SHIFT4_PROVIDER_ID
+} from "./constants"
+import { getPaymentStatus as getShift4PaymentStatus } from "./paymentStatus"
+import { translateEvent as translateShift4Event } from "./translateEvent"
+import { verifyWebhook as verifyShift4Webhook } from "./verifyWebhook"
 
 export const shift4Adapter: ProviderAdapter = {
   metadata: {

@@ -12,16 +12,15 @@ const dashboardEngine = fs.readFileSync(
 )
 
 describe("Stripe provider display", () => {
-  it("passes safe Stripe Connect readiness fields through the Providers API payload", () => {
-    expect(dashboardEngine).toContain("sanitizeStripeProviderRow")
-    expect(dashboardEngine).toContain("stripe_account_id")
-    expect(dashboardEngine).toContain("charges_enabled")
-    expect(dashboardEngine).toContain("details_submitted")
-    expect(dashboardEngine).toContain("payouts_enabled")
+  it("passes normalized Stripe Connect readiness through the Providers API payload", () => {
+    expect(dashboardEngine).toContain("sanitizeCardProviderRow")
+    expect(dashboardEngine).toContain("cardReadiness")
+    expect(dashboardEngine).toContain("isStripeConnectReady")
+    expect(dashboardEngine).toContain("canCardProviderProcessPayments")
   })
 
   it("displays active Stripe Connect as Connected", () => {
-    expect(providersPage).toContain("isStripeConnectReady")
+    expect(providersPage).toContain("cardReadiness")
     expect(providersPage).toContain('return "Connected"')
   })
 

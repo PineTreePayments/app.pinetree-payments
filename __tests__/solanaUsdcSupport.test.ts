@@ -122,7 +122,7 @@ vi.mock("@/engine/loadProviders", () => ({
   loadProviders: vi.fn(),
 }))
 
-vi.mock("@/engine/providerRegistry", () => ({
+vi.mock("@/providers/registry", () => ({
   getProviderMetadata: vi.fn(),
   isProviderHealthy: vi.fn(),
   providerSupportsFeeAtPaymentTime: vi.fn(),

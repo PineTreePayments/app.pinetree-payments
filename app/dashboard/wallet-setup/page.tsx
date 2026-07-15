@@ -36,6 +36,7 @@ import {
   ProviderStatusPill,
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
+import MerchantWalletManagementPanel from "@/components/dashboard/MerchantWalletManagementPanel"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 import {
@@ -71,7 +72,7 @@ import { runWithBoundedTimeout, type BoundedProviderCallSettlement } from "@/lib
 // Types
 // ---------------------------------------------------------------------------
 
-type WalletTab = "overview" | "balances" | "withdraw" | "activity"
+type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "speed"
 type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
@@ -460,6 +461,7 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "balances", label: "Balances" },
   { id: "withdraw", label: "Withdraw" },
   { id: "activity", label: "Activity" },
+  { id: "speed", label: "Speed Wallet" },
 ]
 
 const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
@@ -8341,7 +8343,7 @@ function PineTreeWalletRuntime() {
             </header>
 
             <nav
-              className="grid shrink-0 grid-cols-4 gap-1.5 border-b border-gray-100 px-4 py-3 sm:px-6"
+              className="grid shrink-0 grid-cols-5 gap-1.5 border-b border-gray-100 px-4 py-3 sm:px-6"
               aria-label="PineTree Wallet sections"
             >
               {walletTabs.map((tab) => (
@@ -8432,6 +8434,10 @@ function PineTreeWalletRuntime() {
 
               {activeTab === "activity" ? (
                 <ActivityTab sync={walletSync} syncing={walletSyncing} />
+              ) : null}
+
+              {activeTab === "speed" ? (
+                <MerchantWalletManagementPanel accessToken={accessTokenRef.current} />
               ) : null}
 
             </div>

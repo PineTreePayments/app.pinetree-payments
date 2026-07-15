@@ -201,13 +201,16 @@ describe("Balances tab - compact selected asset detail", () => {
 })
 
 describe("Wallets tab removed", () => {
-  it("modal tabs include Overview, Balances, Withdraw, and Activity", () => {
-    expect(walletPage).toContain('type WalletTab = "overview" | "balances" | "withdraw" | "activity"')
+  it("modal tabs include Overview, Balances, Withdraw, Activity, and Speed Wallet", () => {
+    expect(walletPage).toContain(
+      'type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "speed"'
+    )
     expect(walletPage).toContain('{ id: "overview", label: "Overview" }')
     expect(walletPage).toContain('{ id: "balances", label: "Balances" }')
     expect(walletPage).toContain('{ id: "withdraw", label: "Withdraw" }')
     expect(walletPage).toContain('{ id: "activity", label: "Activity" }')
-    expect(walletPage).toContain("grid-cols-4")
+    expect(walletPage).toContain('{ id: "speed", label: "Speed Wallet" }')
+    expect(walletPage).toContain("grid-cols-5")
     expect(walletPage).not.toContain('label: "Wallets"')
     expect(walletPage).not.toContain('activeTab === "wallets"')
   })

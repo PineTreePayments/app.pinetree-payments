@@ -7,7 +7,7 @@
  */
 
 import type { ProviderAdapter, ProviderCapabilities, LightningInvoiceRequest } from "@/types/provider"
-import { registerProvider } from "@/engine/providerRegistry"
+import { registerProvider } from "@/providers/registry"
 import {
   SPEED_PROVIDER_NAME,
   getMerchantSpeedProvider

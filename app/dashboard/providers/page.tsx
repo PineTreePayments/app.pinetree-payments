@@ -15,10 +15,8 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import {
-  getShift4DisplayStatus,
   type Shift4DisplayStatus
 } from "@/lib/shift4DisplayStatus"
-import { isStripeConnectReady } from "@/lib/providers/cardProviderReadiness"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 
 const shift4ApplicationUrl =
@@ -80,11 +78,6 @@ type ProviderCredentials = {
   wallet_type?: string | null
   wallet_label?: string
   provider_model?: string
-  account_reference?: string
-  merchant_approval_status?: string
-  api_status?: string
-  webhook_status?: string
-  notes?: string
   [key: string]: unknown
 }
 
@@ -105,6 +98,13 @@ type ProviderRecord = {
     ready: boolean
     missingPermissions: string[]
     reason: string | null
+  } | null
+  cardReadiness?: {
+    connected: boolean
+    enabled: boolean
+    readyForPayments: boolean
+    onboardingStatus: "not_started" | "pending" | "complete" | "denied"
+    unavailableReason: string | null
   } | null
 }
 
@@ -374,16 +374,6 @@ export default function ProvidersPage() {
 
     const p = getProvider(provider)
     if (isManagedCardProvider(provider)) {
-      if (provider === "stripe") {
-        if (isStripeConnectReady(p || { provider: "stripe" })) return "Connected"
-        const credentials = p?.credentials
-        const setupInProgress = Boolean(
-          p?.enabled &&
-          p.status === "active" &&
-          (credentials?.details_submitted || credentials?.stripe_account_id)
-        )
-        return setupInProgress ? "Pending" : "Not connected"
-      }
       const applicationStatus = getCardProviderApplicationStatus(provider, p)
       if (applicationStatus === "Approved") return "Connected"
       if (applicationStatus === "Pending") return "Pending"
@@ -833,37 +823,15 @@ function EngineSettingStatus({
     providerKey: CardOnboardingProvider,
     provider?: ProviderRecord | null
   ): CardApplicationStatus {
-    if (providerKey === "stripe") {
-      const creds = provider?.credentials
-      if (Boolean(creds?.charges_enabled)) return "Approved"
-      if (Boolean(creds?.details_submitted) || Boolean(creds?.stripe_account_id)) return "Pending"
-      if (getCardProviderStatusOverride(providerKey) === "Pending") return "Pending"
-      return "Not started"
-    }
-
-    const applicationStatus = String(provider?.credentials?.application_status || provider?.status || "").trim().toLowerCase()
-    if (applicationStatus === "approved" || applicationStatus === "active" || applicationStatus === "connected") return "Approved"
-    if (applicationStatus === "denied" || applicationStatus === "declined" || applicationStatus === "rejected") return "Denied"
-    if (applicationStatus === "pending" || applicationStatus === "setup_started") return "Pending"
-
-    const displayStatus = getShift4DisplayStatus({
-      providerStatus: provider?.status,
-      accountReference: String(provider?.credentials?.account_reference || ""),
-      merchantApprovalStatus: String(provider?.credentials?.merchant_approval_status || ""),
-      apiStatus: String(provider?.credentials?.api_status || "")
-    })
-
-    if (displayStatus.label === "Denied") return "Denied"
-    if (displayStatus.label === "Connected") return "Approved"
-    if (displayStatus.label === "Pending" || getCardProviderStatusOverride(providerKey) === "Pending") return "Pending"
+    const onboardingStatus = provider?.cardReadiness?.onboardingStatus
+    if (onboardingStatus === "complete") return "Approved"
+    if (onboardingStatus === "denied") return "Denied"
+    if (onboardingStatus === "pending" || getCardProviderStatusOverride(providerKey) === "Pending") return "Pending"
     return "Not started"
   }
 
   function getStripeConnectCtaLabel(p: ProviderRecord | undefined): string {
-    const creds = p?.credentials
-    if (!creds?.stripe_account_id) return "Start Stripe Setup"
-    if (Boolean(creds.charges_enabled)) return "Start Stripe Setup"
-    return "Continue Setup"
+    return p?.cardReadiness?.onboardingStatus === "pending" ? "Continue Setup" : "Start Stripe Setup"
   }
 
   function ProviderCard({
@@ -976,7 +944,7 @@ function EngineSettingStatus({
                 <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
                   {connected
                     ? "Card processing enabled"
-                    : p?.credentials?.stripe_account_id
+                    : p?.cardReadiness?.onboardingStatus === "pending"
                       ? "Stripe account needs setup"
                       : "Stripe account not connected"}
                 </span>

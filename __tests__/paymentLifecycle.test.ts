@@ -22,7 +22,7 @@ vi.mock("@/engine/updatePaymentStatus", () => ({
   updatePaymentStatus: vi.fn()
 }))
 
-vi.mock("@/engine/providerRegistry", () => ({
+vi.mock("@/providers/registry", () => ({
   getProvider: vi.fn()
 }))
 
