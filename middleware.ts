@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
+import { createClient } from "@supabase/supabase-js"
 
 function isProtectedPage(pathname: string): boolean {
   return (
@@ -124,6 +125,28 @@ export async function middleware(req: NextRequest) {
     const loginUrl = req.nextUrl.clone()
     loginUrl.pathname = "/login"
     return NextResponse.redirect(loginUrl)
+  }
+
+  if (user && (pathname === "/dashboard/admin" || pathname.startsWith("/dashboard/admin/"))) {
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    const adminDb = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      serviceKey || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    const { data } = await adminDb
+      .from("merchants")
+      .select("role")
+      .eq("id", user.id)
+      .single()
+
+    const isAdmin = data?.role === "admin"
+
+    if (!isAdmin) {
+      const dashboardUrl = req.nextUrl.clone()
+      dashboardUrl.pathname = "/dashboard"
+      dashboardUrl.search = ""
+      return NextResponse.redirect(dashboardUrl)
+    }
   }
 
   return res

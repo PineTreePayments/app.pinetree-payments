@@ -12,6 +12,8 @@ describe("dashboard checkout and developer navigation", () => {
 
     expect(layout).toContain('{ name: "Online Checkout", href: "/dashboard/checkout" }')
     expect(layout).toContain('{ name: "Developer", href: "/dashboard/developer" }')
+    expect(layout).toContain('...(isAdmin ? [{ name: "Admin", href: "/dashboard/admin" }] : [])')
+    expect(layout).toContain('setIsAdmin(meData.isAdmin === true)')
     expect(layout.indexOf('{ name: "Help Center", href: "/dashboard/help" }')).toBeLessThan(
       layout.indexOf('{ name: "Developer", href: "/dashboard/developer" }')
     )

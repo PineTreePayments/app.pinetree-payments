@@ -1,24 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
-import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
-import { supabase, supabaseAdmin } from "@/database/supabase"
-
-const db = supabaseAdmin || supabase
+import { getAdminStatusFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
 
 export async function GET(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
-
-    const { data } = await db
-      .from("merchants")
-      .select("email, role")
-      .eq("id", merchantId)
-      .single()
+    const status = await getAdminStatusFromRequest(req)
 
     return NextResponse.json({
-      isAdmin: data?.role === "admin",
-      merchantId,
-      email: data?.email ?? null,
-      role: data?.role ?? null,
+      isAdmin: status.isAdmin,
+      merchantId: status.merchantId,
+      email: status.isAdmin ? status.email : null,
+      role: status.isAdmin ? status.role : null,
     })
   } catch (error: unknown) {
     return NextResponse.json(
