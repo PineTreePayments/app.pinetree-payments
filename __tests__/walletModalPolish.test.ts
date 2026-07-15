@@ -113,11 +113,11 @@ describe("Balances tab - compact selected asset detail", () => {
   it("BalanceRows uses selectedKey state with the shared asset dropdown", () => {
     const src = balanceRowsSrc()
     expect(src).toContain("selectedKey")
-    expect(src).toContain("setSelectedKey")
+    expect(src).toContain("onSelectKey")
     expect(src).toContain("balanceOptions")
     expect(src).toContain("dropdownOptions")
     expect(src).toContain("AssetSelectDropdown")
-    expect(src).toContain("onSelect={setSelectedKey}")
+    expect(src).toContain("onSelect={onSelectKey}")
     expect(src).toContain('balanceOptions.find((row) => row.key === "BASE_ETH")')
     expect(src).not.toContain('["Deposit", "Withdraw", "History"].map')
     expect(src).not.toContain("allAssets.map((row, index)")
@@ -200,19 +200,23 @@ describe("Balances tab - compact selected asset detail", () => {
   })
 })
 
-describe("Wallets tab removed", () => {
-  it("modal tabs include Overview, Balances, Withdraw, Activity, and Speed Wallet", () => {
+describe("Provider-branded wallet tab removed", () => {
+  it("modal tabs include exactly Overview, Balances, Withdraw, and Activity", () => {
     expect(walletPage).toContain(
-      'type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "speed"'
+      'type WalletTab = "overview" | "balances" | "withdraw" | "activity"'
     )
     expect(walletPage).toContain('{ id: "overview", label: "Overview" }')
     expect(walletPage).toContain('{ id: "balances", label: "Balances" }')
     expect(walletPage).toContain('{ id: "withdraw", label: "Withdraw" }')
     expect(walletPage).toContain('{ id: "activity", label: "Activity" }')
-    expect(walletPage).toContain('{ id: "speed", label: "Speed Wallet" }')
-    expect(walletPage).toContain("grid-cols-5")
+    expect(walletPage).not.toContain('{ id: "speed"')
+    expect(walletPage).not.toContain("Speed Wallet")
+    expect(walletPage).toContain("grid-cols-4")
+    expect(walletPage).toContain("whitespace-nowrap")
+    expect(walletPage).not.toContain("grid-cols-5")
     expect(walletPage).not.toContain('label: "Wallets"')
     expect(walletPage).not.toContain('activeTab === "wallets"')
+    expect(walletPage).not.toContain('activeTab === "speed"')
   })
 
   it("old wallet-row and receive-row components are gone", () => {
@@ -233,6 +237,35 @@ describe("Wallets tab removed", () => {
     expect(src).toContain("Set Bitcoin payout destination")
     expect(src).not.toContain("Speed")
     expect(src).not.toContain("Auto-settlement")
+  })
+
+  it("does not mount a provider-branded wallet management panel inside the PineTree Wallet modal", () => {
+    const modalSrc = runtimeSrc().slice(
+      runtimeSrc().indexOf('aria-labelledby="pinetree-wallet-modal-title"'),
+      runtimeSrc().indexOf("// ---------------------------------------------------------------------------\n// Page")
+    )
+    expect(modalSrc).not.toContain("MerchantWalletManagementPanel")
+    expect(modalSrc).not.toContain("providerDisplayName")
+    expect(modalSrc).not.toMatch(/\bSpeed\b/)
+  })
+
+  it("Bitcoin overview rows open the unified Balances tab with BTC selected", () => {
+    const src = runtimeSrc()
+    expect(src).toContain("handleOverviewRailSelect")
+    expect(src).toContain('bitcoin: "BTC"')
+    expect(src).toContain('setActiveTab("balances")')
+    expect(src).toContain("onSelectRail={handleOverviewRailSelect}")
+    expect(walletOverviewSrc()).toContain("onClick={() => onSelectRail?.(row.rail)}")
+    expect(balanceRowsSrc()).toContain("selectedKey")
+    expect(balanceRowsSrc()).toContain("onSelectKey")
+  })
+
+  it("Bitcoin appears in Overview, Balances, Withdraw, and Activity as a unified PineTree rail", () => {
+    expect(walletPage).toContain('label: "Bitcoin" as const')
+    expect(walletPage).toContain('{ key: "BTC", rail: "bitcoin", asset: "BTC"')
+    expect(walletPage).toContain('bitcoin: ["BTC"]')
+    expect(walletPage).toContain('railDisplayName(item.rail)')
+    expect(walletPage).not.toContain("/api/wallets/speed")
   })
 })
 

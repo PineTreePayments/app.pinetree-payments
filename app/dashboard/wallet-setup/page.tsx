@@ -36,7 +36,6 @@ import {
   ProviderStatusPill,
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
-import MerchantWalletManagementPanel from "@/components/dashboard/MerchantWalletManagementPanel"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 import {
@@ -72,7 +71,7 @@ import { runWithBoundedTimeout, type BoundedProviderCallSettlement } from "@/lib
 // Types
 // ---------------------------------------------------------------------------
 
-type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "speed"
+type WalletTab = "overview" | "balances" | "withdraw" | "activity"
 type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
@@ -461,7 +460,6 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "balances", label: "Balances" },
   { id: "withdraw", label: "Withdraw" },
   { id: "activity", label: "Activity" },
-  { id: "speed", label: "Speed Wallet" },
 ]
 
 const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
@@ -934,7 +932,7 @@ function formatCryptoAmount(value: number | null, asset: string) {
 function railDisplayName(rail: WithdrawalRail) {
   if (rail === "base") return "Base"
   if (rail === "solana") return "Solana"
-  return "Bitcoin"
+  return "Bitcoin Lightning"
 }
 
 function assetOptionKey(option: Pick<WithdrawalAssetOption, "rail" | "asset">) {
@@ -2296,10 +2294,12 @@ function WalletOverviewSummary({
   rows,
   sync,
   syncing,
+  onSelectRail,
 }: {
   rows: WalletRailRow[]
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
+  onSelectRail?: (rail: WithdrawalRail) => void
 }) {
   const visibleRows = rows
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
@@ -2331,7 +2331,11 @@ function WalletOverviewSummary({
               const needsAttention = Boolean(row.needsAttentionMessage)
               return (
                 <div key={row.label} className="px-4 py-3.5 sm:px-5">
-                  <div className="grid grid-cols-[minmax(0,1fr)_7.25rem_minmax(4.5rem,auto)] items-center gap-3 sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)]">
+                  <button
+                    type="button"
+                    onClick={() => onSelectRail?.(row.rail)}
+                    className="grid w-full grid-cols-[minmax(0,1fr)_7.25rem_minmax(4.5rem,auto)] items-center gap-3 rounded-xl text-left transition hover:bg-blue-50/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)]"
+                  >
                     <p className="min-w-0 text-sm font-semibold text-gray-900">{row.label}</p>
                     <span className="flex justify-center">
                       <WalletStatusPill
@@ -2340,7 +2344,7 @@ function WalletOverviewSummary({
                       />
                     </span>
                     <span className="min-w-[72px] text-right text-sm font-semibold tabular-nums text-gray-950 sm:min-w-[92px]">{formatUsd(railUsd)}</span>
-                  </div>
+                  </button>
                   {needsAttention ? (
                     <p className="mt-1.5 text-xs leading-4 text-amber-700">{row.needsAttentionMessage}</p>
                   ) : null}
@@ -2458,17 +2462,21 @@ function BalanceRows({
   profileAddresses,
   bitcoinPayoutEntries,
   copiedAddress,
+  selectedKey,
   onCopy,
+  onSelectKey,
 }: {
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
   profileAddresses: Record<"base" | "solana" | "bitcoin", AddressEntry[]>
   bitcoinPayoutEntries: AddressEntry[]
   copiedAddress: string
+  selectedKey: string
   onCopy: (address: string) => void
+  onSelectKey: (key: string) => void
 }) {
   const assetRailLabel = (rail: SyncedBalanceAsset["rail"]) =>
-    rail === "base" ? "Base" : rail === "solana" ? "Solana" : "Bitcoin"
+    rail === "base" ? "Base" : rail === "solana" ? "Solana" : "Bitcoin Lightning"
   const balanceOptions = useMemo(() => {
     const rows: SyncedBalanceAsset[] = []
     if (profileAddresses.base.length > 0) rows.push(...(sync?.balances.base ?? []))
@@ -2486,18 +2494,17 @@ function BalanceRows({
     balanceOptions.find((row) => row.key === "BASE_ETH")?.key ??
     balanceOptions[0]?.key ??
     ""
-  const [selectedKey, setSelectedKey] = useState(preferredSelectedKey)
   const selectedAsset = balanceOptions.find((row) => row.key === selectedKey) ?? balanceOptions[0] ?? null
 
   useEffect(() => {
     if (balanceOptions.length === 0) {
-      if (selectedKey) setSelectedKey("")
+      if (selectedKey) onSelectKey("")
       return
     }
     if (!balanceOptions.some((row) => row.key === selectedKey)) {
-      setSelectedKey(preferredSelectedKey)
+      onSelectKey(preferredSelectedKey)
     }
-  }, [balanceOptions, preferredSelectedKey, selectedKey])
+  }, [balanceOptions, onSelectKey, preferredSelectedKey, selectedKey])
 
   const dropdownOptions: AssetDropdownOption[] = balanceOptions.map((row) => ({
     key: row.key,
@@ -2531,7 +2538,7 @@ function BalanceRows({
         label="Asset"
         options={dropdownOptions}
         selectedKey={selectedAsset?.key ?? selectedKey}
-        onSelect={setSelectedKey}
+        onSelect={onSelectKey}
       />
 
       {selectedAsset ? (
@@ -2746,6 +2753,7 @@ function PineTreeWalletRuntime() {
   const [walletSetupOpeningAfterCreate, setWalletSetupOpeningAfterCreate] = useState(false)
   const [openWalletReconnectNeeded, setOpenWalletReconnectNeeded] = useState(false)
   const [activeTab, setActiveTab] = useState<WalletTab>("overview")
+  const [selectedWalletBalanceKey, setSelectedWalletBalanceKey] = useState("BASE_ETH")
   const [merchantId, setMerchantId] = useState<string | null>(null)
   const [merchantEmail, setMerchantEmail] = useState<string | null>(null)
   const [walletSetupAttemptId, setWalletSetupAttemptId] = useState(createWalletSetupAttemptId)
@@ -7620,6 +7628,16 @@ function PineTreeWalletRuntime() {
     setWithdrawalApprovalError("")
   }
 
+  const handleOverviewRailSelect = useCallback((rail: WithdrawalRail) => {
+    const preferredBalanceKeyByRail: Record<WithdrawalRail, string> = {
+      base: "BASE_ETH",
+      solana: "SOLANA_SOL",
+      bitcoin: "BTC",
+    }
+    setSelectedWalletBalanceKey(preferredBalanceKeyByRail[rail])
+    setActiveTab("balances")
+  }, [])
+
   function handleEditWithdrawal() {
     setWithdrawalScreen("form")
     setWithdrawalSubmitResult(null)
@@ -8343,7 +8361,7 @@ function PineTreeWalletRuntime() {
             </header>
 
             <nav
-              className="grid shrink-0 grid-cols-5 gap-1.5 border-b border-gray-100 px-4 py-3 sm:px-6"
+              className="grid shrink-0 grid-cols-4 gap-1.5 border-b border-gray-100 px-3 py-3 sm:px-6"
               aria-label="PineTree Wallet sections"
             >
               {walletTabs.map((tab) => (
@@ -8351,7 +8369,7 @@ function PineTreeWalletRuntime() {
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`min-w-0 shrink-0 rounded-xl px-2.5 py-2.5 text-xs font-semibold transition sm:px-4 ${
+                  className={`min-w-0 shrink-0 whitespace-nowrap rounded-xl px-2 py-2.5 text-[11px] font-semibold transition sm:px-4 sm:text-xs ${
                     activeTab === tab.id
                       ? "bg-[#0052FF] text-white"
                       : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
@@ -8370,6 +8388,7 @@ function PineTreeWalletRuntime() {
                     rows={walletRailRows}
                     sync={walletSync}
                     syncing={walletSyncing}
+                    onSelectRail={handleOverviewRailSelect}
                   />
                 </>
               ) : null}
@@ -8382,7 +8401,9 @@ function PineTreeWalletRuntime() {
                     profileAddresses={profileAddresses}
                     bitcoinPayoutEntries={bitcoinPayoutEntries}
                     copiedAddress={copiedAddress}
+                    selectedKey={selectedWalletBalanceKey}
                     onCopy={(a) => void copyAddress(a)}
+                    onSelectKey={setSelectedWalletBalanceKey}
                   />
                 </div>
               ) : null}
@@ -8434,10 +8455,6 @@ function PineTreeWalletRuntime() {
 
               {activeTab === "activity" ? (
                 <ActivityTab sync={walletSync} syncing={walletSyncing} />
-              ) : null}
-
-              {activeTab === "speed" ? (
-                <MerchantWalletManagementPanel accessToken={accessTokenRef.current} />
               ) : null}
 
             </div>
