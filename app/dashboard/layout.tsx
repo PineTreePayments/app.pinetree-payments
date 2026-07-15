@@ -35,16 +35,12 @@ export default function DashboardLayout({
     async function checkSession() {
       const { data } = await supabase.auth.getSession()
 
-      console.info("[auth:dashboard] session check", {
-        pathname,
-        hasSession: Boolean(data.session),
-        userId: data.session?.user?.id || null,
-        email: data.session?.user?.email || null,
-        cookieNames: document.cookie
-          .split(";")
-          .map((cookie) => cookie.trim().split("=")[0])
-          .filter((name) => name.startsWith("sb-") || name.includes("auth"))
-      })
+      if (process.env.NODE_ENV !== "production") {
+        console.info("[auth:dashboard] session check", {
+          pathname,
+          hasSession: Boolean(data.session)
+        })
+      }
 
       if (!data.session) {
         router.replace("/login")

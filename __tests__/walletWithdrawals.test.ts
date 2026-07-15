@@ -103,6 +103,7 @@ const BTC_TXID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 function configureBtcExecution() {
   vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+  vi.stubEnv("PINETREE_ENABLE_DYNAMIC_BTC_LEGACY", "true")
   vi.stubEnv("BITCOIN_NETWORK", "mainnet")
   vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
   vi.stubEnv("BITCOIN_ESPLORA_BASE_URL", "https://mempool.test/api")
@@ -552,30 +553,47 @@ describe("PineTree Wallet withdrawals", () => {
     }, createDefaultWithdrawalSigner())).rejects.toThrow("PineTree Wallet source address is not available.")
   })
 
-  it("Bitcoin withdrawal review is blocked without Speed/BTC payout readiness", async () => {
+  it("Bitcoin withdrawal review is unavailable by default even when Dynamic and Bitcoin provider env are configured", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+    vi.stubEnv("BITCOIN_NETWORK", "mainnet")
+    vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
+    vi.stubEnv("BITCOIN_ESPLORA_BASE_URL", "https://mempool.test/api")
+    vi.stubEnv("BITCOIN_BROADCAST_ENABLED", "true")
 
     await expect(createWalletWithdrawalReview("merchant_1", {
       rail: "bitcoin",
       asset: "BTC",
       destinationAddress: BTC_DESTINATION,
       amountDecimal: "0.001",
-    }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin payouts are not ready for this merchant.")
+    }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin withdrawals are not available yet.")
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.createWalletWithdrawalRequest).not.toHaveBeenCalled()
   })
 
-  it("Bitcoin withdrawal review is blocked if BTC provider env is missing", async () => {
-    vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+  it("Dynamic BTC legacy flag must be exactly true before Bitcoin can use Dynamic approval", async () => {
+    for (const flag of [undefined, "", "false", "TRUE", "1", "yes"]) {
+      vi.unstubAllEnvs()
+      vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+      vi.stubEnv("BITCOIN_NETWORK", "mainnet")
+      vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
+      vi.stubEnv("BITCOIN_ESPLORA_BASE_URL", "https://mempool.test/api")
+      vi.stubEnv("BITCOIN_BROADCAST_ENABLED", "true")
+      if (flag !== undefined) vi.stubEnv("PINETREE_ENABLE_DYNAMIC_BTC_LEGACY", flag)
+      mocks.createWalletWithdrawalRequest.mockClear()
 
-    await expect(createWalletWithdrawalReview("merchant_1", {
-      rail: "bitcoin",
-      asset: "BTC",
-      destinationAddress: BTC_DESTINATION,
-      amountDecimal: "0.0001",
-    }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin payouts are not ready for this merchant.")
+      await expect(createWalletWithdrawalReview("merchant_1", {
+        rail: "bitcoin",
+        asset: "BTC",
+        destinationAddress: BTC_DESTINATION,
+        amountDecimal: "0.0001",
+      }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin withdrawals are not available yet.")
+      expect(mocks.createWalletWithdrawalRequest).not.toHaveBeenCalled()
+    }
   })
 
-  it("Bitcoin withdrawal review is blocked when BTC broadcast is not enabled", async () => {
+  it("legacy Dynamic BTC withdrawal review is blocked when BTC broadcast is not enabled", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+    vi.stubEnv("PINETREE_ENABLE_DYNAMIC_BTC_LEGACY", "true")
     vi.stubEnv("BITCOIN_NETWORK", "mainnet")
     vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
     vi.stubEnv("BITCOIN_ESPLORA_BASE_URL", "https://mempool.test/api")
@@ -876,7 +894,7 @@ describe("PineTree Wallet withdrawals", () => {
     )
   })
 
-  it("prepares a Bitcoin PSBT using server-fetched UTXOs and returns change to the merchant BTC address", async () => {
+  it("legacy Dynamic BTC prepares a PSBT using server-fetched UTXOs and returns change to the merchant BTC address", async () => {
     configureBtcExecution()
     mockBtcProviderFetch(100_000)
     mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
@@ -923,7 +941,7 @@ describe("PineTree Wallet withdrawals", () => {
     )
   })
 
-  it("rejects BTC amount greater than spendable balance after fees", async () => {
+  it("legacy Dynamic BTC rejects amount greater than spendable balance after fees", async () => {
     configureBtcExecution()
     mockBtcProviderFetch(10_000)
     mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
@@ -947,7 +965,7 @@ describe("PineTree Wallet withdrawals", () => {
     ).rejects.toThrow("Withdrawal amount exceeds spendable Bitcoin balance")
   })
 
-  it("browser cannot choose BTC source address or provide UTXOs", async () => {
+  it("legacy Dynamic BTC ignores browser-supplied source address and UTXOs", async () => {
     configureBtcExecution()
     mockBtcProviderFetch(100_000)
     mocks.getPineTreeWalletProfile.mockResolvedValueOnce({
@@ -1032,7 +1050,8 @@ describe("PineTree Wallet withdrawals", () => {
     )
   })
 
-  it("stores BTC txid after Dynamic signed PSBT broadcast without confirming immediately", async () => {
+  it("legacy Dynamic BTC stores txid after Dynamic signed PSBT broadcast without confirming immediately", async () => {
+    vi.stubEnv("PINETREE_ENABLE_DYNAMIC_BTC_LEGACY", "true")
     const finalizeSpy = vi.spyOn(bitcoinNetworkProvider, "finalizeAndBroadcastBitcoinPsbt").mockResolvedValueOnce({
       txid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       rawTxHex: "020000000001",
@@ -1192,8 +1211,9 @@ describe("PineTree Wallet withdrawals", () => {
     }
   })
 
-  it("BTC withdrawal without BITCOIN_BROADCAST_ENABLED is blocked before approval", async () => {
+  it("legacy Dynamic BTC without BITCOIN_BROADCAST_ENABLED is blocked before approval", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
+    vi.stubEnv("PINETREE_ENABLE_DYNAMIC_BTC_LEGACY", "true")
     vi.stubEnv("BITCOIN_NETWORK", "mainnet")
     vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
     vi.stubEnv("BITCOIN_ESPLORA_BASE_URL", "https://mempool.test/api")

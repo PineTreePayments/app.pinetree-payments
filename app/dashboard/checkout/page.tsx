@@ -1128,6 +1128,7 @@ export function CheckoutWorkspace({
   const filteredLinks = links.filter((l) => l.resolvedStatus === linkFilter)
   const isLoading = loading || statsLoading
   const confirmedCheckoutPayments = stats?.confirmedPayments ?? 0
+  const checkoutButtonCount = 0
   const checkoutReadinessStatus =
     isLoading
       ? "..."
@@ -1496,7 +1497,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
             >
               {[
                 ["Active links", isLoading ? "—" : String(activeLinks)],
-                ["Button", activeLinks > 0 ? "Ready" : "Set up"],
+                ["Button", String(checkoutButtonCount)],
                 ["Activity", isLoading ? "—" : String(stats?.confirmedPayments ?? 0)],
               ].map(([label, value], index) => (
                 <div

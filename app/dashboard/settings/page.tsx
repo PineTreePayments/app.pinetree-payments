@@ -87,20 +87,6 @@ type SettingsApiResponse = {
   error?: string
 }
 
-type ProviderSummary = {
-  provider: string
-  status: string
-  enabled: boolean
-}
-
-type IntegrationSummary = {
-  wallets: number
-  checkoutLinks: number
-  webhookConfigured: boolean
-  inventoryAvailable: boolean
-  inventoryItems: number
-}
-
 const defaultOperationsSettings: MerchantOperationsSettingsPayload = {
   show_business_name: true,
   show_business_address: true,
@@ -213,16 +199,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [schemaReady, setSchemaReady] = useState(true)
   const [settingsLoadWarning, setSettingsLoadWarning] = useState<string | null>(null)
-  const [providerSummary, setProviderSummary] = useState<ProviderSummary[]>([])
-  const [integrationSummary, setIntegrationSummary] = useState<IntegrationSummary>({
-    wallets: 0,
-    checkoutLinks: 0,
-    webhookConfigured: false,
-    inventoryAvailable: false,
-    inventoryItems: 0
-  })
 
-  const callSettingsApi = useCallback(async (method: "GET" | "POST", body?: unknown) => {
+  const callSettingsApi = useCallback(async (method: "GET" | "POST", body?: unknown, signal?: AbortSignal) => {
     const {
       data: { session }
     } = await supabase.auth.getSession()
@@ -240,7 +218,8 @@ export default function SettingsPage() {
       },
       body: method === "POST" ? JSON.stringify(body || {}) : undefined,
       credentials: "include",
-      cache: "no-store"
+      cache: "no-store",
+      signal
     })
 
     const payload = (await res.json().catch(() => null)) as SettingsApiResponse | null
@@ -250,9 +229,9 @@ export default function SettingsPage() {
     }
 
     return payload || {}
-  }, [accountEmail])
+  }, [])
 
-  const applyPayload = useCallback((payload: SettingsApiResponse, authenticatedEmail = accountEmail) => {
+  const applyPayload = useCallback((payload: SettingsApiResponse, authenticatedEmail: string) => {
     const settings = payload.settings
     const tax = payload.tax
     setSchemaReady(payload.schemaReady !== false)
@@ -295,7 +274,7 @@ export default function SettingsPage() {
     if (payload.operations) setOperations({ ...defaultOperationsSettings, ...payload.operations })
   }, [])
 
-  const loadSettings = useCallback(async () => {
+  const loadSettings = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
     try {
       const {
@@ -310,58 +289,24 @@ export default function SettingsPage() {
       const authenticatedEmail = user.email ?? ""
       setAccountEmail(authenticatedEmail)
 
-      const payload = await callSettingsApi("GET")
+      const payload = await callSettingsApi("GET", undefined, signal)
+      if (signal?.aborted) return
       applyPayload(payload, authenticatedEmail)
-
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session?.access_token) {
-        const requestOptions = {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-          cache: "no-store" as const
-        }
-        const [providerResponse, walletResponse, checkoutResponse, webhookResponse, inventoryResponse] = await Promise.all([
-          fetch("/api/providers", requestOptions),
-          fetch("/api/wallets/overview", requestOptions),
-          fetch("/api/checkout-links", requestOptions),
-          fetch("/api/merchant/webhooks", requestOptions),
-          fetch("/api/inventory", requestOptions)
-        ])
-        if (providerResponse.ok) {
-          const providerPayload = await providerResponse.json() as { providers?: ProviderSummary[] }
-          setProviderSummary(providerPayload.providers || [])
-        }
-        const walletPayload = walletResponse.ok
-          ? await walletResponse.json() as { wallets?: unknown[] }
-          : {}
-        const checkoutPayload = checkoutResponse.ok
-          ? await checkoutResponse.json() as { links?: Array<{ resolvedStatus?: string }> }
-          : {}
-        const webhookPayload = webhookResponse.ok
-          ? await webhookResponse.json() as { webhook?: unknown }
-          : {}
-        const inventoryPayload = inventoryResponse.ok
-          ? await inventoryResponse.json() as { available?: boolean; summary?: { totalItems?: number } }
-          : {}
-        setIntegrationSummary({
-          wallets: walletPayload.wallets?.length || 0,
-          checkoutLinks: checkoutPayload.links?.filter((link) => link.resolvedStatus !== "archived").length || 0,
-          webhookConfigured: Boolean(webhookPayload.webhook),
-          inventoryAvailable: Boolean(inventoryPayload.available),
-          inventoryItems: Number(inventoryPayload.summary?.totalItems || 0)
-        })
-      }
     } catch (error) {
+      if (signal?.aborted) return
       console.error(error)
       setSchemaReady(false)
       setSettingsLoadWarning(error instanceof Error ? error.message : "Failed to load settings")
       toast.error(error instanceof Error ? error.message : "Failed to load settings")
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) setLoading(false)
     }
   }, [applyPayload, callSettingsApi])
 
   useEffect(() => {
-    loadSettings()
+    const controller = new AbortController()
+    loadSettings(controller.signal)
+    return () => controller.abort()
   }, [loadSettings])
 
   useEffect(() => {
@@ -426,7 +371,7 @@ export default function SettingsPage() {
         operations
       })
 
-      applyPayload(payload)
+      applyPayload(payload, accountEmail)
       toast.success("Settings saved")
     } catch (error) {
       console.error(error)
@@ -551,9 +496,6 @@ export default function SettingsPage() {
     // TODO: list and delete passkeys once Supabase SDK exposes management APIs
   }
 
-  const enabledRails = providerSummary.filter((provider) =>
-    provider.enabled && ["connected", "active"].includes(String(provider.status).toLowerCase())
-  )
   const fieldClass = "form-field mt-1.5"
   const labelClass = "text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500"
   const updateOperation = <K extends keyof MerchantOperationsSettingsPayload>(
@@ -926,25 +868,25 @@ export default function SettingsPage() {
             </div>
             <IntegrationSummaryLink
               title="Wallet"
-              value={integrationSummary.wallets > 0 ? "Connected" : "Not connected"}
+              value="Open wallet"
               detail="PineTree Wallet"
               href="/dashboard/wallets"
             />
             <IntegrationSummaryLink
               title="Checkout & Webhooks"
-              value={`${integrationSummary.checkoutLinks} link${integrationSummary.checkoutLinks === 1 ? "" : "s"}`}
-              detail={`Webhook ${integrationSummary.webhookConfigured ? "configured" : "not configured"}`}
+              value="Open checkout"
+              detail="Links, buttons, and webhooks"
               href="/dashboard/checkout"
             />
             <IntegrationSummaryLink
               title="Inventory"
-              value={integrationSummary.inventoryAvailable ? `${integrationSummary.inventoryItems} item${integrationSummary.inventoryItems === 1 ? "" : "s"}` : "Not available"}
+              value="Open inventory"
               detail="Inventory integration"
               href="/dashboard/inventory"
             />
             <IntegrationSummaryLink
               title="Payment Rails"
-              value={`${enabledRails.length} enabled`}
+              value="Open providers"
               detail="Provider connections"
               href="/dashboard/providers"
             />

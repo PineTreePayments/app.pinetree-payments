@@ -2607,12 +2607,12 @@ function EnabledRailChips({
   const enabledRows = rows.filter((row) => row.enabled && row.configured)
 
   return (
-    <div className="flex flex-col items-center text-center">
+    <div className="flex flex-col items-start text-left">
       <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-700/80">Connected Networks</p>
       {enabledRows.length === 0 ? (
         <p className="text-xs text-gray-400">None connected yet</p>
       ) : (
-        <div className="flex flex-wrap items-center justify-center gap-2.5" aria-label="Enabled payment rails">
+        <div className="flex flex-wrap items-center justify-start gap-2.5" aria-label="Enabled payment rails">
           {enabledRows.map((rail) => (
             <span
               key={rail.label}

@@ -7,6 +7,10 @@ function read(file: string) {
   return fs.readFileSync(path.join(process.cwd(), file), "utf8")
 }
 
+function compactSource(value: string) {
+  return value.replace(/\r\n/g, "\n").replace(/\s+/g, " ")
+}
+
 describe("PineTree embedded wallet setup", () => {
   const provider = read("components/providers/PineTreeDynamicProvider.tsx")
   const layout = read("app/dashboard/layout.tsx")
@@ -31,6 +35,7 @@ describe("PineTree embedded wallet setup", () => {
   const speedConnectMigration = read("database/migrations/20260623_add_speed_connect_fields_to_merchant_lightning_profiles.sql")
   const lightningDbHelper = read("database/merchantLightningProfiles.ts")
   const lightningApiRoute = read("app/api/wallets/lightning/pinetree-managed/route.ts")
+  const setupDebugEventRoute = read("app/api/debug/pinetree-wallet/setup-event/route.ts")
   const businessProfileApiRoute = read("app/api/merchant/business-profile/route.ts")
   const businessOwnerProfileApiRoute = read("app/api/merchant/business-owner-profile/route.ts")
 
@@ -768,7 +773,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("walletCreationStep !== \"failed\" &&")
     expect(page).toContain("walletCreationStep !== \"timeout\"")
     expect(page).toContain("clearScheduledWalletOpenAfterCreate()")
-    expect(page).toContain("return () => {\n      clearScheduledWalletOpenAfterCreate()\n    }")
+    expect(compactSource(page)).toContain("return () => { clearScheduledWalletOpenAfterCreate() }")
     expect(openingScheduler).toContain("setWalletSetupOpeningAfterCreate(true)")
     expect(openingScheduler).toContain("window.setTimeout")
     expect(openingScheduler).toContain("walletSetupOpeningDelayMs")
@@ -776,7 +781,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("schedulePineTreeWalletModalOpenAfterProgress(\"profile_ready_after_create\")")
   })
 
-  it("Speed provisioning never throws into or fails core wallet setup", () => {
+  it("Bitcoin provisioning never throws into or fails core wallet setup", () => {
     const speedFn = page.slice(
       page.indexOf("async function provisionSpeedLightning("),
       page.indexOf("function handleUsePineTreeAccountEmail()")
@@ -784,9 +789,9 @@ describe("PineTree embedded wallet setup", () => {
     expect(speedFn).toContain('fetch("/api/wallets/lightning/pinetree-managed"')
     expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_started", {})')
     expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_skipped_business_profile_required", {})')
-    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_success", {})')
-    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_pending", {})')
-    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_speed_setup_failed"')
+    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_bitcoin_setup_success", {})')
+    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_bitcoin_setup_pending", {})')
+    expect(speedFn).toContain('emitWalletSetupDebugEvent("wallet_bitcoin_setup_failed"')
     expect(speedFn).toContain('return "failed"')
     // Its failure paths only return a status - they never record a core setup
     // failure, flip the core creation step, or clear pendingSync.
@@ -1174,16 +1179,16 @@ describe("PineTree embedded wallet setup", () => {
       "wallet_dynamic_native_user_detected",
       "wallet_core_profile_post_started",
       "wallet_core_profile_post_success",
-      "wallet_speed_setup_success",
-      "wallet_speed_setup_pending",
-      "wallet_speed_setup_failed",
+      "wallet_bitcoin_setup_success",
+      "wallet_bitcoin_setup_pending",
+      "wallet_bitcoin_setup_failed",
       "wallet_setup_orchestrator_settled",
       "wallet_setup_ready",
       "wallet_setup_pending_lightning",
       "wallet_setup_failed_core",
       "wallet_setup_lightning_needs_attention",
     ]
-    const combined = `${page}\n${apiRoute}`
+    const combined = `${page}\n${apiRoute}\n${setupDebugEventRoute}`
     for (const event of expectedEvents) {
       expect(combined).toContain(event)
     }
@@ -1861,8 +1866,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("action: \"submit\"")
   })
 
-  it("BTC withdrawals use a Dynamic PSBT path instead of Speed, NWC, Spark, or Lightning", () => {
+  it("legacy Dynamic BTC withdrawal approval is explicitly gated and not the normal merchant-facing Bitcoin path", () => {
     const bitcoinProvider = read("providers/wallets/bitcoinNetworkProvider.ts")
+    expect(withdrawalEngine).toContain("isDynamicBtcLegacyEnabled")
+    expect(withdrawalEngine).toContain("Bitcoin wallet approval is not available yet.")
+    expect(withdrawalSigner).toContain("isDynamicBtcLegacyEnabled()")
     expect(withdrawalEngine).toContain("kind: \"bitcoin_psbt\"")
     expect(withdrawalEngine).toContain("buildBitcoinWithdrawalPsbt")
     expect(withdrawalEngine).toContain("finalizeAndBroadcastBitcoinPsbt")
@@ -2188,13 +2196,17 @@ describe("PineTree embedded wallet setup", () => {
     expect(speedClient).toContain('"/connect"')
   })
 
-  it("canonical mode does not save a merchant Speed connected account", () => {
-    expect(lightningReadinessEngine).toContain('speedConnectedAccountId: null')
-    expect(lightningReadinessEngine).toContain('"pinetree_wallet_btc_payout_ready"')
-    expect(lightningReadinessEngine).toContain('"btc_address_missing_internal"')
-    expect(lightningReadinessEngine).toContain('internal_readiness_issue: btcAddressReady ? null : "btc_address_missing"')
-    expect(lightningReadinessEngine).toContain("bitcoinLightningAccountId: null")
-    expect(lightningReadinessEngine).toContain("speedSetup.speed_connected_account_id")
+  it("managed Custom Connect persists Speed acct_ and ca_ identifiers separately", () => {
+    expect(lightningReadinessEngine).toContain("function speedAccountId(value?: string | null): string | null {")
+    expect(lightningReadinessEngine).toContain('return id.startsWith("acct_") ? id : null')
+    expect(lightningReadinessEngine).toContain("function speedRelationshipId(value?: string | null): string | null {")
+    expect(lightningReadinessEngine).toContain('return id.startsWith("ca_") ? id : null')
+    expect(lightningReadinessEngine).toContain("const createdAccountId = speedAccountId(speedSetup.speed_account_id)")
+    expect(lightningReadinessEngine).toContain("const createdRelationshipId = speedRelationshipId(speedSetup.speed_connected_account_relationship_id)")
+    expect(lightningReadinessEngine).toContain("speedConnectedAccountId: createdAccountId || createdRelationshipId")
+    expect(lightningReadinessEngine).toContain("speedConnectedAccountRelationshipId: createdRelationshipId")
+    expect(lightningReadinessEngine).toContain("speedAccountId: createdAccountId")
+    expect(lightningReadinessEngine).toContain("managedAccountEmail: speedEmail")
   })
 
   it("managed Lightning POST records canonical treasury-sweep state without secrets", () => {
@@ -2231,7 +2243,13 @@ describe("PineTree embedded wallet setup", () => {
     expect(speedConnectedAccountHelper).toContain("speed_connect_return_url_missing")
     expect(speedConnectedAccountHelper).toContain("Speed connected account was not found")
     expect(lightningReadinessEngine).toContain('"btc_address_missing_internal"')
-    expect(lightningReadinessEngine).toContain('speedSetup.readiness === "ready"')
+    expect(lightningReadinessEngine).toContain("function deriveSpeedIntakeStatus")
+    expect(lightningReadinessEngine).toContain('if (input.speedAccountId && isActiveSpeedStatus(input.providerStatus)) return "ready"')
+    expect(lightningReadinessEngine).toContain('if (input.fallback === "needs_attention") return "needs_attention"')
+    expect(lightningReadinessEngine).toContain('return "pending"')
+    expect(lightningReadinessEngine).toContain("providerStatus: normalizedSpeedStatus")
+    expect(lightningReadinessEngine).toContain("speedAccountId: createdAccountId")
+    expect(lightningReadinessEngine).toContain("fallback: speedSetup.readiness")
   })
 
   it("syncs PineTree Wallet Lightning fields from the managed Lightning profile", () => {

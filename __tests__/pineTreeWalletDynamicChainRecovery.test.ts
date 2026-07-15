@@ -6,8 +6,16 @@ function read(file: string) {
   return fs.readFileSync(path.join(process.cwd(), file), "utf8")
 }
 
-const page = read("app/dashboard/wallet-setup/page.tsx")
-const eventRoute = read("app/api/debug/pinetree-wallet/setup-event/route.ts")
+function normalizeSource(value: string) {
+  return value.replace(/\r\n/g, "\n")
+}
+
+function compactSource(value: string) {
+  return normalizeSource(value).replace(/\s+/g, " ")
+}
+
+const page = normalizeSource(read("app/dashboard/wallet-setup/page.tsx"))
+const eventRoute = normalizeSource(read("app/api/debug/pinetree-wallet/setup-event/route.ts"))
 
 describe("Dynamic hydration single-flight is bounded, not reused indefinitely (Part A)", () => {
   it("a stale in-flight promise is evicted instead of awaited forever", () => {
@@ -148,7 +156,7 @@ describe("setupAttemptActive reflects a ref, not just stale render-cycle state (
     )
     expect(timeoutBlock).toContain("overallSetupActiveRef.current = false")
 
-    const readyCleanupStart = page.indexOf("walletSetupStartInFlightRef.current = null\n    overallSetupActiveRef.current = false")
+    const readyCleanupStart = page.indexOf("walletSetupStartInFlightRef.current = null")
     const readyCleanupBlock = page.slice(
       readyCleanupStart,
       page.indexOf('setWalletCreationStep("profile_synced")', readyCleanupStart)
@@ -180,18 +188,20 @@ describe("Chain create is bounded by a true PineTree-side deadline, not just the
   })
 
   it("a timed-out create does not immediately trigger a duplicate create - it marks the chain detached", () => {
+    const compactImplFn = compactSource(implFn)
     expect(page).toContain("const baseWalletCreateDetachedRef = useRef(false)")
     expect(page).toContain("const solanaWalletCreateDetachedRef = useRef(false)")
-    expect(implFn).toContain("!chainCreateGuardActive(baseWalletCreateGuardRef) &&\n            !baseWalletCreateDetachedRef.current")
-    expect(implFn).toContain("!chainCreateGuardActive(solanaWalletCreateGuardRef) &&\n            !solanaWalletCreateDetachedRef.current")
+    expect(compactImplFn).toContain("!chainCreateGuardActive(baseWalletCreateGuardRef) && !baseWalletCreateDetachedRef.current")
+    expect(compactImplFn).toContain("!chainCreateGuardActive(solanaWalletCreateGuardRef) && !solanaWalletCreateDetachedRef.current")
     expect(implFn).toContain("baseWalletCreateDetachedRef.current = true")
     expect(implFn).toContain("solanaWalletCreateDetachedRef.current = true")
   })
 
   it("fresh hydration after a timeout rechecks provider state (computeRequiredChainState) before any retry, and only clears detached once the original call actually settles", () => {
+    const compactImplFn = compactSource(implFn)
     expect(implFn).toContain("computeRequiredChainState({")
-    expect(implFn).toContain("void baseCreateCall.settlement.then((settled) => {\n                baseWalletCreateDetachedRef.current = false")
-    expect(implFn).toContain("void solanaCreateCall.settlement.then((settled) => {\n                solanaWalletCreateDetachedRef.current = false")
+    expect(compactImplFn).toContain("void baseCreateCall.settlement.then((settled) => { baseWalletCreateDetachedRef.current = false")
+    expect(compactImplFn).toContain("void solanaCreateCall.settlement.then((settled) => { solanaWalletCreateDetachedRef.current = false")
   })
 
   it("an older provider promise resolving later cannot overwrite a newer generation, flip an already-succeeded wallet to failed, or trigger duplicate profile work", () => {
@@ -201,16 +211,13 @@ describe("Chain create is bounded by a true PineTree-side deadline, not just the
     // generation match (and terminal-success) before ever bumping the refresh nonce.
     expect(implFn).toContain("void baseCreateCall.settlement.then((settled) => {")
     expect(implFn).toContain("void solanaCreateCall.settlement.then((settled) => {")
-    expect(implFn).toContain(
-      "logStaleDynamicCreateSettlement({\n                  reason,\n                  refreshMode,\n                  label: \"base\","
-    )
-    expect(implFn).toContain(
-      "logStaleDynamicCreateSettlement({\n                  reason,\n                  refreshMode,\n                  label: \"solana\","
-    )
+    const compactImplFn = compactSource(implFn)
+    expect(compactImplFn).toContain("logStaleDynamicCreateSettlement({ reason, refreshMode, label: \"base\",")
+    expect(compactImplFn).toContain("logStaleDynamicCreateSettlement({ reason, refreshMode, label: \"solana\",")
     // A late settlement must never flip an already-terminally-succeeded wallet to
     // failed - the *CreateFailedRef assignment is gated on !pastTerminalSuccess.
-    expect(implFn).toContain("if (!pastTerminalSuccess) {\n                  baseWalletCreateFailedRef.current = settled.status === \"rejected\"")
-    expect(implFn).toContain("if (!pastTerminalSuccess) {\n                  solanaWalletCreateFailedRef.current = settled.status === \"rejected\"")
+    expect(compactImplFn).toContain("if (!pastTerminalSuccess) { baseWalletCreateFailedRef.current = settled.status === \"rejected\"")
+    expect(compactImplFn).toContain("if (!pastTerminalSuccess) { solanaWalletCreateFailedRef.current = settled.status === \"rejected\"")
 
     const helperFn = page.slice(
       page.indexOf("const logDynamicCreateLateResultIgnored = useCallback"),
@@ -251,7 +258,7 @@ describe("Overall core-setup deadline is stage-aware, not shorter than valid sta
     expect(page).toContain("const dynamicChainCreateTimeoutMs = 25_000")
     expect(page).toContain("const walletCoreSetupPostCreateHydrationMs = 12_000")
     expect(page).toContain("const walletCreationTimeoutMs =")
-    expect(page).toContain("dynamicHydrationSingleFlightTimeoutMs +\n  dynamicChainCreateTimeoutMs * 2 +\n  walletCoreSetupPostCreateHydrationMs")
+    expect(compactSource(page)).toContain("dynamicHydrationSingleFlightTimeoutMs + dynamicChainCreateTimeoutMs * 2 + walletCoreSetupPostCreateHydrationMs")
     expect(page).toContain("const walletProvisioningFinalRefreshGraceMs = 15_000")
   })
 
@@ -351,12 +358,13 @@ describe("Stale Dynamic create/hydration work is ignored once setup terminally s
   })
 
   it("never starts another createWalletAccount call once this generation is superseded (initial waas-create, Base, and Solana paths)", () => {
+    const compactImplFn = compactSource(implFn)
     expect(implFn).toContain("isDynamicCreateGenerationSuperseded(refreshMode, generation)")
     expect(implFn).toContain(
       "if (requiredChains.length > 0 && !creatingEmbeddedWalletRef.current && isDynamicCreateGenerationSuperseded(refreshMode, generation)) {"
     )
-    expect(implFn).toContain("!baseWalletCreateDetachedRef.current &&\n            !isDynamicCreateGenerationSuperseded(refreshMode, generation)")
-    expect(implFn).toContain("!solanaWalletCreateDetachedRef.current &&\n            !isDynamicCreateGenerationSuperseded(refreshMode, generation)")
+    expect(compactImplFn).toContain("!baseWalletCreateDetachedRef.current && !isDynamicCreateGenerationSuperseded(refreshMode, generation)")
+    expect(compactImplFn).toContain("!solanaWalletCreateDetachedRef.current && !isDynamicCreateGenerationSuperseded(refreshMode, generation)")
   })
 
   it("the initial WaaS create call is bounded, not an unbounded await - production hung 129+ seconds on exactly this call", () => {
@@ -431,9 +439,10 @@ describe("Stale Dynamic create/hydration work is ignored once setup terminally s
   })
 
   it("a late throw from the outer refresh attempt is also ignored once setup already succeeded - never reported as a fresh failure", () => {
+    const catchStart = page.indexOf("} catch (error) {\n      creatingEmbeddedWalletRef.current = false")
     const catchBlock = page.slice(
-      page.indexOf("} catch (error) {\n      creatingEmbeddedWalletRef.current = false"),
-      page.indexOf("}, [\n    createEmbeddedWallet,")
+      catchStart,
+      page.indexOf("const classified = classifyDynamicRefreshError(error)", catchStart)
     )
     expect(catchBlock).toContain("const pastTerminalSuccess =")
     expect(catchBlock).toContain("wallet_dynamic_late_result_ignored")
@@ -446,9 +455,7 @@ describe("Stale Dynamic create/hydration work is ignored once setup terminally s
       page.indexOf("}, [refreshDynamicWalletRuntimeImpl, sdkHasLoaded, user])")
     )
     expect(wrapperFn).toContain("wallet_dynamic_singleflight_cleared_after_success")
-    expect(wrapperFn).toContain(
-      "const pastTerminalSuccess =\n            walletCoreSetupTerminalGenerationRef.current !== null &&\n            generation <= walletCoreSetupTerminalGenerationRef.current"
-    )
+    expect(compactSource(wrapperFn)).toContain("const pastTerminalSuccess = walletCoreSetupTerminalGenerationRef.current !== null && generation <= walletCoreSetupTerminalGenerationRef.current")
   })
 
   it("a later, explicitly user-initiated refresh still gets a fresh (higher) generation and is unaffected by an earlier terminal capture", () => {
