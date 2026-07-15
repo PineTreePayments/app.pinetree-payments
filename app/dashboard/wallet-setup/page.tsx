@@ -1949,12 +1949,8 @@ function WithdrawalFormShell({
   const amountExceedsBalance = selectedBalanceKnown && amountValue > selectedBalanceAmount
   const missingDestination = destinationAddress.trim().length === 0
   const noWithdrawableAssets = assetOptions.length === 0
-  const missingRuntimeSigner =
-    dynamicSignerWithdrawalRails.includes(rail) &&
-    diagnostics.walletProfileAddressPresent &&
-    !diagnostics.dynamicMethodAvailable
   const reviewBlockedByInput = reviewing || noWithdrawableAssets || missingDestination || missingAmount || amountParseError || invalidAmount || selectedBalanceZero || amountExceedsBalance
-  const reviewDisabled = missingRuntimeSigner ? false : reviewBlockedByInput
+  const reviewDisabled = reviewBlockedByInput
   const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
@@ -1962,9 +1958,7 @@ function WithdrawalFormShell({
   const reviewActionLabel = review?.review.approvalMethod === "dynamic_browser" ? "Approve withdrawal" : "Submit withdrawal request"
   const blockingMessage =
     error ||
-    (missingRuntimeSigner
-      ? pineTreeSignerReconnectMessage
-      : missingDestination
+    (missingDestination
       ? "Enter a destination address to review."
       : missingAmount
         ? "Enter an amount to review."
@@ -2238,11 +2232,11 @@ function WithdrawalFormShell({
       <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
         <button
           type="button"
-          onClick={missingRuntimeSigner && onFinishSetup ? onFinishSetup : onReview}
+          onClick={onReview}
           disabled={reviewDisabled}
           className="inline-flex h-11 min-w-[12rem] items-center justify-center rounded-lg bg-[#0052FF] px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
         >
-          {reviewing ? "Reviewing..." : missingRuntimeSigner ? "Reconnect PineTree Wallet" : "Review withdrawal"}
+          {reviewing ? "Reviewing..." : "Review withdrawal"}
         </button>
       </div>
 
@@ -2608,7 +2602,7 @@ function EnabledRailChips({
 
   return (
     <div className="flex flex-col items-start text-left">
-      <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-700/80">Connected Networks</p>
+      <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-950">Connected Networks</p>
       {enabledRows.length === 0 ? (
         <p className="text-xs text-gray-400">None connected yet</p>
       ) : (
@@ -6520,13 +6514,14 @@ function PineTreeWalletRuntime() {
     const railState = walletRailRows.find((row) => row.rail === withdrawalRail)
     const sourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
     const usesDynamicSigner = dynamicSignerWithdrawalRails.includes(withdrawalRail)
-    const browserWalletAddresses = usesDynamicSigner
+    const shouldResolveWithdrawalSigner = Boolean(withdrawalReview) && usesDynamicSigner
+    const browserWalletAddresses = shouldResolveWithdrawalSigner
       ? [
           ...(wallets as unknown[]),
           primaryWallet,
         ].filter(Boolean).flatMap((wallet) => getDynamicWalletAddresses(wallet as DynamicWalletLike))
       : []
-    const matchingWallet = usesDynamicSigner
+    const matchingWallet = shouldResolveWithdrawalSigner
       ? findDynamicWalletForSource(wallets as unknown[], primaryWallet, sourceAddress || "", withdrawalRail)
       : null
     const dynamicMethodAvailable = matchingWallet ? dynamicWalletSupportsRail(matchingWallet, withdrawalRail) : false
@@ -6564,7 +6559,7 @@ function PineTreeWalletRuntime() {
       ...baseDiagnostics,
       fallbackReason: getWithdrawalFallbackReason(baseDiagnostics),
     }
-  }, [lightningProfileState, primaryWallet, profile, walletRailRows, wallets, withdrawalAsset, withdrawalRail])
+  }, [lightningProfileState, primaryWallet, profile, walletRailRows, wallets, withdrawalAsset, withdrawalRail, withdrawalReview])
 
   const lightningPayoutSummary = useMemo(() => {
     const connected =
@@ -8193,7 +8188,7 @@ function PineTreeWalletRuntime() {
           </div>
         ) : null}
 
-        <div className="mt-auto flex justify-center pt-8">
+        <div className="mt-auto flex justify-start pt-8">
           {dynamicVerificationPromptReason ? (
             <button
               type="button"
@@ -8275,21 +8270,29 @@ function PineTreeWalletRuntime() {
             <h2 id="pinetree-withdrawal-auth-recovery-title" className="text-base font-semibold text-gray-950">
               We couldn't authorize this withdrawal
             </h2>
-            <p className="mt-2 text-sm leading-6 text-gray-600">
-              Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.
-            </p>
+            {withdrawalReview ? (
+              <p className="mt-2 text-sm leading-6 text-gray-600">
+                Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.
+              </p>
+            ) : (
+              <p className="mt-2 text-sm leading-6 text-gray-600">
+                Review the withdrawal details again before authorizing.
+              </p>
+            )}
             <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  setWithdrawalAuthorizationRecoveryOpen(false)
-                  void handleSubmitWithdrawal()
-                }}
-                disabled={submittingWithdrawal || !withdrawalReview}
-                className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-2"
-              >
-                Try Again
-              </button>
+              {withdrawalReview ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWithdrawalAuthorizationRecoveryOpen(false)
+                    void handleSubmitWithdrawal()
+                  }}
+                  disabled={submittingWithdrawal}
+                  className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-2"
+                >
+                  {submittingWithdrawal ? "Trying again..." : "Try Again"}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setWithdrawalAuthorizationRecoveryOpen(false)}

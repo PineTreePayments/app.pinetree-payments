@@ -1749,18 +1749,66 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('aria-label="Withdrawal amount"')
     expect(page).toContain("Review withdrawal")
     const reviewButton = page.slice(
-      page.indexOf("onClick={missingRuntimeSigner && onFinishSetup ? onFinishSetup : onReview}"),
+      page.indexOf("onClick={onReview}"),
       page.indexOf('{reviewing ? "Reviewing..."')
     )
     expect(reviewButton).toContain("inline-flex h-11 min-w-[12rem]")
     expect(reviewButton).toContain("px-6")
     expect(reviewButton).not.toContain("w-full")
+    expect(reviewButton).not.toContain("Reconnect PineTree Wallet")
     expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals")
     expect(page).not.toContain("Withdrawal coming soon")
     expect(page).not.toContain("Withdrawal disabled")
     // The Review button is disabled — no API calls for withdrawal execution
     expect(page).not.toContain("/api/wallets/settlement")
     expect(page).not.toContain("/api/wallets/send-sessions")
+  })
+
+  it("does not treat idle withdrawal form validation as wallet disconnection", () => {
+    const formShell = page.slice(
+      page.indexOf("function WithdrawalFormShell("),
+      page.indexOf("function formatUsd(")
+    )
+    const blockingMessage = formShell.slice(
+      formShell.indexOf("const blockingMessage ="),
+      formShell.indexOf("if (screen === \"review\"")
+    )
+    const reviewButton = formShell.slice(
+      formShell.indexOf("onClick={onReview}"),
+      formShell.indexOf("{process.env.NODE_ENV")
+    )
+
+    expect(formShell).not.toContain("missingRuntimeSigner")
+    expect(blockingMessage).toContain("Enter a destination address to review.")
+    expect(blockingMessage).toContain("Enter an amount to review.")
+    expect(blockingMessage).toContain("No available balance for this asset.")
+    expect(blockingMessage).not.toContain("pineTreeSignerReconnectMessage")
+    expect(reviewButton).toContain("onClick={onReview}")
+    expect(reviewButton).toContain('{reviewing ? "Reviewing..." : "Review withdrawal"}')
+    expect(reviewButton).not.toContain("Reconnect PineTree Wallet")
+  })
+
+  it("defers browser signer resolution until a withdrawal is being reviewed or submitted", () => {
+    const diagnostics = page.slice(
+      page.indexOf("const withdrawalDiagnostics = useMemo"),
+      page.indexOf("const lightningPayoutSummary = useMemo")
+    )
+    const reviewHandler = page.slice(
+      page.indexOf("async function handleReviewWithdrawal()"),
+      page.indexOf("function handleMaxWithdrawalAmount()")
+    )
+    const submitHandler = page.slice(
+      page.indexOf("async function handleSubmitWithdrawal()"),
+      page.indexOf("// ---------------------------------------------------------------------------\n  // Early returns")
+    )
+
+    expect(diagnostics).toContain("const shouldResolveWithdrawalSigner = Boolean(withdrawalReview) && usesDynamicSigner")
+    expect(diagnostics).toContain("const matchingWallet = shouldResolveWithdrawalSigner")
+    expect(reviewHandler.indexOf("if (!destination)")).toBeLessThan(reviewHandler.indexOf("findDynamicApprovalWalletForSource"))
+    expect(reviewHandler.indexOf("if (!amount)")).toBeLessThan(reviewHandler.indexOf("findDynamicApprovalWalletForSource"))
+    expect(reviewHandler.indexOf("No available balance for this asset.")).toBeLessThan(reviewHandler.indexOf("findDynamicApprovalWalletForSource"))
+    expect(submitHandler).toContain('await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
+    expect(submitHandler).toContain("findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, _debugRail, _debugSourceAddress)")
   })
 
   it("maps raw schema/cache withdrawal errors to merchant-safe copy", () => {

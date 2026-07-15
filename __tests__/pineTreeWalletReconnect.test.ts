@@ -57,8 +57,23 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain("We couldn't authorize this withdrawal")
     expect(page).toContain("Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.")
     expect(page).toContain("Try Again")
+    expect(page).toContain("Trying again...")
     expect(page).toContain("Cancel")
     expect(page).not.toContain("setWalletSetupPrimaryState")
+  })
+
+  it("retryable authorization recovery enables Try Again whenever a review exists", () => {
+    const modal = page.slice(
+      page.indexOf("{withdrawalAuthorizationRecoveryOpen ? ("),
+      page.indexOf("{walletOpen ? (")
+    )
+    expect(modal).toContain("{withdrawalReview ? (")
+    expect(modal).toContain("Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.")
+    expect(modal).toContain("Review the withdrawal details again before authorizing.")
+    expect(modal).toContain("void handleSubmitWithdrawal()")
+    expect(modal).toContain("disabled={submittingWithdrawal}")
+    expect(modal).not.toContain("disabled={submittingWithdrawal || !withdrawalReview}")
+    expect(modal).toContain('{submittingWithdrawal ? "Trying again..." : "Try Again"}')
   })
 
   it("reconnect and signing lookup use all Dynamic wallets plus primary wallet", () => {
