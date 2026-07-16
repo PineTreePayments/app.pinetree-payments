@@ -29,7 +29,9 @@ vi.mock("@/engine/webhookDelivery", () => ({
 }))
 
 vi.mock("@/providers/registry", () => ({
-  getProvider: vi.fn()
+  getProvider: vi.fn(),
+  registerProvider: vi.fn(),
+  setProviderHealth: vi.fn()
 }))
 
 import {

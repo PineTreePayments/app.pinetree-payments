@@ -46,7 +46,7 @@ describe("card provider setup UI", () => {
     expect(source).toContain('networks="Card"')
     expect(source).toContain('settlement="Stripe merchant account"')
     expect(source).toContain("Accept card payments through Stripe once merchant onboarding is approved.")
-    expect(source).toContain("Start Stripe Setup")
+    expect(source).toContain("Connect Stripe")
     expect(source).toContain("Managed by PineTree / {getCardProviderName(provider)}")
 
     expect(source).toContain('name="Fluid Pay"')
@@ -60,7 +60,7 @@ describe("card provider setup UI", () => {
     const source = read("app/dashboard/providers/page.tsx")
 
     expect(source).toContain("Stripe Merchant Setup")
-    expect(source).toContain("Complete setup to begin onboarding for card payment acceptance through Stripe.")
+    expect(source).toContain("Complete your business onboarding for card payment acceptance without leaving PineTree.")
     expect(source).toContain("Fluid Pay Merchant Setup")
     expect(source).toContain("Complete setup to begin onboarding for card payment acceptance through Fluid Pay.")
     expect(source).toContain("PineTree will keep this provider status updated after approval is completed.")

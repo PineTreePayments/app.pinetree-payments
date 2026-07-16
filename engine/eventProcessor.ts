@@ -17,6 +17,8 @@ import {
 } from "@/database/transactions"
 import { getPaymentEventByProviderEvent } from "@/database/paymentEvents"
 import { syncTransactionProgressForPayment } from "./transactionProgress"
+import { getMerchantStripeAccountId } from "./stripeConnect"
+import { releaseTerminalReaderClaim } from "@/database/merchantTerminalReaders"
 
 const SPEED_PROVIDER_NAME = "lightning_speed"
 
@@ -29,6 +31,7 @@ export type WebhookInput = {
 
 type TranslatedEvent = {
   paymentId?: string
+  providerReference?: string
   event:
     | "payment.created"
     | "payment.pending"
@@ -145,6 +148,12 @@ async function resolvePaymentIdFromEvent(input: {
     }
   }
 
+  const translatedReference = String(input.translatedEvent?.providerReference || "").trim()
+  if (translatedReference) {
+    const payment = await getPaymentByProviderReference(translatedReference)
+    if (payment) return { paymentId: payment.id, source: "translated_provider_reference" }
+  }
+
   const references = getProviderReferenceCandidates(input.payload)
   for (const reference of references) {
     const payment = await getPaymentByProviderReference(reference)
@@ -256,6 +265,19 @@ export async function advancePaymentToTargetStatus(
   await updatePaymentStatus(paymentId, targetStatus, resolvedMetadata)
 }
 
+function sanitizeProviderPayload(provider: string, payload: unknown): unknown {
+  if (provider !== "stripe") return payload
+  const blocked = new Set(["client_secret", "cvc", "number", "registration_code", "connection_token"])
+  const visit = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(visit)
+    if (!value || typeof value !== "object") return value
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !blocked.has(key.toLowerCase()))
+      .map(([key, child]) => [key, visit(child)]))
+  }
+  return visit(payload)
+}
+
 export async function processWebhook({
   provider,
   payload,
@@ -294,7 +316,7 @@ export async function processWebhook({
   }
 
   if (!event) {
-    console.warn("Could not translate webhook event:", payload)
+    console.warn("Could not translate webhook event", { provider, providerEvent: getProviderEventType(payload) })
     return
   }
 
@@ -318,7 +340,7 @@ export async function processWebhook({
   const providerEventType = getProviderEventType(payload)
   const providerEventId = getProviderEventId(payload)
 
-  if (provider === SPEED_PROVIDER_NAME && providerEventId) {
+  if (providerEventId) {
     const existingEvent = await getPaymentEventByProviderEvent(providerEventId)
     if (existingEvent) {
       console.info("[eventProcessor] idempotent:provider_event_skip", {
@@ -335,6 +357,16 @@ export async function processWebhook({
   if (!payment) {
     console.warn("Payment not found for webhook:", paymentId)
     return
+  }
+
+  if (provider === "stripe") {
+    const eventAccount = String(readPath(payload, ["account"]) || "").trim()
+    if (eventAccount) {
+      const expectedAccount = await getMerchantStripeAccountId(payment.merchant_id)
+      if (!expectedAccount || expectedAccount !== eventAccount) {
+        throw Object.assign(new Error("Stripe webhook account does not match the payment merchant"), { status: 403 })
+      }
+    }
   }
 
   // Idempotency guard — if the payment is already in a terminal state, a duplicate
@@ -393,10 +425,8 @@ export async function processWebhook({
 
   try {
     await advancePaymentToTargetStatus(paymentId, status, {
-      providerEvent: provider === SPEED_PROVIDER_NAME && providerEventId
-        ? providerEventId
-        : providerEventType,
-      rawPayload: payload
+      providerEvent: providerEventId || providerEventType,
+      rawPayload: sanitizeProviderPayload(provider, payload)
     })
 
     if (provider === "lightning") {
@@ -440,6 +470,11 @@ export async function processWebhook({
         await ensurePineTreeLightningSettlementJob(paymentId, payload)
         await ensureLightningSweepQueued(paymentId)
       }
+    }
+
+
+    if (provider === "stripe" && (status === "CONFIRMED" || status === "FAILED" || status === "INCOMPLETE")) {
+      await releaseTerminalReaderClaim(paymentId).catch(() => undefined)
     }
 
     console.info("[eventProcessor] status applied", {

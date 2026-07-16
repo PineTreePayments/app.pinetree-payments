@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { processWebhook } from "@/engine/eventProcessor"
 import { loadProviders } from "@/engine/loadProviders"
+import { syncStripeConnectAccountByProviderAccountId } from "@/engine/stripeConnect"
 
 export async function GET() {
   return NextResponse.json({ ok: true, provider: "stripe", endpoint: "stripe" })
@@ -26,6 +27,12 @@ export async function POST(req: NextRequest) {
       headers: Object.fromEntries(req.headers),
       rawBody
     })
+
+    const event = payload && typeof payload === "object" ? payload as Record<string, unknown> : {}
+    if (event.type === "account.updated") {
+      const account = event.account || (event.data as { object?: { id?: unknown } } | undefined)?.object?.id
+      await syncStripeConnectAccountByProviderAccountId(String(account || ""))
+    }
 
     return NextResponse.json({ received: true, provider: "stripe" })
   } catch (error) {

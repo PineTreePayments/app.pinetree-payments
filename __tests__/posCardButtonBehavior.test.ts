@@ -11,15 +11,19 @@ describe("POS Card button behavior", () => {
   const engine = read("engine/posPayments.ts")
   const hostedCheckout = read("app/pay/PayClient.tsx")
 
-  it("has an active Card handler that requests the Stripe rail", () => {
+  it("has an active Card handler that resolves capabilities and uses the Stripe Terminal route", () => {
     expect(pos).toContain("async function startCard()")
     expect(pos).toContain("onClick={() => void startCard()}")
-    expect(pos).toContain('network: "stripe"')
+    expect(pos).toContain('fetch("/api/providers/stripe/card-capabilities"')
+    expect(pos).toContain('fetch("/api/payments/stripe/terminal"')
+    expect(pos).toContain("readerId: reader.id")
   })
 
   it("does not silently no-op and exposes loading, fallback, and failure UI", () => {
     expect(pos).toContain("Preparing card payment…")
-    expect(pos).toContain("Open secure card checkout")
+    expect(pos).toContain("Present card on reader")
+    expect(pos).toContain("Enter card manually")
+    expect(pos).toContain('fetch("/api/payments/stripe/manual"')
     expect(pos).toContain("Card payments are not ready yet.")
     expect(pos).toContain("setPaymentError(")
     expect(pos).toContain('setStatus("failed")')

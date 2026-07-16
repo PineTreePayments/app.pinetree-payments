@@ -1,34 +1,28 @@
 import { StripeClient } from "./client"
 
-export type StripeConnectedAccount = {
-  id: string
-  detailsSubmitted: boolean
-  chargesEnabled: boolean
-  payoutsEnabled: boolean
-}
+/**
+ * Stripe Connect onboarding sessions.
+ *
+ * Embedded onboarding (canonical): createStripeAccountSession creates an
+ * Account Session enabling only the account_onboarding embedded component.
+ * The client secret is short-lived, is returned only to the authenticated
+ * merchant's browser session, and must never be persisted or logged.
+ *
+ * Hosted account links (legacy fallback): createStripeOnboardingLink remains
+ * for the pre-embedded redirect flow (return_url / refresh_url pages).
+ */
 
-function normalizeConnectedAccount(account: {
-  id: string
-  details_submitted: boolean
-  charges_enabled: boolean
-  payouts_enabled: boolean
-}): StripeConnectedAccount {
-  return {
-    id: account.id,
-    detailsSubmitted: account.details_submitted,
-    chargesEnabled: account.charges_enabled,
-    payoutsEnabled: account.payouts_enabled
-  }
-}
-
-export async function createStripeConnectedAccount(): Promise<StripeConnectedAccount> {
+export async function createStripeAccountSession(params: {
+  accountId: string
+}): Promise<{ clientSecret: string }> {
   const client = new StripeClient()
-  return normalizeConnectedAccount(await client.createConnectedAccount({ type: "express" }))
-}
-
-export async function retrieveStripeConnectedAccount(accountId: string): Promise<StripeConnectedAccount> {
-  const client = new StripeClient()
-  return normalizeConnectedAccount(await client.retrieveConnectedAccount(accountId))
+  const session = await client.createAccountSession({
+    account: params.accountId,
+    components: {
+      account_onboarding: { enabled: true }
+    }
+  })
+  return { clientSecret: session.client_secret }
 }
 
 export async function createStripeOnboardingLink(params: {

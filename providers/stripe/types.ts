@@ -66,6 +66,74 @@ export type StripeNormalizedPayment = {
   raw: StripePaymentIntent
 }
 
+// ─── Stripe Connect (connected accounts / embedded onboarding) ───────────────
+
+/** Raw-but-bounded requirements snapshot from a Stripe Account. */
+export type StripeAccountRequirements = {
+  currentlyDue: string[]
+  eventuallyDue: string[]
+  pastDue: string[]
+  pendingVerification: string[]
+  disabledReason: string | null
+}
+
+/** Stripe capability state, e.g. { card_payments: "active", transfers: "pending" }. */
+export type StripeAccountCapabilities = Record<string, string>
+
+/** Basic connected-account snapshot (legacy hosted-link flow shape). */
+export type StripeConnectedAccount = {
+  id: string
+  detailsSubmitted: boolean
+  chargesEnabled: boolean
+  payoutsEnabled: boolean
+}
+
+/** Full normalized connected-account snapshot used for status synchronization. */
+export type StripeConnectedAccountDetails = StripeConnectedAccount & {
+  requirements: StripeAccountRequirements
+  capabilities: StripeAccountCapabilities
+  metadata: Record<string, string>
+}
+
+/**
+ * PineTree-normalized Stripe connection status.
+ *
+ * Mapping from Stripe account properties (applied in this order — see
+ * providers/stripe/capabilities.ts):
+ *  - no connected account                                → not_connected
+ *  - requirements.disabled_reason is terminal
+ *    (rejected.*, listed, platform_paused, other)        → disabled
+ *  - details_submitted = false                           → onboarding_required
+ *  - requirements.past_due non-empty or
+ *    disabled_reason = requirements.past_due             → restricted
+ *  - charges_enabled && payouts_enabled                  → active
+ *  - requirements.currently_due non-empty                → onboarding_required
+ *  - otherwise (submitted, Stripe reviewing)             → pending_verification
+ */
+export type StripeConnectionStatus =
+  | "not_connected"
+  | "onboarding_required"
+  | "pending_verification"
+  | "restricted"
+  | "active"
+  | "disabled"
+
+/** Safe, PineTree-facing normalized connection state. Never contains secrets. */
+export type StripeNormalizedConnection = {
+  provider: "stripe"
+  connectionStatus: StripeConnectionStatus
+  accountConnected: boolean
+  detailsSubmitted: boolean
+  chargesEnabled: boolean
+  payoutsEnabled: boolean
+  requirementsCurrentlyDue: string[]
+  requirementsEventuallyDue: string[]
+  requirementsPastDue: string[]
+  requirementsPendingVerification: string[]
+  disabledReason: string | null
+  capabilities: StripeAccountCapabilities
+}
+
 export type StripeTranslatedEvent = {
   provider: "stripe"
   providerReference: string

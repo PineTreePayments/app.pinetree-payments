@@ -7,6 +7,7 @@ import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import { StripeCardPayment } from "@/components/payment/StripeCardPayment"
 import {
   initPosBaseWalletConnect,
   waitForWalletConnect,
@@ -42,6 +43,13 @@ type AvailableMethods = {
 }
 
 type PaymentMode = "crypto" | "card" | null
+type CardReaderOption = { id: string; label: string; status: "online" | "offline" | "busy" | "unknown"; isDefault: boolean; simulated: boolean }
+type CardCapabilities = {
+  terminalReaders: CardReaderOption[]
+  tapToPay: { available: boolean; reason: string }
+  manualEntryEnabled: boolean
+  recommendedMethod: "terminal_reader" | "tap_to_pay" | "manual_entry" | "payment_link" | null
+}
 
 type Breakdown = {
   subtotalAmount: number
@@ -284,8 +292,13 @@ export default function POSLayout({ terminalContext }: Props) {
   const [activePaymentId, setActivePaymentId] = useState("")
   const [paymentError, setPaymentError] = useState("")
   const [paymentMode, setPaymentMode] = useState<PaymentMode>(null)
-  const [cardCheckoutUrl, setCardCheckoutUrl] = useState("")
   const [cardLoading, setCardLoading] = useState(false)
+  const [cardCapabilities, setCardCapabilities] = useState<CardCapabilities | null>(null)
+  const [selectedCardReaderId, setSelectedCardReaderId] = useState("")
+  const [manualClientSecret, setManualClientSecret] = useState("")
+  const [manualStripeAccountId, setManualStripeAccountId] = useState("")
+  const [manualReturnUrl, setManualReturnUrl] = useState("")
+  const [manualSubmitted, setManualSubmitted] = useState(false)
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null)
   const [breakdownLoading, setBreakdownLoading] = useState(false)
   const [availableMethods, setAvailableMethods] = useState<AvailableMethods>({ cash: true, crypto: false, card: false })
@@ -324,8 +337,13 @@ export default function POSLayout({ terminalContext }: Props) {
     activePaymentIdRef.current = ""
     setPaymentError("")
     setPaymentMode(null)
-    setCardCheckoutUrl("")
     setCardLoading(false)
+    setCardCapabilities(null)
+    setSelectedCardReaderId("")
+    setManualClientSecret("")
+    setManualStripeAccountId("")
+    setManualReturnUrl("")
+    setManualSubmitted(false)
     setBreakdown(null)
     setCashDigits("")
     setCashRecording(false)
@@ -334,7 +352,17 @@ export default function POSLayout({ terminalContext }: Props) {
   }
 
   async function cancelSale() {
-    if (intentId) {
+    if (paymentMode === "card" && activePaymentId) {
+      setCanceling(true)
+      try {
+        await fetch(`/api/payments/stripe/terminal/${encodeURIComponent(activePaymentId)}/cancel`, {
+          method: "POST",
+          headers: posAuthHeaders(terminalContext?.sessionToken),
+        })
+      } finally {
+        setCanceling(false)
+      }
+    } else if (intentId) {
       setCanceling(true)
       try {
         const response = await fetch(`/api/payment-intents/${encodeURIComponent(intentId)}/cancel`, {
@@ -383,6 +411,19 @@ export default function POSLayout({ terminalContext }: Props) {
         clearTimeout(resetTimerRef.current)
       }
     }
+  }, [])
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const returnedManualPaymentId = String(url.searchParams.get("manual_payment") || "").trim()
+    if (!returnedManualPaymentId) return
+    activePaymentIdRef.current = returnedManualPaymentId
+    setActivePaymentId(returnedManualPaymentId)
+    setPaymentMode("card")
+    setManualSubmitted(true)
+    setStatus("processing")
+    url.searchParams.delete("manual_payment")
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`)
   }, [])
 
   /* =========================
@@ -982,17 +1023,35 @@ export default function POSLayout({ terminalContext }: Props) {
       return
     }
 
-    const checkoutWindow = window.open("about:blank", "_blank")
-    if (checkoutWindow) checkoutWindow.opener = null
-
     try {
       setPaymentError("")
       setPaymentMode("card")
-      setCardCheckoutUrl("")
       setCardLoading(true)
       setStatus("waiting")
 
-      const res = await fetch("/api/pos/payment", {
+      const capabilityResponse = await fetch("/api/providers/stripe/card-capabilities", {
+        headers: posAuthHeaders(terminalContext?.sessionToken),
+      })
+      const capabilities = await capabilityResponse.json().catch(() => null) as CardCapabilities | null
+      if (!capabilityResponse.ok || !capabilities) throw new Error("Unable to load card reader availability.")
+      setCardCapabilities(capabilities)
+
+      const reader = capabilities.terminalReaders.find(item => item.id === selectedCardReaderId && item.status === "online")
+        || capabilities.terminalReaders.find(item => item.isDefault && item.status === "online")
+        || capabilities.terminalReaders.find(item => item.status === "online")
+      if (!reader) {
+        if (capabilities.manualEntryEnabled) {
+          await startManualEntry()
+          return
+        }
+        const suffix = capabilities.tapToPay.reason === "native_app_required"
+          ? " Tap to Pay requires the PineTree mobile app."
+          : ""
+        throw new Error(`No online Stripe Terminal reader is available.${suffix}`)
+      }
+      setSelectedCardReaderId(reader.id)
+
+      const res = await fetch("/api/payments/stripe/terminal", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1001,7 +1060,7 @@ export default function POSLayout({ terminalContext }: Props) {
         body: JSON.stringify({
           amount: subtotalNum,
           currency: "USD",
-          network: "stripe",
+          readerId: reader.id,
         }),
       })
       const data = await res.json().catch(() => null)
@@ -1010,22 +1069,52 @@ export default function POSLayout({ terminalContext }: Props) {
         throw new Error(data?.error || "Card payments are not ready yet.")
       }
 
-      const returnedIntentId = String(data.intentId || "").trim()
-      const checkoutUrl = String(data.paymentUrl || "").trim()
-      if (!returnedIntentId || !checkoutUrl) {
-        throw new Error("Unable to prepare secure card checkout.")
-      }
-
-      setIntentId(returnedIntentId)
-      setCardCheckoutUrl(checkoutUrl)
-      if (checkoutWindow) checkoutWindow.location.href = checkoutUrl
+      const returnedPaymentId = String(data.paymentId || "").trim()
+      if (!returnedPaymentId) throw new Error("Unable to send this payment to the reader.")
+      activePaymentIdRef.current = returnedPaymentId
+      setActivePaymentId(returnedPaymentId)
     } catch (error) {
-      checkoutWindow?.close()
-      setPaymentError(error instanceof Error ? error.message : "Unable to prepare secure card checkout.")
+      setPaymentError(error instanceof Error ? error.message : "Unable to prepare the card reader.")
       setStatus("failed")
     } finally {
       setCardLoading(false)
     }
+  }
+
+  async function startManualEntry(paymentId?: string) {
+    setPaymentError("")
+    setPaymentMode("card")
+    setManualSubmitted(false)
+    const response = await fetch("/api/payments/stripe/manual", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...posAuthHeaders(terminalContext?.sessionToken),
+      },
+      body: JSON.stringify({
+        paymentId: paymentId || undefined,
+        amount: subtotalNum,
+        currency: "USD",
+      }),
+    })
+    const payload = await response.json().catch(() => null) as {
+      error?: string
+      paymentId?: string
+      clientSecret?: string
+      stripeAccountId?: string
+    } | null
+    if (!response.ok || !payload?.paymentId || !payload.clientSecret || !payload.stripeAccountId) {
+      throw new Error(payload?.error || "Unable to prepare manual card entry.")
+    }
+    activePaymentIdRef.current = payload.paymentId
+    setActivePaymentId(payload.paymentId)
+    setManualClientSecret(payload.clientSecret)
+    setManualStripeAccountId(payload.stripeAccountId)
+    const returnUrl = new URL(window.location.href)
+    returnUrl.searchParams.set("manual_payment", payload.paymentId)
+    setManualReturnUrl(returnUrl.toString())
+    setSelectedCardReaderId("")
+    setStatus("waiting")
   }
 
   const displayTotal = breakdown
@@ -1256,20 +1345,42 @@ export default function POSLayout({ terminalContext }: Props) {
         {(status === "waiting" || status === "processing") && (
           <div className="space-y-3">
 
-            {paymentMode === "card" && cardCheckoutUrl ? (
+            {paymentMode === "card" && manualClientSecret && manualStripeAccountId && !manualSubmitted ? (
+              <div className="space-y-3 rounded-2xl border border-blue-100/70 bg-white px-4 py-4">
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-gray-950">Enter card details</p>
+                  <p className="text-xs text-gray-500">Manual entry is processed as card-not-present. PineTree confirms success from Stripe&apos;s verified webhook.</p>
+                </div>
+                <StripeCardPayment
+                  clientSecret={manualClientSecret}
+                  stripeAccountId={manualStripeAccountId}
+                  returnUrl={manualReturnUrl}
+                  onSuccess={() => {
+                    setManualSubmitted(true)
+                    setStatus("processing")
+                  }}
+                  onError={message => setPaymentError(message)}
+                />
+                {paymentError && <p className="text-sm text-red-600" role="alert">{paymentError}</p>}
+              </div>
+            ) : paymentMode === "card" && manualSubmitted ? (
               <div className="space-y-3 rounded-2xl border border-blue-100/70 bg-blue-50/50 px-4 py-4 text-center">
-                <p className="text-sm font-semibold text-gray-950">Secure card checkout is ready</p>
+                <p className="text-sm font-semibold text-gray-950">Card payment processing</p>
+                <p className="text-sm text-gray-600">Waiting for PineTree to confirm the verified Stripe webhook.</p>
+              </div>
+            ) : paymentMode === "card" && activePaymentId ? (
+              <div className="space-y-3 rounded-2xl border border-blue-100/70 bg-blue-50/50 px-4 py-4 text-center">
+                <p className="text-sm font-semibold text-gray-950">Present card on reader</p>
                 <p className="text-sm text-gray-600">
-                  Complete the card form in the secure checkout window. This screen will update when payment is confirmed.
+                  {cardCapabilities?.terminalReaders.find(reader => reader.id === selectedCardReaderId)?.label || "Stripe Terminal reader"} is ready for tap, insert, or swipe. This screen updates from PineTree&apos;s verified payment state.
                 </p>
-                <a
-                  href={cardCheckoutUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                >
-                  Open secure card checkout
-                </a>
+                <p className="text-xs text-gray-500">Tap to Pay on a phone requires the PineTree mobile app and is not available in this browser.</p>
+                {cardCapabilities?.manualEntryEnabled && (
+                  <Button variant="secondary" fullWidth disabled={cardLoading} onClick={() => void startManualEntry(activePaymentId).catch(error => setPaymentError(error instanceof Error ? error.message : "Unable to prepare manual entry"))}>
+                    Enter card manually
+                  </Button>
+                )}
+                {paymentError && <p className="text-sm text-red-600" role="alert">{paymentError}</p>}
               </div>
             ) : qrCodeUrl ? (
               <div className="flex flex-col items-center rounded-2xl border border-blue-100/70 bg-gradient-to-br from-white to-blue-50/40 px-4 py-4 shadow-[0_12px_32px_rgba(0,82,255,0.08)]">

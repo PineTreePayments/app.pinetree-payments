@@ -120,9 +120,9 @@ describe("Stripe Connect onboarding", () => {
     expect(PROVIDERS_PAGE).toContain("getStripeConnectCtaLabel")
   })
 
-  it("providers page shows Continue Setup label when account exists but incomplete", () => {
-    expect(PROVIDERS_PAGE).toContain('"Continue Setup"')
-    expect(PROVIDERS_PAGE).toContain("Start Stripe Setup")
+  it("providers page shows Continue setup label when account exists but incomplete", () => {
+    expect(PROVIDERS_PAGE).toContain('"Continue setup"')
+    expect(PROVIDERS_PAGE).toContain('"Connect Stripe"')
   })
 
   it("providers page existing tests: start-setup fetch call still present", () => {

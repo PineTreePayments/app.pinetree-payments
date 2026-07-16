@@ -338,6 +338,28 @@ export async function getMerchantDailyVolume(
   }))
 }
 
+/** Merge safe provider lifecycle metadata without replacing unrelated split/POS metadata. */
+export async function updatePaymentMetadata(
+  paymentId: string,
+  metadata: Record<string, unknown>
+) {
+  const current = await getPaymentById(paymentId)
+  if (!current) throw new Error("Payment not found")
+
+  const existing = current.metadata && typeof current.metadata === "object"
+    ? current.metadata as Record<string, unknown>
+    : {}
+  const { data, error } = await supabase
+    .from("payments")
+    .update({ metadata: { ...existing, ...metadata }, updated_at: new Date().toISOString() })
+    .eq("id", paymentId)
+    .select()
+    .single()
+
+  if (error) throw new Error(`Failed to update payment metadata: ${error.message}`)
+  return data as Payment
+}
+
 export async function getPublicPaymentById(
   paymentId: string,
   merchantId: string

@@ -48,8 +48,18 @@ export function verifyWebhook({
   webhookSecret,
   now = Math.floor(Date.now() / 1000)
 }: VerifyWebhookInput): boolean {
-  const secret = String(webhookSecret || process.env.STRIPE_WEBHOOK_SECRET || "").trim()
-  if (!secret) return false
+  // An explicit secret is authoritative. Otherwise accept a signature from
+  // either configured endpoint: the account webhook (STRIPE_WEBHOOK_SECRET)
+  // or the Connect webhook (STRIPE_CONNECT_WEBHOOK_SECRET) — direct charges
+  // on connected accounts deliver payment/terminal events to the Connect
+  // endpoint, signed with its own secret.
+  const secrets = (webhookSecret
+    ? [webhookSecret]
+    : [process.env.STRIPE_WEBHOOK_SECRET, process.env.STRIPE_CONNECT_WEBHOOK_SECRET]
+  )
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+  if (secrets.length === 0) return false
 
   const signatureHeader =
     String(signature || "").trim() ||
@@ -62,10 +72,11 @@ export function verifyWebhook({
 
   if (Math.abs(now - parsed.timestamp) > STRIPE_WEBHOOK_TOLERANCE_SECONDS) return false
 
-  const expected = crypto
-    .createHmac("sha256", secret)
-    .update(`${parsed.timestamp}.${rawBody}`, "utf8")
-    .digest("hex")
-
-  return parsed.signatures.some((candidate) => timingSafeHexEqual(candidate, expected))
+  return secrets.some((secret) => {
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(`${parsed.timestamp}.${rawBody}`, "utf8")
+      .digest("hex")
+    return parsed.signatures.some((candidate) => timingSafeHexEqual(candidate, expected))
+  })
 }

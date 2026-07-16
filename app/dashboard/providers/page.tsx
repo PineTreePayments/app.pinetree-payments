@@ -14,6 +14,8 @@ import {
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
+import StripeConnectOnboarding from "@/components/dashboard/StripeConnectOnboarding"
+import StripeTerminalSettings from "@/components/dashboard/StripeTerminalSettings"
 import {
   type Shift4DisplayStatus
 } from "@/lib/shift4DisplayStatus"
@@ -55,9 +57,9 @@ const cardProviderSetupContent: Record<CardOnboardingProvider, {
   },
   stripe: {
     name: "Stripe",
-    cta: "Start Stripe Setup",
+    cta: "Connect Stripe",
     modalTitle: "Stripe Merchant Setup",
-    subtitle: "Complete setup to begin onboarding for card payment acceptance through Stripe.",
+    subtitle: "Complete your business onboarding for card payment acceptance without leaving PineTree.",
     primaryAction: "Begin Setup",
     missingUrlMessage: "Setup link not configured yet."
   },
@@ -117,6 +119,27 @@ type WalletRecord = {
   wallet_type?: string | null
 }
 
+// Safe normalized Stripe connection state returned by
+// GET /api/providers/stripe/status. Mirrors StripeConnectionState from
+// PineTree Engine — never contains Stripe account IDs or secrets.
+type StripeConnectionStatusValue =
+  | "not_connected"
+  | "onboarding_required"
+  | "pending_verification"
+  | "restricted"
+  | "active"
+  | "disabled"
+
+type StripeConnectionSummary = {
+  connectionStatus: StripeConnectionStatusValue
+  accountConnected: boolean
+  detailsSubmitted: boolean
+  chargesEnabled: boolean
+  payoutsEnabled: boolean
+  outstandingRequirementCount: number
+  disabledReason: string | null
+}
+
 type ProvidersApiResponse = {
   success?: boolean
   providers?: ProviderRecord[]
@@ -174,6 +197,7 @@ export default function ProvidersPage() {
   const [railReadiness, setRailReadiness] = useState<PineTreeRailReadinessMap | null>(null)
   const [pineTreeWalletProfile, setPineTreeWalletProfile] = useState<ProvidersApiResponse["pineTreeWalletProfile"]>(null)
   const [businessProfileStatus, setBusinessProfileStatus] = useState<ProvidersApiResponse["businessProfile"] | null>(null)
+  const [stripeConnection, setStripeConnection] = useState<StripeConnectionSummary | null>(null)
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState("")
   const [shift4ApplicationStatusOverride, setShift4ApplicationStatusOverride] = useState<"Pending" | null>(null)
@@ -233,15 +257,63 @@ export default function ProvidersPage() {
     setAutoConversion(Boolean(payload.settings?.auto_conversion_enabled))
   }, [])
 
+  // Best-effort refresh of the normalized Stripe connection state. The
+  // status route also synchronizes PineTree's database with Stripe.
+  const loadStripeConnection = useCallback(async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) return
+
+      const res = await fetch("/api/providers/stripe/status", {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store"
+      })
+      const payload = await res.json().catch(() => null)
+
+      if (res.ok && payload?.ok && payload?.connection) {
+        setStripeConnection(payload.connection as StripeConnectionSummary)
+      }
+    } catch {
+      // Silent: the Stripe card falls back to stored provider readiness.
+    }
+  }, [])
+
   const loadAll = useCallback(async () => {
     try {
-      const payload = await callProvidersApi("GET")
+      const [payload] = await Promise.all([callProvidersApi("GET"), loadStripeConnection()])
       applyProvidersPayload(payload)
     } catch (error) {
       console.error("Failed to load provider dashboard:", error)
       toast.error(error instanceof Error ? error.message : "Failed to load providers")
     }
-  }, [applyProvidersPayload, callProvidersApi])
+  }, [applyProvidersPayload, callProvidersApi, loadStripeConnection])
+
+  // Fetches a fresh Account Session client secret for embedded onboarding.
+  // The secret is handed directly to Stripe Connect JS — never stored.
+  const fetchStripeAccountSessionSecret = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+
+    if (!token) {
+      throw new Error("Please sign in again")
+    }
+
+    const res = await fetch("/api/providers/stripe/account-session", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
+      cache: "no-store"
+    })
+    const payload = await res.json().catch(() => null)
+
+    if (!res.ok || !payload?.ok || !payload?.clientSecret) {
+      throw new Error(payload?.error || "Failed to start Stripe onboarding")
+    }
+
+    return String(payload.clientSecret)
+  }, [])
 
   useEffect(() => {
     loadAll()
@@ -338,7 +410,20 @@ export default function ProvidersPage() {
     return railReadiness?.[key] || null
   }
 
+  function getStripeStatusLabel(status: StripeConnectionStatusValue) {
+    if (status === "active") return "Connected"
+    if (status === "onboarding_required") return "Setup needed"
+    if (status === "pending_verification") return "Verification pending"
+    if (status === "restricted") return "Action required"
+    if (status === "disabled") return "Disabled"
+    return "Not connected"
+  }
+
   function getStatus(provider: string) {
+    if (provider === "stripe" && stripeConnection) {
+      return getStripeStatusLabel(stripeConnection.connectionStatus)
+    }
+
     if (provider === "lightning") {
       const p = getProvider(provider)
       if (!p || p.dashboard_status === "not_configured") return "Not connected"
@@ -649,8 +734,8 @@ function EngineSettingStatus({
 
   function statusTone(status: string) {
     if (status === "Connected" || status === "Ready" || status === "Managed") return "blue"
-    if (status === "Pending" || status === "Setup needed" || status === "Setup pending" || status === "Needs verification" || status === "Needs permissions" || status === "Setup only") return "amber"
-    if (status === "Provider unavailable" || status === "Missing env" || status === "Denied") return "red"
+    if (status === "Pending" || status === "Setup needed" || status === "Setup pending" || status === "Needs verification" || status === "Verification pending" || status === "Needs permissions" || status === "Setup only") return "amber"
+    if (status === "Provider unavailable" || status === "Missing env" || status === "Denied" || status === "Action required" || status === "Disabled") return "red"
     return "default"
   }
 
@@ -831,7 +916,43 @@ function EngineSettingStatus({
   }
 
   function getStripeConnectCtaLabel(p: ProviderRecord | undefined): string {
-    return p?.cardReadiness?.onboardingStatus === "pending" ? "Continue Setup" : "Start Stripe Setup"
+    const status = stripeConnection?.connectionStatus
+    if (status === "onboarding_required" || status === "restricted") return "Continue setup"
+    if (status === "pending_verification" || status === "active" || status === "disabled") return "View status"
+    if (status === "not_connected") return "Connect Stripe"
+    return p?.cardReadiness?.onboardingStatus === "pending" ? "Continue setup" : "Connect Stripe"
+  }
+
+  // Merchant-facing summary line for the Stripe provider card, derived only
+  // from the normalized connection state (never raw provider credentials).
+  function getStripeProviderStatusLine(p: ProviderRecord | undefined | null): string {
+    const connection = stripeConnection
+
+    if (connection) {
+      const outstanding = connection.outstandingRequirementCount
+      const outstandingLine = `${outstanding} item${outstanding === 1 ? "" : "s"} outstanding`
+
+      if (connection.connectionStatus === "active") {
+        return `Charges ${connection.chargesEnabled ? "enabled" : "not enabled"} • Payouts ${connection.payoutsEnabled ? "enabled" : "not enabled"}`
+      }
+      if (connection.connectionStatus === "onboarding_required") {
+        return outstanding > 0 ? `Setup incomplete • ${outstandingLine}` : "Stripe account needs setup"
+      }
+      if (connection.connectionStatus === "pending_verification") {
+        return "Stripe is verifying your information"
+      }
+      if (connection.connectionStatus === "restricted") {
+        return outstanding > 0 ? `Action required • ${outstandingLine}` : "Action required on your Stripe account"
+      }
+      if (connection.connectionStatus === "disabled") {
+        return "Stripe has disabled this account"
+      }
+      return "Stripe account not connected"
+    }
+
+    if (p?.cardReadiness?.onboardingStatus === "complete") return "Card processing enabled"
+    if (p?.cardReadiness?.onboardingStatus === "pending") return "Stripe account needs setup"
+    return "Stripe account not connected"
   }
 
   function ProviderCard({
@@ -942,11 +1063,7 @@ function EngineSettingStatus({
               </span>
               {provider === "stripe" ? (
                 <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
-                  {connected
-                    ? "Card processing enabled"
-                    : p?.cardReadiness?.onboardingStatus === "pending"
-                      ? "Stripe account needs setup"
-                      : "Stripe account not connected"}
+                  {getStripeProviderStatusLine(p)}
                 </span>
               ) : (
                 <span className="mt-1 block text-sm font-medium leading-snug text-gray-950">
@@ -1452,7 +1569,51 @@ function EngineSettingStatus({
               </div>
             )}
 
-            {isManagedCardProvider(activeProvider) && (
+            {activeProvider === "stripe" && (
+              <div className="mb-4">
+                {!stripeConnection ||
+                stripeConnection.connectionStatus === "not_connected" ||
+                stripeConnection.connectionStatus === "onboarding_required" ||
+                stripeConnection.connectionStatus === "restricted" ? (
+                  <StripeConnectOnboarding
+                    fetchClientSecret={fetchStripeAccountSessionSecret}
+                    onExit={() => {
+                      closeProviderModal()
+                      void loadAll()
+                    }}
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-4">
+                      <p className="text-sm font-semibold text-blue-900">
+                        {stripeConnection.connectionStatus === "pending_verification"
+                          ? "Verification pending"
+                          : stripeConnection.connectionStatus === "active"
+                            ? "Stripe is connected"
+                            : "Stripe account disabled"}
+                      </p>
+                      <p className="mt-1.5 text-xs leading-5 text-blue-700">
+                        {getStripeProviderStatusLine(getProvider("stripe"))}
+                      </p>
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={closeProviderModal}
+                        className={secondaryButtonClass()}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {activeProvider === "stripe" && stripeConnection?.connectionStatus === "active" && (
+              <StripeTerminalSettings />
+            )}
+
+            {isManagedCardProvider(activeProvider) && activeProvider !== "stripe" && (
               <div className="mb-5 space-y-5">
                 <section className="rounded-xl border border-gray-200 bg-white px-3.5 py-3.5">
                   <p className="text-sm font-semibold text-gray-950">Application checklist</p>
@@ -1482,7 +1643,7 @@ function EngineSettingStatus({
                 />
               )}
 
-            {isManagedCardProvider(activeProvider) && (
+            {isManagedCardProvider(activeProvider) && activeProvider !== "stripe" && (
             <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 border-t border-gray-100 bg-white p-4 sm:-mx-5 sm:-mb-5 sm:flex-row sm:items-center sm:justify-between sm:p-5 sticky bottom-0">
               <button
                 type="button"

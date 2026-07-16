@@ -113,10 +113,18 @@ const groups = [
   {
     name: "Stripe card processing",
     entries: [
+      // All optional: Stripe features fail closed with a clear
+      // "not configured" error until the keys are provided, so local
+      // development and non-Stripe deploys are never blocked at build time.
       ["STRIPE_SECRET_KEY", false, "secret16"],
+      ["NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", false, "stripepk"],
       ["STRIPE_WEBHOOK_SECRET", false, "secret16"],
+      ["STRIPE_CONNECT_WEBHOOK_SECRET", false, "secret16"],
       ["STRIPE_API_VERSION", false, "text"],
       ["STRIPE_APPLICATION_URL", false, "url"],
+      ["PINE_TREE_STRIPE_CHARGE_MODEL", false, "text"],
+      ["STRIPE_APPLICATION_FEE_ENABLED", false, "boolean"],
+      ["PINETREE_NATIVE_CLIENT_SECRET", false, "secret16"],
     ],
   },
   {
@@ -173,6 +181,9 @@ function validation(name, kind) {
   if (kind === "ptkey") return /^pt_(live|test)_[A-Za-z0-9_-]+$/.test(value)
     ? { ok: true }
     : { ok: false, detail: "expected pt_live_* or pt_test_*" }
+  if (kind === "stripepk") return /^pk_(live|test)_[A-Za-z0-9]+$/.test(value)
+    ? { ok: true }
+    : { ok: false, detail: "expected pk_live_* or pk_test_* (publishable key only — never a secret key)" }
   if (kind === "webhook") return value.length >= 16
     ? { ok: true }
     : { ok: false, detail: "too short" }

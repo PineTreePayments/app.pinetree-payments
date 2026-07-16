@@ -9,9 +9,10 @@ import Button from "@/components/ui/Button"
 type StripePaymentFormProps = {
   onSuccess: () => void
   onError: (message: string) => void
+  returnUrl?: string
 }
 
-function StripePaymentForm({ onSuccess, onError }: StripePaymentFormProps) {
+function StripePaymentForm({ onSuccess, onError, returnUrl }: StripePaymentFormProps) {
   const stripe = useStripe()
   const elements = useElements()
   const [submitting, setSubmitting] = useState(false)
@@ -23,7 +24,7 @@ function StripePaymentForm({ onSuccess, onError }: StripePaymentFormProps) {
     try {
       const { error } = await stripe.confirmPayment({
         elements,
-        confirmParams: { return_url: window.location.href },
+        confirmParams: { return_url: returnUrl || window.location.href },
         redirect: "if_required",
       })
       if (error) {
@@ -37,7 +38,7 @@ function StripePaymentForm({ onSuccess, onError }: StripePaymentFormProps) {
     } finally {
       setSubmitting(false)
     }
-  }, [stripe, elements, onSuccess, onError])
+  }, [stripe, elements, onSuccess, onError, returnUrl])
 
   return (
     <div className="space-y-4">
@@ -62,9 +63,10 @@ type StripeCardPaymentProps = {
   stripeAccountId: string
   onSuccess: () => void
   onError: (message: string) => void
+  returnUrl?: string
 }
 
-export function StripeCardPayment({ clientSecret, stripeAccountId, onSuccess, onError }: StripeCardPaymentProps) {
+export function StripeCardPayment({ clientSecret, stripeAccountId, onSuccess, onError, returnUrl }: StripeCardPaymentProps) {
   const stripePromise = useMemo(() => {
     const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
     if (!publishableKey || !stripeAccountId) return null
@@ -75,7 +77,7 @@ export function StripeCardPayment({ clientSecret, stripeAccountId, onSuccess, on
 
   return (
     <Elements stripe={stripePromise} options={{ clientSecret }}>
-      <StripePaymentForm onSuccess={onSuccess} onError={onError} />
+      <StripePaymentForm onSuccess={onSuccess} onError={onError} returnUrl={returnUrl} />
     </Elements>
   )
 }
