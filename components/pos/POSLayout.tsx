@@ -1479,7 +1479,7 @@ export default function POSLayout({ terminalContext }: Props) {
               <div className="rounded-2xl border border-blue-100/70 bg-blue-50/50 px-4 py-4 text-center">
                 <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
                 <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-                  {paymentMode === "card" ? "Preparing card payment…" : "Preparing payment…"}
+                  Preparing payment…
                 </p>
               </div>
             )}

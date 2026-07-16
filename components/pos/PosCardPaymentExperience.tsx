@@ -5,11 +5,11 @@ import {
   Check,
   ChevronLeft,
   CircleAlert,
-  Contactless,
   CreditCard,
   ExternalLink,
   Link2,
   LoaderCircle,
+  Nfc,
   Plus,
   Radio,
   RefreshCw,
@@ -79,7 +79,7 @@ function Amount({ children }: { children: string }) {
 
 function StatusMark({ kind }: { kind: "waiting" | "processing" | "approved" | "declined" }) {
   const config = {
-    waiting: { className: "bg-blue-100 text-[#1652f0]", icon: <Contactless className="h-8 w-8" /> },
+    waiting: { className: "bg-blue-100 text-[#1652f0]", icon: <Nfc className="h-8 w-8" /> },
     processing: { className: "bg-blue-100 text-[#1652f0]", icon: <LoaderCircle className="h-8 w-8 animate-spin" /> },
     approved: { className: "bg-emerald-100 text-emerald-700", icon: <Check className="h-8 w-8" /> },
     declined: { className: "bg-red-100 text-red-600", icon: <CircleAlert className="h-8 w-8" /> },
