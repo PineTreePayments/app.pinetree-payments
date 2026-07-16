@@ -26,9 +26,10 @@ describe("transaction display normalization", () => {
     expect(normalizeTransactionAsset({ provider: "solana", network: "solana" })).toBe("Unknown asset")
   })
 
-  it("distinguishes canceled, expired, and incomplete terminal events", () => {
+  it("distinguishes canceled and expired evidence with a canceled fallback", () => {
     expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.cancelled" }])).toBe("CANCELED")
+    expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.canceled" }])).toBe("CANCELED")
     expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.expired" }])).toBe("EXPIRED")
-    expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.incomplete" }])).toBe("INCOMPLETE")
+    expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.incomplete" }])).toBe("CANCELED")
   })
 })

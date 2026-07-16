@@ -102,7 +102,8 @@ export function normalizeShift4PaymentStatus(status: unknown): PaymentStatus {
   if (normalized === "refunded") return "REFUNDED"
 
   // Unknown provider statuses must never confirm a payment.
-  return "PENDING"
+  console.warn("[shift4] unknown payment status", { providerStatus: normalized || null })
+  return "UNKNOWN"
 }
 
 function readString(value: unknown, path: string[]): string {

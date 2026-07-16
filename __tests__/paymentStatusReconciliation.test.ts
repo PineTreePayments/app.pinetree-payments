@@ -314,9 +314,9 @@ describe("Scenario 3 — PROCESSING with tx hash stays PROCESSING", () => {
 // ── 4. CONFIRMED is never downgraded ─────────────────────────────────────────
 
 describe("Scenario 4 — CONFIRMED is never downgraded (Rule 10)", () => {
-  it("isConfirmedStatus returns true for CONFIRMED and REFUNDED", () => {
+  it("isConfirmedStatus returns true only for CONFIRMED", () => {
     expect(isConfirmedStatus("CONFIRMED")).toBe(true)
-    expect(isConfirmedStatus("REFUNDED")).toBe(true)
+    expect(isConfirmedStatus("REFUNDED")).toBe(false)
   })
 
   it("isConfirmedStatus returns false for all non-confirmed statuses", () => {
@@ -340,8 +340,9 @@ describe("Scenario 4 — CONFIRMED is never downgraded (Rule 10)", () => {
     expect(resolveTransactionDisplayStatus("CONFIRMED", "PENDING")).toBe("CONFIRMED")
   })
 
-  it("normalizeStoredPaymentStatus: REFUNDED normalises to CONFIRMED", () => {
-    expect(normalizeStoredPaymentStatus("REFUNDED")).toBe("CONFIRMED")
+  it("normalizeStoredPaymentStatus preserves REFUNDED", () => {
+    expect(normalizeStoredPaymentStatus("REFUNDED")).toBe("REFUNDED")
+    expect(resolveTransactionDisplayStatus("REFUNDED", "CONFIRMED")).toBe("REFUNDED")
   })
 
   it("getPaymentIncompleteEligibility: CONFIRMED payment is always ineligible", async () => {
@@ -459,10 +460,10 @@ describe("normalizeStoredPaymentStatus — canonical 6-state normalisation", () 
     ["INCOMPLETE", "INCOMPLETE"],
     ["EXPIRED",    "INCOMPLETE"],   // EXPIRED collapses to INCOMPLETE
     ["CANCELLED",  "INCOMPLETE"],   // CANCELLED collapses to INCOMPLETE
-    ["REFUNDED",   "CONFIRMED"],    // REFUNDED collapses to CONFIRMED
-    ["",           "PENDING"],      // unknown → safe fallback
-    [null,         "PENDING"],
-    [undefined,    "PENDING"],
+    ["REFUNDED",   "REFUNDED"],
+    ["",           "UNKNOWN"],
+    [null,         "UNKNOWN"],
+    [undefined,    "UNKNOWN"],
   ] as const)(
     "normalizeStoredPaymentStatus('%s') → '%s'",
     (input, expected) => {

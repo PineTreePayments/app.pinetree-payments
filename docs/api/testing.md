@@ -89,7 +89,7 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
   }'
 ```
 
-Open the returned `checkoutUrl` in a browser. Complete or cancel the checkout and confirm you receive the `payment.confirmed` or `payment.incomplete` webhook.
+Open the returned `checkoutUrl` in a browser. Complete or cancel the checkout and confirm you receive the `payment.confirmed` or `payment.canceled` webhook.
 
 ### Create a session via the Node SDK
 
@@ -156,11 +156,12 @@ app.listen(3000, () => console.log("Listening on :3000"))
 
 ---
 
-## Testing failed and incomplete payments
+## Testing failed, canceled, and expired payments
 
 To test failure handling:
-- **Failed payment**: Attempt a payment and then cancel from the wallet side
-- **Incomplete payment**: Create a session and let it expire (or call the expire endpoint)
+- **Failed payment**: Use a provider or wallet path that returns explicit failure evidence
+- **Canceled payment**: Cancel the checkout before sending funds
+- **Expired payment**: Create a session and let it expire (or call the expire endpoint)
 
 ```bash
 # Manually expire a session
@@ -168,7 +169,7 @@ curl -X POST "https://app.pinetree-payments.com/api/v1/checkout/sessions/cs_01ab
   -H "Authorization: Bearer $PINETREE_API_KEY"
 ```
 
-Confirm your server handles `payment.incomplete` events gracefully (do not fulfill the order).
+Confirm your server handles `payment.canceled` and `payment.expired` events gracefully (do not fulfill the order). `payment.incomplete` remains a compatibility event for abandoned payments without more specific evidence.
 
 ---
 

@@ -14,7 +14,8 @@ export async function GET(req: NextRequest) {
       merchantId,
       startDate: searchParams.get("startDate") || undefined,
       endDate: searchParams.get("endDate") || undefined,
-      type: searchParams.get("type") || undefined
+      type: searchParams.get("type") || undefined,
+      status: searchParams.get("status") || undefined
     })
     const pdfBytes = await generateReportPdfFromSummary(report)
 

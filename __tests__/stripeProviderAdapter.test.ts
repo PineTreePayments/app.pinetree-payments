@@ -135,8 +135,8 @@ describe("Stripe provider adapter", () => {
     ["processing", "PROCESSING"],
     ["requires_capture", "PROCESSING"],
     ["succeeded", "CONFIRMED"],
-    ["canceled", "FAILED"],
-    ["unknown", "PENDING"]
+    ["canceled", "INCOMPLETE"],
+    ["unknown", "UNKNOWN"]
   ] as const)("normalizes %s to %s", (providerStatus, expectedStatus) => {
     expect(normalizeStripePaymentStatus(providerStatus)).toBe(expectedStatus)
   })
@@ -207,7 +207,7 @@ describe("Stripe provider adapter", () => {
     ["payment_intent.processing", "payment.processing"],
     ["payment_intent.succeeded", "payment.confirmed"],
     ["payment_intent.payment_failed", "payment.failed"],
-    ["payment_intent.canceled", "payment.failed"]
+    ["payment_intent.canceled", "payment.canceled"]
   ] as const)("translates %s to %s", (providerEvent, expectedEvent) => {
     expect(translateEvent({
       id: "evt_123",

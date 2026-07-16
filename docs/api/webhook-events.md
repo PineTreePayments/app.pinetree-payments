@@ -27,7 +27,7 @@ Use `eventId` for idempotency. Fulfill orders from `payment.confirmed` or `check
 | `payment_link.disabled` | Payment link was disabled | `payment_link` | Payment link disabled/archived in implementation |
 | `payment_link.expired` | Payment link expired | `payment_link` | Payment link expiration |
 
-Legacy compatibility: `checkout.session.paid` is accepted and normalized to `checkout.session.completed`. `payment.cancelled` (British spelling) is accepted and normalized to `payment.canceled`. Neither should be used for new integrations.
+Legacy compatibility: `checkout.session.paid` is accepted and normalized to `checkout.session.completed`. `payment.cancelled` (British spelling) is accepted and normalized to `payment.canceled`. Neither should be used for new integrations. Merchant labels follow the [Merchant Status Architecture](../architecture.md#merchant-status-architecture-authoritative).
 
 ## Event envelope
 
@@ -135,11 +135,11 @@ Fires when a payment expires. Object type: `payment`. Retryable: yes. Status map
 
 ### payment.canceled
 
-Fires when a payment is canceled. Object type: `payment`. Retryable: yes. Status mapping: visible `Incomplete` for dashboard display compatibility. Legacy spelling `payment.cancelled` is accepted and normalized.
+Fires when a payment is canceled. Object type: `payment`. Retryable: yes. Merchant status: `Canceled`. Legacy spelling `payment.cancelled` is accepted and normalized.
 
 ### payment.incomplete
 
-Fires when a customer abandons, backs out, or no funds are sent before PineTree marks the attempt incomplete. Object type: `payment`. Retryable: yes. Status mapping: visible `Incomplete`.
+Fires when a customer abandons, backs out, or no funds are sent before PineTree marks the canonical attempt incomplete. Object type: `payment`. Retryable: yes. Merchant status: `Canceled` unless explicit expiry evidence resolves it to `Expired`.
 
 ### payment.refunded
 

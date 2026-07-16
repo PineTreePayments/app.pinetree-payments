@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
       merchantId,
       startDate: searchParams.get("startDate") || undefined,
       endDate: searchParams.get("endDate") || undefined,
-      type
+      type,
+      status: searchParams.get("status") || undefined
     })
 
     if (format === "csv") {

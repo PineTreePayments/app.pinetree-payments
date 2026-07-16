@@ -70,7 +70,7 @@ class ProviderNameAdapter extends BaseProviderAdapter {
     void providerReference
     // Implement status check
     return {
-      status: "PROCESSING" as PaymentStatus
+      status: "UNKNOWN" as PaymentStatus
     }
   }
 

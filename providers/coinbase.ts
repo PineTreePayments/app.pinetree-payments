@@ -166,7 +166,7 @@ export const coinbaseAdapter: ProviderAdapter = {
 
     } catch (error) {
       console.error("Coinbase adapter status check error:", error)
-      return { status: "PENDING" as const }
+      return { status: "UNKNOWN" as const }
     }
   },
 
@@ -241,10 +241,8 @@ export const coinbaseAdapter: ProviderAdapter = {
         }
 
       default:
-        return {
-          paymentId,
-          event: "payment.pending" as const
-        }
+        console.warn("[coinbase] unknown payment event", { providerEvent: event || null })
+        return null
     }
   }
 }
@@ -262,10 +260,12 @@ function coinbaseStatusToPineTree(status: CoinbaseStatus) {
     case "RESOLVED":
       return { status: "CONFIRMED" as const }
     case "EXPIRED":
+      return { status: "EXPIRED" as const }
     case "CANCELED":
-      return { status: "FAILED" as const }
+      return { status: "INCOMPLETE" as const }
     default:
-      return { status: "PENDING" as const }
+      console.warn("[coinbase] unknown payment status", { providerStatus: status || null })
+      return { status: "UNKNOWN" as const }
   }
 }
 

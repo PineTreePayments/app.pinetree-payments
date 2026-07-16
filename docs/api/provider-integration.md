@@ -79,7 +79,8 @@ Maps your provider's webhook event structure to PineTree's normalized event form
 
 ```typescript
 type NormalizedEvent = {
-  type: "payment.confirmed" | "payment.failed" | "payment.pending" | "payment.incomplete"
+  type: "payment.pending" | "payment.processing" | "payment.confirmed" |
+    "payment.failed" | "payment.expired" | "payment.canceled" | "payment.incomplete"
   paymentId: string     // PineTree payment ID
   providerEventId?: string
 }
@@ -160,7 +161,14 @@ Your `translateEvent()` method must map provider-specific events to these normal
 | Transaction broadcast | `payment.processing` |
 | Transaction confirmed | `payment.confirmed` |
 | Transaction failed / rejected | `payment.failed` |
-| Payment expired / cancelled | `payment.incomplete` |
+| Payment expired | `payment.expired` |
+| Payment canceled | `payment.canceled` |
+| Abandoned with no more specific evidence | `payment.incomplete` |
+
+Adapters must return `Unknown` status evidence or `null` for unrecognized
+provider values. They must never guess `payment.pending` for an unknown value.
+Merchant-facing labels and colors are owned by the
+[Merchant Status Architecture](../architecture.md#merchant-status-architecture-authoritative).
 
 **Terminal states are permanent.** Once a payment is `CONFIRMED` or `FAILED`, no further transitions are allowed. The compare-and-set guard in the engine enforces this.
 

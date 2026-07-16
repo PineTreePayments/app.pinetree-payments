@@ -27,6 +27,10 @@ export default function TransactionStatus({
     return <PaymentStatusVisual status="PENDING" iconSize={34} />
   }
 
+  if (status === "processing") {
+    return <PaymentStatusVisual status="PROCESSING" iconSize={34} />
+  }
+
   if (status === "confirmed") {
     return <PaymentStatusVisual status="CONFIRMED" iconSize={34} />
   }
@@ -41,6 +45,14 @@ export default function TransactionStatus({
 
   if (status === "expired") {
     return <PaymentStatusVisual status="EXPIRED" iconSize={34} />
+  }
+
+  if (status === "canceled" || status === "cancelled") {
+    return <PaymentStatusVisual status="CANCELED" iconSize={34} />
+  }
+
+  if (status === "refunded") {
+    return <PaymentStatusVisual status="REFUNDED" iconSize={34} />
   }
 
   return null

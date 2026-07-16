@@ -767,11 +767,13 @@ function DocSectionPaymentStates() {
         headers={["Visible State", "Meaning", "Terminal", "Color"]}
         rows={[
           ["Waiting", "Payment request open, no funds detected", "No", "Blue"],
-          ["Processing", "Payment detected, awaiting final confirmation", "No", "Blue"],
+          ["Processing", "Payment detected, awaiting final confirmation", "No", "Darker blue"],
           ["Confirmed", "Payment completed", "Yes", "Green"],
           ["Failed", "Provider/network/payment attempt failed", "Yes", "Red"],
           ["Expired", "Payment window timed out", "Yes", "Red"],
-          ["Incomplete", "Customer abandoned/backed out/no funds sent", "Yes", "Red"],
+          ["Canceled", "Customer abandoned/backed out/no funds sent", "Yes", "Gray"],
+          ["Refunded", "Settled funds were returned", "Yes", "Orange"],
+          ["Unknown", "Status is not recognized", "No", "Neutral gray"],
         ]}
       />
     </div>
@@ -811,7 +813,7 @@ const event = pinetree.webhooks.constructEvent(
           ["payment.expired", "Payment expired before completion"],
           ["payment.canceled", "Payment was canceled"],
           ["payment.refunded", "Payment was refunded"],
-          ["payment.incomplete", "Session expired before payment"],
+          ["payment.incomplete", "Payment ended without more specific terminal evidence"],
           ["payment.processing", "Transaction broadcast; awaiting confirmation"],
           ["payment.pending", "Customer wallet action detected"],
           ["payment.created", "Payment object first created"],

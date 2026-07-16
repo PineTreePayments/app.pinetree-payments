@@ -15,8 +15,10 @@ const ALL_STATUSES = [
   "PROCESSING",
   "CONFIRMED",
   "FAILED",
-  "INCOMPLETE",
   "EXPIRED",
+  "CANCELED",
+  "REFUNDED",
+  "UNKNOWN",
 ]
 
 function makeTx(status: string, index: number): DashboardTransactionRow {

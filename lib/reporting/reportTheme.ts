@@ -5,7 +5,7 @@
 // (CompactMetricTile, MetricGrid, etc.) for their light floating-card UI.
 // The dark premium style defined here is for generated report outputs only.
 
-export type ReportAccent = "blue" | "green" | "red" | "neutral"
+export type ReportAccent = "blue" | "green" | "red" | "orange" | "neutral"
 
 // ── Canonical hex color tokens ────────────────────────────────────────────────
 // Used by email inline styles. PDF engine consumes PDF_RGB below.
@@ -17,18 +17,21 @@ export const REPORT_HEX = {
     blue:        "#0c1a35",
     green:       "#091c14",
     red:         "#1b0b0d",
+    orange:      "#fff7ed",
     neutral:     "#0f1728",
   },
   tileBorder: {
     blue:        "#1d4ed8",
     green:       "#047857",
     red:         "#7f1d1d",
+    orange:      "#fdba74",
     neutral:     "#1e2c47",
   },
   tileLabel: {
     blue:        "#60a5fa",
     green:       "#34d399",
     red:         "#db757a",
+    orange:      "#c2410c",
     neutral:     "#a8b0bd",
   },
   emailCard: {
@@ -81,13 +84,16 @@ export const PDF_RGB = {
     bgGreen:     [0.941, 0.980, 0.961] as RGB3,
     bgNeutral:   [0.976, 0.980, 0.984] as RGB3,
     bgRed:       [0.996, 0.949, 0.949] as RGB3,
+    bgOrange:    [1.000, 0.969, 0.925] as RGB3,
     borderBlue:  [0.749, 0.859, 0.996] as RGB3,
     borderGreen: [0.655, 0.953, 0.816] as RGB3,
     borderGray:  [0.898, 0.906, 0.922] as RGB3,
     borderRed:   [0.996, 0.792, 0.792] as RGB3,
+    borderOrange:[0.996, 0.729, 0.455] as RGB3,
     labelBlue:   [0.114, 0.306, 0.847] as RGB3,
     labelGreen:  [0.016, 0.471, 0.341] as RGB3,
     labelGray:   [0.420, 0.447, 0.502] as RGB3,
     labelRed:    [0.725, 0.110, 0.110] as RGB3,
+    labelOrange: [0.761, 0.255, 0.047] as RGB3,
   },
 }

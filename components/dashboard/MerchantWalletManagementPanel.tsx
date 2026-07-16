@@ -5,6 +5,7 @@ import { Loader2, RefreshCw, X } from "lucide-react"
 import Card from "@/components/ui/Card"
 import Button from "@/components/ui/Button"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
+import StatusBadge from "@/components/ui/StatusBadge"
 
 // ---------------------------------------------------------------------------
 // Normalized PineTree wallet types (mirrors engine/wallet/walletTypes.ts).
@@ -138,13 +139,6 @@ function operationTypeLabel(type: string) {
     .split("_")
     .map((word) => word[0]?.toUpperCase() + word.slice(1))
     .join(" ")
-}
-
-function statusTone(status: string): string {
-  if (status === "COMPLETED") return "bg-green-100 text-green-700"
-  if (status === "FAILED" || status === "CANCELED" || status === "EXPIRED") return "bg-red-100 text-red-700"
-  if (status === "REQUIRES_ACTION") return "bg-amber-100 text-amber-700"
-  return "bg-blue-100 text-blue-700"
 }
 
 // ---------------------------------------------------------------------------
@@ -451,9 +445,7 @@ function ActivityCard({ activity }: { activity: ActivityData | null }) {
                   {op.direction === "credit" ? "+" : "-"}
                   {op.amountBaseUnits} {op.asset}
                 </span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusTone(op.status)}`}>
-                  {op.status}
-                </span>
+                <StatusBadge status={op.status} />
               </div>
             </div>
           ))}

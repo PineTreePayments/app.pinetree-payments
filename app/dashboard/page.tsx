@@ -282,13 +282,13 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
             <InlineMetric label="Payments" value={today.transactionCount} />
             <InlineMetric label="Average" value={formatUsd(today.averageTransaction)} />
-            <InlineMetric label="Success" value={today.confirmed} />
+            <InlineMetric label="Confirmed" value={today.confirmed} />
           </div>
         </GroupedMetricSurface>
         <GroupedMetricSurface title="Activity Health" titleTone="blue">
           <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
             <InlineMetric label="Success Rate" value={`${successRate}%`} />
-            <InlineMetric label="Incomplete" value={today.incomplete} />
+            <InlineMetric label="Canceled" value={today.incomplete} />
             <InlineMetric label="Failed" value={today.failed} />
           </div>
         </GroupedMetricSurface>
@@ -409,7 +409,7 @@ export default function DashboardPage() {
           <InlineMetric label="All-Time Volume" value={formatUsd(volume)} />
           <InlineMetric label="All Transactions" value={txCount} />
           <InlineMetric label="Success Rate" value={`${successRate}%`} />
-          <InlineMetric label="Success Today" value={today.confirmed} />
+          <InlineMetric label="Confirmed Today" value={today.confirmed} />
         </div>
       </GroupedMetricSurface>
 

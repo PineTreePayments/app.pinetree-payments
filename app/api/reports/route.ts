@@ -18,7 +18,8 @@ export async function GET(req: NextRequest) {
       merchantId,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
-      type
+      type,
+      status: searchParams.get("status") || undefined
     })
     return NextResponse.json(report)
   } catch (error: unknown) {

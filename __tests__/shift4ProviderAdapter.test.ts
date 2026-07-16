@@ -29,8 +29,9 @@ describe("Shift4 provider adapter", () => {
     ["payment.settled", "payment.confirmed"],
     ["payment.declined", "payment.failed"],
     ["payment.failed", "payment.failed"],
-    ["payment.canceled", "payment.incomplete"],
-    ["payment.cancelled", "payment.incomplete"],
+    ["payment.canceled", "payment.canceled"],
+    ["payment.cancelled", "payment.canceled"],
+    ["payment.expired", "payment.expired"],
     ["CHARGE_PENDING", "payment.pending"],
     ["CHARGE_UPDATED", "payment.processing"],
     ["CHARGE_SUCCEEDED", "payment.confirmed"],
@@ -81,7 +82,7 @@ describe("Shift4 provider adapter", () => {
     ["expired", "EXPIRED"],
     ["cancelled", "INCOMPLETE"],
     ["refunded", "REFUNDED"],
-    ["mystery_state", "PENDING"],
+    ["mystery_state", "UNKNOWN"],
   ] as const)("normalizes status %s to %s", async (providerStatus, expectedStatus) => {
     vi.stubEnv("SHIFT4_SECRET_KEY", "sk_test_123")
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
@@ -105,7 +106,7 @@ describe("Shift4 provider adapter", () => {
     await expect(getPaymentStatus("chse_shift4_123")).resolves.toMatchObject({
       provider: "shift4",
       providerReference: "chse_shift4_123",
-      status: "PENDING"
+      status: "UNKNOWN"
     })
     expect(fetchSpy).not.toHaveBeenCalled()
   })

@@ -66,7 +66,7 @@ export function resolveLifecycleDisplayStatus(
     const reason = event.raw_payload && typeof event.raw_payload === "object"
       ? normalized((event.raw_payload as Record<string, unknown>).reason)
       : ""
-    if (eventType === "payment.cancelled" || /cancel|user_rejected/.test(`${providerEvent} ${reason}`)) {
+    if (["payment.canceled", "payment.cancelled"].includes(eventType) || /cancel|user_rejected/.test(`${providerEvent} ${reason}`)) {
       return "CANCELED"
     }
     if (eventType === "payment.expired" || /expir|timeout/.test(`${providerEvent} ${reason}`)) {
@@ -74,5 +74,5 @@ export function resolveLifecycleDisplayStatus(
     }
   }
 
-  return "INCOMPLETE"
+  return "CANCELED"
 }

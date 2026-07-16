@@ -17,8 +17,6 @@ export function normalizeToStrictPaymentStatus(status: unknown): PaymentStatus {
   const normalized = String(status || "").toUpperCase().trim()
 
   if (normalized === "EXPIRED") return "INCOMPLETE"
-  if (normalized === "REFUNDED") return "CONFIRMED"
-
   if (
     normalized === "CREATED" ||
     normalized === "PENDING" ||

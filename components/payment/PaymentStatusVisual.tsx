@@ -1,4 +1,4 @@
-import { CheckCircle, CircleMinus, Clock3, LoaderCircle, XCircle } from "lucide-react"
+import { AlertTriangle, CheckCircle, CircleMinus, Clock3, LoaderCircle, RotateCcw, XCircle } from "lucide-react"
 import {
   getPaymentDisplayStatus,
   type PaymentStatusIcon,
@@ -22,6 +22,8 @@ const STATUS_ICONS = {
   "clock": Clock3,
   "spinner": LoaderCircle,
   "x-circle": XCircle,
+  refund: RotateCcw,
+  "alert-triangle": AlertTriangle,
 } satisfies Record<PaymentStatusIcon, typeof CheckCircle>
 
 export function normalizeStandardPaymentStatus(status: string) {

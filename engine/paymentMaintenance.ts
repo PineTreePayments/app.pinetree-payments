@@ -309,7 +309,7 @@ export async function runPaymentMaintenanceTick(options?: {
         if (!result.skipped) {
           reconciled += 1
           const events = await getPaymentEvents(payment.id).catch(() => [])
-          if (events.some((event) => event.event_type === "payment.cancelled")) {
+          if (events.some((event) => event.event_type === "payment.canceled" || event.event_type === "payment.cancelled")) {
             canceledReconciled += 1
           }
         }

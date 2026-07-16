@@ -117,7 +117,7 @@ Webhook delivery is at-least-once. Your endpoint should:
 - Store `eventId` and ignore duplicates.
 - Fulfill only terminal success events such as `payment.confirmed` or `checkout.session.completed`.
 - Return a 2xx response only after durable processing.
-- Treat `payment.failed`, `payment.expired`, and `payment.incomplete` as separate negative terminal cases.
+- Treat `payment.failed`, `payment.expired`, `payment.canceled`, and `payment.incomplete` as separate negative terminal cases.
 
 ## Event schema compatibility
 

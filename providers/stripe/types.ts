@@ -71,5 +71,5 @@ export type StripeTranslatedEvent = {
   providerReference: string
   providerEvent: string
   paymentId: string
-  event: "payment.created" | "payment.processing" | "payment.confirmed" | "payment.failed"
+  event: "payment.created" | "payment.processing" | "payment.confirmed" | "payment.failed" | "payment.canceled"
 }

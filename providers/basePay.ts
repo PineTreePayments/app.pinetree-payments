@@ -49,8 +49,9 @@ export const basePayAdapter: ProviderAdapter = {
   },
 
   async getPaymentStatus() {
+    console.warn("[base] provider status polling is unavailable; use paymentWatcher")
     return {
-      status: "PROCESSING" as const
+      status: "UNKNOWN" as const
     }
   },
 
@@ -59,10 +60,8 @@ export const basePayAdapter: ProviderAdapter = {
   },
 
   translateEvent(payload: { paymentId?: string; reference?: string }) {
-    return {
-      paymentId: payload?.paymentId || payload?.reference || "",
-      event: "payment.pending" as const
-    }
+    console.warn("[base] unknown provider event", { paymentId: payload?.paymentId || payload?.reference || null })
+    return null
   }
 }
 

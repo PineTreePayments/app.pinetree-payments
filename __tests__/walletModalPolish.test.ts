@@ -372,15 +372,16 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
 
   it("withdrawal form uses a compact centered Review withdrawal action", () => {
     const src = withdrawalFormSrc()
-    const reviewButton = src.slice(
-      src.indexOf("onClick={missingRuntimeSigner && onFinishSetup ? onFinishSetup : onReview}"),
-      src.indexOf('{reviewing ? "Reviewing..."')
+    const actionBlock = src.slice(
+      src.lastIndexOf('<div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">'),
+      src.indexOf('{process.env.NODE_ENV !== "production" ? (')
     )
 
-    expect(reviewButton).toContain("inline-flex h-11 min-w-[12rem]")
-    expect(reviewButton).toContain("px-6")
-    expect(reviewButton).not.toContain("w-full")
-    expect(src).toContain("flex flex-col items-center gap-2 sm:flex-row sm:justify-center")
+    expect(actionBlock).toContain("onClick={onReview}")
+    expect(actionBlock).toContain('disabled={reviewDisabled}')
+    expect(actionBlock).toContain('Review withdrawal')
+    expect(actionBlock).toContain("min-w-[12rem]")
+    expect(actionBlock).not.toContain("w-full")
   })
 
   it("withdraw validation and pending review states are not yellow warning blocks", () => {
@@ -409,7 +410,11 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(src).toContain("max-w-2xl")
     expect(src).toContain("max-w-xl")
     expect(src).toContain("mt-7 max-w-xl")
-    expect(src).toContain("mt-auto flex justify-center pt-8")
+    const setupActionIndex = src.indexOf('<div className="mt-auto flex justify-start pt-8">')
+    const setupCardStart = src.indexOf('<article className="max-w-2xl')
+    const setupCardEnd = src.indexOf("</article>", setupCardStart)
+    expect(setupActionIndex).toBeGreaterThan(src.indexOf("<EnabledRailChips rows={walletRailRows} />"))
+    expect(setupActionIndex).toBeLessThan(setupCardEnd)
   })
 
   it("front wallet card shows a simple centered summary without duplicating the modal overview", () => {
@@ -465,13 +470,19 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
 
   it("Open/Create PineTree Wallet button remains in the content flow", () => {
     const src = runtimeSrc()
-    expect(src).toContain("Open PineTree Wallet")
-    expect(src).toContain("Create PineTree Wallet")
-    expect(src).toContain("mt-auto flex justify-center pt-8")
-    expect(src).toContain("h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60")
+    const setupCardStart = src.indexOf('<article className="max-w-2xl')
+    const setupCard = src.slice(
+      setupCardStart,
+      src.indexOf("</article>", setupCardStart)
+    )
+    expect(setupCard).toContain("Open PineTree Wallet")
+    expect(setupCard).toContain("Create PineTree Wallet")
+    expect(setupCard).toContain("onClick={handleOpenWallet}")
+    expect(setupCard).toContain("onClick={handleCreateWallet}")
+    expect(setupCard.indexOf("Open PineTree Wallet")).toBeGreaterThan(setupCard.indexOf("<EnabledRailChips rows={walletRailRows} />"))
   })
 
-  it("withdrawal reconnect keeps Reconnect PineTree Wallet as the only visible action", () => {
+  it("withdrawal form keeps reconnect handling out of the initial review action", () => {
     const formShell = walletPage.slice(
       walletPage.indexOf("function WithdrawalFormShell("),
       walletPage.indexOf("function formatUsd(")
@@ -481,10 +492,10 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
       formShell.indexOf('{process.env.NODE_ENV !== "production" ? (')
     )
 
-    expect(formShell).toContain('missingRuntimeSigner ? "Reconnect PineTree Wallet" : "Review withdrawal"')
-    expect(formShell).toContain("missingRuntimeSigner && onFinishSetup ? onFinishSetup : onReview")
-    expect(actionBlock).not.toContain("Finish setup")
-    expect(actionBlock).not.toContain("border border-gray-200 bg-white px-4")
+    expect(actionBlock).toContain("onClick={onReview}")
+    expect(actionBlock).toContain('Review withdrawal')
+    expect(actionBlock).not.toContain("Reconnect PineTree Wallet")
+    expect(formShell).not.toContain("missingRuntimeSigner")
   })
 
   it("EnabledRailChips renders Connected Networks label above active rail pills", () => {
@@ -572,35 +583,13 @@ describe("Activity tab - recent withdrawal visibility", () => {
     expect(submitFn).toContain("void syncPineTreeWallet()")
   })
 
-  it("ActivityStatusPill renders Confirmed status in blue", () => {
+  it("ActivityStatusPill delegates to the shared merchant status contract", () => {
     const src = walletPage.slice(
       walletPage.indexOf("function ActivityStatusPill("),
       walletPage.indexOf("function ActivityTab(")
     )
-    expect(src).toContain("Confirmed")
-    expect(src).toContain("bg-blue-100")
-    expect(src).toContain("text-blue-700")
-  })
-
-  it("ActivityStatusPill renders Failed status", () => {
-    const src = walletPage.slice(
-      walletPage.indexOf("function ActivityStatusPill("),
-      walletPage.indexOf("function ActivityTab(")
-    )
-    expect(src).toContain("Failed")
-    expect(src).toContain("text-red-600")
-  })
-
-  it("ActivityStatusPill renders Sent, Confirmed, Canceled, Blocked, and Pending statuses", () => {
-    const src = walletPage.slice(
-      walletPage.indexOf("function ActivityStatusPill("),
-      walletPage.indexOf("function ActivityTab(")
-    )
-    expect(src).toContain('s === "sent" || s === "processing" ? "Sent"')
-    expect(src).toContain("Confirmed")
-    expect(src).toContain("Canceled")
-    expect(src).toContain("Blocked")
-    expect(src).toContain("Pending")
+    expect(src).toContain("<StatusBadge status={status} />")
+    expect(walletPage).toContain('import StatusBadge from "@/components/ui/StatusBadge"')
   })
 
   it("Activity tab is wired to walletSync and walletSyncing props", () => {

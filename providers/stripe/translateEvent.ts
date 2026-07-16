@@ -41,8 +41,9 @@ export function translateEvent(payload: unknown): StripeTranslatedEvent | null {
     case "payment_intent.succeeded":
       return { ...base, event: "payment.confirmed" }
     case "payment_intent.payment_failed":
-    case "payment_intent.canceled":
       return { ...base, event: "payment.failed" }
+    case "payment_intent.canceled":
+      return { ...base, event: "payment.canceled" }
     default:
       return null
   }

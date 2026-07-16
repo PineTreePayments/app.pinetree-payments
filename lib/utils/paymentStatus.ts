@@ -11,16 +11,17 @@ export type PaymentStatusTone =
   | "processing"
   | "confirmed"
   | "failed"
-  | "incomplete"
   | "expired"
   | "canceled"
+  | "refunded"
+  | "disputed"
   | "unknown"
 
-export type PaymentStatusIcon = "clock" | "spinner" | "check-circle" | "x-circle" | "minus"
+export type PaymentStatusIcon = "clock" | "spinner" | "check-circle" | "x-circle" | "refund" | "alert-triangle" | "minus"
 
 export type PaymentDisplayStatus = {
   status: string
-  label: "Waiting" | "Processing" | "Confirmed" | "Failed" | "Incomplete" | "Expired" | "Canceled" | "Unknown"
+  label: "Waiting" | "Processing" | "Confirmed" | "Failed" | "Expired" | "Canceled" | "Refunded" | "Disputed" | "Unknown"
   message: string
   tone: PaymentStatusTone
   icon: PaymentStatusIcon
@@ -45,9 +46,9 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     message: "Payment detected and awaiting confirmation.",
     tone: "processing",
     icon: "spinner",
-    classes: "border border-blue-200 bg-blue-100 text-blue-800",
-    iconClassName: "text-blue-600",
-    iconBgClassName: "bg-blue-50",
+    classes: "border border-blue-300 bg-blue-200 text-blue-900",
+    iconClassName: "text-blue-700",
+    iconBgClassName: "bg-blue-100",
     spin: true,
   },
   confirmed: {
@@ -63,15 +64,6 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     label: "Failed",
     message: "Payment attempt failed validation, was rejected, or could not complete.",
     tone: "failed",
-    icon: "x-circle",
-    classes: "border border-red-200 bg-red-100 text-red-800",
-    iconClassName: "text-red-600",
-    iconBgClassName: "bg-red-50",
-  },
-  incomplete: {
-    label: "Incomplete",
-    message: "Customer left the payment or switched payment methods before sending funds.",
-    tone: "incomplete",
     icon: "x-circle",
     classes: "border border-red-200 bg-red-100 text-red-800",
     iconClassName: "text-red-600",
@@ -95,6 +87,24 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     iconClassName: "text-gray-600",
     iconBgClassName: "bg-gray-50",
   },
+  refunded: {
+    label: "Refunded",
+    message: "The settled payment was returned to the customer.",
+    tone: "refunded",
+    icon: "refund",
+    classes: "border border-orange-200 bg-orange-100 text-orange-800",
+    iconClassName: "text-orange-700",
+    iconBgClassName: "bg-orange-50",
+  },
+  disputed: {
+    label: "Disputed",
+    message: "The payment is under dispute.",
+    tone: "disputed",
+    icon: "alert-triangle",
+    classes: "border border-amber-200 bg-amber-100 text-amber-900",
+    iconClassName: "text-amber-700",
+    iconBgClassName: "bg-amber-50",
+  },
   unknown: {
     label: "Unknown",
     message: "The payment status is not recognized.",
@@ -107,25 +117,33 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
 }
 
 function displayToneForStatus(normalizedStatus: string): PaymentStatusTone {
-  if (["CREATED", "PENDING", "WAITING", "AWAITING_CUSTOMER"].includes(normalizedStatus)) {
+  if ([
+    "CREATED", "PENDING", "WAITING", "AWAITING_CUSTOMER", "DRAFT",
+    "AWAITING_CONFIRMATION", "AWAITING_APPROVAL", "REQUIRES_ACTION", "REVIEW_REQUIRED"
+  ].includes(normalizedStatus)) {
     return "waiting"
   }
-  if (["PROCESSING", "IN_PROGRESS", "SETTLING"].includes(normalizedStatus)) {
+  if ([
+    "PROCESSING", "IN_PROGRESS", "SETTLING", "SUBMITTED", "SENT",
+    "READY_TO_SUBMIT", "PREPARED", "AWAITING_SIGNATURE", "PAYOUT_INITIATED"
+  ].includes(normalizedStatus)) {
     return "processing"
   }
   if (["CONFIRMED", "SUCCESS", "SUCCEEDED", "COMPLETE", "COMPLETED", "PAID"].includes(normalizedStatus)) {
     return "confirmed"
   }
-  if (["FAILED", "ERROR", "REJECTED", "DECLINED", "DENIED"].includes(normalizedStatus)) {
+  if (["FAILED", "ERROR", "REJECTED", "DECLINED", "DENIED", "VALIDATION_FAILED", "BLOCKED"].includes(normalizedStatus)) {
     return "failed"
   }
   if (["INCOMPLETE", "ABANDONED"].includes(normalizedStatus)) {
-    return "incomplete"
+    return "canceled"
   }
   if (["CANCELED", "CANCELLED"].includes(normalizedStatus)) return "canceled"
   if (["EXPIRED", "TIMED_OUT", "TIMEOUT"].includes(normalizedStatus)) {
     return "expired"
   }
+  if (["REFUNDED", "REFUND_COMPLETE", "REFUND_COMPLETED"].includes(normalizedStatus)) return "refunded"
+  if (["DISPUTED", "CHARGEBACK"].includes(normalizedStatus)) return "disputed"
   return "unknown"
 }
 

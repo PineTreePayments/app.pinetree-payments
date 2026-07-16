@@ -2,6 +2,8 @@
 
 A payment object is created when a customer begins a payment attempt against a checkout session. The payment tracks on-chain status, network, rail, fee, and amount. Payment status updates are delivered to your server via webhooks.
 
+Merchant labels and colors follow the [Merchant Status Architecture](../architecture.md#merchant-status-architecture-authoritative).
+
 ---
 
 ## The Payment object
@@ -32,7 +34,7 @@ A payment object is created when a customer begins a payment attempt against a c
 | `processing` | Payment broadcast to the network; awaiting confirmation |
 | `paid` | Payment confirmed on-chain — order can be fulfilled |
 | `failed` | Payment failed (rejected, timed out, or underpaid) |
-| `incomplete` | Session expired or payment could not be finalized |
+| `canceled` | Session was canceled or abandoned before payment |
 
 ### Status display labels
 
@@ -42,7 +44,8 @@ A payment object is created when a customer begins a payment attempt against a c
 | `processing` | Processing | `payment.processing` |
 | `paid` | Confirmed | `payment.confirmed` |
 | `failed` | Failed | `payment.failed` |
-| `incomplete` | Incomplete | `payment.incomplete` |
+| `canceled` | Canceled | `payment.canceled`, `payment.incomplete` |
+| refund adjustment | Refunded | `payment.refunded` |
 
 ---
 
@@ -62,7 +65,7 @@ CREATED ──► PENDING ──► PROCESSING ──► CONFIRMED (paid)
 
 ### Terminal states
 
-`paid`, `failed`, `expired`, and `incomplete` are terminal for merchant fulfillment decisions. The public API uses `paid` for the successful value; PineTree's visible label for that state is **Confirmed**.
+`paid`, `failed`, `expired`, `canceled`, and refund adjustments are terminal for merchant fulfillment decisions. The public API uses `paid` for compatibility; PineTree's visible label is **Confirmed**.
 
 ### Idempotency note
 

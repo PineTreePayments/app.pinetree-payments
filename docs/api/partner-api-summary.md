@@ -79,7 +79,7 @@ PineTree delivers HMAC-SHA256 signed events to merchant webhook endpoints.
 - `PineTree-Event-Id` — unique event identifier
 - `PineTree-Event-Schema` — `payments-v1` (also sent as `PineTree-Webhook-Version` for legacy compatibility)
 
-**Event types:** `payment.created`, `payment.pending`, `payment.processing`, `payment.confirmed`, `payment.failed`, `payment.expired`, `payment.cancelled`, `payment.incomplete`, `payment.refunded`, `checkout.session.created`, `checkout.session.processing`, `checkout.session.completed`, `checkout.session.failed`, `checkout.session.expired`, `checkout.session.canceled`, `payment_link.created`, `payment_link.disabled`, `payment_link.expired`
+**Event types:** `payment.created`, `payment.pending`, `payment.processing`, `payment.confirmed`, `payment.failed`, `payment.expired`, `payment.canceled`, `payment.incomplete`, `payment.refunded`, `checkout.session.created`, `checkout.session.processing`, `checkout.session.completed`, `checkout.session.failed`, `checkout.session.expired`, `checkout.session.canceled`, `payment_link.created`, `payment_link.disabled`, `payment_link.expired`. Merchant labels follow the [Merchant Status Architecture](../architecture.md#merchant-status-architecture-authoritative).
 
 **Event shape:**
 ```json

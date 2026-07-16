@@ -22,18 +22,21 @@ const TILE_BLUE_BG    = rgb(...PDF_RGB.lightCard.bgBlue)
 const TILE_GREEN_BG   = rgb(...PDF_RGB.lightCard.bgGreen)
 const TILE_NEUTRAL_BG = rgb(...PDF_RGB.lightCard.bgNeutral)
 const TILE_RED_BG     = rgb(...PDF_RGB.lightCard.bgRed)
+const TILE_ORANGE_BG  = rgb(...PDF_RGB.lightCard.bgOrange)
 
 const TILE_BLUE_BORDER    = rgb(...PDF_RGB.lightCard.borderBlue)
 const TILE_GREEN_BORDER   = rgb(...PDF_RGB.lightCard.borderGreen)
 const TILE_NEUTRAL_BORDER = rgb(...PDF_RGB.lightCard.borderGray)
 const TILE_RED_BORDER     = rgb(...PDF_RGB.lightCard.borderRed)
+const TILE_ORANGE_BORDER  = rgb(...PDF_RGB.lightCard.borderOrange)
 
 const TILE_BLUE_LABEL    = rgb(...PDF_RGB.lightCard.labelBlue)
 const TILE_GREEN_LABEL   = rgb(...PDF_RGB.lightCard.labelGreen)
 const TILE_NEUTRAL_LABEL = rgb(...PDF_RGB.lightCard.labelGray)
 const TILE_RED_LABEL     = rgb(...PDF_RGB.lightCard.labelRed)
+const TILE_ORANGE_LABEL  = rgb(...PDF_RGB.lightCard.labelOrange)
 
-type StatAccent = "blue" | "green" | "neutral" | "red"
+type StatAccent = "blue" | "green" | "neutral" | "red" | "orange"
 
 function currency(value: number) {
   return `$${value.toFixed(2)}`
@@ -109,15 +112,15 @@ function drawStatCard(ctx: PdfContext, x: number, width: number, label: string, 
   const cardY = ctx.y - H
   const bg = {
     blue: TILE_BLUE_BG, green: TILE_GREEN_BG,
-    neutral: TILE_NEUTRAL_BG, red: TILE_RED_BG
+    neutral: TILE_NEUTRAL_BG, red: TILE_RED_BG, orange: TILE_ORANGE_BG
   }[accent]
   const border = {
     blue: TILE_BLUE_BORDER, green: TILE_GREEN_BORDER,
-    neutral: TILE_NEUTRAL_BORDER, red: TILE_RED_BORDER
+    neutral: TILE_NEUTRAL_BORDER, red: TILE_RED_BORDER, orange: TILE_ORANGE_BORDER
   }[accent]
   const lbl = {
     blue: TILE_BLUE_LABEL, green: TILE_GREEN_LABEL,
-    neutral: TILE_NEUTRAL_LABEL, red: TILE_RED_LABEL
+    neutral: TILE_NEUTRAL_LABEL, red: TILE_RED_LABEL, orange: TILE_ORANGE_LABEL
   }[accent]
   ctx.page.drawRectangle({ x, y: cardY, width, height: H, color: bg, borderColor: border, borderWidth: 1 })
   ctx.page.drawText(label.toUpperCase(), { x: x + 12, y: cardY + H - 19, size: 7, font: ctx.bold, color: lbl })
@@ -251,8 +254,13 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
     { label: "Taxes Collected", value: currency(report.taxesCollected), accent: "neutral" },
     { label: "Transactions",    value: String(report.transactionCount), accent: "neutral" },
     { label: "Confirmed",        value: String(report.confirmedCount),   accent: "green" },
+    { label: "Waiting",         value: String(report.waitingCount),     accent: "blue" },
+    { label: "Processing",      value: String(report.processingCount),  accent: "blue" },
     { label: "Failed",          value: String(report.failedCount),      accent: "red" },
-    { label: "Incomplete",      value: String(report.incompleteCount),  accent: "neutral" },
+    { label: "Expired",         value: String(report.expiredCount),     accent: "red" },
+    { label: "Canceled",        value: String(report.canceledCount),    accent: "neutral" },
+    { label: "Refunded",        value: String(report.refundedCount),    accent: "orange" },
+    { label: "Unknown",         value: String(report.unknownCount),     accent: "neutral" },
     { label: "Success Rate",    value: `${report.successRate}%`,        accent: "green" },
     { label: "Avg Transaction", value: currency(report.avgTransaction), accent: "blue" },
   ])

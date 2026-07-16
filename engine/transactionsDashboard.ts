@@ -250,7 +250,7 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
       .from("payment_events")
       .select("payment_id,event_type,provider_event,raw_payload,created_at")
       .in("payment_id", dashboardPaymentIds)
-      .in("event_type", ["payment.cancelled", "payment.expired", "payment.incomplete"])
+      .in("event_type", ["payment.canceled", "payment.cancelled", "payment.expired", "payment.incomplete"])
       .order("created_at", { ascending: true })
 
     if (lifecycleError) {

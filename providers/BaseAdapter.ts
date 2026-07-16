@@ -85,7 +85,8 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
     status: PaymentStatus
   }> {
     void providerReference
-    return { status: "PROCESSING" }
+    console.warn(`[${this.providerId}] provider status polling is not implemented`)
+    return { status: "UNKNOWN" }
   }
 
   /**
@@ -109,14 +110,12 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
       | "payment.processing"
       | "payment.confirmed"
       | "payment.failed"
-  } {
+  } | null {
     const source = isRecord(payload) ? payload : {}
     const paymentId = String(source.paymentId || source.reference || "")
 
-    return {
-      paymentId,
-      event: "payment.pending"
-    }
+    console.warn(`[${this.providerId}] unknown provider event`, { paymentId: paymentId || null })
+    return null
   }
 
   /**

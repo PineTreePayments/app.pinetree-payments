@@ -258,10 +258,11 @@ const EVENT_LABELS: Record<string, string> = {
   "payment.created":    "Created",
   "payment.pending":    "Waiting",
   "payment.processing": "Processing",
-  "payment.confirmed":  "Success",
+  "payment.confirmed":  "Confirmed",
   "payment.failed":     "Failed",
-  "payment.cancelled":  "Incomplete",
-  "payment.incomplete": "Incomplete",
+  "payment.cancelled":  "Canceled",
+  "payment.canceled":   "Canceled",
+  "payment.incomplete": "Canceled",
   "payment.expired":    "Expired",
   "payment.refunded":   "Refunded",
 }
@@ -814,12 +815,12 @@ export default function AdminPage() {
                     value={m ? fmt(m.totalTransactions) : "—"}
                   />
                   <CompactMetricTile
-                    label="Success"
+                    label="Confirmed"
                     value={m ? fmt(m.confirmedTransactions) : "—"}
                     tone="green"
                   />
                   <CompactMetricTile
-                    label="Success Volume"
+                    label="Confirmed Volume"
                     value={m ? fmtUSD(m.totalConfirmedVolume) : "—"}
                     tone="blue"
                   />
@@ -846,7 +847,7 @@ export default function AdminPage() {
                     detail="Hard provider failure"
                   />
                   <CompactMetricTile
-                    label="Incomplete"
+                    label="Canceled"
                     value={m ? fmt(m.incompleteTransactions) : "—"}
                     tone="amber"
                     detail="Customer abandoned"

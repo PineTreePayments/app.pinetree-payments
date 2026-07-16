@@ -397,7 +397,7 @@ export const helpArticles: HelpArticle[] = [
     title: "Webhooks",
     category: "Developer/API",
     description: "Configure event delivery and review webhook activity from Developer.",
-    body: "Open Developer, then Webhooks, to add your HTTPS endpoint and choose events such as payment.confirmed, payment.failed, payment.incomplete, and checkout.session.created. PineTree shows delivery activity so you can review response status and attempts.\n\nWhat this means: Webhooks notify your backend when PineTree activity changes. Your handler should verify the real PineTree headers, return a successful response promptly, and process repeated events safely.\n\nWhat to check: Endpoint URL, enabled events, signature verification, delivery status, response status, attempt count, and duplicate-event handling.",
+    body: "Open Developer, then Webhooks, to add your HTTPS endpoint and choose events such as payment.confirmed, payment.failed, payment.canceled, and checkout.session.created. PineTree shows delivery activity so you can review response status and attempts.\n\nWhat this means: Webhooks notify your backend when PineTree activity changes. Your handler should verify the real PineTree headers, return a successful response promptly, and process repeated events safely.\n\nWhat to check: Endpoint URL, enabled events, signature verification, delivery status, response status, attempt count, and duplicate-event handling.",
     tags: ["webhooks", "events", "developer"],
     keywords: ["payment.confirmed", "payment.failed", "deliveries", "signature"]
   },

@@ -224,6 +224,7 @@ export type PaymentStatus =
   | "INCOMPLETE"
   | "EXPIRED"
   | "REFUNDED"
+  | "UNKNOWN"
 
 export type BaseUsdcStrategy = "v7_eip3009_relayer"
 

@@ -229,7 +229,7 @@ function statusToEventType(
 ): PaymentEventType {
   if (status === "INCOMPLETE") {
     const providerEvent = String(metadata?.providerEvent || "").toLowerCase()
-    if (/cancel|user_rejected/.test(providerEvent)) return "payment.cancelled"
+    if (/cancel|user_rejected/.test(providerEvent)) return "payment.canceled"
     if (/expir|timeout/.test(providerEvent)) return "payment.expired"
   }
   const mapping: Record<PaymentStatus, PaymentEventType> = {

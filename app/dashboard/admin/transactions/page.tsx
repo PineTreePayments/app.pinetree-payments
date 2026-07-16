@@ -113,11 +113,11 @@ const LIMIT = 50
 
 const STATUSES = [
   { value: "", label: "All Statuses" },
-  { value: "CONFIRMED",  label: "Success" },
+  { value: "CONFIRMED",  label: "Confirmed" },
   { value: "PROCESSING", label: "Processing" },
   { value: "WAITING",    label: "Waiting" },
   { value: "FAILED",     label: "Failed" },
-  { value: "INCOMPLETE", label: "Incomplete" },
+  { value: "INCOMPLETE", label: "Canceled" },
   { value: "EXPIRED",    label: "Expired" },
 ]
 
@@ -144,12 +144,13 @@ const EVENT_LABELS: Record<string, string> = {
   "payment.created":    "Waiting",
   "payment.pending":    "Waiting",
   "payment.processing": "Processing",
-  "payment.confirmed":  "Success",
+  "payment.confirmed":  "Confirmed",
   "payment.failed":     "Failed",
-  "payment.cancelled":  "Incomplete",
-  "payment.incomplete": "Incomplete",
+  "payment.cancelled":  "Canceled",
+  "payment.canceled":   "Canceled",
+  "payment.incomplete": "Canceled",
   "payment.expired":    "Expired",
-  "payment.refunded":   "Success",
+  "payment.refunded":   "Refunded",
 }
 
 const NETWORK_LABELS_DETAIL: Record<string, string> = {
@@ -622,13 +623,13 @@ export default function AdminTransactionsPage() {
             value={s ? fmt(s.totalCount) : "—"}
           />
           <CompactMetricTile
-            label="Success"
+            label="Confirmed"
             value={s ? fmt(s.confirmedCount) : "—"}
             tone="green"
             detail={s && s.totalCount ? `${pct(s.confirmedCount, s.totalCount)} of total` : undefined}
           />
           <CompactMetricTile
-            label="Success Volume"
+            label="Confirmed Volume"
             value={s ? fmtUSD(s.confirmedVolume) : "—"}
             tone="blue"
           />
@@ -655,7 +656,7 @@ export default function AdminTransactionsPage() {
             detail={s && s.totalCount ? `${pct(s.failedCount, s.totalCount)} rate` : undefined}
           />
           <CompactMetricTile
-            label="Incomplete"
+            label="Canceled"
             value={s ? fmt(s.incompleteCount) : "—"}
             tone="amber"
             detail={s && s.totalCount ? `${pct(s.incompleteCount, s.totalCount)} rate` : undefined}

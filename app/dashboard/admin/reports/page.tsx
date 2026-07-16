@@ -449,12 +449,12 @@ export default function AdminReportsPage() {
           >
             <MetricGrid columns="three">
               <CompactMetricTile label="Total"            value={r ? fmt(r.totalTransactions) : "—"} />
-              <CompactMetricTile label="Success"        value={r ? fmt(r.confirmedTransactions) : "—"}  tone="green" />
-              <CompactMetricTile label="Success Volume" value={r ? fmtUSD(r.confirmedVolume) : "—"}     tone="blue" />
+              <CompactMetricTile label="Confirmed"        value={r ? fmt(r.confirmedTransactions) : "—"}  tone="green" />
+              <CompactMetricTile label="Confirmed Volume" value={r ? fmtUSD(r.confirmedVolume) : "—"}     tone="blue" />
               <CompactMetricTile label="Service fees"     value={r ? fmtUSD(r.pinetreeFees) : "—"}        tone="blue" />
               <CompactMetricTile label="Processing"       value={r ? fmt(r.processingTransactions) : "—"} tone="amber" detail="In-flight on-chain" />
               <CompactMetricTile label="Waiting"          value={r ? fmt(r.awaitingTransactions) : "—"}   detail="Waiting for customer action" />
-              <CompactMetricTile label="Incomplete"       value={r ? fmt(r.incompleteTransactions) : "—"} tone="amber" detail="Customer abandoned" />
+              <CompactMetricTile label="Canceled"         value={r ? fmt(r.incompleteTransactions) : "—"} detail="Customer abandoned" />
               <CompactMetricTile label="Failed"           value={r ? fmt(r.failedTransactions) : "—"}     tone="red" />
               <CompactMetricTile label="Expired"          value={r ? fmt(r.expiredTransactions) : "—"} />
             </MetricGrid>
@@ -473,7 +473,7 @@ export default function AdminReportsPage() {
             <DashboardSection title="Volume by Rail" titleTone="blue">
               <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                 <div className="hidden grid-cols-[1fr_90px_90px_110px_100px_80px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                  {["Rail", "Total", "Success", "Volume", "Fees", "Conv %"].map((h) => (
+                  {["Rail", "Total", "Confirmed", "Volume", "Fees", "Conv %"].map((h) => (
                     <div key={h} className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
                       {h}
                     </div>
@@ -507,7 +507,7 @@ export default function AdminReportsPage() {
             <DashboardSection title="Volume by Provider" titleTone="blue">
               <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                 <div className="hidden grid-cols-[1fr_90px_90px_110px_100px_80px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                  {["Provider", "Total", "Success", "Volume", "Fees", "Conv %"].map((h) => (
+                  {["Provider", "Total", "Confirmed", "Volume", "Fees", "Conv %"].map((h) => (
                     <div key={h} className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
                       {h}
                     </div>
@@ -541,7 +541,7 @@ export default function AdminReportsPage() {
             <DashboardSection title="Top Merchants by Volume" titleTone="blue">
               <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                 <div className="hidden grid-cols-[1fr_100px_120px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                  {["Merchant ID", "Success", "Volume"].map((h) => (
+                  {["Merchant ID", "Confirmed", "Volume"].map((h) => (
                     <div key={h} className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
                       {h}
                     </div>

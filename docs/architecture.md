@@ -71,6 +71,53 @@ Alternative:
 
 ---
 
+## Merchant Status Architecture (AUTHORITATIVE)
+
+This section is the single source of truth for merchant-facing financial status
+presentation. Provider, blockchain, wallet, and integration terminology must be
+translated at system boundaries and must never determine labels in the UI.
+
+The canonical payment database state machine remains the six-state lifecycle
+above. Expired and Canceled are presentation outcomes derived from terminal
+`INCOMPLETE` lifecycle evidence. Refunded is a post-settlement transaction
+adjustment; it is not a payment-state transition. Disputed is reserved for future
+architecture and must not imply that dispute processing exists today.
+
+| Merchant status | Meaning | Color | Icon |
+|---|---|---|---|
+| Waiting | Payment request exists and needs customer action. | Blue | Clock |
+| Processing | Payment was detected and awaits confirmation. | Darker blue | Animated spinner |
+| Confirmed | Payment completed successfully. | Green | Check circle |
+| Failed | Provider or network evidence proves failure. | Red | X circle |
+| Expired | An unpaid payment request timed out. | Muted red | X circle |
+| Canceled | The payment was intentionally canceled or otherwise abandoned. | Gray | X circle |
+| Refunded | Settled funds were returned after confirmation. | Orange | Refund arrow |
+| Disputed | Reserved presentation for future dispute architecture. | Amber | Warning triangle |
+| Unknown | A value is not recognized. Defensive fallback only. | Neutral gray | Minus circle |
+
+Rules:
+
+- UI, reports, receipts, notifications, email, and merchant APIs use the shared
+  Engine-owned presentation contract in `lib/utils/paymentStatus.ts`.
+- `CREATED` and `PENDING` display as Waiting. Merchant surfaces never display Pending.
+- A bare `INCOMPLETE` record displays as Canceled; explicit expiry evidence displays Expired.
+- Legacy aliases such as `CANCELLED`, `payment.cancelled`, `PAID`, `COMPLETED`,
+  provider `ERROR`, and provider `REJECTED` may be accepted at boundaries but are
+  never emitted as merchant labels.
+- Unknown provider values log diagnostics and normalize to Unknown. They must not
+  masquerade as Waiting and must not advance canonical payment state.
+- Refunded remains distinct in transaction history, filtering, summaries, reports,
+  and exports. It must not fall through to Unknown or display as Confirmed.
+- Provider adapters translate external values. They do not own merchant labels,
+  mutate database rows, or bypass PineTree Engine reconciliation.
+- The canonical public cancellation event is `payment.canceled`. The British
+  spelling is accepted only for legacy compatibility.
+
+Other status documentation must reference this section instead of defining a
+second merchant presentation standard.
+
+---
+
 ## Critical Rules
 
 - ONLY engine/eventProcessor updates status

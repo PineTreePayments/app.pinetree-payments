@@ -107,7 +107,7 @@ describe("overlapping payment transition idempotency", () => {
 
     expect(mockCreateEvent).toHaveBeenCalledWith(expect.objectContaining({
       payment_id: "pay-1",
-      event_type: "payment.cancelled",
+      event_type: "payment.canceled",
       provider_event: "terminal_cancel"
     }))
   })

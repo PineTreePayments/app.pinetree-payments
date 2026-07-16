@@ -84,14 +84,14 @@ export const solanaAdapter: ProviderAdapter = {
   /* --------------------------------
      GET PAYMENT STATUS
      For Solana, we rely on blockchain monitoring
-     This returns PROCESSING as a placeholder
+     Provider polling is unsupported; the watcher owns chain status.
   -------------------------------- */
 
   async getPaymentStatus() {
     // Solana payments are monitored via blockchain
-    // This is a placeholder - actual status comes from paymentWatcher
+    console.warn("[solana] provider status polling is unavailable; use paymentWatcher")
     return {
-      status: "PROCESSING" as const
+      status: "UNKNOWN" as const
     }
   },
 
@@ -134,10 +134,8 @@ export const solanaAdapter: ProviderAdapter = {
       }
     }
 
-    return {
-      paymentId: reference,
-      event: "payment.pending" as const
-    }
+    console.warn("[solana] unknown payment event", { paymentId: reference || null })
+    return null
   }
 }
 

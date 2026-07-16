@@ -23,7 +23,7 @@
  *
  * EXPIRED and REFUNDED are not first-class engine states:
  *   EXPIRED  is normalised → INCOMPLETE (timed out, no payment received)
- *   REFUNDED is normalised → CONFIRMED  (payment was collected; later refunded)
+ *   REFUNDED remains a distinct post-settlement transaction adjustment.
  */
 export type CanonicalPaymentStatus =
   | "CREATED"
@@ -33,24 +33,27 @@ export type CanonicalPaymentStatus =
   | "FAILED"
   | "INCOMPLETE"
 
+export type NormalizedStoredPaymentStatus = CanonicalPaymentStatus | "REFUNDED" | "UNKNOWN"
+export type TransactionDisplayStatus = NormalizedStoredPaymentStatus
+
 /**
  * Normalise a raw DB payment status (from either the payments or transactions
- * table) to the canonical 6-state set.
+ * table) to a canonical lifecycle or post-settlement presentation state.
  *
  *   EXPIRED / CANCELLED → INCOMPLETE
- *   REFUNDED            → CONFIRMED
- *   unknown / null      → "PENDING"  (fail-safe; should not appear in practice)
+ *   REFUNDED            → REFUNDED
+ *   unknown / null      → UNKNOWN
  */
 export function normalizeStoredPaymentStatus(
   raw: string | null | undefined
-): CanonicalPaymentStatus {
+): NormalizedStoredPaymentStatus {
   const s = String(raw ?? "").trim().toUpperCase()
   switch (s) {
     case "EXPIRED":
     case "CANCELLED":
       return "INCOMPLETE"
     case "REFUNDED":
-      return "CONFIRMED"
+      return "REFUNDED"
     case "CREATED":
     case "PENDING":
     case "PROCESSING":
@@ -59,13 +62,13 @@ export function normalizeStoredPaymentStatus(
     case "INCOMPLETE":
       return s as CanonicalPaymentStatus
     default:
-      return "PENDING"
+      return "UNKNOWN"
   }
 }
 
 /**
  * Return true when the status represents a definitively confirmed payment.
- * REFUNDED is also treated as confirmed (revenue was collected).
+ * Post-settlement refunds remain distinct and are not confirmed status.
  */
 export function isConfirmedStatus(raw: string | null | undefined): boolean {
   return normalizeStoredPaymentStatus(raw) === "CONFIRMED"
@@ -86,7 +89,7 @@ export function isTerminalFailureStatus(raw: string | null | undefined): boolean
  */
 export function isTerminalStatus(raw: string | null | undefined): boolean {
   const norm = normalizeStoredPaymentStatus(raw)
-  return norm === "CONFIRMED" || norm === "FAILED" || norm === "INCOMPLETE"
+  return norm === "CONFIRMED" || norm === "FAILED" || norm === "INCOMPLETE" || norm === "REFUNDED"
 }
 
 /**
@@ -123,9 +126,13 @@ export function isSafeToMarkIncomplete(raw: string | null | undefined): boolean 
 export function resolveTransactionDisplayStatus(
   txStatus: string | null | undefined,
   paymentStatus: string | null | undefined
-): CanonicalPaymentStatus {
+): TransactionDisplayStatus {
+  const rawTxStatus = String(txStatus || "").trim().toUpperCase()
+  if (rawTxStatus === "REFUNDED") return "REFUNDED"
   const txNorm = normalizeStoredPaymentStatus(txStatus)
   const pmtNorm = normalizeStoredPaymentStatus(paymentStatus)
+
+  if (pmtNorm === "REFUNDED") return "REFUNDED"
 
   // Rule 10: CONFIRMED is never downgraded.
   if (pmtNorm === "CONFIRMED") return "CONFIRMED"

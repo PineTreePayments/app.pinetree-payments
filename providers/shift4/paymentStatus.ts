@@ -20,7 +20,7 @@ export async function getPaymentStatus(
     return {
       provider: "shift4",
       providerReference: reference,
-      status: "PENDING",
+      status: "UNKNOWN",
       raw: {
         providerReference: reference,
         reason: "Shift4 public docs document charge retrieval, but not checkout session status retrieval."

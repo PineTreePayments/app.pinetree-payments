@@ -9,6 +9,7 @@ export type PaymentStatus =
   | "INCOMPLETE"
   | "EXPIRED"
   | "REFUNDED"
+  | "UNKNOWN"
 
 export type FeeCaptureMethod =
   | "atomic_split"
@@ -68,7 +69,9 @@ export type LightningInvoiceStatus =
   | "PROCESSING"
   | "CONFIRMED"
   | "FAILED"
+  | "INCOMPLETE"
   | "EXPIRED"
+  | "UNKNOWN"
 
 export type StandardPaymentEvent = {
   paymentId: string
@@ -78,6 +81,8 @@ export type StandardPaymentEvent = {
     | "payment.processing"
     | "payment.confirmed"
     | "payment.failed"
+    | "payment.expired"
+    | "payment.canceled"
     | "payment.incomplete"
 }
 

@@ -36,6 +36,7 @@ import {
   ProviderStatusPill,
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
+import StatusBadge from "@/components/ui/StatusBadge"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 import {
@@ -2635,30 +2636,7 @@ function EnabledRailChips({
 // ---------------------------------------------------------------------------
 
 function ActivityStatusPill({ status }: { status: string }) {
-  const s = status.toLowerCase()
-  const cls =
-    s === "confirmed"
-      ? "bg-blue-100 text-blue-700"
-      : s === "sent" || s === "processing"
-        ? "bg-blue-50 text-blue-500"
-        : s === "failed"
-          ? "bg-red-50 text-red-600"
-          : "bg-gray-100 text-gray-500"
-  const label =
-    s === "confirmed" ? "Confirmed"
-    // "processing" is the legacy internal status name for a signed/submitted
-    // transaction PineTree hasn't independently reconciled on-chain yet - display it
-    // the same as "sent" rather than exposing internal vocabulary to merchants.
-    : s === "sent" || s === "processing" ? "Sent"
-    : s === "failed" ? "Failed"
-    : s === "canceled" ? "Canceled"
-    : s === "blocked" ? "Blocked"
-    : "Pending"
-  return (
-    <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-semibold leading-none ${cls}`}>
-      {label}
-    </span>
-  )
+  return <StatusBadge status={status} />
 }
 
 function ActivityTab({

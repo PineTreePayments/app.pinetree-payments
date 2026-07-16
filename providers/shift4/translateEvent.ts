@@ -26,6 +26,8 @@ export function mapShift4Event(value: string):
   | "payment.processing"
   | "payment.confirmed"
   | "payment.failed"
+  | "payment.expired"
+  | "payment.canceled"
   | "payment.incomplete"
   | null {
   const normalized = normalizeEventName(value)
@@ -59,9 +61,8 @@ export function mapShift4Event(value: string):
   ) {
     return "payment.failed"
   }
-  if (normalized === "canceled" || normalized === "cancelled" || normalized === "expired") {
-    return "payment.incomplete"
-  }
+  if (normalized === "canceled" || normalized === "cancelled") return "payment.canceled"
+  if (normalized === "expired") return "payment.expired"
   // Refund events are post-confirmation accounting events in this first pass.
   // Returning null prevents a refund-only webhook from confirming a new payment.
   if (normalized === "refunded" || normalized === "charge_refunded") return null

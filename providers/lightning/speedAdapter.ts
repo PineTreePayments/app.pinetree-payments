@@ -69,12 +69,15 @@ function getMetadata(payload: unknown): Record<string, unknown> {
   return metadata && typeof metadata === "object" ? metadata as Record<string, unknown> : {}
 }
 
-function normalizeSpeedStatus(status: string) {
+export function normalizeSpeedStatus(status: string) {
   const normalized = status.toLowerCase().trim()
   if (normalized === "paid" || normalized === "confirmed") return "CONFIRMED" as const
   if (normalized === "processing" || normalized === "settling") return "PROCESSING" as const
-  if (normalized === "expired" || normalized === "cancelled" || normalized === "canceled") return "EXPIRED" as const
-  return "PENDING" as const
+  if (normalized === "pending" || normalized === "unpaid" || normalized === "created") return "PENDING" as const
+  if (normalized === "expired") return "EXPIRED" as const
+  if (normalized === "cancelled" || normalized === "canceled") return "INCOMPLETE" as const
+  console.warn("[speed] unknown payment status", { providerStatus: normalized || null })
+  return "UNKNOWN" as const
 }
 
 export const speedAdapter: ProviderAdapter = {
@@ -195,10 +198,17 @@ export const speedAdapter: ProviderAdapter = {
       }
     }
 
-    if (eventType === "payment.expired" || eventType === "payment.cancelled") {
+    if (eventType === "payment.expired") {
       return {
         paymentId,
-        event: "payment.incomplete"
+        event: "payment.expired"
+      }
+    }
+
+    if (eventType === "payment.cancelled" || eventType === "payment.canceled") {
+      return {
+        paymentId,
+        event: "payment.canceled"
       }
     }
 
@@ -214,10 +224,25 @@ export const speedAdapter: ProviderAdapter = {
       }
     }
 
-    return {
-      paymentId,
-      event: "payment.pending"
+    if (
+      eventType === "payment.pending" ||
+      eventType === "payment.created" ||
+      status.toLowerCase() === "pending" ||
+      status.toLowerCase() === "unpaid" ||
+      status.toLowerCase() === "created"
+    ) {
+      return {
+        paymentId,
+        event: "payment.pending"
+      }
     }
+
+    console.warn("[speed] unknown payment event", {
+      providerEvent: eventType || null,
+      providerStatus: status || null,
+      paymentId: paymentId || null
+    })
+    return null
   },
 
   async healthCheck() {

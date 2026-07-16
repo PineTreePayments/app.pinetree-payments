@@ -53,7 +53,7 @@ export const shift4Adapter: ProviderAdapter = {
       return { status: payment.status }
     } catch (error) {
       console.error("Shift4 adapter status check error:", error)
-      return { status: "PENDING" as const }
+      return { status: "UNKNOWN" as const }
     }
   },
 

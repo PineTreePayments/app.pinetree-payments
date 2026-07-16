@@ -52,7 +52,7 @@ export const stripeAdapter: ProviderAdapter = {
       return { status: payment.status }
     } catch (error) {
       console.error("Stripe adapter status check error:", error)
-      return { status: "PENDING" as const }
+      return { status: "UNKNOWN" as const }
     }
   },
 

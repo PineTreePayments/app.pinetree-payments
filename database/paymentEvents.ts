@@ -7,6 +7,7 @@ export type PaymentEventType =
   | "payment.processing"
   | "payment.confirmed"
   | "payment.failed"
+  | "payment.canceled"
   | "payment.cancelled"
   | "payment.incomplete"
   | "payment.expired"

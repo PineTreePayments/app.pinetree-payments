@@ -25,6 +25,7 @@ export type ReportInput = {
   startDate?: string
   endDate?: string
   type?: ReportType | string
+  status?: string
 }
 
 export type ReportLedgerRow = {
@@ -64,6 +65,14 @@ export type ReportSummary = {
   confirmedCount: number
   failedCount: number
   incompleteCount: number
+  waitingCount: number
+  processingCount: number
+  expiredCount: number
+  canceledCount: number
+  refundedCount: number
+  unknownCount: number
+  refundedAmount: number
+  statusCounts: Record<string, number>
   successRate: number
   avgTransaction: number
   failedPayments: number
@@ -180,7 +189,10 @@ function addTotal(target: Record<string, number>, key: string, value: number) {
 function buildLedgerRow(payment: MerchantReportPaymentRow): ReportLedgerRow {
   const tx = primaryTransaction(payment)
   const metadata = payment.metadata || {}
-  const statusCode = String(payment.status || tx?.status || "PENDING").trim().toUpperCase()
+  const transactionStatus = String(tx?.status || "").trim().toUpperCase()
+  const statusCode = transactionStatus === "REFUNDED"
+    ? "REFUNDED"
+    : String(payment.status || tx?.status || "PENDING").trim().toUpperCase()
   const status = normalizeReportStatus(statusCode, payment.created_at)
   const gross = money(payment.gross_amount) || centsToDollars(tx?.total_amount)
   const pinetreeFee = money(payment.pinetree_fee) || centsToDollars(tx?.platform_fee)
@@ -230,7 +242,12 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
   const channelTotals: Record<string, number> = {}
   const networkTotals: Record<string, number> = {}
   const assetTotals: Record<string, number> = {}
-  const transactionsTable = payments.map(buildLedgerRow)
+  const statusFilter = input.status
+    ? normalizeReportStatus(input.status, "")
+    : null
+  const transactionsTable = payments
+    .map(buildLedgerRow)
+    .filter((row) => !statusFilter || row.status === statusFilter)
 
   let grossVolume = 0
   let netSettlements = 0
@@ -239,9 +256,17 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
   let taxableSales = 0
   let confirmedCount = 0
   let failedCount = 0
-  let incompleteCount = 0
+  let waitingCount = 0
+  let processingCount = 0
+  let expiredCount = 0
+  let canceledCount = 0
+  let refundedCount = 0
+  let unknownCount = 0
+  let refundedAmount = 0
+  const statusCounts: Record<string, number> = {}
 
   for (const row of transactionsTable) {
+    statusCounts[row.status] = (statusCounts[row.status] || 0) + 1
     if (row.status === "Confirmed") {
       confirmedCount++
       grossVolume += row.gross
@@ -253,10 +278,21 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
       addTotal(channelTotals, row.channel, row.gross)
       addTotal(networkTotals, row.network, row.gross)
       addTotal(assetTotals, row.asset, row.gross)
-    } else if (row.status === "Failed" || row.status === "Expired") {
+    } else if (row.status === "Failed") {
       failedCount++
-    } else if (row.status === "Incomplete") {
-      incompleteCount++
+    } else if (row.status === "Waiting") {
+      waitingCount++
+    } else if (row.status === "Processing") {
+      processingCount++
+    } else if (row.status === "Expired") {
+      expiredCount++
+    } else if (row.status === "Canceled") {
+      canceledCount++
+    } else if (row.status === "Refunded") {
+      refundedCount++
+      refundedAmount += row.gross
+    } else {
+      unknownCount++
     }
   }
 
@@ -283,7 +319,15 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
     transactionCount,
     confirmedCount,
     failedCount,
-    incompleteCount,
+    incompleteCount: canceledCount,
+    waitingCount,
+    processingCount,
+    expiredCount,
+    canceledCount,
+    refundedCount,
+    unknownCount,
+    refundedAmount,
+    statusCounts,
     successRate,
     avgTransaction: confirmedCount > 0 ? grossVolume / confirmedCount : 0,
     failedPayments: failedCount,

@@ -8,7 +8,7 @@
  * Fee model: merchant receives full payment; PineTree charges fee after confirmation (post_payment_nwc).
  */
 
-import type { ProviderAdapter, ProviderCapabilities, LightningInvoiceRequest, LightningInvoiceStatus } from "@/types/provider"
+import type { ProviderAdapter, ProviderCapabilities, LightningInvoiceRequest } from "@/types/provider"
 import { registerProvider } from "@/providers/registry"
 import { makeNwcInvoice, validateNwcUri } from "./nwcClient"
 import QRCode from "qrcode"
@@ -118,7 +118,6 @@ export const nwcAdapter: ProviderAdapter = {
     throw new Error(
       "NWC Lightning: getLightningInvoiceStatus requires nwcUri — call lookupNwcInvoice directly from the payment checker"
     )
-    return { status: "PENDING" as LightningInvoiceStatus }
   },
 
   async getPaymentStatus(providerReference: string) {

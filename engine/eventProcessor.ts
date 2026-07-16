@@ -35,6 +35,8 @@ type TranslatedEvent = {
     | "payment.processing"
     | "payment.confirmed"
     | "payment.failed"
+    | "payment.expired"
+    | "payment.canceled"
     | "payment.incomplete"
 }
 
@@ -44,6 +46,8 @@ const eventToStatus: Record<TranslatedEvent["event"], PaymentStatus> = {
   "payment.processing": "PROCESSING",
   "payment.confirmed": "CONFIRMED",
   "payment.failed": "FAILED",
+  "payment.expired": "INCOMPLETE",
+  "payment.canceled": "INCOMPLETE",
   "payment.incomplete": "INCOMPLETE"
 }
 
