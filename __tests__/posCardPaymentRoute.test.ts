@@ -19,17 +19,18 @@ vi.mock("@/lib/api/merchantAuth", () => ({
   getRouteErrorStatus: (error: { status?: number }) => error?.status || 500
 }))
 
-import { POST } from "@/app/api/pos/payment/route"
+import { POST as createPaymentLink } from "@/app/api/pos/card/payment-link/route"
+import { POST as createGeneralPosPayment } from "@/app/api/pos/payment/route"
 
 function cardRequest() {
-  return new Request("https://app.pinetree-payments.test/api/pos/payment", {
+  return new Request("https://app.pinetree-payments.test/api/pos/card/payment-link", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ amount: 10, currency: "USD", network: "stripe" })
   })
 }
 
-describe("POS Stripe card payment route", () => {
+describe("explicit POS Stripe card payment-link fallback", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.requireTerminalSession.mockReturnValue({ mid: "merchant_1", tid: "terminal_1" })
@@ -42,8 +43,8 @@ describe("POS Stripe card payment route", () => {
     })
   })
 
-  it("routes connected Stripe Card selection to a Stripe-only POS intent", async () => {
-    const response = await POST(cardRequest() as never)
+  it("routes only the explicit payment-link action to a Stripe-only POS intent", async () => {
+    const response = await createPaymentLink(cardRequest() as never)
     const body = await response.json()
 
     expect(response.status).toBe(200)
@@ -65,8 +66,15 @@ describe("POS Stripe card payment route", () => {
       Object.assign(new Error("Card payments are not ready yet."), { status: 400 })
     )
 
-    const response = await POST(cardRequest() as never)
+    const response = await createPaymentLink(cardRequest() as never)
     await expect(response.json()).resolves.toEqual({ error: "Card payments are not ready yet." })
     expect(response.status).toBe(400)
+  })
+
+  it("rejects Stripe on the general POS payment route", async () => {
+    const response = await createGeneralPosPayment(cardRequest() as never)
+    await expect(response.json()).resolves.toEqual({ error: "Use the explicit POS card payment-link fallback." })
+    expect(response.status).toBe(400)
+    expect(mocks.createPosPaymentIntentEngine).not.toHaveBeenCalled()
   })
 })

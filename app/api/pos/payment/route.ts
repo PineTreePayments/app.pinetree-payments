@@ -19,6 +19,12 @@ export async function POST(req: NextRequest) {
     // Customer wallet only approves; customer's mobile browser shows a status-only page.
     const normalizedNetwork = String(network || "").toLowerCase().trim()
     const normalizedAsset = String(asset || "").toUpperCase().trim()
+    if (normalizedNetwork === "stripe") {
+      return NextResponse.json(
+        { error: "Use the explicit POS card payment-link fallback." },
+        { status: 400 }
+      )
+    }
     if (normalizedNetwork === "base" && (normalizedAsset === "ETH" || normalizedAsset === "USDC")) {
       const result = await createPosPaymentEngine({
         amount: Number(amount),
@@ -60,7 +66,7 @@ export async function POST(req: NextRequest) {
       terminal: {
         merchantId,
         terminalId,
-        preferredNetwork: normalizedNetwork === "stripe" ? "stripe" : undefined,
+        preferredNetwork: undefined,
       },
     })
 

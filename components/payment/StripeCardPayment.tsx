@@ -10,9 +10,11 @@ type StripePaymentFormProps = {
   onSuccess: () => void
   onError: (message: string) => void
   returnUrl?: string
+  submitLabel?: string
+  showReadyStatus?: boolean
 }
 
-function StripePaymentForm({ onSuccess, onError, returnUrl }: StripePaymentFormProps) {
+function StripePaymentForm({ onSuccess, onError, returnUrl, submitLabel = "Pay Now", showReadyStatus = true }: StripePaymentFormProps) {
   const stripe = useStripe()
   const elements = useElements()
   const [submitting, setSubmitting] = useState(false)
@@ -42,9 +44,11 @@ function StripePaymentForm({ onSuccess, onError, returnUrl }: StripePaymentFormP
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-gray-500" role="status">
-        {ready ? "Payment ready" : "Loading card form"}
-      </p>
+      {showReadyStatus && (
+        <p className="text-xs text-gray-500" role="status">
+          {ready ? "Payment ready" : "Loading card form"}
+        </p>
+      )}
       <PaymentElement onReady={() => setReady(true)} />
       <Button fullWidth disabled={submitting || !stripe || !elements} onClick={() => void handlePay()}>
         {submitting ? (
@@ -52,7 +56,7 @@ function StripePaymentForm({ onSuccess, onError, returnUrl }: StripePaymentFormP
             <span className="inline-block h-3 w-3 rounded-full border border-white border-t-transparent animate-spin mr-2" />
             Processing payment…
           </>
-        ) : "Pay Now"}
+        ) : submitLabel}
       </Button>
     </div>
   )
@@ -64,9 +68,11 @@ type StripeCardPaymentProps = {
   onSuccess: () => void
   onError: (message: string) => void
   returnUrl?: string
+  submitLabel?: string
+  showReadyStatus?: boolean
 }
 
-export function StripeCardPayment({ clientSecret, stripeAccountId, onSuccess, onError, returnUrl }: StripeCardPaymentProps) {
+export function StripeCardPayment({ clientSecret, stripeAccountId, onSuccess, onError, returnUrl, submitLabel, showReadyStatus }: StripeCardPaymentProps) {
   const stripePromise = useMemo(() => {
     const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
     if (!publishableKey || !stripeAccountId) return null
@@ -77,7 +83,13 @@ export function StripeCardPayment({ clientSecret, stripeAccountId, onSuccess, on
 
   return (
     <Elements stripe={stripePromise} options={{ clientSecret }}>
-      <StripePaymentForm onSuccess={onSuccess} onError={onError} returnUrl={returnUrl} />
+      <StripePaymentForm
+        onSuccess={onSuccess}
+        onError={onError}
+        returnUrl={returnUrl}
+        submitLabel={submitLabel}
+        showReadyStatus={showReadyStatus}
+      />
     </Elements>
   )
 }

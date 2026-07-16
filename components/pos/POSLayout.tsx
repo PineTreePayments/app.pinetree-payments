@@ -7,7 +7,10 @@ import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
-import { StripeCardPayment } from "@/components/payment/StripeCardPayment"
+import PosCardPaymentExperience, {
+  type PosCardCapabilities,
+  type PosCardView,
+} from "./PosCardPaymentExperience"
 import {
   initPosBaseWalletConnect,
   waitForWalletConnect,
@@ -43,14 +46,6 @@ type AvailableMethods = {
 }
 
 type PaymentMode = "crypto" | "card" | null
-type CardReaderOption = { id: string; label: string; status: "online" | "offline" | "busy" | "unknown"; isDefault: boolean; simulated: boolean }
-type CardCapabilities = {
-  terminalReaders: CardReaderOption[]
-  tapToPay: { available: boolean; reason: string }
-  manualEntryEnabled: boolean
-  recommendedMethod: "terminal_reader" | "tap_to_pay" | "manual_entry" | "payment_link" | null
-}
-
 type Breakdown = {
   subtotalAmount: number
   taxAmount: number
@@ -293,12 +288,13 @@ export default function POSLayout({ terminalContext }: Props) {
   const [paymentError, setPaymentError] = useState("")
   const [paymentMode, setPaymentMode] = useState<PaymentMode>(null)
   const [cardLoading, setCardLoading] = useState(false)
-  const [cardCapabilities, setCardCapabilities] = useState<CardCapabilities | null>(null)
+  const [cardView, setCardView] = useState<PosCardView>("loading")
+  const [cardCapabilities, setCardCapabilities] = useState<PosCardCapabilities | null>(null)
   const [selectedCardReaderId, setSelectedCardReaderId] = useState("")
+  const [cardPaymentLink, setCardPaymentLink] = useState("")
   const [manualClientSecret, setManualClientSecret] = useState("")
   const [manualStripeAccountId, setManualStripeAccountId] = useState("")
   const [manualReturnUrl, setManualReturnUrl] = useState("")
-  const [manualSubmitted, setManualSubmitted] = useState(false)
   const [breakdown, setBreakdown] = useState<Breakdown | null>(null)
   const [breakdownLoading, setBreakdownLoading] = useState(false)
   const [availableMethods, setAvailableMethods] = useState<AvailableMethods>({ cash: true, crypto: false, card: false })
@@ -338,12 +334,13 @@ export default function POSLayout({ terminalContext }: Props) {
     setPaymentError("")
     setPaymentMode(null)
     setCardLoading(false)
+    setCardView("loading")
     setCardCapabilities(null)
     setSelectedCardReaderId("")
+    setCardPaymentLink("")
     setManualClientSecret("")
     setManualStripeAccountId("")
     setManualReturnUrl("")
-    setManualSubmitted(false)
     setBreakdown(null)
     setCashDigits("")
     setCashRecording(false)
@@ -390,7 +387,13 @@ export default function POSLayout({ terminalContext }: Props) {
 
     setStatus(next)
 
-    if (next === "confirmed" || next === "failed" || next === "incomplete" || next === "expired") {
+    if (paymentMode === "card") {
+      if (next === "processing") setCardView("processing")
+      if (next === "confirmed") setCardView("approved")
+      if (next === "failed" || next === "incomplete" || next === "expired") setCardView("declined")
+    }
+
+    if (paymentMode !== "card" && (next === "confirmed" || next === "failed" || next === "incomplete" || next === "expired")) {
       if (!hasScheduledResetRef.current) {
         hasScheduledResetRef.current = true
 
@@ -420,8 +423,8 @@ export default function POSLayout({ terminalContext }: Props) {
     activePaymentIdRef.current = returnedManualPaymentId
     setActivePaymentId(returnedManualPaymentId)
     setPaymentMode("card")
-    setManualSubmitted(true)
     setStatus("processing")
+    setCardView("processing")
     url.searchParams.delete("manual_payment")
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`)
   }, [])
@@ -1028,29 +1031,54 @@ export default function POSLayout({ terminalContext }: Props) {
       setPaymentMode("card")
       setCardLoading(true)
       setStatus("waiting")
+      setCardView("loading")
 
-      const capabilityResponse = await fetch("/api/providers/stripe/card-capabilities", {
-        headers: posAuthHeaders(terminalContext?.sessionToken),
-      })
-      const capabilities = await capabilityResponse.json().catch(() => null) as CardCapabilities | null
-      if (!capabilityResponse.ok || !capabilities) throw new Error("Unable to load card reader availability.")
-      setCardCapabilities(capabilities)
+      await loadCardCapabilities(true)
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "Unable to load Stripe Card Readers.")
+      setCardView("no-reader")
+    } finally {
+      setCardLoading(false)
+    }
+  }
 
-      const reader = capabilities.terminalReaders.find(item => item.id === selectedCardReaderId && item.status === "online")
-        || capabilities.terminalReaders.find(item => item.isDefault && item.status === "online")
-        || capabilities.terminalReaders.find(item => item.status === "online")
-      if (!reader) {
-        if (capabilities.manualEntryEnabled) {
-          await startManualEntry()
-          return
-        }
-        const suffix = capabilities.tapToPay.reason === "native_app_required"
-          ? " Tap to Pay requires the PineTree mobile app."
-          : ""
-        throw new Error(`No online Stripe Terminal reader is available.${suffix}`)
+  async function loadCardCapabilities(refresh = false) {
+    setPaymentError("")
+    setCardLoading(true)
+    const endpoint = refresh
+      ? "/api/providers/stripe/terminal/readers"
+      : "/api/providers/stripe/card-capabilities"
+    if (refresh) {
+      const refreshResponse = await fetch(endpoint, { headers: posAuthHeaders(terminalContext?.sessionToken) })
+      if (!refreshResponse.ok) {
+        const refreshPayload = await refreshResponse.json().catch(() => null)
+        throw new Error(refreshPayload?.error || "Unable to refresh Stripe Card Readers.")
       }
-      setSelectedCardReaderId(reader.id)
+    }
+    const capabilityResponse = await fetch("/api/providers/stripe/card-capabilities", {
+      headers: posAuthHeaders(terminalContext?.sessionToken),
+    })
+    const capabilities = await capabilityResponse.json().catch(() => null) as PosCardCapabilities | null
+    if (!capabilityResponse.ok || !capabilities) throw new Error("Unable to load Stripe Card Reader availability.")
+    setCardCapabilities(capabilities)
+    const reader = capabilities.terminalReaders.find(item => item.id === selectedCardReaderId && item.status === "online")
+      || capabilities.terminalReaders.find(item => item.isDefault && item.status === "online")
+      || capabilities.terminalReaders.find(item => item.status === "online")
+    setSelectedCardReaderId(reader?.id || "")
+    setCardView(reader ? "collect" : "no-reader")
+    setCardLoading(false)
+  }
 
+  async function sendToCardReader() {
+    const reader = cardCapabilities?.terminalReaders.find(item => item.id === selectedCardReaderId && item.status === "online")
+    if (!reader) {
+      setCardView("no-reader")
+      setPaymentError("Select an online Stripe Card Reader.")
+      return
+    }
+    setCardLoading(true)
+    setPaymentError("")
+    try {
       const res = await fetch("/api/payments/stripe/terminal", {
         method: "POST",
         headers: {
@@ -1073,9 +1101,10 @@ export default function POSLayout({ terminalContext }: Props) {
       if (!returnedPaymentId) throw new Error("Unable to send this payment to the reader.")
       activePaymentIdRef.current = returnedPaymentId
       setActivePaymentId(returnedPaymentId)
+      setCardView("waiting")
     } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : "Unable to prepare the card reader.")
-      setStatus("failed")
+      setPaymentError(error instanceof Error ? error.message : "Unable to send the payment to the reader.")
+      setCardView("collect")
     } finally {
       setCardLoading(false)
     }
@@ -1084,7 +1113,9 @@ export default function POSLayout({ terminalContext }: Props) {
   async function startManualEntry(paymentId?: string) {
     setPaymentError("")
     setPaymentMode("card")
-    setManualSubmitted(false)
+    setManualClientSecret("")
+    setManualStripeAccountId("")
+    setCardView("manual")
     const response = await fetch("/api/payments/stripe/manual", {
       method: "POST",
       headers: {
@@ -1117,6 +1148,50 @@ export default function POSLayout({ terminalContext }: Props) {
     setStatus("waiting")
   }
 
+  async function registerCardReader(registrationCode: string, label: string) {
+    setCardLoading(true)
+    setPaymentError("")
+    try {
+      const headers = posAuthHeaders(terminalContext?.sessionToken)
+      const locationsResponse = await fetch("/api/providers/stripe/terminal/locations", { headers })
+      const locationsPayload = await locationsResponse.json().catch(() => null) as { locations?: Array<{ id: string }>; error?: string } | null
+      const terminalLocationId = locationsPayload?.locations?.[0]?.id
+      if (!locationsResponse.ok || !terminalLocationId) throw new Error(locationsPayload?.error || "Create a Stripe Terminal location in Settings before registering a reader.")
+      const response = await fetch("/api/providers/stripe/terminal/readers/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ registrationCode, label, terminalLocationId }),
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(payload?.error || "Unable to register this Stripe Card Reader.")
+      await loadCardCapabilities(true)
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "Unable to register this Stripe Card Reader.")
+    } finally {
+      setCardLoading(false)
+    }
+  }
+
+  async function sendCardPaymentLink() {
+    setCardView("payment-link")
+    setCardPaymentLink("")
+    setPaymentError("")
+    try {
+      const response = await fetch("/api/pos/card/payment-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...posAuthHeaders(terminalContext?.sessionToken) },
+        body: JSON.stringify({ amount: subtotalNum, currency: "USD", network: "stripe" }),
+      })
+      const payload = await response.json().catch(() => null) as { paymentUrl?: string; error?: string } | null
+      if (!response.ok || !payload?.paymentUrl) throw new Error(payload?.error || "Unable to create a payment link.")
+      setCardPaymentLink(payload.paymentUrl)
+      if (navigator.share) await navigator.share({ title: `Pay ${displayTotal}`, url: payload.paymentUrl }).catch(() => undefined)
+      else await navigator.clipboard?.writeText(payload.paymentUrl).catch(() => undefined)
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "Unable to create a payment link.")
+    }
+  }
+
   const displayTotal = breakdown
     ? fmtUsd(breakdown.totalAmount)
     : fmtUsd(subtotalNum)
@@ -1124,7 +1199,7 @@ export default function POSLayout({ terminalContext }: Props) {
   return (
     <div className="flex flex-col items-center w-full px-4">
 
-      <div className="bg-white rounded-2xl shadow-lg p-6 w-full max-w-[420px]">
+      <div className={`${paymentMode === "card" ? "bg-[#F4F8FF]" : "bg-white"} rounded-2xl shadow-lg p-6 w-full max-w-[420px]`}>
 
         {/* ── READY ── */}
         {status === "ready" && (
@@ -1342,47 +1417,44 @@ export default function POSLayout({ terminalContext }: Props) {
         )}
 
         {/* ── WAITING / PROCESSING ── */}
-        {(status === "waiting" || status === "processing") && (
+        {paymentMode === "card" && (
+          <PosCardPaymentExperience
+            amount={displayTotal}
+            view={cardView}
+            capabilities={cardCapabilities}
+            selectedReaderId={selectedCardReaderId}
+            loading={cardLoading || canceling}
+            error={paymentError}
+            paymentLink={cardPaymentLink}
+            paymentId={activePaymentId}
+            manualClientSecret={manualClientSecret}
+            manualStripeAccountId={manualStripeAccountId}
+            manualReturnUrl={manualReturnUrl}
+            onSelectReader={setSelectedCardReaderId}
+            onSendToReader={() => void sendToCardReader()}
+            onRefreshReaders={() => void loadCardCapabilities(true).catch(error => {
+              setPaymentError(error instanceof Error ? error.message : "Unable to refresh Stripe Card Readers.")
+              setCardLoading(false)
+              setCardView("no-reader")
+            })}
+            onOpenRegister={() => { setPaymentError(""); setCardView("register") }}
+            onRegisterReader={registerCardReader}
+            onOpenManual={() => void startManualEntry().catch(error => setPaymentError(error instanceof Error ? error.message : "Unable to prepare manual card entry."))}
+            onManualSuccess={() => { setStatus("processing"); setCardView("processing") }}
+            onManualError={setPaymentError}
+            onSendPaymentLink={() => void sendCardPaymentLink()}
+            onTryAgain={() => { setActivePaymentId(""); activePaymentIdRef.current = ""; void loadCardCapabilities() }}
+            onBack={() => { setPaymentError(""); setCardView(cardCapabilities?.terminalReaders.some(reader => reader.status === "online") ? "collect" : "no-reader") }}
+            onCancel={() => void cancelSale()}
+            onDone={resetSale}
+            onViewReceipt={() => window.open(`/api/receipts/${encodeURIComponent(activePaymentId)}`, "_blank", "noopener,noreferrer")}
+          />
+        )}
+
+        {paymentMode !== "card" && (status === "waiting" || status === "processing") && (
           <div className="space-y-3">
 
-            {paymentMode === "card" && manualClientSecret && manualStripeAccountId && !manualSubmitted ? (
-              <div className="space-y-3 rounded-2xl border border-blue-100/70 bg-white px-4 py-4">
-                <div className="text-center">
-                  <p className="text-sm font-semibold text-gray-950">Enter card details</p>
-                  <p className="text-xs text-gray-500">Manual entry is processed as card-not-present. PineTree confirms success from Stripe&apos;s verified webhook.</p>
-                </div>
-                <StripeCardPayment
-                  clientSecret={manualClientSecret}
-                  stripeAccountId={manualStripeAccountId}
-                  returnUrl={manualReturnUrl}
-                  onSuccess={() => {
-                    setManualSubmitted(true)
-                    setStatus("processing")
-                  }}
-                  onError={message => setPaymentError(message)}
-                />
-                {paymentError && <p className="text-sm text-red-600" role="alert">{paymentError}</p>}
-              </div>
-            ) : paymentMode === "card" && manualSubmitted ? (
-              <div className="space-y-3 rounded-2xl border border-blue-100/70 bg-blue-50/50 px-4 py-4 text-center">
-                <p className="text-sm font-semibold text-gray-950">Card payment processing</p>
-                <p className="text-sm text-gray-600">Waiting for PineTree to confirm the verified Stripe webhook.</p>
-              </div>
-            ) : paymentMode === "card" && activePaymentId ? (
-              <div className="space-y-3 rounded-2xl border border-blue-100/70 bg-blue-50/50 px-4 py-4 text-center">
-                <p className="text-sm font-semibold text-gray-950">Present card on reader</p>
-                <p className="text-sm text-gray-600">
-                  {cardCapabilities?.terminalReaders.find(reader => reader.id === selectedCardReaderId)?.label || "Stripe Terminal reader"} is ready for tap, insert, or swipe. This screen updates from PineTree&apos;s verified payment state.
-                </p>
-                <p className="text-xs text-gray-500">Tap to Pay on a phone requires the PineTree mobile app and is not available in this browser.</p>
-                {cardCapabilities?.manualEntryEnabled && (
-                  <Button variant="secondary" fullWidth disabled={cardLoading} onClick={() => void startManualEntry(activePaymentId).catch(error => setPaymentError(error instanceof Error ? error.message : "Unable to prepare manual entry"))}>
-                    Enter card manually
-                  </Button>
-                )}
-                {paymentError && <p className="text-sm text-red-600" role="alert">{paymentError}</p>}
-              </div>
-            ) : qrCodeUrl ? (
+            {qrCodeUrl ? (
               <div className="flex flex-col items-center rounded-2xl border border-blue-100/70 bg-gradient-to-br from-white to-blue-50/40 px-4 py-4 shadow-[0_12px_32px_rgba(0,82,255,0.08)]">
                 <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
                   Scan to Pay
@@ -1443,14 +1515,14 @@ export default function POSLayout({ terminalContext }: Props) {
         )}
 
         {/* ── CONFIRMED ── */}
-        {status === "confirmed" && (
+        {paymentMode !== "card" && status === "confirmed" && (
           <div className="py-3">
             <PaymentStatusVisual status="CONFIRMED" variant="card" />
           </div>
         )}
 
         {/* ── INCOMPLETE ── */}
-        {status === "incomplete" && (
+        {paymentMode !== "card" && status === "incomplete" && (
           <div className="flex flex-col items-center gap-3 py-3">
             <PaymentStatusVisual status="INCOMPLETE" variant="card" />
             <Button variant="secondary" fullWidth onClick={resetSale}>
@@ -1460,7 +1532,7 @@ export default function POSLayout({ terminalContext }: Props) {
         )}
 
         {/* ── FAILED ── */}
-        {status === "failed" && (
+        {paymentMode !== "card" && status === "failed" && (
           <div className="flex flex-col items-center gap-3 py-3">
             <PaymentStatusVisual
               status="FAILED"
@@ -1477,7 +1549,7 @@ export default function POSLayout({ terminalContext }: Props) {
         )}
 
         {/* ── EXPIRED ── */}
-        {status === "expired" && (
+        {paymentMode !== "card" && status === "expired" && (
           <div className="flex flex-col items-center gap-3 py-3">
             <PaymentStatusVisual status="EXPIRED" variant="card" />
             <Button variant="secondary" fullWidth onClick={resetSale}>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
+import { getRouteErrorStatus } from "@/lib/api/merchantAuth"
+import { requireStripeCardMerchant } from "@/lib/api/stripeTerminalAuth"
 import { createTerminalLocationEngine, listTerminalLocationsEngine } from "@/engine/stripeTerminal"
 
 function errorResponse(error: unknown) {
@@ -7,13 +8,13 @@ function errorResponse(error: unknown) {
 }
 
 export async function GET(req: NextRequest) {
-  try { return NextResponse.json({ locations: await listTerminalLocationsEngine(await requireMerchantIdFromRequest(req)) }) }
+  try { return NextResponse.json({ locations: await listTerminalLocationsEngine((await requireStripeCardMerchant(req)).merchantId) }) }
   catch (error) { return errorResponse(error) }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const { merchantId } = await requireStripeCardMerchant(req)
     const body = await req.json()
     return NextResponse.json({ location: await createTerminalLocationEngine(merchantId, { displayName: body.displayName, address: body.address }) })
   } catch (error) { return errorResponse(error) }
