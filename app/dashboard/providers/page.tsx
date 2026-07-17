@@ -1609,7 +1609,7 @@ function EngineSettingStatus({
                 )}
               </div>
             )}
-            {activeProvider === "stripe" && stripeConnection?.connectionStatus === "active" && (
+            {activeProvider === "stripe" && (
               <StripeTerminalSettings />
             )}
 

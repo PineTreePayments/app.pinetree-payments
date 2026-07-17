@@ -54,11 +54,13 @@ describe("dedicated PineTree POS Card experience", () => {
   })
 
   it("renders the dedicated no-reader fallback state", () => {
-    expect(card).toContain('props.view === "no-reader"')
-    expect(card).toContain("No Stripe Card Reader Connected")
-    expect(card).toContain("Refresh Readers")
-    expect(card).toContain("Register Reader")
-    expect(card).toContain("Tap to Pay requires the PineTree mobile app.")
+    const noReader = card.slice(card.indexOf('props.view === "no-reader"'), card.indexOf('props.view === "setup"'))
+    expect(noReader).toContain("No Stripe Card Reader Connected")
+    expect(noReader).toContain("Refresh Readers")
+    expect(noReader).toContain("Set Up Stripe Terminal")
+    expect(noReader).toContain("Create Sandbox Reader")
+    expect(noReader).not.toContain("Register Reader")
+    expect(noReader).toContain("Tap to Pay requires the PineTree native mobile app.")
   })
 
   it("renders waiting, processing, approved, and declined states", () => {

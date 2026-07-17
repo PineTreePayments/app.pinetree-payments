@@ -28,6 +28,8 @@ export type PosCardReader = {
 
 export type PosCardCapabilities = {
   terminalReaders: PosCardReader[]
+  terminalLocations: Array<{ id: string; displayName: string }>
+  stripeTestMode: boolean
   tapToPay: { available: boolean; reason: string }
   manualEntryEnabled: boolean
   recommendedMethod: "terminal_reader" | "tap_to_pay" | "manual_entry" | "payment_link" | null
@@ -42,6 +44,7 @@ export type PosCardView =
   | "processing"
   | "approved"
   | "declined"
+  | "setup"
   | "register"
   | "payment-link"
 
@@ -60,6 +63,12 @@ type Props = {
   onSelectReader: (readerId: string) => void
   onSendToReader: () => void
   onRefreshReaders: () => void
+  onOpenSetup: () => void
+  onCreateLocation: (input: {
+    displayName: string
+    address: { line1: string; line2?: string; city: string; state: string; postalCode: string; country: string }
+  }) => Promise<void>
+  onCreateSandboxReader: () => void
   onOpenRegister: () => void
   onRegisterReader: (registrationCode: string, label: string) => Promise<void>
   onOpenManual: () => void
@@ -90,6 +99,8 @@ function StatusMark({ kind }: { kind: "waiting" | "processing" | "approved" | "d
 export default function PosCardPaymentExperience(props: Props) {
   const [registrationCode, setRegistrationCode] = useState("")
   const [readerLabel, setReaderLabel] = useState("Front Counter Reader")
+  const [locationName, setLocationName] = useState("")
+  const [locationAddress, setLocationAddress] = useState({ line1: "", line2: "", city: "", state: "", postalCode: "", country: "US" })
   const onlineReaders = props.capabilities?.terminalReaders.filter((reader) => reader.status === "online") ?? []
   const selectedReader = onlineReaders.find((reader) => reader.id === props.selectedReaderId) ?? onlineReaders[0]
 
@@ -122,15 +133,15 @@ export default function PosCardPaymentExperience(props: Props) {
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-[#1652f0]"><CreditCard className="h-5 w-5" /></div>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-bold text-[#0B1F3A]">{selectedReader.label}</p>
-                <p className="text-sm text-slate-500">Stripe Card Reader</p>
+                <p className="truncate font-bold text-[#0B1F3A]">{selectedReader.simulated ? "Sandbox Reader" : selectedReader.label}</p>
+                <p className="text-sm text-slate-500">{selectedReader.simulated ? selectedReader.label : "Stripe Card Reader"}</p>
               </div>
             </div>
             {onlineReaders.length > 1 && (
               <div className="mt-4 grid gap-2" aria-label="Choose a Stripe Card Reader">
                 {onlineReaders.map((reader) => (
                   <button key={reader.id} type="button" onClick={() => props.onSelectReader(reader.id)} className={`flex items-center justify-between rounded-xl px-3 py-2 text-left text-sm ${reader.id === selectedReader.id ? "bg-blue-50 font-semibold text-[#1652f0]" : "bg-slate-50 text-slate-700"}`}>
-                    <span>{reader.label}</span><Radio className="h-4 w-4" />
+                    <span>{reader.simulated ? `Sandbox Reader · ${reader.label}` : reader.label}</span><Radio className="h-4 w-4" />
                   </button>
                 ))}
               </div>
@@ -164,13 +175,49 @@ export default function PosCardPaymentExperience(props: Props) {
         <div><h1 className="text-2xl font-bold text-[#0B1F3A]">No Stripe Card Reader Connected</h1><p className="mt-2 text-sm leading-6 text-slate-600">Connect a reader or choose another way to collect payment.</p></div>
         <div className="space-y-2 text-left">
           <Button fullWidth className="h-11 rounded-xl" disabled={props.loading} onClick={props.onRefreshReaders}><RefreshCw className={`mr-2 h-4 w-4 ${props.loading ? "animate-spin" : ""}`} />Refresh Readers</Button>
-          <Button variant="secondary" fullWidth className="h-11 justify-start rounded-xl" onClick={props.onOpenRegister}><Plus className="mr-2 h-4 w-4" />Register Reader</Button>
+          <Button variant="secondary" fullWidth className="h-11 justify-start rounded-xl" onClick={props.onOpenSetup}><Plus className="mr-2 h-4 w-4" />Set Up Stripe Terminal</Button>
+          {props.capabilities?.stripeTestMode && <Button variant="secondary" fullWidth className="h-11 justify-start rounded-xl" onClick={props.onCreateSandboxReader}><Nfc className="mr-2 h-4 w-4" />Create Sandbox Reader</Button>}
           {props.capabilities?.manualEntryEnabled && <Button variant="secondary" fullWidth className="h-11 justify-start rounded-xl" onClick={props.onOpenManual}><CreditCard className="mr-2 h-4 w-4" />Enter Card Manually</Button>}
           <Button variant="secondary" fullWidth className="h-11 justify-start rounded-xl" onClick={props.onSendPaymentLink}><Link2 className="mr-2 h-4 w-4" />Send Payment Link</Button>
         </div>
-        <p className="rounded-xl bg-blue-50 px-3 py-2 text-sm text-slate-600">Tap to Pay requires the PineTree mobile app.</p>
+        <p className="rounded-xl bg-blue-50 px-3 py-2 text-sm text-slate-600">Tap to Pay requires the PineTree native mobile app.</p>
         {props.error && <p className="text-sm text-red-600" role="alert">{props.error}</p>}
         <Button variant="secondary" fullWidth className="border-0 bg-transparent shadow-none" onClick={props.onCancel}>Cancel</Button>
+      </section>
+    )
+  }
+
+  if (props.view === "setup") {
+    const hasLocation = Boolean(props.capabilities?.terminalLocations.length)
+    const formComplete = Boolean(
+      locationName.trim() && locationAddress.line1.trim() && locationAddress.city.trim() &&
+      locationAddress.state.trim() && locationAddress.postalCode.trim() && /^[A-Za-z]{2}$/.test(locationAddress.country.trim())
+    )
+    return (
+      <section className="space-y-5">
+        <button type="button" onClick={props.onBack} className="inline-flex items-center text-sm font-semibold text-slate-600"><ChevronLeft className="mr-1 h-4 w-4" />Back</button>
+        {!hasLocation ? (
+          <>
+            <div className="text-center"><h1 className="text-2xl font-bold text-[#0B1F3A]">Stripe Terminal Location Required</h1><p className="mt-2 text-sm leading-6 text-slate-500">Stripe requires a location before a card reader can be registered or simulated.</p></div>
+            <div className="space-y-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-blue-100/70">
+              <input aria-label="Display name" className="h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-[#1652f0]" placeholder="Display name" value={locationName} onChange={(event) => setLocationName(event.target.value)} />
+              <input aria-label="Address line 1" className="h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-[#1652f0]" placeholder="Address line 1" value={locationAddress.line1} onChange={(event) => setLocationAddress((current) => ({ ...current, line1: event.target.value }))} />
+              <input aria-label="Address line 2, optional" className="h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-[#1652f0]" placeholder="Address line 2, optional" value={locationAddress.line2} onChange={(event) => setLocationAddress((current) => ({ ...current, line2: event.target.value }))} />
+              <div className="grid grid-cols-2 gap-2"><input aria-label="City" className="h-11 min-w-0 rounded-xl border border-slate-200 px-3 outline-none focus:border-[#1652f0]" placeholder="City" value={locationAddress.city} onChange={(event) => setLocationAddress((current) => ({ ...current, city: event.target.value }))} /><input aria-label="State" className="h-11 min-w-0 rounded-xl border border-slate-200 px-3 outline-none focus:border-[#1652f0]" placeholder="State" value={locationAddress.state} onChange={(event) => setLocationAddress((current) => ({ ...current, state: event.target.value }))} /></div>
+              <div className="grid grid-cols-2 gap-2"><input aria-label="Postal code" className="h-11 min-w-0 rounded-xl border border-slate-200 px-3 outline-none focus:border-[#1652f0]" placeholder="Postal code" value={locationAddress.postalCode} onChange={(event) => setLocationAddress((current) => ({ ...current, postalCode: event.target.value }))} /><input aria-label="Country" className="h-11 min-w-0 rounded-xl border border-slate-200 px-3 uppercase outline-none focus:border-[#1652f0]" maxLength={2} placeholder="Country" value={locationAddress.country} onChange={(event) => setLocationAddress((current) => ({ ...current, country: event.target.value.toUpperCase() }))} /></div>
+              <Button fullWidth className="h-11 rounded-xl" disabled={props.loading || !formComplete} onClick={() => void props.onCreateLocation({ displayName: locationName.trim(), address: { ...locationAddress, line2: locationAddress.line2.trim() || undefined } })}>{props.loading ? "Creating…" : "Create Location"}</Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="text-center"><h1 className="text-2xl font-bold text-[#0B1F3A]">Set Up Stripe Terminal</h1><p className="mt-2 text-sm text-slate-500">Choose a physical reader or a test-mode Sandbox Reader.</p></div>
+            <div className="space-y-2">
+              <Button fullWidth className="h-11 rounded-xl" onClick={props.onOpenRegister}><CreditCard className="mr-2 h-4 w-4" />Register Physical Reader</Button>
+              {props.capabilities?.stripeTestMode && <Button variant="secondary" fullWidth className="h-11 rounded-xl" disabled={props.loading} onClick={props.onCreateSandboxReader}><Nfc className="mr-2 h-4 w-4" />Create Sandbox Reader</Button>}
+            </div>
+          </>
+        )}
+        {props.error && <p className="text-center text-sm text-red-600" role="alert">{props.error}</p>}
       </section>
     )
   }
@@ -209,7 +256,7 @@ export default function PosCardPaymentExperience(props: Props) {
     return (
       <section className="space-y-5">
         <button type="button" onClick={props.onBack} className="inline-flex items-center text-sm font-semibold text-slate-600"><ChevronLeft className="mr-1 h-4 w-4" />Back</button>
-        <div className="text-center"><h1 className="text-2xl font-bold text-[#0B1F3A]">Register Stripe Card Reader</h1><p className="mt-2 text-sm text-slate-500">Enter the registration code shown on the reader.</p></div>
+        <div className="text-center"><h1 className="text-2xl font-bold text-[#0B1F3A]">Register Physical Stripe Reader</h1><p className="mt-2 text-sm text-slate-500">Enter the registration code shown on the physical reader.</p></div>
         <div className="space-y-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-blue-100/70">
           <label className="block text-sm font-semibold text-slate-700">Reader name<input value={readerLabel} onChange={(event) => setReaderLabel(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 font-normal outline-none focus:border-[#1652f0]" /></label>
           <label className="block text-sm font-semibold text-slate-700">Registration code<input value={registrationCode} onChange={(event) => setRegistrationCode(event.target.value)} placeholder="word-word-word" autoCapitalize="none" className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 font-normal outline-none focus:border-[#1652f0]" /></label>

@@ -1,5 +1,6 @@
 import {
   createStripeTerminalLocation,
+  listStripeTerminalLocations,
   listStripeTerminalReaders,
   registerStripeTerminalReader,
   registerSimulatedStripeReader,
@@ -120,7 +121,31 @@ async function requireTerminalReady(merchantId: string): Promise<string> {
 
 // ─── Locations ───────────────────────────────────────────────────────────────
 
-export async function listTerminalLocationsEngine(merchantId: string): Promise<SafeTerminalLocation[]> {
+export async function listTerminalLocationsEngine(
+  merchantId: string,
+  options?: { refresh?: boolean }
+): Promise<SafeTerminalLocation[]> {
+  if (options?.refresh) {
+    const readiness = await getStripeTerminalReadiness(merchantId)
+    if (readiness.ready) {
+      try {
+        const live = await listStripeTerminalLocations({ connectedAccountId: readiness.accountId })
+        for (const location of live) {
+          await upsertMerchantTerminalLocation({
+            merchantId,
+            providerLocationId: location.id,
+            displayName: location.displayName,
+            address: location.address as unknown as Record<string, unknown>,
+            status: "active"
+          })
+        }
+      } catch (error) {
+        console.warn("[stripeTerminal] location refresh failed", {
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+  }
   const rows = await listMerchantTerminalLocations(merchantId)
   return rows.map(toSafeLocation)
 }
@@ -196,16 +221,11 @@ export async function listTerminalReadersEngine(
         const locations = await listMerchantTerminalLocations(merchantId)
         const locationByProviderId = new Map(locations.map((l) => [l.provider_location_id, l.id]))
         for (const reader of live) {
-          await upsertMerchantTerminalReader({
+          await persistReader(
             merchantId,
-            providerReaderId: reader.id,
-            terminalLocationId: reader.locationId ? locationByProviderId.get(reader.locationId) ?? null : null,
-            label: reader.label,
-            deviceType: reader.deviceType,
-            serialNumber: reader.serialNumber,
-            status: reader.status,
-            simulated: reader.simulated
-          })
+            reader,
+            reader.locationId ? locationByProviderId.get(reader.locationId) ?? null : null
+          )
         }
       } catch (error) {
         console.warn("[stripeTerminal] reader refresh failed", {
@@ -225,6 +245,10 @@ export async function registerTerminalReaderEngine(
 ): Promise<SafeTerminalReader> {
   const accountId = await requireTerminalReady(merchantId)
 
+  if (!String(input.terminalLocationId || "").trim()) {
+    throw statusError("Create a Stripe Terminal Location before registering a physical reader.", 409)
+  }
+
   const location = await getMerchantTerminalLocationById(merchantId, String(input.terminalLocationId || ""))
   if (!location) throw statusError("Terminal location not found for this merchant", 404)
 
@@ -238,15 +262,6 @@ export async function registerTerminalReaderEngine(
 
   const row = await persistReader(merchantId, reader, location.id)
   return toSafeReader(row)
-}
-
-const SIMULATED_LOCATION_NAME = "PineTree Test Location"
-const SIMULATED_LOCATION_ADDRESS: StripeTerminalAddress = {
-  line1: "354 Oyster Point Blvd",
-  city: "South San Francisco",
-  state: "CA",
-  postalCode: "94080",
-  country: "US"
 }
 
 export async function createSimulatedTerminalReaderEngine(
@@ -274,18 +289,10 @@ export async function createSimulatedTerminalReaderEngine(
   }
 
   if (!location) {
-    const created = await createStripeTerminalLocation({
-      connectedAccountId: accountId,
-      displayName: SIMULATED_LOCATION_NAME,
-      address: SIMULATED_LOCATION_ADDRESS
-    })
-    location = await upsertMerchantTerminalLocation({
-      merchantId,
-      providerLocationId: created.id,
-      displayName: created.displayName,
-      address: created.address as unknown as Record<string, unknown>,
-      status: "active"
-    })
+    throw statusError(
+      "Create a Stripe Terminal Location before creating a Sandbox Reader.",
+      409
+    )
   }
 
   const reader = await registerSimulatedStripeReader({
@@ -372,6 +379,11 @@ export type CardCaptureAvailability = {
     isDefault: boolean
     simulated: boolean
   }>
+  terminalLocations: Array<{
+    id: string
+    displayName: string
+  }>
+  stripeTestMode: boolean
   tapToPay: {
     available: boolean
     reason: "available" | "native_app_required" | "unsupported_device" | "not_configured" | "provider_not_ready"
@@ -388,6 +400,7 @@ export async function getCardCaptureAvailabilityEngine(
   const stripeReady = context.connection.chargesEnabled === true
 
   const readerRows = stripeReady ? await listTerminalReadersEngine(merchantId) : []
+  const locationRows = stripeReady ? await listTerminalLocationsEngine(merchantId) : []
   const terminalReaders = readerRows.map((reader) => ({
     id: reader.id,
     label: reader.label,
@@ -423,6 +436,11 @@ export async function getCardCaptureAvailabilityEngine(
     manualEntryEnabled,
     routingPreference: context.settings.routingPreference,
     terminalReaders,
+    terminalLocations: locationRows.map((location) => ({
+      id: location.id,
+      displayName: location.displayName
+    })),
+    stripeTestMode: isStripeTestMode(),
     tapToPay,
     recommendedMethod: resolveRecommendedCardMethod({
       routingPreference: context.settings.routingPreference,

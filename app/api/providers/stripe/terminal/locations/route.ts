@@ -8,7 +8,7 @@ function errorResponse(error: unknown) {
 }
 
 export async function GET(req: NextRequest) {
-  try { return NextResponse.json({ locations: await listTerminalLocationsEngine((await requireStripeCardMerchant(req)).merchantId) }) }
+  try { return NextResponse.json({ locations: await listTerminalLocationsEngine((await requireStripeCardMerchant(req)).merchantId, { refresh: true }) }) }
   catch (error) { return errorResponse(error) }
 }
 

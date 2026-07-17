@@ -1102,6 +1102,20 @@ export default function POSLayout({ terminalContext }: Props) {
       activePaymentIdRef.current = returnedPaymentId
       setActivePaymentId(returnedPaymentId)
       setCardView("waiting")
+      if (reader.simulated) {
+        const simulationResponse = await fetch("/api/providers/stripe/terminal/readers/simulate-payment", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...posAuthHeaders(terminalContext?.sessionToken),
+          },
+          body: JSON.stringify({ paymentId: returnedPaymentId }),
+        })
+        if (!simulationResponse.ok) {
+          const simulationPayload = await simulationResponse.json().catch(() => null)
+          throw new Error(simulationPayload?.error || "Unable to present the Sandbox Reader test card.")
+        }
+      }
     } catch (error) {
       setPaymentError(error instanceof Error ? error.message : "Unable to send the payment to the reader.")
       setCardView("collect")
@@ -1156,7 +1170,10 @@ export default function POSLayout({ terminalContext }: Props) {
       const locationsResponse = await fetch("/api/providers/stripe/terminal/locations", { headers })
       const locationsPayload = await locationsResponse.json().catch(() => null) as { locations?: Array<{ id: string }>; error?: string } | null
       const terminalLocationId = locationsPayload?.locations?.[0]?.id
-      if (!locationsResponse.ok || !terminalLocationId) throw new Error(locationsPayload?.error || "Create a Stripe Terminal location in Settings before registering a reader.")
+      if (!locationsResponse.ok || !terminalLocationId) {
+        setCardView("setup")
+        throw new Error(locationsPayload?.error || "Create a Stripe Terminal Location before registering a physical reader.")
+      }
       const response = await fetch("/api/providers/stripe/terminal/readers/register", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...headers },
@@ -1167,6 +1184,57 @@ export default function POSLayout({ terminalContext }: Props) {
       await loadCardCapabilities(true)
     } catch (error) {
       setPaymentError(error instanceof Error ? error.message : "Unable to register this Stripe Card Reader.")
+    } finally {
+      setCardLoading(false)
+    }
+  }
+
+  async function createPosTerminalLocation(input: {
+    displayName: string
+    address: { line1: string; line2?: string; city: string; state: string; postalCode: string; country: string }
+  }) {
+    setCardLoading(true)
+    setPaymentError("")
+    try {
+      const response = await fetch("/api/providers/stripe/terminal/locations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...posAuthHeaders(terminalContext?.sessionToken) },
+        body: JSON.stringify(input),
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok || !payload?.location) throw new Error(payload?.error || "Unable to create this Stripe Terminal Location.")
+      await loadCardCapabilities()
+      setCardView("setup")
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "Unable to create this Stripe Terminal Location.")
+      setCardView("setup")
+    } finally {
+      setCardLoading(false)
+    }
+  }
+
+  async function createSandboxCardReader() {
+    const terminalLocationId = cardCapabilities?.terminalLocations[0]?.id
+    if (!terminalLocationId) {
+      setPaymentError("")
+      setCardView("setup")
+      return
+    }
+
+    setCardLoading(true)
+    setPaymentError("")
+    try {
+      const response = await fetch("/api/providers/stripe/terminal/readers/simulated", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...posAuthHeaders(terminalContext?.sessionToken) },
+        body: JSON.stringify({ terminalLocationId }),
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok || !payload?.reader) throw new Error(payload?.error || "Unable to create a Sandbox Reader.")
+      await loadCardCapabilities(true)
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : "Unable to create a Sandbox Reader.")
+      setCardView("no-reader")
     } finally {
       setCardLoading(false)
     }
@@ -1437,6 +1505,9 @@ export default function POSLayout({ terminalContext }: Props) {
               setCardLoading(false)
               setCardView("no-reader")
             })}
+            onOpenSetup={() => { setPaymentError(""); setCardView("setup") }}
+            onCreateLocation={createPosTerminalLocation}
+            onCreateSandboxReader={() => void createSandboxCardReader()}
             onOpenRegister={() => { setPaymentError(""); setCardView("register") }}
             onRegisterReader={registerCardReader}
             onOpenManual={() => void startManualEntry().catch(error => setPaymentError(error instanceof Error ? error.message : "Unable to prepare manual card entry."))}
