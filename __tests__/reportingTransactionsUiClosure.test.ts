@@ -19,13 +19,14 @@ describe("reporting and transaction UI closure", () => {
   it("persists combined transaction filters in the URL and requests stable server pagination", () => {
     const page = read("app/dashboard/transactions/page.tsx")
     const engine = read("engine/transactionsDashboard.ts")
-    for (const filter of ["provider", "network", "channel", "status", "rail", "asset", "method", "startDate", "endDate"]) {
+    for (const filter of ["provider", "network", "channel", "status", "rail", "asset", "currency", "source", "method", "startDate", "endDate"]) {
       expect(page).toContain(`setFilter("${filter}"`)
     }
     expect(page).toContain("window.history.replaceState")
     expect(engine).toContain('.order("created_at", { ascending: false })')
     expect(engine).toContain('.order("id", { ascending: false })')
     expect(engine).toContain('metadata->>selectedAsset.eq.${asset}')
+    expect(engine).toContain('.eq("status", "CONFIRMED")')
     expect(engine).toContain("if (result.status === 416) return true")
     expect(engine).toContain('String((result.error as { code?: unknown }).code || "") === "PGRST103"')
   })

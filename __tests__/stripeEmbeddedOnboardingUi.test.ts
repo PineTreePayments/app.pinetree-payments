@@ -23,7 +23,7 @@ const ROUTE_STATUS = read("app/api/providers/stripe/status/route.ts")
 
 describe("Stripe embedded onboarding UI", () => {
   it("uses Stripe Connect embedded components inside PineTree", () => {
-    expect(ONBOARDING_COMPONENT).toContain('from "@stripe/connect-js"')
+    expect(ONBOARDING_COMPONENT).toContain('from "@stripe/connect-js/pure"')
     expect(ONBOARDING_COMPONENT).toContain('from "@stripe/react-connect-js"')
     expect(ONBOARDING_COMPONENT).toContain("loadConnectAndInitialize")
     expect(ONBOARDING_COMPONENT).toContain("ConnectComponentsProvider")

@@ -14,6 +14,8 @@ describe("staging environment readiness", () => {
     const checker = read("scripts/check-environment.mjs")
 
     expect(packageJson.scripts["check:env"]).toBe("node scripts/check-environment.mjs")
+    expect(checker).toContain("stripeSecretMode !== stripePublishableMode")
+    expect(checker).toContain("Production diagnostics must be disabled")
     expect(packageJson.scripts["check:env:strict"]).toContain("--strict")
     expect(packageJson.scripts["smoke:staging-routes"]).toBe("node scripts/smoke-staging-routes.mjs")
     expect(checker).toContain("Values are never printed.")

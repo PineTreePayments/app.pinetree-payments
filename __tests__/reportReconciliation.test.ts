@@ -90,9 +90,12 @@ describe("report reconciliation", () => {
     expect(report.failedCount).toBe(1)
     expect(report.cardVolume).toBeCloseTo(10.15)
     expect(report.cryptoVolume).toBeCloseTo(20.15)
+    expect(report.assetTotals).toEqual({ BTC: 20.15 })
+    expect(Object.values(report.assetTotals).reduce((sum, value) => sum + value, 0)).toBe(report.cryptoVolume)
     expect(report.reconciliation).toEqual({
       providerMatchesGross: true,
       railMatchesGross: true,
+      assetMatchesCrypto: true,
       variance: 0,
     })
   })
@@ -161,7 +164,7 @@ describe("report reconciliation", () => {
     const empty = await generateReportEngine({ merchantId: "merchant-1", startDate: "2026-07-17", endDate: "2026-07-17" })
     expect(empty.grossVolume).toBe(0)
     expect(empty.avgTransaction).toBe(0)
-    expect(empty.reconciliation).toMatchObject({ providerMatchesGross: true, railMatchesGross: true, variance: 0 })
+    expect(empty.reconciliation).toMatchObject({ providerMatchesGross: true, railMatchesGross: true, assetMatchesCrypto: true, variance: 0 })
 
     payments.mockResolvedValue([{
       id: "pay-refund",

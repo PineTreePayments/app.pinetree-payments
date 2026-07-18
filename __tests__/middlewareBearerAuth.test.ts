@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 
 describe("middleware bearer authentication", () => {
   it("validates Supabase bearer sessions when an API request has no auth cookie", () => {
-    const source = fs.readFileSync(path.join(process.cwd(), "middleware.ts"), "utf8")
+    const source = fs.readFileSync(path.join(process.cwd(), "proxy.ts"), "utf8")
 
     expect(source).toContain('req.headers.get("authorization")')
     expect(source).toContain('authorization.startsWith("Bearer ")')

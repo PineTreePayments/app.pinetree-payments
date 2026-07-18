@@ -117,7 +117,7 @@ const STATUSES = [
   { value: "PROCESSING", label: "Processing" },
   { value: "WAITING",    label: "Waiting" },
   { value: "FAILED",     label: "Failed" },
-  { value: "INCOMPLETE", label: "Canceled" },
+  { value: "INCOMPLETE", label: "Incomplete" },
   { value: "EXPIRED",    label: "Expired" },
 ]
 

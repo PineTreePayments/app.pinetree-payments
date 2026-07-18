@@ -17,7 +17,7 @@ function listRouteFiles(dir: string): string[] {
 
 describe("admin route protection", () => {
   it("protects direct admin page navigation in middleware", () => {
-    const middleware = read("middleware.ts")
+    const middleware = read("proxy.ts")
 
     expect(middleware).toContain('pathname === "/dashboard/admin"')
     expect(middleware).toContain('pathname.startsWith("/dashboard/admin/")')

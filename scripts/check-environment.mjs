@@ -287,6 +287,33 @@ if (speedConnectEnabled && !speedPasswordValidation.ok) {
   )
 }
 
+const stripeSecretKey = String(env.STRIPE_SECRET_KEY ?? "").trim()
+const stripePublishableKey = String(env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "").trim()
+const stripeSecretMode = stripeSecretKey.startsWith("sk_test_")
+  ? "test"
+  : stripeSecretKey.startsWith("sk_live_") ? "live" : null
+const stripePublishableMode = stripePublishableKey.startsWith("pk_test_")
+  ? "test"
+  : stripePublishableKey.startsWith("pk_live_") ? "live" : null
+if (stripeSecretMode && stripePublishableMode && stripeSecretMode !== stripePublishableMode) {
+  requiredFailures += 1
+  warnings.push("Stripe secret and publishable keys belong to different modes. Configure a matching test or live key pair.")
+}
+
+if (nodeEnv === "production") {
+  const enabledProductionDiagnostics = [
+    "SPEED_CONNECT_DEBUG",
+    "NEXT_PUBLIC_WALLET_DEBUG_EVENTS",
+    "PINETREE_WALLET_DEBUG_SMOKE_ENABLED",
+  ].filter((name) => ["true", "1"].includes(String(env[name] ?? "").trim().toLowerCase()))
+  if (enabledProductionDiagnostics.length > 0) {
+    requiredFailures += 1
+    warnings.push(
+      `Production diagnostics must be disabled. Enabled flags: ${enabledProductionDiagnostics.join(", ")}.`
+    )
+  }
+}
+
 if (present("PINETREE_INTEGRATION_API_KEY")) {
   const base = String(env.PINETREE_INTEGRATION_BASE_URL ?? "")
   if (/^pt_live_/i.test(String(env.PINETREE_INTEGRATION_API_KEY)) && /localhost|127\.0\.0\.1/i.test(base)) {

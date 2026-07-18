@@ -34,6 +34,14 @@ type TransactionRow = {
   created_at?: string
   terminal_at?: string | null
   terminal_reason?: string | null
+  lifecycle_events?: NormalizedTransactionEvent[]
+}
+
+export type NormalizedTransactionEvent = {
+  type: string
+  status: string
+  occurredAt: string | null
+  message: string
 }
 
 export type TransactionsChartRow = {
@@ -66,11 +74,40 @@ export type TransactionsDashboardFilters = {
   status?: string | null
   rail?: string | null
   asset?: string | null
+  currency?: string | null
+  source?: string | null
   method?: string | null
   startDate?: string | null
   endDate?: string | null
   page?: number
   pageSize?: number
+}
+
+export function normalizeTransactionEvent(event: TransactionLifecycleEvent): NormalizedTransactionEvent {
+  const type = String(event.event_type || "payment.unknown").trim().toLowerCase()
+  const suffix = type.split(".").pop()?.toUpperCase() || "UNKNOWN"
+  const status = suffix === "CANCELLED" ? "CANCELED" : suffix
+  const messages: Record<string, string> = {
+    CREATED: "Payment request created.",
+    PENDING: "Payment is waiting for customer action.",
+    PROCESSING: "Payment is processing.",
+    CONFIRMED: "Payment confirmed.",
+    FAILED: "Payment failed.",
+    INCOMPLETE: "Payment was not completed.",
+    CANCELED: "Payment canceled before completion.",
+    EXPIRED: "Payment request expired.",
+    REFUNDED: "Payment refunded.",
+  }
+  return {
+    type,
+    status,
+    occurredAt: event.created_at || null,
+    message: messages[status] || "Payment state updated.",
+  }
+}
+
+export function isTerminalTransactionEvent(event: NormalizedTransactionEvent): boolean {
+  return ["CONFIRMED", "FAILED", "INCOMPLETE", "CANCELED", "EXPIRED", "REFUNDED"].includes(event.status)
 }
 
 type TransactionsChartProviderKey = Exclude<keyof TransactionsChartRow, "time">
@@ -248,7 +285,9 @@ export async function getTransactionsDashboardEngine(
   const offset = (page - 1) * pageSize
   const status = String(filters.status || "").trim().toUpperCase()
   const asset = String(filters.asset || "").trim().toUpperCase().replace(/[^A-Z0-9._-]/g, "")
-  const paymentJoin = status || asset ? "payments!inner" : "payments"
+  const currency = String(filters.currency || "").trim().toUpperCase().replace(/[^A-Z0-9._-]/g, "")
+  const source = String(filters.source || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "")
+  const paymentJoin = status || asset || currency || source ? "payments!inner" : "payments"
   // Use transactions table directly — includes cash, crypto, and all channels
   let transactionQuery = db
     .from("transactions")
@@ -289,6 +328,8 @@ export async function getTransactionsDashboardEngine(
   if (filters.network) transactionQuery = transactionQuery.eq("network", filters.network)
   if (filters.channel) transactionQuery = transactionQuery.eq("channel", filters.channel)
   if (status) transactionQuery = transactionQuery.eq("payments.status", status)
+  if (currency) transactionQuery = transactionQuery.eq("payments.currency", currency)
+  if (source) transactionQuery = transactionQuery.eq("payments.metadata->>source", source)
   if (asset) {
     // Crypto checkouts retain USD as their settlement currency and record the
     // selected asset in metadata. Match either representation while keeping
@@ -329,9 +370,8 @@ export async function getTransactionsDashboardEngine(
   if (dashboardPaymentIds.length) {
     const { data: lifecycleEvents, error: lifecycleError } = await db
       .from("payment_events")
-      .select("payment_id,event_type,provider_event,raw_payload,created_at")
+      .select("payment_id,event_type,provider_event,created_at")
       .in("payment_id", dashboardPaymentIds)
-      .in("event_type", ["payment.canceled", "payment.cancelled", "payment.expired", "payment.incomplete"])
       .order("created_at", { ascending: true })
 
     if (lifecycleError) {
@@ -376,14 +416,14 @@ export async function getTransactionsDashboardEngine(
       ? resolveTransactionDisplayStatus(transaction.status, authoritativePayment?.status)
       : "UNKNOWN"
     const lifecycleEvents = lifecycleEventsByPaymentId.get(String(transaction.payment_id || "")) || []
-    const terminalEvent = lifecycleEvents[lifecycleEvents.length - 1]
     const status = resolveLifecycleDisplayStatus(
       canonicalStatus,
       lifecycleEvents
     )
-    const terminalPayload = terminalEvent?.raw_payload && typeof terminalEvent.raw_payload === "object"
-      ? terminalEvent.raw_payload as Record<string, unknown>
-      : null
+    const normalizedEvents = lifecycleEvents.map(normalizeTransactionEvent)
+    const terminalEventIndex = normalizedEvents.findLastIndex(isTerminalTransactionEvent)
+    const terminalEvent = terminalEventIndex >= 0 ? lifecycleEvents[terminalEventIndex] : undefined
+    const normalizedTerminalEvent = terminalEventIndex >= 0 ? normalizedEvents[terminalEventIndex] : undefined
     const payments = Array.isArray(transaction.payments)
       ? transaction.payments.map((payment) => ({
           ...payment,
@@ -400,7 +440,8 @@ export async function getTransactionsDashboardEngine(
       ...transaction,
       status,
       terminal_at: terminalEvent?.created_at || null,
-      terminal_reason: String(terminalPayload?.reason || terminalEvent?.provider_event || "").trim() || null,
+      terminal_reason: normalizedTerminalEvent?.message || null,
+      lifecycle_events: normalizedEvents,
       displayStatus: getPaymentStatusLabel(status),
       payments
     }
@@ -429,8 +470,9 @@ export async function getTransactionsChartEngine(
 
   const { data: paymentData, error: paymentError } = await db
     .from("payments")
-    .select("id,provider,network,created_at,gross_amount,metadata")
+    .select("id,provider,network,created_at,gross_amount,metadata,status")
     .eq("merchant_id", merchantId)
+    .eq("status", "CONFIRMED")
     .gte("created_at", start.toISOString())
 
   if (paymentError) {

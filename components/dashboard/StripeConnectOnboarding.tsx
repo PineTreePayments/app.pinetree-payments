@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { loadConnectAndInitialize, type StripeConnectInstance } from "@stripe/connect-js"
+import { loadConnectAndInitialize, type StripeConnectInstance } from "@stripe/connect-js/pure"
 import { ConnectAccountOnboarding, ConnectComponentsProvider } from "@stripe/react-connect-js"
 
 /**

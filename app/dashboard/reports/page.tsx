@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
+import StatusBadge from "@/components/ui/StatusBadge"
 import {
   DashboardHeroCard,
   DashboardSection,
@@ -29,6 +30,7 @@ type LedgerRow = {
   gross: number
   pinetreeFee: number
   status: string
+  canonicalStatus: string
 }
 
 type ReportSummary = {
@@ -61,6 +63,7 @@ type ReportSummary = {
   reconciliation: {
     providerMatchesGross: boolean
     railMatchesGross: boolean
+    assetMatchesCrypto: boolean
     variance: number
   }
   transactionsTable: LedgerRow[]
@@ -272,7 +275,9 @@ export default function ReportsPage() {
   }, [summary])
 
   const reconciled = Boolean(
-    summary?.reconciliation.providerMatchesGross && summary.reconciliation.railMatchesGross
+    summary?.reconciliation.providerMatchesGross &&
+    summary.reconciliation.railMatchesGross &&
+    summary.reconciliation.assetMatchesCrypto
   )
 
   return (
@@ -342,10 +347,10 @@ export default function ReportsPage() {
 
           {!reconciled ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-              Report totals need review. Provider or rail totals differ from confirmed gross sales by {currency(summary.reconciliation.variance)}.
+              Report totals need review. Provider, rail, or crypto asset totals differ by {currency(summary.reconciliation.variance)}.
             </div>
           ) : (
-            <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">Provider and rail totals reconcile to confirmed gross sales.</div>
+            <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">Provider and rail totals reconcile to confirmed gross sales, and crypto assets reconcile to crypto volume.</div>
           )}
 
           <DashboardSection title="Summary" titleTone="blue">
@@ -386,7 +391,7 @@ export default function ReportsPage() {
                 <table className="min-w-[880px] w-full text-left text-sm">
                   <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Reference</th><th className="px-4 py-3">Provider</th><th className="px-4 py-3">Rail</th><th className="px-4 py-3">Network / asset</th><th className="px-4 py-3 text-right">Gross</th><th className="px-4 py-3 text-right">Fee</th><th className="px-4 py-3">Status</th></tr></thead>
                   <tbody className="divide-y divide-gray-100">{summary.transactionsTable.map((row) => (
-                    <tr key={`${row.paymentId}-${row.reference}`}><td className="whitespace-nowrap px-4 py-3 text-gray-600">{new Intl.DateTimeFormat("en-US", { timeZone: summary.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(row.dateTime))}</td><td className="max-w-[180px] truncate px-4 py-3 font-mono text-xs text-gray-600">{row.reference}</td><td className="px-4 py-3">{formatDashboardProvider(row.provider)}</td><td className="px-4 py-3">{row.rail}</td><td className="px-4 py-3">{formatDashboardNetwork(row.network)} · {row.asset}</td><td className="px-4 py-3 text-right font-semibold">{currency(row.gross)}</td><td className="px-4 py-3 text-right">{currency(row.pinetreeFee)}</td><td className="px-4 py-3">{row.status}</td></tr>
+                    <tr key={`${row.paymentId}-${row.reference}`}><td className="whitespace-nowrap px-4 py-3 text-gray-600">{new Intl.DateTimeFormat("en-US", { timeZone: summary.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(row.dateTime))}</td><td className="max-w-[180px] truncate px-4 py-3 font-mono text-xs text-gray-600">{row.reference}</td><td className="px-4 py-3">{formatDashboardProvider(row.provider)}</td><td className="px-4 py-3">{row.rail}</td><td className="px-4 py-3">{formatDashboardNetwork(row.network)} · {row.asset}</td><td className="px-4 py-3 text-right font-semibold">{currency(row.gross)}</td><td className="px-4 py-3 text-right">{currency(row.pinetreeFee)}</td><td className="px-4 py-3"><StatusBadge status={row.canonicalStatus} /></td></tr>
                   ))}</tbody>
                 </table>
                 {summary.transactionsTruncated ? <p className="border-t border-gray-100 px-4 py-3 text-xs text-gray-500">Showing the first {summary.transactionsTable.length} of {summary.totalLedgerRows} rows. CSV export includes the complete period.</p> : null}

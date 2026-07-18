@@ -74,5 +74,5 @@ export function resolveLifecycleDisplayStatus(
     }
   }
 
-  return "CANCELED"
+  return "INCOMPLETE"
 }

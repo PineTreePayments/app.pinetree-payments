@@ -117,6 +117,8 @@ export default function TransactionsPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [railFilter, setRailFilter] = useState("all")
   const [assetFilter, setAssetFilter] = useState("all")
+  const [currencyFilter, setCurrencyFilter] = useState("all")
+  const [sourceFilter, setSourceFilter] = useState("all")
   const [methodFilter, setMethodFilter] = useState("all")
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
@@ -153,6 +155,8 @@ export default function TransactionsPage() {
     setStatusFilter(value("status"))
     setRailFilter(value("rail"))
     setAssetFilter(value("asset"))
+    setCurrencyFilter(value("currency"))
+    setSourceFilter(value("source"))
     setMethodFilter(value("method"))
     setStartDate(value("startDate", ""))
     setEndDate(value("endDate", ""))
@@ -173,6 +177,8 @@ export default function TransactionsPage() {
     setFilter("status", statusFilter)
     setFilter("rail", railFilter)
     setFilter("asset", assetFilter)
+    setFilter("currency", currencyFilter)
+    setFilter("source", sourceFilter)
     setFilter("method", methodFilter)
     setFilter("startDate", startDate)
     setFilter("endDate", endDate)
@@ -180,7 +186,7 @@ export default function TransactionsPage() {
     if (pageSize !== 50) params.set("pageSize", String(pageSize))
     const query = params.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`)
-  }, [assetFilter, channelFilter, endDate, filtersHydrated, methodFilter, networkFilter, page, pageSize, railFilter, startDate, statusFilter, walletFilter])
+  }, [assetFilter, channelFilter, currencyFilter, endDate, filtersHydrated, methodFilter, networkFilter, page, pageSize, railFilter, sourceFilter, startDate, statusFilter, walletFilter])
 
   const callTransactionsApi = useCallback(async (method: "GET" | "POST", body?: unknown, query = "") => {
     const {
@@ -291,6 +297,8 @@ export default function TransactionsPage() {
       if (statusFilter !== "all") params.set("status", statusFilter)
       if (railFilter !== "all") params.set("rail", railFilter)
       if (assetFilter !== "all") params.set("asset", assetFilter)
+      if (currencyFilter !== "all") params.set("currency", currencyFilter)
+      if (sourceFilter !== "all") params.set("source", sourceFilter)
       if (methodFilter !== "all") params.set("method", methodFilter)
       if (startDate) params.set("startDate", startDate)
       if (endDate) params.set("endDate", endDate)
@@ -319,7 +327,7 @@ export default function TransactionsPage() {
     } finally {
       setLoadingTransactions(false)
     }
-  }, [assetFilter, callTransactionsApi, calculateInsights, channelFilter, endDate, filtersHydrated, methodFilter, networkFilter, page, pageSize, railFilter, startDate, statusFilter, walletFilter])
+  }, [assetFilter, callTransactionsApi, calculateInsights, channelFilter, currencyFilter, endDate, filtersHydrated, methodFilter, networkFilter, page, pageSize, railFilter, sourceFilter, startDate, statusFilter, walletFilter])
 
   const loadChartData = useCallback(async (range: string, mode = chartMode) => {
     try {
@@ -549,6 +557,27 @@ export default function TransactionsPage() {
             </select>
           </label>
           <label className={filterRowClass}>
+            <span className={filterLabelClass}>Settlement currency</span>
+            <select aria-label="Settlement currency filter" className={filterSelectClass} value={currencyFilter} onChange={(event) => { setCurrencyFilter(event.target.value); setPage(1) }}>
+              <option value="all">All Currencies</option>
+              <option value="USD">USD</option>
+              <option value="USDC">USDC</option>
+              <option value="USDT">USDT</option>
+              <option value="BTC">BTC</option>
+            </select>
+          </label>
+          <label className={filterRowClass}>
+            <span className={filterLabelClass}>Source</span>
+            <select aria-label="Source filter" className={filterSelectClass} value={sourceFilter} onChange={(event) => { setSourceFilter(event.target.value); setPage(1) }}>
+              <option value="all">All Sources</option>
+              <option value="pos">POS</option>
+              <option value="online">Online</option>
+              <option value="api">API</option>
+              <option value="shopify">Shopify</option>
+              <option value="woocommerce">WooCommerce</option>
+            </select>
+          </label>
+          <label className={filterRowClass}>
             <span className={filterLabelClass}>Page size</span>
             <select aria-label="Page size" className={filterSelectClass} value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }}>
               <option value={25}>25 per page</option>
@@ -568,7 +597,7 @@ export default function TransactionsPage() {
             type="button"
             onClick={() => {
               setWalletFilter("all"); setNetworkFilter("all"); setChannelFilter("all"); setStatusFilter("all")
-              setRailFilter("all"); setAssetFilter("all"); setMethodFilter("all"); setStartDate(""); setEndDate(""); setPage(1)
+               setRailFilter("all"); setAssetFilter("all"); setCurrencyFilter("all"); setSourceFilter("all"); setMethodFilter("all"); setStartDate(""); setEndDate(""); setPage(1)
             }}
             className={`${filterSelectClass} text-gray-600`}
           >

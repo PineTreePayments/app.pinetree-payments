@@ -35,6 +35,8 @@ export async function GET(req: NextRequest) {
       status: filter("status"),
       rail: filter("rail"),
       asset: filter("asset"),
+      currency: filter("currency"),
+      source: filter("source"),
       method: filter("method"),
       startDate,
       endDate,

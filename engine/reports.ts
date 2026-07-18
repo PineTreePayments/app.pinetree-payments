@@ -98,6 +98,7 @@ export type ReportSummary = {
   reconciliation: {
     providerMatchesGross: boolean
     railMatchesGross: boolean
+    assetMatchesCrypto: boolean
     variance: number
   }
   transactionsTable: ReportLedgerRow[]
@@ -319,7 +320,7 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
       addMinorTotal(channelTotalsMinor, row.channel, grossMinor)
       addMinorTotal(railTotalsMinor, row.rail, grossMinor)
       addMinorTotal(networkTotalsMinor, row.network, grossMinor)
-      addMinorTotal(assetTotalsMinor, row.asset, grossMinor)
+      if (row.rail === "Crypto") addMinorTotal(assetTotalsMinor, row.asset, grossMinor)
     } else if (row.status === "Failed") {
       failedCount++
     } else if (row.status === "Waiting") {
@@ -328,11 +329,6 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
       processingCount++
     } else if (row.canonicalStatus === "INCOMPLETE") {
       incompleteCount++
-      // The merchant-facing status label is currently "Canceled" for the
-      // canonical INCOMPLETE state, but reporting keeps the lifecycle bucket
-      // explicit for financial metrics while retaining the existing display
-      // bucket for backward-compatible dashboards.
-      canceledCount++
     } else if (row.status === "Expired") {
       expiredCount++
     } else if (row.status === "Canceled") {
@@ -350,6 +346,8 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
   const totalOf = (values: Record<string, number>) => Object.values(values).reduce((sum, value) => sum + value, 0)
   const providerVarianceMinor = Math.abs(totalOf(providerTotalsMinor) - grossVolumeMinor)
   const railVarianceMinor = Math.abs(totalOf(railTotalsMinor) - grossVolumeMinor)
+  const cryptoVolumeMinor = railTotalsMinor.Crypto || 0
+  const assetVarianceMinor = Math.abs(totalOf(assetTotalsMinor) - cryptoVolumeMinor)
   const providerTotals = minorTotalsToMoney(providerTotalsMinor)
   const channelTotals = minorTotalsToMoney(channelTotalsMinor)
   const railTotals = minorTotalsToMoney(railTotalsMinor)
@@ -408,7 +406,8 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
     reconciliation: {
       providerMatchesGross: providerVarianceMinor === 0,
       railMatchesGross: railVarianceMinor === 0,
-      variance: fromMinorUnits(Math.max(providerVarianceMinor, railVarianceMinor)),
+      assetMatchesCrypto: assetVarianceMinor === 0,
+      variance: fromMinorUnits(Math.max(providerVarianceMinor, railVarianceMinor, assetVarianceMinor)),
     },
     transactionsTable
   }

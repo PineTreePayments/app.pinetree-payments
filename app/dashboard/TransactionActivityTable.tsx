@@ -54,6 +54,12 @@ export type DashboardTransactionRow = {
   created_at?: string | null
   terminal_at?: string | null
   terminal_reason?: string | null
+  lifecycle_events?: Array<{
+    type: string
+    status: string
+    occurredAt: string | null
+    message: string
+  }>
 }
 
 function parseTimestamp(value: string) {
@@ -499,6 +505,22 @@ export default function TransactionActivityTable({
                 />
               ))}
             </div>
+            {selectedTx.lifecycle_events?.length ? (
+              <div className="mt-4 rounded-xl border border-gray-100 bg-white p-4">
+                <h4 className="text-xs font-semibold uppercase tracking-widest text-gray-500">Payment events</h4>
+                <ol className="mt-3 space-y-3">
+                  {selectedTx.lifecycle_events.map((event, index) => (
+                    <li key={`${event.type}-${event.occurredAt || index}`} className="border-l-2 border-blue-200 pl-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-gray-900">{event.message}</span>
+                        <span className="text-xs text-gray-500">{formatChicagoDateTime(event.occurredAt)}</span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-gray-500">{event.status}</p>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
             {selectedPayment?.id && selectedPayment.status === "CONFIRMED" && (
               <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                 <button

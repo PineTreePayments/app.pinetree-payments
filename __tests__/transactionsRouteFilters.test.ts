@@ -38,7 +38,7 @@ describe("transactions route filters", () => {
 
   it("passes combined bounded filters with the authenticated merchant scope", async () => {
     const request = new NextRequest(
-      "https://app.test/api/transactions?provider=stripe&network=base&channel=pos&status=CONFIRMED&rail=card&asset=USD&method=card&startDate=2026-07-01&endDate=2026-07-31&page=2&pageSize=25",
+      "https://app.test/api/transactions?provider=stripe&network=base&channel=pos&status=CONFIRMED&rail=card&asset=USD&currency=USD&source=shopify&method=card&startDate=2026-07-01&endDate=2026-07-31&page=2&pageSize=25",
       { headers: { Authorization: "Bearer token" } }
     )
     const response = await GET(request)
@@ -51,6 +51,8 @@ describe("transactions route filters", () => {
       status: "CONFIRMED",
       rail: "card",
       asset: "USD",
+      currency: "USD",
+      source: "shopify",
       method: "card",
       startDate: "2026-07-01T00:00:00.000Z",
       endDate: "2026-07-31T23:59:59.999Z",

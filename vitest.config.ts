@@ -17,6 +17,13 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    env: {
+      // Source-contract tests import database modules without contacting a
+      // database. Give Supabase's constructor valid inert test configuration
+      // so collection does not depend on a developer's untracked env files.
+      NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "pinetree-test-anon-key",
+    },
     exclude: [
       ...configDefaults.exclude,
       "packages/pinetree-node/test/integration/**",

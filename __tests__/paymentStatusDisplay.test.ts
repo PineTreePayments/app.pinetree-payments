@@ -13,8 +13,8 @@ describe("shared payment status display", () => {
     ["PROCESSING", "Processing", "processing", "spinner"],
     ["CONFIRMED",  "Confirmed",  "confirmed",  "check-circle"],
     ["FAILED",     "Failed",     "failed",     "x-circle"],
-    ["INCOMPLETE", "Canceled",   "canceled",   "x-circle"],
-    ["EXPIRED",    "Expired",    "expired",    "x-circle"],
+    ["INCOMPLETE", "Incomplete", "incomplete", "alert-triangle"],
+    ["EXPIRED",    "Expired",    "expired",    "alert-triangle"],
     ["CANCELED",   "Canceled",   "canceled",   "x-circle"],
     ["REFUNDED",   "Refunded",   "refunded",   "refund"],
     ["DISPUTED",   "Disputed",   "disputed",   "alert-triangle"],
@@ -38,7 +38,7 @@ describe("shared payment status display", () => {
     ["declined",  "Failed"],
     ["rejected",  "Failed"],
     ["cancelled", "Canceled"],
-    ["abandoned", "Canceled"],
+    ["abandoned", "Incomplete"],
     ["timed out", "Expired"],
   ])("normalizes provider wording %s without changing stored state", (status, label) => {
     const display = getPaymentDisplayStatus(status)
@@ -64,10 +64,9 @@ describe("shared payment status display", () => {
     expect(getPaymentStatusLabel("CONFIRMED")).not.toBe("Success")
   })
 
-  it("Waiting uses blue classes, not gray", () => {
+  it("Waiting uses gray classes", () => {
     const display = getPaymentDisplayStatus("PENDING")
-    expect(display.classes).toContain("blue")
-    expect(display.classes).not.toContain("gray")
+    expect(display.classes).toContain("gray")
     expect(display.tone).toBe("waiting")
   })
 
@@ -92,19 +91,16 @@ describe("shared payment status display", () => {
     expect(display.tone).toBe("failed")
   })
 
-  it("Incomplete is an internal alias for merchant-facing Canceled", () => {
+  it("Incomplete uses amber classes and remains explicit", () => {
     const display = getPaymentDisplayStatus("INCOMPLETE")
-    expect(display.label).toBe("Canceled")
-    expect(display.classes).toContain("gray")
-    expect(display.classes).not.toContain("amber")
-    expect(display.tone).toBe("canceled")
+    expect(display.label).toBe("Incomplete")
+    expect(display.classes).toContain("amber")
+    expect(display.tone).toBe("incomplete")
   })
 
-  it("Expired uses red classes, not amber or gray", () => {
+  it("Expired uses amber classes", () => {
     const display = getPaymentDisplayStatus("EXPIRED")
-    expect(display.classes).toContain("red")
-    expect(display.classes).not.toContain("amber")
-    expect(display.classes).not.toContain("gray")
+    expect(display.classes).toContain("amber")
     expect(display.tone).toBe("expired")
   })
 
@@ -118,17 +114,17 @@ describe("shared payment status display", () => {
     const expired    = getPaymentDisplayStatus("EXPIRED")
     const failed     = getPaymentDisplayStatus("FAILED")
 
-    expect(incomplete.classes).toContain("gray")
-    expect(expired.classes).toContain("red")
+    expect(incomplete.classes).toContain("amber")
+    expect(expired.classes).toContain("amber")
     expect(failed.classes).toContain("red")
 
-    expect(incomplete.label).toBe("Canceled")
+    expect(incomplete.label).toBe("Incomplete")
     expect(expired.label).toBe("Expired")
     expect(failed.label).toBe("Failed")
   })
 
   it("Incomplete and Expired have distinct merchant outcomes", () => {
-    expect(getPaymentStatusLabel("INCOMPLETE")).toBe("Canceled")
+    expect(getPaymentStatusLabel("INCOMPLETE")).toBe("Incomplete")
     expect(getPaymentStatusLabel("EXPIRED")).toBe("Expired")
   })
 })
