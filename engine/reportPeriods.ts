@@ -14,6 +14,10 @@ export type ReportPeriodType =
 
 type LocalDate = { year: number; month: number; day: number }
 
+function reportRangeError(message: string) {
+  return Object.assign(new Error(message), { status: 400 })
+}
+
 export function normalizeTimeZone(value: string | null | undefined): string {
   const candidate = String(value || "").trim()
   if (!candidate) return DEFAULT_REPORT_TIME_ZONE
@@ -128,21 +132,21 @@ export function resolveMerchantReportRange(input: {
   const now = input.now && Number.isFinite(input.now.getTime()) ? input.now : new Date()
 
   if (Boolean(input.startDate) !== Boolean(input.endDate)) {
-    throw new Error("Both report start and end dates are required")
+    throw reportRangeError("Both report start and end dates are required")
   }
 
   if (input.type === "custom" && (!input.startDate || !input.endDate)) {
-    throw new Error("Custom reports require a start and end date")
+    throw reportRangeError("Custom reports require a start and end date")
   }
 
   if (input.startDate && input.endDate) {
     const localStart = parseDateOnly(input.startDate)
     const localEnd = parseDateOnly(input.endDate)
     if (/^\d{4}-\d{2}-\d{2}$/.test(input.startDate) && !localStart) {
-      throw new Error("Invalid report start date")
+      throw reportRangeError("Invalid report start date")
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(input.endDate) && !localEnd) {
-      throw new Error("Invalid report end date")
+      throw reportRangeError("Invalid report end date")
     }
     const start = localStart
       ? localDateTimeToUtc(localStart, timeZone)
@@ -151,7 +155,7 @@ export function resolveMerchantReportRange(input: {
       ? new Date(localDateTimeToUtc(addLocalDays(localEnd, 1), timeZone).getTime() - 1)
       : new Date(input.endDate)
     if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) {
-      throw new Error("Invalid report date range")
+      throw reportRangeError("Invalid report date range")
     }
     if (localStart && localEnd) {
       const inclusiveDays = Math.round(
@@ -160,7 +164,7 @@ export function resolveMerchantReportRange(input: {
           86_400_000
       ) + 1
       if (inclusiveDays > MAX_CUSTOM_REPORT_DAYS) {
-        throw new Error(`Report date ranges cannot exceed ${MAX_CUSTOM_REPORT_DAYS} days`)
+        throw reportRangeError(`Report date ranges cannot exceed ${MAX_CUSTOM_REPORT_DAYS} days`)
       }
     }
     return {

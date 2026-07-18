@@ -26,5 +26,6 @@ describe("reporting and transaction UI closure", () => {
     expect(engine).toContain('.order("created_at", { ascending: false })')
     expect(engine).toContain('.order("id", { ascending: false })')
     expect(engine).toContain('metadata->>selectedAsset.eq.${asset}')
+    expect(engine).toContain('String((error as { code?: unknown }).code || "") === "PGRST103"')
   })
 })

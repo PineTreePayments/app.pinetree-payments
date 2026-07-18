@@ -82,6 +82,14 @@ type TransactionChartContext = {
   totalAmount: number | string | null
 }
 
+/** PostgREST returns PGRST103 when a requested page starts beyond an empty result set. */
+export function isTransactionsEmptyPageError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === "object" && "code" in error &&
+    String((error as { code?: unknown }).code || "") === "PGRST103"
+  )
+}
+
 function bucket(label: string): TransactionsChartRow {
   return {
     time: label,
@@ -305,7 +313,7 @@ export async function getTransactionsDashboardEngine(
 
   const { data: txData, error: txError, count } = await transactionQuery
 
-  if (txError) {
+  if (txError && !isTransactionsEmptyPageError(txError)) {
     throw new Error(`Failed to load transactions: ${txError.message}`)
   }
 

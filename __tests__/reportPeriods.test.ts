@@ -61,4 +61,18 @@ describe("merchant-local report periods", () => {
     expect(() => resolveMerchantReportRange({ type: "custom", timeZone: "UTC", startDate: "2026-02-01", endDate: "2026-01-01" })).toThrow("Invalid report date range")
     expect(() => resolveMerchantReportRange({ type: "custom", timeZone: "UTC", startDate: "2025-01-01", endDate: "2026-12-31" })).toThrow(`${MAX_CUSTOM_REPORT_DAYS} days`)
   })
+
+  it("marks invalid custom ranges as client errors", () => {
+    try {
+      resolveMerchantReportRange({
+        type: "custom",
+        timeZone: "UTC",
+        startDate: "2026-02-01",
+        endDate: "2026-01-01",
+      })
+      throw new Error("expected invalid report range")
+    } catch (error) {
+      expect(error).toMatchObject({ status: 400 })
+    }
+  })
 })
