@@ -29,10 +29,13 @@ export async function GET(req: NextRequest) {
       transactionsTruncated: report.transactionsTable.length > visibleLedgerLimit
     })
   } catch (error: unknown) {
-    console.error("Report error:", error)
+    const status = getRouteErrorStatus(error)
+    // Authentication and validation failures are expected client outcomes;
+    // reserve error-level production logs for server-side report failures.
+    if (status >= 500) console.error("Report error:", error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to generate report" },
-      { status: getRouteErrorStatus(error) }
+      { status }
     )
   }
 }
