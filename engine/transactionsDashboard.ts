@@ -82,11 +82,15 @@ type TransactionChartContext = {
   totalAmount: number | string | null
 }
 
-/** PostgREST returns PGRST103 when a requested page starts beyond an empty result set. */
-export function isTransactionsEmptyPageError(error: unknown): boolean {
+/** PostgREST represents a requested page beyond the result set as HTTP 416/PGRST103. */
+export function isTransactionsEmptyPageResult(result: {
+  status?: number
+  error?: unknown
+}): boolean {
+  if (result.status === 416) return true
   return Boolean(
-    error && typeof error === "object" && "code" in error &&
-    String((error as { code?: unknown }).code || "") === "PGRST103"
+    result.error && typeof result.error === "object" && "code" in result.error &&
+    String((result.error as { code?: unknown }).code || "") === "PGRST103"
   )
 }
 
@@ -311,9 +315,10 @@ export async function getTransactionsDashboardEngine(
   if (filters.startDate) transactionQuery = transactionQuery.gte("created_at", filters.startDate)
   if (filters.endDate) transactionQuery = transactionQuery.lte("created_at", filters.endDate)
 
-  const { data: txData, error: txError, count } = await transactionQuery
+  const transactionResult = await transactionQuery
+  const { data: txData, error: txError, count } = transactionResult
 
-  if (txError && !isTransactionsEmptyPageError(txError)) {
+  if (txError && !isTransactionsEmptyPageResult(transactionResult)) {
     throw new Error(`Failed to load transactions: ${txError.message}`)
   }
 
