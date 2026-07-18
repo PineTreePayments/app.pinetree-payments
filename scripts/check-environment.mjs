@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const strict = process.argv.includes("--strict")
+const processOnly = process.argv.includes("--process-only")
 
 function parseEnvFile(filePath) {
   if (!existsSync(filePath)) return {}
@@ -28,8 +29,8 @@ function parseEnvFile(filePath) {
   return result
 }
 
-const baseEnv = parseEnvFile(resolve(repoRoot, ".env"))
-const localEnv = parseEnvFile(resolve(repoRoot, ".env.local"))
+const baseEnv = processOnly ? {} : parseEnvFile(resolve(repoRoot, ".env"))
+const localEnv = processOnly ? {} : parseEnvFile(resolve(repoRoot, ".env.local"))
 const env = { ...baseEnv, ...localEnv, ...process.env }
 
 function sourceFor(name) {
@@ -77,7 +78,7 @@ const groups = [
       ["NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK", false, "boolean"],
       ["DYNAMIC_EXTERNAL_JWT_ENABLED", false, "boolean"],
       ["DYNAMIC_EXTERNAL_JWT_ISSUER", false, "url"],
-      ["DYNAMIC_EXTERNAL_JWT_AUDIENCE", false, "text"],
+      ["DYNAMIC_EXTERNAL_JWT_AUDIENCE_OVERRIDE", false, "text"],
       ["DYNAMIC_EXTERNAL_JWT_KID", false, "text"],
       ["DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64", false, "secret16"],
     ],
@@ -143,10 +144,14 @@ const groups = [
   {
     name: "Speed Custom Connect credentials",
     entries: [
-      // Required only outside production - checked conditionally below so a
-      // production deploy isn't flagged for a var it must never use.
-      ["SPEED_TEST_ACCOUNT_PASSWORD", false, "secret16"],
-      ["SPEED_CREDENTIAL_ENCRYPTION_KEY", true, "hex64"],
+      // The active provisioning path resolves one server-only password from
+      // Vercel and never persists it. Required conditionally below only when
+      // Speed Custom Connect is enabled.
+      ["SPEED_CONNECTED_ACCOUNT_PASSWORD", false, "speedpassword"],
+      // Legacy recovery only: new provisioning no longer writes encrypted
+      // Speed passwords. Keep the key available only where historical rows
+      // must still be revealed by the admin-only recovery route.
+      ["SPEED_CREDENTIAL_ENCRYPTION_KEY", false, "hex64"],
     ],
   },
   {
@@ -184,6 +189,14 @@ function validation(name, kind) {
   if (kind === "stripepk") return /^pk_(live|test)_[A-Za-z0-9]+$/.test(value)
     ? { ok: true }
     : { ok: false, detail: "expected pk_live_* or pk_test_* (publishable key only — never a secret key)" }
+  if (kind === "speedpassword") {
+    const valid = value.length >= 12 && value.length <= 128 &&
+      !/\s/.test(value) && /[a-z]/.test(value) && /[A-Z]/.test(value) &&
+      /[0-9]/.test(value) && /[!#$%&()*+\-.:;=?@[\]^_{}~]/.test(value) &&
+      !/(.)\1\1/.test(value) &&
+      !/abc|bcd|cde|def|efg|fgh|ghi|hij|ijk|jkl|klm|lmn|mno|nop|opq|pqr|qrs|rst|stu|tuv|uvw|vwx|wxy|xyz|123|234|345|456|567|678|789/i.test(value)
+    return valid ? { ok: true } : { ok: false, detail: "does not satisfy the Speed password policy" }
+  }
   if (kind === "webhook") return value.length >= 16
     ? { ok: true }
     : { ok: false, detail: "too short" }
@@ -194,7 +207,9 @@ function validation(name, kind) {
     ? { ok: true }
     : { ok: false, detail: "expected external_jwt or dynamic_email_fallback" }
   if (kind === "scopes") {
-    const required = ["read_orders", "write_orders", "read_checkouts"]
+    // PineTree consumes order webhooks. Shopify retired the Checkout APIs in
+    // 2025, so requesting read_checkouts is obsolete and over-privileged.
+    const required = ["read_orders", "write_orders"]
     const scopes = new Set(value.split(",").map((item) => item.trim()).filter(Boolean))
     const missing = required.filter((scope) => !scopes.has(scope))
     return missing.length === 0
@@ -221,7 +236,7 @@ for (const group of groups) {
   console.log("")
 }
 
-const nodeEnv = String(env.NODE_ENV ?? "development").toLowerCase()
+const nodeEnv = processOnly ? "production" : String(env.NODE_ENV ?? "development").toLowerCase()
 for (const name of ["NEXT_PUBLIC_APP_URL", "SHOPIFY_APP_URL", "PINETREE_INTEGRATION_BASE_URL"]) {
   const value = String(env[name] ?? "").trim()
   if (!value || !validUrl(value)) continue
@@ -239,7 +254,7 @@ if (dynamicAuthMode === "external_jwt") {
   const externalJwtVars = [
     "DYNAMIC_EXTERNAL_JWT_ENABLED",
     "DYNAMIC_EXTERNAL_JWT_ISSUER",
-    "DYNAMIC_EXTERNAL_JWT_AUDIENCE",
+    "NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID",
     "DYNAMIC_EXTERNAL_JWT_KID",
     "DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64",
   ]
@@ -260,15 +275,15 @@ if (dynamicAuthMode === "external_jwt") {
   )
 }
 
-// SPEED_TEST_ACCOUNT_PASSWORD is only required outside production - Speed
-// Custom Connect account creation fails closed without it there, but
-// production must never read it (production generates a unique password
-// per account instead).
-if (nodeEnv !== "production" && !present("SPEED_TEST_ACCOUNT_PASSWORD")) {
+const speedConnectEnabled = ["true", "1"].includes(
+  String(env.SPEED_CONNECT_ENABLED ?? "").trim().toLowerCase()
+)
+const speedPasswordValidation = validation("SPEED_CONNECTED_ACCOUNT_PASSWORD", "speedpassword")
+if (speedConnectEnabled && !speedPasswordValidation.ok) {
   requiredFailures += 1
   warnings.push(
-    "SPEED_TEST_ACCOUNT_PASSWORD is required outside production (NODE_ENV=" + nodeEnv + ") " +
-      "for Speed Custom Connect account creation to succeed."
+    "SPEED_CONNECT_ENABLED=true requires a valid server-only SPEED_CONNECTED_ACCOUNT_PASSWORD " +
+      `(${speedPasswordValidation.detail}). New provisioning never stores this value in Supabase.`
   )
 }
 

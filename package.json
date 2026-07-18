@@ -14,6 +14,7 @@
     "test": "vitest run",
     "check:env": "node scripts/check-environment.mjs",
     "check:env:strict": "node scripts/check-environment.mjs --strict",
+    "check:env:production": "node scripts/check-environment.mjs --strict --process-only",
     "dynamic:jwt:generate": "node scripts/generate-dynamic-external-jwt-keys.mjs",
     "dynamic:jwt:test": "node scripts/test-dynamic-external-jwt.mjs",
     "smoke:staging-routes": "node scripts/smoke-staging-routes.mjs",

@@ -18,12 +18,13 @@ describe("check-environment.mjs PineTree Wallet Dynamic auth coverage", () => {
       "NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK",
       "DYNAMIC_EXTERNAL_JWT_ENABLED",
       "DYNAMIC_EXTERNAL_JWT_ISSUER",
-      "DYNAMIC_EXTERNAL_JWT_AUDIENCE",
+      "DYNAMIC_EXTERNAL_JWT_AUDIENCE_OVERRIDE",
       "DYNAMIC_EXTERNAL_JWT_KID",
       "DYNAMIC_EXTERNAL_JWT_SIGNING_KEY_B64",
     ]) {
       expect(script).toContain(`"${name}"`)
     }
+    expect(script).not.toContain('["DYNAMIC_EXTERNAL_JWT_AUDIENCE",')
   })
 
   it("fails strict mode when external_jwt mode is missing its server-only config", () => {

@@ -109,7 +109,7 @@ is pointing at a Dynamic sandbox environment. That is fine for staging only when
 the sandbox project also has External JWT/BYOA enabled with:
 
 - Issuer: `https://app.pinetree-payments.com`
-- Audience: `dynamic`
+- Audience: the matching `NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID`
 - JWKS URL: `https://app.pinetree-payments.com/.well-known/dynamic-jwks.json`
   or the matching public key
 - KID matching `DYNAMIC_EXTERNAL_JWT_KID`

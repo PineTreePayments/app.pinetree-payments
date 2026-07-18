@@ -34,7 +34,8 @@ Do not set `NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK=false` by itself. That
 removes the current Dynamic fallback used to restore the embedded wallet signer
 session. Only disable it when `NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=external_jwt`
 is configured end to end and Dynamic has enabled External Authentication/BYOA
-for the project with the matching issuer, audience, and JWKS/signing settings.
+for the project with the matching issuer, environment-ID audience, and
+JWKS/signing settings.
 
 ```bash
 NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID=...
@@ -48,7 +49,7 @@ NEXT_PUBLIC_PINETREE_DYNAMIC_AUTH_MODE=external_jwt
 NEXT_PUBLIC_PINETREE_DYNAMIC_EMAIL_FALLBACK=false
 DYNAMIC_EXTERNAL_JWT_ENABLED=true
 DYNAMIC_EXTERNAL_JWT_ISSUER=https://app.pinetree-payments.com
-DYNAMIC_EXTERNAL_JWT_AUDIENCE=dynamic
+# Audience is derived from NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID.
 
 # Server-only signing material. Use npm run dynamic:jwt:generate.
 # PineTree derives /.well-known/dynamic-jwks.json from this key at runtime.
@@ -83,6 +84,8 @@ From the repository root:
 ```bash
 npm run check:env
 npm run check:env:strict
+# For an environment injected entirely by the hosting provider:
+npm run check:env:production
 ```
 
 The first command reports all categories without failing for missing values.

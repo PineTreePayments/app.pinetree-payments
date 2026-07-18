@@ -8,7 +8,7 @@ Set these as server-side staging environment variables:
 |---|---|
 | `SHOPIFY_CLIENT_ID` | Matches the Shopify Partner app client ID |
 | `SHOPIFY_CLIENT_SECRET` | Server-only app secret |
-| `SHOPIFY_SCOPES` | Includes `read_orders,write_orders,read_checkouts` |
+| `SHOPIFY_SCOPES` | Includes `read_orders,write_orders` |
 | `SHOPIFY_APP_URL` | Public HTTPS PineTree staging URL |
 | `SHOPIFY_TOKEN_ENCRYPTION_KEY` | Exactly 64 hexadecimal characters |
 
@@ -39,6 +39,10 @@ Register:
 - `orders/cancelled`
 - `orders/updated`
 - `app/uninstalled`
+
+`read_checkouts` is intentionally not requested. Shopify retired the legacy
+Checkout APIs in 2025, and PineTree creates its own checkout sessions rather
+than reading Shopify Checkout API resources.
 
 ## Verify
 

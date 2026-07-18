@@ -7,8 +7,9 @@ export const SHOPIFY_APP_CONFIG = {
 
   // OAuth scopes required for the PineTree payment integration.
   // read_orders / write_orders — retrieve and update order status after payment.
-  // read_checkouts — access checkout data to build session params.
-  REQUIRED_SCOPES: "read_orders,write_orders,read_checkouts",
+  // PineTree does not use Shopify's retired Checkout APIs, so read_checkouts
+  // is intentionally excluded.
+  REQUIRED_SCOPES: "read_orders,write_orders",
 
   // Webhook topics PineTree subscribes to on install.
   WEBHOOK_TOPICS: [

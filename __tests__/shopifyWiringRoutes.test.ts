@@ -49,7 +49,7 @@ describe("Shopify database-backed route wiring", () => {
     mocks.encryptToken.mockReturnValue("encrypted-token")
     process.env.SHOPIFY_CLIENT_ID = "client_123"
     process.env.SHOPIFY_CLIENT_SECRET = "shopify-secret"
-    process.env.SHOPIFY_SCOPES = "read_orders,write_orders,read_checkouts"
+    process.env.SHOPIFY_SCOPES = "read_orders,write_orders"
     process.env.SHOPIFY_APP_URL = "https://app.test"
     process.env.SHOPIFY_TOKEN_ENCRYPTION_KEY = "a".repeat(64)
   })

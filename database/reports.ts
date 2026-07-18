@@ -53,7 +53,6 @@ export type MerchantReportContext = {
 
 type MerchantRow = {
   id?: string | null
-  name?: string | null
   business_name?: string | null
   email?: string | null
 }
@@ -144,7 +143,7 @@ export async function getMerchantReportContext(merchantId: string): Promise<Merc
   const [merchantResult, settingsResult, taxResult] = await Promise.all([
     db
       .from("merchants")
-      .select("id,name,business_name,email")
+      .select("id,business_name,email")
       .eq("id", normalizedMerchantId)
       .maybeSingle(),
     db
@@ -166,7 +165,7 @@ export async function getMerchantReportContext(merchantId: string): Promise<Merc
   const merchant = (merchantResult.data || {}) as MerchantRow
   const settings = (settingsResult.data || {}) as SettingsRow
   const tax = (taxResult.data || {}) as TaxRow
-  const businessName = settings.business_name || merchant.business_name || merchant.name || "PineTree Merchant"
+  const businessName = settings.business_name || merchant.business_name || "PineTree Merchant"
 
   return {
     merchant: {

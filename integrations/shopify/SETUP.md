@@ -7,7 +7,7 @@ Add these values to the PineTree deployment:
 ```text
 SHOPIFY_CLIENT_ID=<Shopify app client ID>
 SHOPIFY_CLIENT_SECRET=<Shopify app client secret>
-SHOPIFY_SCOPES=read_orders,write_orders,read_checkouts
+SHOPIFY_SCOPES=read_orders,write_orders
 SHOPIFY_APP_URL=https://your-pinetree-domain.com
 SHOPIFY_TOKEN_ENCRYPTION_KEY=<64-character hexadecimal key>
 ```
@@ -23,7 +23,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 Use these scopes:
 
 ```text
-read_orders,write_orders,read_checkouts
+read_orders,write_orders
 ```
 
 Add this allowed callback URL:
@@ -39,6 +39,9 @@ ${SHOPIFY_APP_URL}/api/shopify/webhooks
 ```
 
 Register:
+
+Do not request `read_checkouts`: Shopify retired the legacy Checkout APIs in
+2025, and PineTree creates its own checkout sessions.
 
 - `orders/paid`
 - `orders/cancelled`

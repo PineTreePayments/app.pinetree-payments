@@ -110,9 +110,22 @@ export async function middleware(req: NextRequest) {
 
   // getUser() validates the JWT against Supabase — never use getSession() here
   // because it trusts the client-side cookie without server verification.
-  const {
+  let {
     data: { user },
   } = await supabase.auth.getUser()
+
+  // Dashboard API clients send the same Supabase session as an explicit
+  // bearer token. Middleware previously checked cookies only, rejecting valid
+  // authenticated API requests before the route-level verifier could run.
+  // Validate a bearer session directly when no cookie session was found.
+  const authorization = req.headers.get("authorization") || ""
+  const bearerToken = authorization.startsWith("Bearer ")
+    ? authorization.slice(7).trim()
+    : ""
+  if (!user && bearerToken && !bearerToken.startsWith("pt_live_")) {
+    const bearerAuth = await supabase.auth.getUser(bearerToken)
+    user = bearerAuth.data.user
+  }
 
   const protectedPage = isProtectedPage(pathname)
   const protectedApi = isProtectedApi(pathname)

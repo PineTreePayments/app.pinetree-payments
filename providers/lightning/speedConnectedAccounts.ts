@@ -12,11 +12,11 @@
  * account - only create, list, and retrieve are implemented above. Do not add
  * an unverified DELETE-style call against a guessed endpoint; confirm the
  * exact contract in Speed's own API docs first. Until then, the retained
- * credential (database/merchantSpeedCredentials.ts) is the only supported
- * fallback for removing/cleaning up a PineTree-created Speed account, via
- * Speed's own portal login - that is a separate operation from disconnecting
- * the account inside PineTree Connect, not proven-equivalent to permanent
- * account deletion.
+ * historical retained credentials (database/merchantSpeedCredentials.ts) may
+ * help an administrator recover older accounts through Speed's portal. Active
+ * provisioning does not retain the unified server password. Portal access is
+ * separate from disconnecting an account inside PineTree Connect and is not
+ * proven equivalent to permanent account deletion.
  */
 
 import {
