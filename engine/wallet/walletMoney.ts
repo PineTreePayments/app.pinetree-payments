@@ -24,6 +24,10 @@ export function isSupportedWalletAsset(value: string): value is WalletAsset {
 }
 
 export function getWalletAssetDecimals(asset: string): number {
+  // BTC balance snapshots use satoshis as their base unit. BTC remains
+  // display-only here; provider write operations continue to use SATS until
+  // the provider contract explicitly supports BTC-denominated write input.
+  if (asset === "BTC") return 8
   return isSupportedWalletAsset(asset) ? ASSET_DECIMALS[asset] : 0
 }
 

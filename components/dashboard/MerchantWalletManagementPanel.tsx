@@ -51,6 +51,8 @@ type PineTreeWalletBalance = {
 type BalancesData = {
   capabilityAvailable: boolean
   unavailableReason: string | null
+  syncStatus: "live" | "cached" | "unavailable"
+  lastSuccessfulSyncAt: string | null
   balances: PineTreeWalletBalance[]
 }
 
@@ -394,23 +396,45 @@ function CapabilitySummary({ capabilities }: { capabilities: CapabilitiesData | 
 }
 
 function BalancesCard({ balances }: { balances: BalancesData | null }) {
+  const hasCachedBalance = Boolean(balances?.balances.length)
+  const hasStaleBalance = Boolean(balances?.balances.some((balance) => balance.stale))
+  const syncLabel = balances?.syncStatus === "live"
+    ? "Synced"
+    : balances?.syncStatus === "cached"
+      ? hasStaleBalance ? "Stale" : "Cached"
+      : "Unavailable"
   return (
     <Card>
-      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Balances</p>
-      {!balances || !balances.capabilityAvailable ? (
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Balances</p>
+        <div className="text-right">
+          {balances ? <p className={`text-xs font-semibold ${syncLabel === "Synced" ? "text-green-700" : syncLabel === "Unavailable" ? "text-gray-500" : "text-amber-700"}`}>{syncLabel}</p> : null}
+          {balances?.lastSuccessfulSyncAt ? <p className="text-xs text-gray-400">Provider sync {new Date(balances.lastSuccessfulSyncAt).toLocaleString()}</p> : null}
+        </div>
+      </div>
+      {!balances ? (
+        <p className="text-sm text-gray-500">Loading balance…</p>
+      ) : !balances.capabilityAvailable && !hasCachedBalance ? (
         <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
           Live balance reading is not currently available for this wallet. This will appear automatically once
           available.
         </div>
       ) : balances.balances.length === 0 ? (
-        <p className="text-sm text-gray-500">No balance data yet.</p>
+        <div className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
+          No confirmed balance has been synchronized yet.
+        </div>
       ) : (
         <div className="space-y-2">
+          {balances.syncStatus === "cached" ? (
+            <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Live synchronization is not currently available. Showing the last confirmed balance without changing it.
+            </div>
+          ) : null}
           {balances.balances.map((row) => (
             <div key={`${row.asset}-${row.network ?? ""}`} className="flex items-center justify-between text-sm">
               <span className="font-medium text-gray-900">
                 {row.asset}
-                {row.stale ? <span className="ml-1.5 text-xs font-normal text-amber-600">(cached)</span> : null}
+                {row.stale ? <span className="ml-1.5 text-xs font-normal text-amber-600">(stale)</span> : balances.syncStatus === "cached" ? <span className="ml-1.5 text-xs font-normal text-amber-600">(cached)</span> : null}
               </span>
               <span className="text-gray-600">{formatAmount(row.availableBaseUnits, row.decimals, row.asset)}</span>
             </div>

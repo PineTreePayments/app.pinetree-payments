@@ -51,6 +51,26 @@ export type TransactionsDashboardData = {
   todayVolume: number
   todayTransactions: number
   confirmedRate: number
+  pagination: {
+    page: number
+    pageSize: number
+    total: number
+    totalPages: number
+  }
+}
+
+export type TransactionsDashboardFilters = {
+  provider?: string | null
+  network?: string | null
+  channel?: string | null
+  status?: string | null
+  rail?: string | null
+  asset?: string | null
+  method?: string | null
+  startDate?: string | null
+  endDate?: string | null
+  page?: number
+  pageSize?: number
 }
 
 type TransactionsChartProviderKey = Exclude<keyof TransactionsChartRow, "time">
@@ -207,9 +227,18 @@ function getChartAmountUsd(
   )
 }
 
-export async function getTransactionsDashboardEngine(merchantId: string): Promise<TransactionsDashboardData> {
+export async function getTransactionsDashboardEngine(
+  merchantId: string,
+  filters: TransactionsDashboardFilters = {}
+): Promise<TransactionsDashboardData> {
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(filters.pageSize || 50)))
+  const page = Math.max(1, Math.trunc(filters.page || 1))
+  const offset = (page - 1) * pageSize
+  const status = String(filters.status || "").trim().toUpperCase()
+  const asset = String(filters.asset || "").trim().toUpperCase().replace(/[^A-Z0-9._-]/g, "")
+  const paymentJoin = status || asset ? "payments!inner" : "payments"
   // Use transactions table directly — includes cash, crypto, and all channels
-  const { data: txData, error: txError } = await db
+  let transactionQuery = db
     .from("transactions")
     .select(`
       id,
@@ -221,21 +250,60 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
       channel,
       total_amount,
       created_at,
-      payments (
+      ${paymentJoin} (
         id,
         created_at,
         gross_amount,
         merchant_amount,
         pinetree_fee,
         currency,
+        provider,
+        network,
         status,
         provider_reference,
         metadata
       )
-    `)
+    `, { count: "exact" })
     .eq("merchant_id", merchantId)
     .order("created_at", { ascending: false })
-    .limit(100)
+    .order("id", { ascending: false })
+    .range(offset, offset + pageSize - 1)
+
+  if (filters.provider === "lightning_speed") {
+    transactionQuery = transactionQuery.in("provider", ["lightning_speed", "speed", "lightning"])
+  } else if (filters.provider) {
+    transactionQuery = transactionQuery.eq("provider", filters.provider)
+  }
+  if (filters.network) transactionQuery = transactionQuery.eq("network", filters.network)
+  if (filters.channel) transactionQuery = transactionQuery.eq("channel", filters.channel)
+  if (status) transactionQuery = transactionQuery.eq("payments.status", status)
+  if (asset) {
+    // Crypto checkouts retain USD as their settlement currency and record the
+    // selected asset in metadata. Match either representation while keeping
+    // the relation inner-joined so count/pagination remain exact.
+    transactionQuery = transactionQuery.or(
+      `currency.eq.${asset},metadata->>selectedAsset.eq.${asset},metadata->>asset.eq.${asset}`,
+      { referencedTable: "payments" }
+    )
+  }
+
+  const rail = String(filters.rail || "").trim().toLowerCase()
+  if (rail === "card") transactionQuery = transactionQuery.in("provider", ["stripe", "shift4", "fluidpay"])
+  if (rail === "cash") transactionQuery = transactionQuery.eq("provider", "cash")
+  if (["solana", "base", "bitcoin_lightning"].includes(rail)) {
+    transactionQuery = transactionQuery.eq("network", rail)
+  }
+
+  const method = String(filters.method || "").trim().toLowerCase()
+  if (method === "card") transactionQuery = transactionQuery.in("provider", ["stripe", "shift4", "fluidpay"])
+  if (method === "cash") transactionQuery = transactionQuery.eq("provider", "cash")
+  if (method === "crypto") {
+    transactionQuery = transactionQuery.in("network", ["solana", "base", "ethereum", "bitcoin_lightning", "lightning"])
+  }
+  if (filters.startDate) transactionQuery = transactionQuery.gte("created_at", filters.startDate)
+  if (filters.endDate) transactionQuery = transactionQuery.lte("created_at", filters.endDate)
+
+  const { data: txData, error: txError, count } = await transactionQuery
 
   if (txError) {
     throw new Error(`Failed to load transactions: ${txError.message}`)
@@ -279,7 +347,9 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
   }
 
   const safePayments = paymentRows || []
-  const todayVolume = safePayments.reduce((sum, p) => sum + Number(p.gross_amount || 0), 0)
+  const todayVolume = safePayments
+    .filter((payment) => payment.status === "CONFIRMED")
+    .reduce((sum, payment) => sum + Number(payment.gross_amount || 0), 0)
   const todayTransactions = safePayments.length
   const confirmed = safePayments.filter((p) => p.status === "CONFIRMED").length
 
@@ -327,7 +397,13 @@ export async function getTransactionsDashboardEngine(merchantId: string): Promis
     transactions,
     todayVolume,
     todayTransactions,
-    confirmedRate: todayTransactions ? Math.round((confirmed / todayTransactions) * 100) : 0
+    confirmedRate: todayTransactions ? Math.round((confirmed / todayTransactions) * 100) : 0,
+    pagination: {
+      page,
+      pageSize,
+      total: count || 0,
+      totalPages: Math.max(1, Math.ceil((count || 0) / pageSize))
+    }
   }
 }
 

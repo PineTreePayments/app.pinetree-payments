@@ -1218,7 +1218,6 @@ function WalletSetupProgress({
   const [subtitleIndex, setSubtitleIndex] = useState(0)
 
   useEffect(() => {
-    setSubtitleIndex(0)
     if (!active || config.rotatingSubtitles.length <= 1) return
     const subtitleRotationTimer = window.setInterval(() => {
       setSubtitleIndex((current) => (current + 1) % config.rotatingSubtitles.length)
@@ -1226,7 +1225,9 @@ function WalletSetupProgress({
     return () => window.clearInterval(subtitleRotationTimer)
   }, [active, stage, config.rotatingSubtitles.length])
 
-  const subtitle = config.rotatingSubtitles[subtitleIndex] || config.subtitle
+  const subtitle = config.rotatingSubtitles[
+    subtitleIndex % config.rotatingSubtitles.length
+  ] || config.subtitle
 
   return (
     <div className="mt-5 w-full max-w-xl overflow-hidden rounded-xl border border-blue-100/80 bg-blue-50/80 px-4 py-4 shadow-[0_12px_32px_rgba(0,82,255,0.08)] sm:px-5 sm:py-5" data-wallet-setup-progress>
@@ -2489,7 +2490,7 @@ function BalanceRows({
       if (row.rail === "solana" && profileAddresses.solana.length === 0) return false
       return row.status === "synced" || row.balance !== null || row.usdValue !== null
     })
-  }, [bitcoinPayoutEntries.length, profileAddresses.base.length, profileAddresses.solana.length, sync?.balances.base, sync?.balances.bitcoin, sync?.balances.solana])
+  }, [bitcoinPayoutEntries.length, profileAddresses.base.length, profileAddresses.solana.length, sync?.balances])
 
   const preferredSelectedKey =
     balanceOptions.find((row) => row.key === "BASE_ETH")?.key ??
@@ -8266,7 +8267,7 @@ function PineTreeWalletRuntime() {
             className="w-full max-w-[26rem] rounded-[1.25rem] border border-white/70 bg-white px-5 py-5 shadow-[0_28px_80px_rgba(15,23,42,0.28)]"
           >
             <h2 id="pinetree-withdrawal-auth-recovery-title" className="text-base font-semibold text-gray-950">
-              We couldn't authorize this withdrawal
+              {"We couldn't authorize this withdrawal"}
             </h2>
             {withdrawalReview ? (
               <p className="mt-2 text-sm leading-6 text-gray-600">

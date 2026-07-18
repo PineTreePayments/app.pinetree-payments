@@ -57,6 +57,10 @@ describe("formatWalletBaseUnitsAsDecimal", () => {
     expect(formatWalletBaseUnitsAsDecimal(BigInt(1000), "SATS")).toBe("1000")
   })
 
+  it("formats BTC display balances from satoshi base units", () => {
+    expect(formatWalletBaseUnitsAsDecimal(BigInt(125_000), "BTC")).toBe("0.00125")
+  })
+
   it("strips trailing zeros without dropping the whole part", () => {
     expect(formatWalletBaseUnitsAsDecimal(BigInt(10_000_000), "USDC")).toBe("10")
   })

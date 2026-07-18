@@ -10,6 +10,11 @@ import {
   normalizeReportProvider,
   normalizeReportStatus
 } from "./reportDisplayNormalization"
+import {
+  formatInMerchantTimeZone,
+  resolveMerchantReportRange,
+  type ReportPeriodType
+} from "./reportPeriods"
 
 export type ReportType =
   | "today"
@@ -19,6 +24,8 @@ export type ReportType =
   | "tax"
   | "year"
   | "transactions"
+  | "custom"
+  | "end_of_day"
 
 export type ReportInput = {
   merchantId: string
@@ -33,6 +40,7 @@ export type ReportLedgerRow = {
   paymentId: string
   reference: string
   provider: string
+  rail: "Card" | "Crypto" | "Cash" | "Other"
   network: string
   asset: string
   channel: string
@@ -42,6 +50,7 @@ export type ReportLedgerRow = {
   gross: number
   netSettlement: number
   status: string
+  canonicalStatus: string
 }
 
 export type ReportSummary = {
@@ -77,9 +86,20 @@ export type ReportSummary = {
   avgTransaction: number
   failedPayments: number
   providerTotals: Record<string, number>
+  railTotals: Record<string, number>
   channelTotals: Record<string, number>
   networkTotals: Record<string, number>
   assetTotals: Record<string, number>
+  cardVolume: number
+  cryptoVolume: number
+  cashVolume: number
+  timeZone: string
+  isInProgress: boolean
+  reconciliation: {
+    providerMatchesGross: boolean
+    railMatchesGross: boolean
+    variance: number
+  }
   transactionsTable: ReportLedgerRow[]
 }
 
@@ -90,55 +110,38 @@ const REPORT_LABELS: Record<ReportType, string> = {
   month: "Monthly Report",
   tax: "Tax Report",
   year: "Yearly Summary",
-  transactions: "Transaction Export"
+  transactions: "Transaction Export",
+  custom: "Custom Report",
+  end_of_day: "End of Day Report"
 }
 
 export function normalizeReportType(type?: string | null): ReportType {
   const normalized = String(type || "month").trim().toLowerCase()
-  if (normalized === "today") return "today"
+  if (normalized === "today" || normalized === "daily") return "today"
+  if (normalized === "end-of-day" || normalized === "end_of_day" || normalized === "eod") return "end_of_day"
   if (normalized === "yesterday") return "yesterday"
   if (normalized === "weekly" || normalized === "week") return "weekly"
   if (normalized === "tax") return "tax"
   if (normalized === "year" || normalized === "yearly") return "year"
   if (normalized === "transactions" || normalized === "transaction-export" || normalized === "export") return "transactions"
+  if (normalized === "custom") return "custom"
   return "month"
 }
 
-export function resolveReportRange(input: { type?: string | null; startDate?: string | null; endDate?: string | null }) {
-  if (input.startDate && input.endDate) {
-    return {
-      startDate: new Date(input.startDate).toISOString(),
-      endDate: new Date(input.endDate).toISOString()
-    }
-  }
-
-  const type = normalizeReportType(input.type)
-  const now = new Date()
-  const start = new Date(now)
-  const end = new Date(now)
-
-  if (type === "today") {
-    start.setHours(0, 0, 0, 0)
-  } else if (type === "yesterday") {
-    start.setDate(start.getDate() - 1)
-    start.setHours(0, 0, 0, 0)
-    end.setTime(start.getTime())
-    end.setHours(23, 59, 59, 999)
-  } else if (type === "weekly") {
-    start.setDate(start.getDate() - 6)
-    start.setHours(0, 0, 0, 0)
-  } else if (type === "year") {
-    start.setMonth(0, 1)
-    start.setHours(0, 0, 0, 0)
-  } else {
-    start.setDate(1)
-    start.setHours(0, 0, 0, 0)
-  }
-
-  return {
-    startDate: start.toISOString(),
-    endDate: end.toISOString()
-  }
+export function resolveReportRange(input: {
+  type?: string | null
+  startDate?: string | null
+  endDate?: string | null
+  timeZone?: string | null
+  now?: Date
+}) {
+  return resolveMerchantReportRange({
+    type: normalizeReportType(input.type) as ReportPeriodType,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    timeZone: input.timeZone,
+    now: input.now,
+  })
 }
 
 function titleForReport(type: ReportType) {
@@ -154,13 +157,24 @@ function displayChannelName(channel: string) {
   return channel || "Unknown"
 }
 
-function centsToDollars(value: number | string | null | undefined) {
+function transactionCentsToDollars(value: number | string | null | undefined) {
   const numeric = Number(value || 0)
-  return numeric > 999 ? numeric / 100 : numeric
+  return Number.isFinite(numeric) ? fromMinorUnits(Math.round(numeric)) : 0
 }
 
 function money(value: number | string | null | undefined) {
-  return Number(value || 0)
+  const numeric = Number(value || 0)
+  return Number.isFinite(numeric) ? fromMinorUnits(toMinorUnits(numeric)) : 0
+}
+
+const MONEY_SCALE = 100
+
+function toMinorUnits(value: number): number {
+  return Math.round(value * MONEY_SCALE)
+}
+
+function fromMinorUnits(value: number): number {
+  return value / MONEY_SCALE
 }
 
 function getMetadataNumber(metadata: Record<string, unknown> | null | undefined, key: string) {
@@ -181,32 +195,56 @@ function primaryTransaction(payment: MerchantReportPaymentRow) {
     : null
 }
 
-function addTotal(target: Record<string, number>, key: string, value: number) {
+function addMinorTotal(target: Record<string, number>, key: string, value: number) {
   const normalized = key || "Unknown"
   target[normalized] = (target[normalized] || 0) + value
+}
+
+function minorTotalsToMoney(target: Record<string, number>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(target).map(([key, value]) => [key, fromMinorUnits(value)])
+  )
+}
+
+function resolveRail(provider: string, network: string, channel: string): ReportLedgerRow["rail"] {
+  const normalizedProvider = provider.toLowerCase()
+  if (normalizedProvider === "cash" || network === "Cash" || channel === "Cash") return "Cash"
+  if (["stripe", "shift4", "fluidpay"].some((value) => normalizedProvider.includes(value))) return "Card"
+  if (["Solana", "Base", "Ethereum", "Bitcoin Lightning"].includes(network)) return "Crypto"
+  return "Other"
 }
 
 function buildLedgerRow(payment: MerchantReportPaymentRow): ReportLedgerRow {
   const tx = primaryTransaction(payment)
   const metadata = payment.metadata || {}
   const transactionStatus = String(tx?.status || "").trim().toUpperCase()
-  const statusCode = transactionStatus === "REFUNDED"
+  const hasRefundedTransaction = Array.isArray(payment.transactions) && payment.transactions.some(
+    (transaction) => String(transaction.status || "").trim().toUpperCase() === "REFUNDED"
+  )
+  const statusCode = hasRefundedTransaction || transactionStatus === "REFUNDED"
     ? "REFUNDED"
     : String(payment.status || tx?.status || "PENDING").trim().toUpperCase()
   const status = normalizeReportStatus(statusCode, payment.created_at)
-  const gross = money(payment.gross_amount) || centsToDollars(tx?.total_amount)
-  const pinetreeFee = money(payment.pinetree_fee) || centsToDollars(tx?.platform_fee)
+  // A recorded zero is authoritative (for example, a waived historical fee).
+  // Fall back to the transaction only when the payment column is absent.
+  const gross = payment.gross_amount == null
+    ? transactionCentsToDollars(tx?.total_amount)
+    : money(payment.gross_amount)
+  const pinetreeFee = payment.pinetree_fee == null
+    ? transactionCentsToDollars(tx?.platform_fee)
+    : money(payment.pinetree_fee)
   const metadataSubtotal = getMetadataNumber(metadata, "subtotalAmount") || getMetadataNumber(metadata, "merchantAmount")
-  const transactionSubtotal = centsToDollars(tx?.subtotal_amount)
-  const subtotal = metadataSubtotal || transactionSubtotal || Math.max(0, money(payment.merchant_amount) - getMetadataNumber(metadata, "taxAmount"))
+  const transactionSubtotal = transactionCentsToDollars(tx?.subtotal_amount)
+  const subtotal = money(metadataSubtotal || transactionSubtotal || Math.max(0, money(payment.merchant_amount) - getMetadataNumber(metadata, "taxAmount")))
   const metadataTax = getMetadataNumber(metadata, "taxAmount")
-  const tax = metadataTax || Math.max(0, money(payment.merchant_amount) - subtotal)
+  const tax = money(metadataTax || Math.max(0, money(payment.merchant_amount) - subtotal))
   const rawProvider = String(tx?.provider || payment.provider || "")
   const rawNetwork = tx?.network || payment.network
   const provider = normalizeReportProvider(rawProvider || "unknown")
   const network = normalizeReportNetwork(rawNetwork, rawProvider)
   const asset = normalizeReportAsset(getRawAsset(payment), rawNetwork, rawProvider, payment.currency)
   const channel = displayChannelName(String(tx?.channel || metadata.channel || "online"))
+  const rail = resolveRail(provider, network, channel)
   const reference = String(tx?.provider_transaction_id || payment.provider_reference || payment.id)
 
   return {
@@ -214,6 +252,7 @@ function buildLedgerRow(payment: MerchantReportPaymentRow): ReportLedgerRow {
     paymentId: payment.id,
     reference,
     provider,
+    rail,
     network,
     asset,
     channel,
@@ -221,27 +260,27 @@ function buildLedgerRow(payment: MerchantReportPaymentRow): ReportLedgerRow {
     tax,
     pinetreeFee,
     gross,
-    netSettlement: Math.max(0, gross - pinetreeFee),
-    status
+    netSettlement: money(Math.max(0, gross - pinetreeFee)),
+    status,
+    canonicalStatus: statusCode
   }
 }
 
 export async function generateReportEngine(input: ReportInput): Promise<ReportSummary> {
   const reportType = normalizeReportType(input.type)
-  const range = resolveReportRange(input)
-  const [payments, context] = await Promise.all([
-    getMerchantPaymentsForReport({
-      merchantId: input.merchantId,
-      startDate: range.startDate,
-      endDate: range.endDate
-    }),
-    getMerchantReportContext(input.merchantId)
-  ])
+  const context = await getMerchantReportContext(input.merchantId)
+  const range = resolveReportRange({ ...input, timeZone: context.settings.timezone })
+  const payments = await getMerchantPaymentsForReport({
+    merchantId: input.merchantId,
+    startDate: range.startDate,
+    endDate: range.endDate
+  })
 
-  const providerTotals: Record<string, number> = {}
-  const channelTotals: Record<string, number> = {}
-  const networkTotals: Record<string, number> = {}
-  const assetTotals: Record<string, number> = {}
+  const providerTotalsMinor: Record<string, number> = {}
+  const channelTotalsMinor: Record<string, number> = {}
+  const railTotalsMinor: Record<string, number> = {}
+  const networkTotalsMinor: Record<string, number> = {}
+  const assetTotalsMinor: Record<string, number> = {}
   const statusFilter = input.status
     ? normalizeReportStatus(input.status, "")
     : null
@@ -249,48 +288,58 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
     .map(buildLedgerRow)
     .filter((row) => !statusFilter || row.status === statusFilter)
 
-  let grossVolume = 0
-  let netSettlements = 0
-  let pineTreeFees = 0
-  let taxesCollected = 0
-  let taxableSales = 0
+  let grossVolumeMinor = 0
+  let netSettlementsMinor = 0
+  let pineTreeFeesMinor = 0
+  let taxesCollectedMinor = 0
+  let taxableSalesMinor = 0
   let confirmedCount = 0
   let failedCount = 0
   let waitingCount = 0
   let processingCount = 0
   let expiredCount = 0
   let canceledCount = 0
+  let incompleteCount = 0
   let refundedCount = 0
   let unknownCount = 0
-  let refundedAmount = 0
+  let refundedAmountMinor = 0
   const statusCounts: Record<string, number> = {}
 
   for (const row of transactionsTable) {
     statusCounts[row.status] = (statusCounts[row.status] || 0) + 1
     if (row.status === "Confirmed") {
       confirmedCount++
-      grossVolume += row.gross
-      netSettlements += row.netSettlement
-      pineTreeFees += row.pinetreeFee
-      taxesCollected += row.tax
-      taxableSales += row.subtotal
-      addTotal(providerTotals, row.provider, row.gross)
-      addTotal(channelTotals, row.channel, row.gross)
-      addTotal(networkTotals, row.network, row.gross)
-      addTotal(assetTotals, row.asset, row.gross)
+      const grossMinor = toMinorUnits(row.gross)
+      grossVolumeMinor += grossMinor
+      netSettlementsMinor += toMinorUnits(row.netSettlement)
+      pineTreeFeesMinor += toMinorUnits(row.pinetreeFee)
+      taxesCollectedMinor += toMinorUnits(row.tax)
+      taxableSalesMinor += toMinorUnits(row.subtotal)
+      addMinorTotal(providerTotalsMinor, row.provider, grossMinor)
+      addMinorTotal(channelTotalsMinor, row.channel, grossMinor)
+      addMinorTotal(railTotalsMinor, row.rail, grossMinor)
+      addMinorTotal(networkTotalsMinor, row.network, grossMinor)
+      addMinorTotal(assetTotalsMinor, row.asset, grossMinor)
     } else if (row.status === "Failed") {
       failedCount++
     } else if (row.status === "Waiting") {
       waitingCount++
     } else if (row.status === "Processing") {
       processingCount++
+    } else if (row.canonicalStatus === "INCOMPLETE") {
+      incompleteCount++
+      // The merchant-facing status label is currently "Canceled" for the
+      // canonical INCOMPLETE state, but reporting keeps the lifecycle bucket
+      // explicit for financial metrics while retaining the existing display
+      // bucket for backward-compatible dashboards.
+      canceledCount++
     } else if (row.status === "Expired") {
       expiredCount++
     } else if (row.status === "Canceled") {
       canceledCount++
     } else if (row.status === "Refunded") {
       refundedCount++
-      refundedAmount += row.gross
+      refundedAmountMinor += toMinorUnits(row.gross)
     } else {
       unknownCount++
     }
@@ -298,12 +347,27 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
 
   const transactionCount = transactionsTable.length
   const successRate = transactionCount > 0 ? Math.round((confirmedCount / transactionCount) * 100) : 0
+  const totalOf = (values: Record<string, number>) => Object.values(values).reduce((sum, value) => sum + value, 0)
+  const providerVarianceMinor = Math.abs(totalOf(providerTotalsMinor) - grossVolumeMinor)
+  const railVarianceMinor = Math.abs(totalOf(railTotalsMinor) - grossVolumeMinor)
+  const providerTotals = minorTotalsToMoney(providerTotalsMinor)
+  const channelTotals = minorTotalsToMoney(channelTotalsMinor)
+  const railTotals = minorTotalsToMoney(railTotalsMinor)
+  const networkTotals = minorTotalsToMoney(networkTotalsMinor)
+  const assetTotals = minorTotalsToMoney(assetTotalsMinor)
+  const grossVolume = fromMinorUnits(grossVolumeMinor)
+  const netSettlements = fromMinorUnits(netSettlementsMinor)
+  const pineTreeFees = fromMinorUnits(pineTreeFeesMinor)
+  const taxesCollected = fromMinorUnits(taxesCollectedMinor)
+  const taxableSales = fromMinorUnits(taxableSalesMinor)
 
   return {
     reportType,
     title: titleForReport(reportType),
     startDate: range.startDate,
     endDate: range.endDate,
+    timeZone: range.timeZone,
+    isInProgress: range.isInProgress,
     generatedAt: new Date().toISOString(),
     merchant: context.merchant,
     merchantSettings: context.settings,
@@ -319,28 +383,40 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
     transactionCount,
     confirmedCount,
     failedCount,
-    incompleteCount: canceledCount,
+    incompleteCount,
     waitingCount,
     processingCount,
     expiredCount,
     canceledCount,
     refundedCount,
     unknownCount,
-    refundedAmount,
+    refundedAmount: fromMinorUnits(refundedAmountMinor),
     statusCounts,
     successRate,
-    avgTransaction: confirmedCount > 0 ? grossVolume / confirmedCount : 0,
+    avgTransaction: confirmedCount > 0
+      ? fromMinorUnits(Math.round(grossVolumeMinor / confirmedCount))
+      : 0,
     failedPayments: failedCount,
     providerTotals,
+    railTotals,
     channelTotals,
     networkTotals,
     assetTotals,
+    cardVolume: railTotals.Card || 0,
+    cryptoVolume: railTotals.Crypto || 0,
+    cashVolume: railTotals.Cash || 0,
+    reconciliation: {
+      providerMatchesGross: providerVarianceMinor === 0,
+      railMatchesGross: railVarianceMinor === 0,
+      variance: fromMinorUnits(Math.max(providerVarianceMinor, railVarianceMinor)),
+    },
     transactionsTable
   }
 }
 
-function csvValue(value: string | number) {
-  const raw = String(value)
+function csvValue(value: string | number, protectFormula = true) {
+  let raw = String(value)
+  if (protectFormula && /^[\t\r ]*[=+\-@]/.test(raw)) raw = `'${raw}`
   return /[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw
 }
 
@@ -350,6 +426,7 @@ export function generateReportCsv(report: ReportSummary) {
     "payment_id",
     "reference",
     "provider",
+    "rail",
     "network",
     "asset_currency",
     "channel",
@@ -362,24 +439,28 @@ export function generateReportCsv(report: ReportSummary) {
   ]
 
   const rows = report.transactionsTable.map((row) => [
-    row.dateTime,
+    formatInMerchantTimeZone(row.dateTime, report.timeZone),
     row.paymentId,
     row.reference,
     row.provider,
+    row.rail,
     row.network,
     row.asset,
     row.channel,
-    row.subtotal.toFixed(2),
-    row.tax.toFixed(2),
-    row.pinetreeFee.toFixed(2),
-    row.gross.toFixed(2),
-    row.netSettlement.toFixed(2),
+    row.subtotal,
+    row.tax,
+    row.pinetreeFee,
+    row.gross,
+    row.netSettlement,
     row.status
   ])
 
   return [
     headers.join(","),
-    ...rows.map((row) => row.map(csvValue).join(","))
+    ...rows.map((row) => row.map((value, index) => {
+      const numericColumn = index >= 8 && index <= 12
+      return csvValue(numericColumn && typeof value === "number" ? value.toFixed(2) : value, !numericColumn)
+    }).join(","))
   ].join("\n")
 }
 
@@ -398,5 +479,7 @@ export function getReportFilename(report: ReportSummary, format: "pdf" | "csv") 
   if (report.reportType === "tax") return `pinetree-tax-report-${start}_to_${end}.${extension}`
   if (report.reportType === "year") return `pinetree-yearly-summary-${start}_to_${end}.${extension}`
   if (report.reportType === "transactions") return `pinetree-transaction-export-${start}_to_${end}.${extension}`
+  if (report.reportType === "end_of_day") return `pinetree-end-of-day-${start}.${extension}`
+  if (report.reportType === "custom") return `pinetree-custom-report-${start}_to_${end}.${extension}`
   return `pinetree-monthly-report-${start}_to_${end}.${extension}`
 }

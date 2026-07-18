@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   canCardProviderProcessPayments,
+  isCardProviderSetupReady,
   isLegacyCardProviderApproved,
   isStripeConnectReady
 } from "@/providers/cardProviderReadiness"
@@ -25,6 +26,7 @@ describe("card provider readiness", () => {
 
   it("does not make Stripe card-ready when the provider is disabled", () => {
     expect(canCardProviderProcessPayments({ ...activeStripe, enabled: false })).toBe(false)
+    expect(isCardProviderSetupReady({ ...activeStripe, enabled: false })).toBe(true)
   })
 
   it("does not make Stripe card-ready when charges are disabled", () => {
@@ -47,20 +49,32 @@ describe("card provider readiness", () => {
       enabled: true,
       credentials: { application_status: "pending" }
     })).toBe(false)
+    expect(isCardProviderSetupReady({
+      provider: "shift4",
+      status: "pending",
+      enabled: false,
+      credentials: { application_status: "approved" }
+    })).toBe(true)
   })
 
-  it("preserves FluidPay approval behavior", () => {
+  it("keeps FluidPay routing blocked even when underwriting is approved until the API contract is verified", () => {
     expect(isLegacyCardProviderApproved({
       provider: "fluidpay",
       status: "pending",
       enabled: true,
       credentials: { application_status: "approved" }
-    })).toBe(true)
+    })).toBe(false)
     expect(isLegacyCardProviderApproved({
       provider: "fluidpay",
       status: "pending",
       enabled: true,
       credentials: { application_status: "denied" }
+    })).toBe(false)
+    expect(isCardProviderSetupReady({
+      provider: "fluidpay",
+      status: "pending",
+      enabled: false,
+      credentials: { application_status: "approved" }
     })).toBe(false)
   })
 })

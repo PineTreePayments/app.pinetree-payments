@@ -43,6 +43,7 @@ describe("Merchant Status Architecture contract", () => {
         zip: null,
         country: null,
         phone: null,
+        timezone: "UTC",
       },
       tax: { tax_enabled: false, tax_rate: 0, tax_name: "Sales Tax" },
     })

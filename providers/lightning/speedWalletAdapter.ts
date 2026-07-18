@@ -170,7 +170,11 @@ export const speedWalletAdapter: WalletProviderAdapter = {
         speedAccountId: context.providerAccountId,
       })
       return balance.available.map((entry) => ({
-        asset: entry.target_currency,
+        // Speed reports Bitcoin in SATS base units. PineTree keeps that raw
+        // integer amount but exposes the merchant-facing asset as BTC with
+        // eight decimals so the unified wallet never presents SATS as a
+        // separate asset.
+        asset: entry.target_currency === "SATS" ? "BTC" : entry.target_currency,
         availableBaseUnits: BigInt(Math.round(entry.amount)),
         pendingBaseUnits: BigInt(0),
         totalBaseUnits: BigInt(Math.round(entry.amount)),

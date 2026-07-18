@@ -8,6 +8,7 @@ export type MerchantWalletBalanceSnapshot = {
   id: string
   merchant_id: string
   provider: string
+  provider_account_id: string | null
   asset: string
   network: string
   available_base_units: string
@@ -21,13 +22,15 @@ export type MerchantWalletBalanceSnapshot = {
 
 export async function listWalletBalanceSnapshots(
   merchantId: string,
-  provider = "speed"
+  provider = "speed",
+  providerAccountId?: string
 ): Promise<MerchantWalletBalanceSnapshot[]> {
   const { data, error } = await supabase
     .from(TABLE)
     .select("*")
     .eq("merchant_id", merchantId)
     .eq("provider", provider)
+    .eq("provider_account_id", providerAccountId || "")
     .order("asset", { ascending: true })
 
   if (error) throw new Error(`Failed to load wallet balance snapshots: ${error.message}`)
@@ -37,6 +40,7 @@ export async function listWalletBalanceSnapshots(
 export async function upsertWalletBalanceSnapshot(input: {
   merchantId: string
   provider?: string
+  providerAccountId: string
   asset: string
   network?: string
   availableBaseUnits: bigint
@@ -48,6 +52,7 @@ export async function upsertWalletBalanceSnapshot(input: {
   const row = {
     merchant_id: input.merchantId,
     provider: input.provider ?? "speed",
+    provider_account_id: input.providerAccountId,
     asset: input.asset,
     network: input.network ?? "",
     available_base_units: input.availableBaseUnits.toString(),
@@ -59,7 +64,7 @@ export async function upsertWalletBalanceSnapshot(input: {
 
   const { data, error } = await supabase
     .from(TABLE)
-    .upsert(row, { onConflict: "merchant_id,provider,asset,network" })
+    .upsert(row, { onConflict: "merchant_id,provider,provider_account_id,asset,network" })
     .select()
     .single()
 

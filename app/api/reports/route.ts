@@ -21,7 +21,13 @@ export async function GET(req: NextRequest) {
       type,
       status: searchParams.get("status") || undefined
     })
-    return NextResponse.json(report)
+    const visibleLedgerLimit = 250
+    return NextResponse.json({
+      ...report,
+      transactionsTable: report.transactionsTable.slice(0, visibleLedgerLimit),
+      totalLedgerRows: report.transactionsTable.length,
+      transactionsTruncated: report.transactionsTable.length > visibleLedgerLimit
+    })
   } catch (error: unknown) {
     console.error("Report error:", error)
     return NextResponse.json(

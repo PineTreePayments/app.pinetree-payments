@@ -352,3 +352,73 @@ describe("engine/wallet/walletOperations - getWalletCapabilities", () => {
     expect(result.capabilities.balances).toBe(false)
   })
 })
+
+describe("engine/wallet/walletOperations - cached balance fallback", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.resetModules()
+    vi.doUnmock("@/engine/wallet/walletProviderResolution")
+    vi.doUnmock("@/database/merchantWalletOperations")
+    vi.doUnmock("@/database/merchantWalletBalanceSnapshots")
+  })
+
+  it("returns the last confirmed balance as stale when the live provider read fails", async () => {
+    vi.resetModules()
+    const adapter = fakeAdapter({
+      getCapabilities: vi.fn().mockResolvedValue({
+        balances: true,
+        withdrawals: false,
+        payouts: false,
+        swaps: false,
+        automaticPayouts: false,
+        automaticConversion: false,
+      }),
+      getBalances: vi.fn().mockRejectedValue(new Error("provider timed out")),
+    })
+    vi.doMock("@/engine/wallet/walletProviderResolution", () => ({
+      resolveMerchantWalletProvider: vi.fn().mockResolvedValue({
+        provider: "fake-provider",
+        adapter,
+        context: fakeContext,
+      }),
+    }))
+    vi.doMock("@/database/merchantWalletOperations", () => ({
+      createWalletOperation: vi.fn(),
+      updateWalletOperation: vi.fn(),
+      getWalletOperationForMerchant: vi.fn(),
+      listWalletOperations: vi.fn(),
+    }))
+    const upsertWalletBalanceSnapshot = vi.fn()
+    const listWalletBalanceSnapshots = vi.fn().mockResolvedValue([{
+      asset: "BTC",
+      network: "bitcoin_lightning",
+      available_base_units: "125000",
+      pending_base_units: "0",
+      total_base_units: "125000",
+      provider_updated_at: "2026-07-17T12:00:00.000Z",
+      cached_at: "2026-07-17T12:00:00.000Z",
+    }])
+    vi.doMock("@/database/merchantWalletBalanceSnapshots", () => ({
+      upsertWalletBalanceSnapshot,
+      listWalletBalanceSnapshots,
+    }))
+
+    const { getWalletBalances } = await import("@/engine/wallet/walletOperations")
+    const result = await getWalletBalances("merchant-1")
+
+    expect(result.syncStatus).toBe("cached")
+    expect(result.unavailableReason).toBe("WALLET_PROVIDER_UNAVAILABLE")
+    expect(result.lastSuccessfulSyncAt).toBe("2026-07-17T12:00:00.000Z")
+    expect(result.balances[0]).toMatchObject({
+      asset: "BTC",
+      availableBaseUnits: "125000",
+      stale: true,
+    })
+    expect(upsertWalletBalanceSnapshot).not.toHaveBeenCalled()
+    expect(listWalletBalanceSnapshots).toHaveBeenCalledWith(
+      "merchant-1",
+      "fake-provider",
+      fakeContext.providerAccountId
+    )
+  })
+})

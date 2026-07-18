@@ -42,6 +42,7 @@ export type MerchantReportContext = {
     zip: string | null
     country: string | null
     phone: string | null
+    timezone: string
   }
   tax: {
     tax_enabled: boolean
@@ -65,6 +66,7 @@ type SettingsRow = {
   zip?: string | null
   country?: string | null
   phone?: string | null
+  timezone?: string | null
 }
 
 type TaxRow = {
@@ -86,9 +88,12 @@ export async function getMerchantPaymentsForReport(input: {
     throw new Error("Missing required report filters")
   }
 
-  const { data, error } = await db
-    .from("payments")
-    .select(`
+  const pageSize = 1_000
+  const rows: MerchantReportPaymentRow[] = []
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await db
+      .from("payments")
+      .select(`
       id,
       merchant_amount,
       pinetree_fee,
@@ -112,17 +117,22 @@ export async function getMerchantPaymentsForReport(input: {
         platform_fee,
         created_at
       )
-    `)
-    .eq("merchant_id", merchantId)
-    .gte("created_at", startDate)
-    .lte("created_at", endDate)
-    .order("created_at", { ascending: true })
+      `)
+      .eq("merchant_id", merchantId)
+      .gte("created_at", startDate)
+      .lte("created_at", endDate)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1)
 
-  if (error) {
-    throw new Error(`Failed to load report payments: ${error.message}`)
+    if (error) {
+      throw new Error(`Failed to load report payments: ${error.message}`)
+    }
+    const page = (data || []) as MerchantReportPaymentRow[]
+    rows.push(...page)
+    if (page.length < pageSize) break
   }
-
-  return (data || []) as MerchantReportPaymentRow[]
+  return rows
 }
 
 export async function getMerchantReportContext(merchantId: string): Promise<MerchantReportContext> {
@@ -131,7 +141,7 @@ export async function getMerchantReportContext(merchantId: string): Promise<Merc
     throw new Error("Missing merchant id")
   }
 
-  const [{ data: merchantData }, { data: settingsData }, { data: taxData }] = await Promise.all([
+  const [merchantResult, settingsResult, taxResult] = await Promise.all([
     db
       .from("merchants")
       .select("id,name,business_name,email")
@@ -139,7 +149,7 @@ export async function getMerchantReportContext(merchantId: string): Promise<Merc
       .maybeSingle(),
     db
       .from("merchant_settings")
-      .select("business_name,address,city,state,zip,country,phone")
+      .select("business_name,address,city,state,zip,country,phone,timezone")
       .eq("merchant_id", normalizedMerchantId)
       .maybeSingle(),
     db
@@ -149,9 +159,13 @@ export async function getMerchantReportContext(merchantId: string): Promise<Merc
       .maybeSingle()
   ])
 
-  const merchant = (merchantData || {}) as MerchantRow
-  const settings = (settingsData || {}) as SettingsRow
-  const tax = (taxData || {}) as TaxRow
+  if (merchantResult.error) throw new Error(`Failed to load report merchant: ${merchantResult.error.message}`)
+  if (settingsResult.error) throw new Error(`Failed to load report settings: ${settingsResult.error.message}`)
+  if (taxResult.error) throw new Error(`Failed to load report tax settings: ${taxResult.error.message}`)
+
+  const merchant = (merchantResult.data || {}) as MerchantRow
+  const settings = (settingsResult.data || {}) as SettingsRow
+  const tax = (taxResult.data || {}) as TaxRow
   const businessName = settings.business_name || merchant.business_name || merchant.name || "PineTree Merchant"
 
   return {
@@ -167,7 +181,8 @@ export async function getMerchantReportContext(merchantId: string): Promise<Merc
       state: settings.state || null,
       zip: settings.zip || null,
       country: settings.country || null,
-      phone: settings.phone || null
+      phone: settings.phone || null,
+      timezone: String(settings.timezone || "UTC")
     },
     tax: {
       tax_enabled: Boolean(tax.tax_enabled),

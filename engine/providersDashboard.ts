@@ -7,7 +7,7 @@ import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import {
   canCardProviderProcessPayments,
-  isLegacyCardProviderApproved,
+  isCardProviderSetupReady,
   isStripeConnectReady
 } from "@/providers/cardProviderReadiness"
 import {
@@ -246,9 +246,9 @@ function getApplicationCardOnboardingStatus(row: ProviderRow): NonNullable<Provi
   }
 
   if (providerId === "shift4") {
-    if (isLegacyCardProviderApproved(row)) return "complete"
+    if (isCardProviderSetupReady(row)) return "complete"
   } else if (providerId === "fluidpay") {
-    if (isLegacyCardProviderApproved(row)) return "complete"
+    if (isCardProviderSetupReady(row)) return "complete"
   }
 
   if (
@@ -264,7 +264,7 @@ function getApplicationCardOnboardingStatus(row: ProviderRow): NonNullable<Provi
 
 function getStripeOnboardingStatus(row: ProviderRow): NonNullable<ProviderRow["cardReadiness"]>["onboardingStatus"] {
   const credentials = row.credentials || {}
-  if (isStripeConnectReady(row)) return "complete"
+  if (isCardProviderSetupReady(row)) return "complete"
   if (credentials.details_submitted === true || Boolean(String(credentials.stripe_account_id || "").trim())) {
     return "pending"
   }
@@ -276,7 +276,10 @@ function buildCardReadiness(row: ProviderRow): NonNullable<ProviderRow["cardRead
   const onboardingStatus = providerId === "stripe"
     ? getStripeOnboardingStatus(row)
     : getApplicationCardOnboardingStatus(row)
-  const readyForPayments = canCardProviderProcessPayments(row)
+  const readyForPayments = isCardProviderSetupReady(row)
+  const routingReady = providerId === "stripe"
+    ? isStripeConnectReady(row)
+    : canCardProviderProcessPayments(row)
   const connected = onboardingStatus === "complete"
 
   return {
@@ -285,7 +288,9 @@ function buildCardReadiness(row: ProviderRow): NonNullable<ProviderRow["cardRead
     readyForPayments,
     onboardingStatus,
     unavailableReason: readyForPayments
-      ? null
+      ? routingReady
+        ? null
+        : "Payment routing is disabled."
       : onboardingStatus === "pending"
         ? "Provider setup is pending."
         : onboardingStatus === "denied"
@@ -619,6 +624,22 @@ export async function toggleProviderEngine(
 
   if (enabled) {
     await assertMerchantBusinessProfileComplete(merchantId)
+
+    if (provider === "stripe" || provider === "shift4" || provider === "fluidpay") {
+      const { data: cardProvider, error: cardProviderError } = await db
+        .from("merchant_providers")
+        .select("provider,status,enabled,credentials")
+        .eq("merchant_id", merchantId)
+        .eq("provider", provider)
+        .maybeSingle()
+
+      if (cardProviderError) {
+        throw new Error(`Failed checking ${provider} readiness: ${cardProviderError.message}`)
+      }
+      if (!cardProvider || !isCardProviderSetupReady(cardProvider)) {
+        throw new Error(`Complete ${provider === "fluidpay" ? "FluidPay" : provider === "shift4" ? "Shift4" : "Stripe"} setup before enabling payment routing.`)
+      }
+    }
   }
 
   const canonicalWalletMode =

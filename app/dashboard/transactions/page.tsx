@@ -88,6 +88,7 @@ type TransactionsDashboardResponse = {
   todayVolume?: number
   todayTransactions?: number
   confirmedRate?: number
+  pagination?: { page: number; pageSize: number; total: number; totalPages: number }
   error?: string
 }
 
@@ -113,6 +114,19 @@ export default function TransactionsPage() {
   const [walletFilter, setWalletFilter] = useState("all")
   const [networkFilter, setNetworkFilter] = useState("all")
   const [channelFilter, setChannelFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [railFilter, setRailFilter] = useState("all")
+  const [assetFilter, setAssetFilter] = useState("all")
+  const [methodFilter, setMethodFilter] = useState("all")
+  const [startDate, setStartDate] = useState("")
+  const [endDate, setEndDate] = useState("")
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalTransactions, setTotalTransactions] = useState(0)
+  const [filtersHydrated, setFiltersHydrated] = useState(false)
+  const [loadingTransactions, setLoadingTransactions] = useState(true)
+  const [transactionError, setTransactionError] = useState<string | null>(null)
 
   const [showChart, setShowChart] = useState(false)
   const [chartRange, setChartRange] = useState("24h")
@@ -130,7 +144,45 @@ export default function TransactionsPage() {
   const [onlineTransactions, setOnlineTransactions] = useState(0)
   const [transactionInsight, setTransactionInsight] = useState("")
 
-  const callTransactionsApi = useCallback(async (method: "GET" | "POST", body?: unknown) => {
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const value = (name: string, fallback = "all") => params.get(name) || fallback
+    setWalletFilter(value("provider"))
+    setNetworkFilter(value("network"))
+    setChannelFilter(value("channel"))
+    setStatusFilter(value("status"))
+    setRailFilter(value("rail"))
+    setAssetFilter(value("asset"))
+    setMethodFilter(value("method"))
+    setStartDate(value("startDate", ""))
+    setEndDate(value("endDate", ""))
+    setPage(Math.max(1, Number(params.get("page") || 1) || 1))
+    setPageSize([25, 50, 100].includes(Number(params.get("pageSize"))) ? Number(params.get("pageSize")) : 50)
+    setFiltersHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (!filtersHydrated) return
+    const params = new URLSearchParams()
+    const setFilter = (name: string, value: string) => {
+      if (value && value !== "all") params.set(name, value)
+    }
+    setFilter("provider", walletFilter)
+    setFilter("network", networkFilter)
+    setFilter("channel", channelFilter)
+    setFilter("status", statusFilter)
+    setFilter("rail", railFilter)
+    setFilter("asset", assetFilter)
+    setFilter("method", methodFilter)
+    setFilter("startDate", startDate)
+    setFilter("endDate", endDate)
+    if (page > 1) params.set("page", String(page))
+    if (pageSize !== 50) params.set("pageSize", String(pageSize))
+    const query = params.toString()
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`)
+  }, [assetFilter, channelFilter, endDate, filtersHydrated, methodFilter, networkFilter, page, pageSize, railFilter, startDate, statusFilter, walletFilter])
+
+  const callTransactionsApi = useCallback(async (method: "GET" | "POST", body?: unknown, query = "") => {
     const {
       data: { session }
     } = await supabase.auth.getSession()
@@ -140,7 +192,7 @@ export default function TransactionsPage() {
       throw new Error("Please sign in again")
     }
 
-    const authRes = await fetch("/api/transactions", {
+    const authRes = await fetch(`/api/transactions${query}`, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -223,12 +275,37 @@ export default function TransactionsPage() {
   }, [])
 
   const loadDashboardData = useCallback(async () => {
+    if (!filtersHydrated) return
+    if (startDate && endDate && endDate < startDate) {
+      setTransactionError("End date must be on or after the start date.")
+      setLoadingTransactions(false)
+      return
+    }
     try {
-      const payload = (await callTransactionsApi("GET")) as TransactionsDashboardResponse
+      setLoadingTransactions(true)
+      setTransactionError(null)
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+      if (walletFilter !== "all") params.set("provider", walletFilter)
+      if (networkFilter !== "all") params.set("network", networkFilter)
+      if (channelFilter !== "all") params.set("channel", channelFilter)
+      if (statusFilter !== "all") params.set("status", statusFilter)
+      if (railFilter !== "all") params.set("rail", railFilter)
+      if (assetFilter !== "all") params.set("asset", assetFilter)
+      if (methodFilter !== "all") params.set("method", methodFilter)
+      if (startDate) params.set("startDate", startDate)
+      if (endDate) params.set("endDate", endDate)
+      const payload = (await callTransactionsApi("GET", undefined, `?${params.toString()}`)) as TransactionsDashboardResponse
 
       setTodayVolume(Number(payload.todayVolume || 0))
       setTodayTransactions(Number(payload.todayTransactions || 0))
       setConfirmedRate(Number(payload.confirmedRate || 0))
+      const responseTotalPages = payload.pagination?.totalPages || 1
+      setTotalPages(responseTotalPages)
+      setTotalTransactions(payload.pagination?.total || 0)
+      if (page > responseTotalPages) {
+        setPage(responseTotalPages)
+        return
+      }
 
       // Use transactions from the API (already merchant-scoped via auth)
       const apiTx = payload.transactions || []
@@ -236,9 +313,13 @@ export default function TransactionsPage() {
       calculateInsights(apiTx)
     } catch (error) {
       console.error(error)
-      toast.error(error instanceof Error ? error.message : "Failed to load transactions")
+      const message = error instanceof Error ? error.message : "Failed to load transactions"
+      setTransactionError(message)
+      toast.error(message)
+    } finally {
+      setLoadingTransactions(false)
     }
-  }, [callTransactionsApi, calculateInsights])
+  }, [assetFilter, callTransactionsApi, calculateInsights, channelFilter, endDate, filtersHydrated, methodFilter, networkFilter, page, pageSize, railFilter, startDate, statusFilter, walletFilter])
 
   const loadChartData = useCallback(async (range: string, mode = chartMode) => {
     try {
@@ -271,13 +352,7 @@ export default function TransactionsPage() {
   // Refresh transaction list when returning to this tab or refocusing.
   useDashboardAutoRefresh({ refresh: loadDashboardData, refreshOnMount: false })
 
-  const filteredTransactions = transactions.filter((tx) => {
-    if (walletFilter !== "all" && tx.provider !== walletFilter) return false
-    if (networkFilter !== "all" && tx.network !== networkFilter) return false
-    if (channelFilter === "pos" && tx.channel !== "pos" && tx.provider !== "cash") return false
-    if (channelFilter === "online" && tx.channel !== "online") return false
-    return true
-  })
+  const filteredTransactions = transactions
 
   const showChannelTransactions = useCallback((mode: "pos" | "online") => {
     setChartMode(mode)
@@ -375,21 +450,23 @@ export default function TransactionsPage() {
 
       <DashboardSection title="Transaction Ledger" titleTone="blue">
         <div className="rounded-2xl border border-gray-200/80 bg-white p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-2.5">
-          <div className="grid min-w-0 grid-cols-3 gap-1.5 sm:gap-3">
+          <div className="grid min-w-0 grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-3">
           <label className={filterRowClass}>
             <span className={filterLabelClass}>Wallet</span>
             <select
               aria-label="Wallet filter"
               className={filterSelectClass}
               value={walletFilter}
-              onChange={(e) => setWalletFilter(e.target.value)}
+              onChange={(e) => { setWalletFilter(e.target.value); setPage(1) }}
             >
               <option value="all">All Wallets</option>
               <option value="solana">Solana Pay</option>
               <option value="coinbase">Coinbase Business</option>
               <option value="shift4">Shift4</option>
+              <option value="stripe">Stripe</option>
+              <option value="fluidpay">FluidPay</option>
               <option value="base">Base Pay</option>
-              <option value="lightning">Bitcoin Lightning</option>
+              <option value="lightning_speed">Bitcoin Lightning</option>
               <option value="cash">Cash</option>
             </select>
           </label>
@@ -400,7 +477,7 @@ export default function TransactionsPage() {
               aria-label="Network filter"
               className={filterSelectClass}
               value={networkFilter}
-              onChange={(e) => setNetworkFilter(e.target.value)}
+              onChange={(e) => { setNetworkFilter(e.target.value); setPage(1) }}
             >
               <option value="all">All Networks</option>
               <option value="solana">Solana</option>
@@ -416,13 +493,87 @@ export default function TransactionsPage() {
               aria-label="Channel filter"
               className={filterSelectClass}
               value={channelFilter}
-              onChange={(e) => setChannelFilter(e.target.value)}
+              onChange={(e) => { setChannelFilter(e.target.value); setPage(1) }}
             >
               <option value="all">All Channels</option>
               <option value="pos">POS</option>
               <option value="online">Online</option>
             </select>
           </label>
+          <label className={filterRowClass}>
+            <span className={filterLabelClass}>Status</span>
+            <select
+              aria-label="Status filter"
+              className={filterSelectClass}
+              value={statusFilter}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="CONFIRMED">Confirmed</option>
+              <option value="PROCESSING">Processing</option>
+              <option value="PENDING">Pending</option>
+              <option value="INCOMPLETE">Incomplete</option>
+              <option value="FAILED">Failed</option>
+            </select>
+          </label>
+          <label className={filterRowClass}>
+            <span className={filterLabelClass}>Rail</span>
+            <select aria-label="Rail filter" className={filterSelectClass} value={railFilter} onChange={(event) => { setRailFilter(event.target.value); setPage(1) }}>
+              <option value="all">All Rails</option>
+              <option value="card">Card rail</option>
+              <option value="solana">Solana rail</option>
+              <option value="base">Base rail</option>
+              <option value="bitcoin_lightning">Lightning rail</option>
+              <option value="cash">Cash rail</option>
+            </select>
+          </label>
+          <label className={filterRowClass}>
+            <span className={filterLabelClass}>Currency or asset</span>
+            <select aria-label="Currency or asset filter" className={filterSelectClass} value={assetFilter} onChange={(event) => { setAssetFilter(event.target.value); setPage(1) }}>
+              <option value="all">All Assets</option>
+              <option value="USD">USD</option>
+              <option value="USDC">USDC</option>
+              <option value="USDT">USDT</option>
+              <option value="BTC">BTC</option>
+              <option value="ETH">ETH</option>
+              <option value="SOL">SOL</option>
+            </select>
+          </label>
+          <label className={filterRowClass}>
+            <span className={filterLabelClass}>Payment method</span>
+            <select aria-label="Payment method filter" className={filterSelectClass} value={methodFilter} onChange={(event) => { setMethodFilter(event.target.value); setPage(1) }}>
+              <option value="all">All Methods</option>
+              <option value="card">Card</option>
+              <option value="crypto">Crypto</option>
+              <option value="cash">Cash</option>
+            </select>
+          </label>
+          <label className={filterRowClass}>
+            <span className={filterLabelClass}>Page size</span>
+            <select aria-label="Page size" className={filterSelectClass} value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }}>
+              <option value={25}>25 per page</option>
+              <option value={50}>50 per page</option>
+              <option value={100}>100 per page</option>
+            </select>
+          </label>
+          <label className={filterRowClass}>
+            <span className={filterLabelClass}>Start date</span>
+            <input aria-label="Start date" type="date" className={filterSelectClass} value={startDate} onChange={(event) => { setStartDate(event.target.value); setPage(1) }} />
+          </label>
+          <label className={filterRowClass}>
+            <span className={filterLabelClass}>End date</span>
+            <input aria-label="End date" type="date" min={startDate || undefined} className={filterSelectClass} value={endDate} onChange={(event) => { setEndDate(event.target.value); setPage(1) }} />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setWalletFilter("all"); setNetworkFilter("all"); setChannelFilter("all"); setStatusFilter("all")
+              setRailFilter("all"); setAssetFilter("all"); setMethodFilter("all"); setStartDate(""); setEndDate(""); setPage(1)
+            }}
+            className={`${filterSelectClass} text-gray-600`}
+          >
+            Clear filters
+          </button>
           </div>
         </div>
 
@@ -430,7 +581,34 @@ export default function TransactionsPage() {
         ref={tableRef}
         className="mt-3 md:rounded-2xl md:border md:border-gray-200/80 md:bg-white md:p-2.5 md:shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
       >
-        <TransactionActivityTable transactions={filteredTransactions} />
+        {transactionError ? (
+          <div role="alert" className="m-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {transactionError} <button type="button" onClick={() => void loadDashboardData()} className="ml-2 font-semibold underline">Try again</button>
+          </div>
+        ) : null}
+        {loadingTransactions ? <p className="px-4 py-8 text-center text-sm text-gray-500">Loading transactions…</p> : <TransactionActivityTable transactions={filteredTransactions} />}
+        <div className="flex items-center justify-between border-t border-gray-100 px-2 py-3 text-sm text-gray-600">
+          <span>{totalTransactions} transactions</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+              className="rounded-lg border border-gray-200 px-3 py-1.5 font-medium disabled:opacity-40"
+            >
+              Previous
+            </button>
+            <span>Page {page} of {totalPages}</span>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+              className="rounded-lg border border-gray-200 px-3 py-1.5 font-medium disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
       </div>
       </DashboardSection>
 

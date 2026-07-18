@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
@@ -9,7 +9,6 @@ import {
   DashboardSection,
   GroupedMetricSurface,
   InlineMetric,
-  PineTreeInsightsCard,
   dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
 import {
@@ -17,118 +16,199 @@ import {
   formatDashboardProvider
 } from "@/components/dashboard/displayHelpers"
 
-type ReportSummary = {
-  grossVolume?: number
-  totalVolume: number
-  netSettlements?: number
-  merchantNet: number
-  estimatedTax: number
-  taxesCollected?: number
-  transactionCount: number
-  avgTransaction: number
-  failedPayments: number
-  confirmedCount?: number
-  successRate?: number
-  providerTotals: Record<string, number>
-  channelTotals: Record<string, number>
-  networkTotals: Record<string, number>
+type ReportPeriod = "end_of_day" | "today" | "weekly" | "month" | "year" | "custom"
+
+type LedgerRow = {
+  dateTime: string
+  paymentId: string
+  reference: string
+  provider: string
+  rail: string
+  network: string
+  asset: string
+  gross: number
+  pinetreeFee: number
+  status: string
 }
 
-type ReportKind = "today" | "yesterday" | "weekly" | "month" | "tax" | "year" | "transactions"
+type ReportSummary = {
+  title: string
+  startDate: string
+  endDate: string
+  timeZone: string
+  isInProgress: boolean
+  grossVolume: number
+  netSettlements: number
+  pineTreeFees: number
+  taxesCollected: number
+  transactionCount: number
+  confirmedCount: number
+  failedCount: number
+  incompleteCount: number
+  waitingCount: number
+  processingCount: number
+  refundedCount: number
+  refundedAmount: number
+  avgTransaction: number
+  cardVolume: number
+  cryptoVolume: number
+  cashVolume: number
+  providerTotals: Record<string, number>
+  railTotals: Record<string, number>
+  assetTotals: Record<string, number>
+  networkTotals: Record<string, number>
+  statusCounts: Record<string, number>
+  reconciliation: {
+    providerMatchesGross: boolean
+    railMatchesGross: boolean
+    variance: number
+  }
+  transactionsTable: LedgerRow[]
+  totalLedgerRows: number
+  transactionsTruncated: boolean
+}
 
-const REPORT_TITLES: Record<ReportKind, string> = {
-  today: "Today's Report",
-  yesterday: "Yesterday's Report",
-  weekly: "Weekly Report",
-  month: "Monthly Report",
-  tax: "Tax Report",
-  year: "Yearly Summary",
-  transactions: "Transaction Export"
+const PERIODS: Array<{ value: ReportPeriod; label: string }> = [
+  { value: "end_of_day", label: "End of day" },
+  { value: "today", label: "Today" },
+  { value: "weekly", label: "Week" },
+  { value: "month", label: "Month" },
+  { value: "year", label: "Year" },
+  { value: "custom", label: "Custom" }
+]
+
+function currency(value: number | undefined) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0)
+}
+
+function reportQuery(period: ReportPeriod, startDate: string, endDate: string) {
+  const params = new URLSearchParams({ type: period })
+  if (period === "custom") {
+    params.set("startDate", startDate)
+    params.set("endDate", endDate)
+  }
+  return params
+}
+
+function Breakdown({
+  title,
+  totals,
+  formatLabel = (value) => value
+}: {
+  title: string
+  totals: Record<string, number>
+  formatLabel?: (value: string) => string
+}) {
+  const entries = Object.entries(totals).sort((a, b) => b[1] - a[1])
+  return (
+    <GroupedMetricSurface title={title} titleTone="blue">
+      {entries.length ? (
+        <div className="divide-y divide-gray-100">
+          {entries.map(([label, value]) => (
+            <div key={label} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+              <span className="min-w-0 truncate text-gray-600">{formatLabel(label)}</span>
+              <span className="font-semibold text-gray-950">{currency(value)}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="py-3 text-sm text-gray-500">No confirmed volume for this period.</p>
+      )}
+    </GroupedMetricSurface>
+  )
 }
 
 export default function ReportsPage() {
-  const [loadingType, setLoadingType] = useState<ReportKind | null>(null)
+  const [period, setPeriod] = useState<ReportPeriod>("month")
+  const [customStart, setCustomStart] = useState("")
+  const [customEnd, setCustomEnd] = useState("")
+  const [appliedCustom, setAppliedCustom] = useState({ start: "", end: "" })
   const [summary, setSummary] = useState<ReportSummary | null>(null)
-  const [reportStatus, setReportStatus] = useState<string | null>(null)
-  const [userEmail, setUserEmail] = useState("")
-
-  // Email modal state
-  const [emailModal, setEmailModal] = useState<{ type: ReportKind } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [exporting, setExporting] = useState<"csv" | "pdf" | null>(null)
+  const [emailOpen, setEmailOpen] = useState(false)
   const [emailRecipient, setEmailRecipient] = useState("")
+  const [userEmail, setUserEmail] = useState("")
   const [sendingEmail, setSendingEmail] = useState(false)
-  const [emailError, setEmailError] = useState<string | null>(null)
-  const emailInputRef = useRef<HTMLInputElement>(null)
+  const emailRef = useRef<HTMLInputElement>(null)
+
+  const activeStart = period === "custom" ? appliedCustom.start : ""
+  const activeEnd = period === "custom" ? appliedCustom.end : ""
 
   const fetchSummary = useCallback(async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) return
-
-      if (session.user?.email) setUserEmail(session.user.email)
-
-      const start = new Date()
-      start.setDate(1)
-      start.setHours(0, 0, 0, 0)
-      const end = new Date()
-
-      const res = await fetch(
-        `/api/reports?startDate=${start.toISOString()}&endDate=${end.toISOString()}`,
-        {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-          credentials: "include",
-          cache: "no-store"
-        }
-      )
-      if (!res.ok) return
-      const data = (await res.json()) as ReportSummary
-      setSummary(data)
-    } catch {
-      // Non-fatal — summary cards will show $0.00
+    if (period === "custom" && (!activeStart || !activeEnd)) {
+      setSummary(null)
+      setError(null)
+      setLoading(false)
+      return
     }
-  }, [])
-
-  useEffect(() => {
-    void fetchSummary()
-  }, [fetchSummary])
-
-  // Refresh report summary when returning to this tab or refocusing.
-  useDashboardAutoRefresh({ refresh: fetchSummary, refreshOnMount: false })
-
-  // Focus email input when modal opens
-  useEffect(() => {
-    if (emailModal) {
-      setTimeout(() => emailInputRef.current?.focus(), 50)
-    }
-  }, [emailModal])
-
-  async function generateReport(type: ReportKind) {
     try {
-      setLoadingType(type)
-      setReportStatus(null)
-      const isCsv = type === "transactions"
-      toast(`Generating ${isCsv ? "CSV" : "PDF"}...`)
-
+      setLoading(true)
+      setError(null)
       const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) {
-        toast.error("Please sign in to generate reports")
-        return
+      if (!session?.access_token) throw new Error("Please sign in to view reports.")
+      if (session.user.email) {
+        setUserEmail(session.user.email)
+        setEmailRecipient((current) => current || session.user.email || "")
       }
-
-      const res = await fetch(`/api/reports/download?type=${type}`, {
+      const params = reportQuery(period, activeStart, activeEnd)
+      const response = await fetch(`/api/reports?${params}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
         credentials: "include",
         cache: "no-store"
       })
+      const payload = await response.json() as ReportSummary & { error?: string }
+      if (!response.ok) throw new Error(payload.error || "Failed to load report")
+      setSummary(payload)
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load report")
+    } finally {
+      setLoading(false)
+    }
+  }, [activeEnd, activeStart, period])
 
-      if (!res.ok) {
-        const payload = await res.json().catch(() => null) as { error?: string } | null
-        throw new Error(payload?.error || "Failed to generate report")
+  useEffect(() => {
+    void fetchSummary()
+  }, [fetchSummary])
+  useDashboardAutoRefresh({ refresh: fetchSummary, refreshOnMount: false })
+
+  useEffect(() => {
+    if (emailOpen) emailRef.current?.focus()
+  }, [emailOpen])
+
+  function applyCustomRange() {
+    if (!customStart || !customEnd) {
+      setError("Choose both a start date and an end date.")
+      return
+    }
+    if (customEnd < customStart) {
+      setError("End date must be on or after the start date.")
+      return
+    }
+    setAppliedCustom({ start: customStart, end: customEnd })
+  }
+
+  async function download(format: "csv" | "pdf") {
+    if (period === "custom" && (!activeStart || !activeEnd)) return
+    try {
+      setExporting(format)
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) throw new Error("Please sign in to export reports.")
+      const params = reportQuery(period, activeStart, activeEnd)
+      params.set("format", format)
+      const response = await fetch(`/api/reports/download?${params}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        credentials: "include",
+        cache: "no-store"
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null
+        throw new Error(payload?.error || "Failed to export report")
       }
-
-      const blob = await res.blob()
-      const disposition = res.headers.get("content-disposition") || ""
-      const filenameMatch = disposition.match(/filename="?([^"]+)"?/i)
-      const filename = filenameMatch?.[1] || `pinetree-report.${isCsv ? "csv" : "pdf"}`
+      const blob = await response.blob()
+      const disposition = response.headers.get("content-disposition") || ""
+      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `pinetree-report.${format}`
       const objectUrl = URL.createObjectURL(blob)
       const anchor = document.createElement("a")
       anchor.href = objectUrl
@@ -137,242 +217,197 @@ export default function ReportsPage() {
       anchor.click()
       anchor.remove()
       URL.revokeObjectURL(objectUrl)
-      const message = `${isCsv ? "CSV export" : "PDF report"} downloaded.`
-      setReportStatus(message)
-      toast.success(message)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to generate report"
-      setReportStatus(message)
-      toast.error(message)
+      toast.success(`${format.toUpperCase()} report downloaded.`)
+    } catch (exportError) {
+      toast.error(exportError instanceof Error ? exportError.message : "Failed to export report")
     } finally {
-      setLoadingType(null)
+      setExporting(null)
     }
   }
 
-  function openEmailModal(type: ReportKind) {
-    setEmailRecipient(userEmail)
-    setEmailError(null)
-    setEmailModal({ type })
-  }
-
-  function closeEmailModal() {
-    if (sendingEmail) return
-    setEmailModal(null)
-    setEmailError(null)
-  }
-
-  async function sendReport() {
-    if (!emailModal) return
+  async function sendEmail() {
     const recipient = emailRecipient.trim()
-    if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
-      setEmailError("Please enter a valid email address.")
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+      toast.error("Enter a valid email address.")
       return
     }
-
     try {
       setSendingEmail(true)
-      setEmailError(null)
-
       const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) {
-        setEmailError("Please sign in to send reports.")
-        return
-      }
-
-      const res = await fetch("/api/reports/email", {
+      if (!session?.access_token) throw new Error("Please sign in to email reports.")
+      const response = await fetch("/api/reports/email", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json"
         },
         credentials: "include",
-        body: JSON.stringify({ type: emailModal.type, email: recipient })
+        body: JSON.stringify({
+          type: period,
+          email: recipient,
+          startDate: period === "custom" ? activeStart : undefined,
+          endDate: period === "custom" ? activeEnd : undefined
+        })
       })
-
-      const payload = (await res.json()) as { error?: string; sentTo?: string; filename?: string }
-
-      if (!res.ok) {
-        throw new Error(payload.error || "Failed to send report")
-      }
-
-      setEmailModal(null)
-      toast.success(`${REPORT_TITLES[emailModal.type]} sent to ${payload.sentTo ?? recipient}`)
-    } catch (error) {
-      setEmailError(error instanceof Error ? error.message : "Failed to send report email")
+      const payload = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(payload.error || "Failed to send report")
+      setEmailOpen(false)
+      toast.success(`Report sent to ${recipient}.`)
+    } catch (emailError) {
+      toast.error(emailError instanceof Error ? emailError.message : "Failed to send report")
     } finally {
       setSendingEmail(false)
     }
   }
 
-  const fmt = (n: number) => `$${n.toFixed(2)}`
-  const successfulPayments = summary
-    ? Number(summary.confirmedCount ?? Math.max(0, summary.transactionCount - summary.failedPayments))
-    : 0
-  const successRate = summary?.successRate ?? (summary && summary.transactionCount > 0
-    ? Math.round((successfulPayments / summary.transactionCount) * 100)
-    : 0)
-  const topProvider = summary
-    ? Object.entries(summary.providerTotals || {}).sort((a, b) => b[1] - a[1])[0]
-    : null
-  const topNetwork = summary
-    ? Object.entries(summary.networkTotals || {}).sort((a, b) => b[1] - a[1])[0]
-    : null
-  const insights = [
-    topProvider && topProvider[1] > 0 ? `${formatDashboardProvider(topProvider[0])} leads provider volume for this reporting period.` : "",
-    topNetwork && topNetwork[1] > 0 ? `${formatDashboardNetwork(topNetwork[0])} is the highest-volume network in the current summary.` : "",
-    summary && summary.transactionCount > 0 ? `${successRate}% of tracked payments are confirmed or successful in this summary.` : ""
-  ]
+  const dateRangeLabel = useMemo(() => {
+    if (!summary) return ""
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: summary.timeZone,
+      year: "numeric",
+      month: "short",
+      day: "numeric"
+    })
+    return `${formatter.format(new Date(summary.startDate))} – ${formatter.format(new Date(summary.endDate))}`
+  }, [summary])
 
-  const anyLoading = Boolean(loadingType)
+  const reconciled = Boolean(
+    summary?.reconciliation.providerMatchesGross && summary.reconciliation.railMatchesGross
+  )
 
   return (
     <div className="space-y-5 md:space-y-7">
-      <div>
-        <h1 className={dashboardPageTitleClass}>Reports</h1>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className={dashboardPageTitleClass}>Reports</h1>
+          {summary ? (
+            <p className="mt-1 text-sm text-gray-500">
+              {dateRangeLabel} · {summary.timeZone}
+              {summary.isInProgress ? " · In progress" : ""}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => void download("csv")} disabled={!summary || loading || Boolean(exporting)} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50">
+            {exporting === "csv" ? "Exporting…" : "Export CSV"}
+          </button>
+          <button onClick={() => void download("pdf")} disabled={!summary || loading || Boolean(exporting)} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50">
+            {exporting === "pdf" ? "Exporting…" : "Download PDF"}
+          </button>
+          <button onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading} className="rounded-xl bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-50">
+            Email report
+          </button>
+        </div>
       </div>
 
-      <DashboardHeroCard
-        eyebrow="Month To Date"
-        title="Financial summary"
-        value={summary ? fmt(summary.grossVolume ?? summary.totalVolume) : "$0.00"}
-        detail="Gross volume across the current report window."
-        secondary={
-          <div className="grid w-full grid-cols-2 divide-x divide-blue-200/80 border-t border-blue-200/80 pt-3 sm:w-auto sm:min-w-[320px] sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
-            <InlineMetric
-              label="Net Settlements"
-              value={summary ? fmt(summary.netSettlements ?? summary.merchantNet) : "$0.00"}
-              className="pr-4"
-            />
-            <InlineMetric
-              label="Est. Taxes"
-              value={summary ? fmt(summary.taxesCollected ?? summary.estimatedTax) : "$0.00"}
-              className="pl-4"
-            />
-          </div>
-        }
-      />
-
-      {summary && (
-        <PineTreeInsightsCard
-          insights={insights}
-          emptyText="Report insights will appear when the current summary includes transaction volume."
-        />
-      )}
-
-      {reportStatus && (
-        <div className="rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm font-medium text-blue-700 shadow-sm">
-          {reportStatus}
+      <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {PERIODS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => { setPeriod(option.value); setError(null) }}
+              className={`rounded-full px-3.5 py-2 text-sm font-semibold transition ${period === option.value ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
-      )}
-
-      <DashboardSection title="Financial Reports" titleTone="blue">
-        <GroupedMetricSurface>
-          <div className="grid grid-cols-1 divide-y divide-gray-100 md:grid-cols-4 md:divide-x md:divide-y-0">
-            <ReportCard title="Today's Report"     description="Summary of today's transactions and totals"        loading={loadingType === "today"}     disabled={anyLoading} actionLabel="Download PDF" action={() => generateReport("today")}     onEmail={() => openEmailModal("today")} />
-            <ReportCard title="Yesterday's Report" description="Detailed summary of yesterday's transactions"     loading={loadingType === "yesterday"} disabled={anyLoading} actionLabel="Download PDF" action={() => generateReport("yesterday")} onEmail={() => openEmailModal("yesterday")} />
-            <ReportCard title="Weekly Report"      description="Seven-day financial summary and ledger detail"    loading={loadingType === "weekly"}    disabled={anyLoading} actionLabel="Download PDF" action={() => generateReport("weekly")}    onEmail={() => openEmailModal("weekly")} />
-            <ReportCard title="Monthly Report"     description="Complete monthly financial summary"               loading={loadingType === "month"}     disabled={anyLoading} actionLabel="Download PDF" action={() => generateReport("month")}     onEmail={() => openEmailModal("month")} />
+        {period === "custom" ? (
+          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <label className="text-xs font-semibold text-gray-600">Start date<input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 px-3 text-sm font-normal text-gray-900" /></label>
+            <label className="text-xs font-semibold text-gray-600">End date<input type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 px-3 text-sm font-normal text-gray-900" /></label>
+            <button type="button" onClick={applyCustomRange} className="mt-auto h-10 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white">Apply range</button>
           </div>
-        </GroupedMetricSurface>
-      </DashboardSection>
+        ) : null}
+      </div>
 
-      <DashboardSection title="Tax & Compliance" titleTone="blue">
-        <GroupedMetricSurface>
-          <div className="grid grid-cols-1 divide-y divide-gray-100 md:grid-cols-3 md:divide-x md:divide-y-0">
-            <ReportCard title="Tax Report"         description="Taxable sales and tax collected for the month"    loading={loadingType === "tax"}          disabled={anyLoading} actionLabel="Download PDF" action={() => generateReport("tax")}          onEmail={() => openEmailModal("tax")} />
-            <ReportCard title="Yearly Summary"     description="Annual financial summary report"                  loading={loadingType === "year"}         disabled={anyLoading} actionLabel="Download PDF" action={() => generateReport("year")}         onEmail={() => openEmailModal("year")} />
-            <ReportCard title="Transaction Export" description="CSV ledger export for the current report window"  loading={loadingType === "transactions"} disabled={anyLoading} actionLabel="Download CSV" action={() => generateReport("transactions")} onEmail={() => openEmailModal("transactions")} />
-          </div>
-        </GroupedMetricSurface>
-      </DashboardSection>
+      {error ? (
+        <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="flex flex-wrap items-center justify-between gap-3"><span>{error}</span><button type="button" onClick={() => void fetchSummary()} className="font-semibold underline">Try again</button></div>
+        </div>
+      ) : null}
 
-      {/* Email modal */}
-      {emailModal && (
-        <div
-          data-pinetree-overlay="true"
-          className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4"
-          onClick={(e) => { if (e.target === e.currentTarget) closeEmailModal() }}
-        >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="mb-1 text-base font-semibold text-gray-950">
-              Email {REPORT_TITLES[emailModal.type]}
+      {loading ? (
+        <div className="rounded-2xl border border-gray-200 bg-white px-5 py-12 text-center text-sm text-gray-500">Loading report…</div>
+      ) : summary ? (
+        <>
+          <DashboardHeroCard
+            eyebrow={`${PERIODS.find((option) => option.value === period)?.label || "Report"}${summary.isInProgress ? " · In progress" : ""}`}
+            title="Confirmed gross sales"
+            value={currency(summary.grossVolume)}
+            detail={`${summary.confirmedCount} confirmed of ${summary.transactionCount} tracked transactions.`}
+            secondary={<div className="grid min-w-[300px] grid-cols-2 divide-x divide-blue-200/80"><InlineMetric label="Merchant net" value={currency(summary.netSettlements)} className="pr-4" /><InlineMetric label="PineTree fees" value={currency(summary.pineTreeFees)} className="pl-4" /></div>}
+          />
+
+          {!reconciled ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              Report totals need review. Provider or rail totals differ from confirmed gross sales by {currency(summary.reconciliation.variance)}.
             </div>
-            <div className="mb-5 text-sm text-gray-500">
-              Enter a recipient email address. The report will be generated and attached automatically.
+          ) : (
+            <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">Provider and rail totals reconcile to confirmed gross sales.</div>
+          )}
+
+          <DashboardSection title="Summary" titleTone="blue">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <GroupedMetricSurface><InlineMetric label="Average confirmed transaction" value={currency(summary.avgTransaction)} /></GroupedMetricSurface>
+              <GroupedMetricSurface><InlineMetric label="Card volume" value={currency(summary.cardVolume)} /></GroupedMetricSurface>
+              <GroupedMetricSurface><InlineMetric label="Crypto volume" value={currency(summary.cryptoVolume)} /></GroupedMetricSurface>
+              <GroupedMetricSurface><InlineMetric label="Cash volume" value={currency(summary.cashVolume)} /></GroupedMetricSurface>
+              <GroupedMetricSurface><InlineMetric label="Tax collected" value={currency(summary.taxesCollected)} /></GroupedMetricSurface>
+              <GroupedMetricSurface><InlineMetric label="Refunds" value={`${summary.refundedCount} · ${currency(summary.refundedAmount)}`} /></GroupedMetricSurface>
+              <GroupedMetricSurface><InlineMetric label="Pending / processing" value={`${summary.waitingCount} / ${summary.processingCount}`} /></GroupedMetricSurface>
+              <GroupedMetricSurface><InlineMetric label="Failed / incomplete" value={`${summary.failedCount} / ${summary.incompleteCount}`} /></GroupedMetricSurface>
             </div>
+          </DashboardSection>
 
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Recipient
-            </label>
-            <input
-              ref={emailInputRef}
-              type="email"
-              value={emailRecipient}
-              onChange={(e) => { setEmailRecipient(e.target.value); setEmailError(null) }}
-              onKeyDown={(e) => { if (e.key === "Enter") void sendReport() }}
-              placeholder="you@example.com"
-              disabled={sendingEmail}
-              className="mb-1.5 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
-            />
+          <DashboardSection title="Breakdowns" titleTone="blue">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <Breakdown title="Providers" totals={summary.providerTotals} formatLabel={formatDashboardProvider} />
+              <Breakdown title="Rails" totals={summary.railTotals} />
+              <Breakdown title="Assets" totals={summary.assetTotals} />
+              <Breakdown title="Networks" totals={summary.networkTotals} formatLabel={formatDashboardNetwork} />
+            </div>
+          </DashboardSection>
 
-            {emailError && (
-              <div className="mb-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs font-medium text-red-600">
-                {emailError}
+          <DashboardSection title="Status breakdown" titleTone="blue">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {Object.entries(summary.statusCounts).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
+                <div key={status} className="rounded-xl border border-gray-200 bg-white px-4 py-3"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{status}</p><p className="mt-1 text-xl font-semibold text-gray-950">{count}</p></div>
+              ))}
+            </div>
+          </DashboardSection>
+
+          <DashboardSection title="Transaction ledger" titleTone="blue">
+            {summary.totalLedgerRows === 0 ? (
+              <div className="rounded-2xl border border-gray-200 bg-white px-5 py-10 text-center text-sm text-gray-500">No transactions were recorded in this period.</div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
+                <table className="min-w-[880px] w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Reference</th><th className="px-4 py-3">Provider</th><th className="px-4 py-3">Rail</th><th className="px-4 py-3">Network / asset</th><th className="px-4 py-3 text-right">Gross</th><th className="px-4 py-3 text-right">Fee</th><th className="px-4 py-3">Status</th></tr></thead>
+                  <tbody className="divide-y divide-gray-100">{summary.transactionsTable.map((row) => (
+                    <tr key={`${row.paymentId}-${row.reference}`}><td className="whitespace-nowrap px-4 py-3 text-gray-600">{new Intl.DateTimeFormat("en-US", { timeZone: summary.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(row.dateTime))}</td><td className="max-w-[180px] truncate px-4 py-3 font-mono text-xs text-gray-600">{row.reference}</td><td className="px-4 py-3">{formatDashboardProvider(row.provider)}</td><td className="px-4 py-3">{row.rail}</td><td className="px-4 py-3">{formatDashboardNetwork(row.network)} · {row.asset}</td><td className="px-4 py-3 text-right font-semibold">{currency(row.gross)}</td><td className="px-4 py-3 text-right">{currency(row.pinetreeFee)}</td><td className="px-4 py-3">{row.status}</td></tr>
+                  ))}</tbody>
+                </table>
+                {summary.transactionsTruncated ? <p className="border-t border-gray-100 px-4 py-3 text-xs text-gray-500">Showing the first {summary.transactionsTable.length} of {summary.totalLedgerRows} rows. CSV export includes the complete period.</p> : null}
               </div>
             )}
+          </DashboardSection>
+        </>
+      ) : period === "custom" ? (
+        <div className="rounded-2xl border border-gray-200 bg-white px-5 py-10 text-center text-sm text-gray-500">Choose a custom date range to generate a report.</div>
+      ) : null}
 
-            <div className="mt-4 flex gap-2.5">
-              <button
-                onClick={() => void sendReport()}
-                disabled={sendingEmail}
-                className="flex-1 inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
-              >
-                {sendingEmail ? "Sending…" : "Send Report"}
-              </button>
-              <button
-                onClick={closeEmailModal}
-                disabled={sendingEmail}
-                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </div>
+      {emailOpen ? (
+        <div data-pinetree-overlay="true" className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center px-4" onClick={(event) => { if (event.target === event.currentTarget && !sendingEmail) setEmailOpen(false) }}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h2 className="text-base font-semibold text-gray-950">Email this report</h2>
+            <p className="mt-1 text-sm text-gray-500">The attachment will use the selected period and exact date boundaries shown above.</p>
+            <input ref={emailRef} type="email" value={emailRecipient} onChange={(event) => setEmailRecipient(event.target.value)} className="mt-4 h-11 w-full rounded-xl border border-gray-200 px-3 text-sm" placeholder="you@example.com" />
+            <div className="mt-4 flex gap-2"><button type="button" onClick={() => void sendEmail()} disabled={sendingEmail} className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{sendingEmail ? "Sending…" : "Send report"}</button><button type="button" onClick={() => setEmailOpen(false)} disabled={sendingEmail} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700">Cancel</button></div>
           </div>
         </div>
-      )}
-    </div>
-  )
-}
-
-function ReportCard({ title, description, action, loading, disabled, actionLabel, onEmail }: {
-  title: string
-  description: string
-  action: () => void
-  loading: boolean
-  disabled: boolean
-  actionLabel: string
-  onEmail: () => void
-}) {
-  return (
-    <div className="min-w-0 p-3 md:p-4">
-      <div className="text-sm font-semibold text-gray-950">{title}</div>
-      <div className="mt-1 min-h-10 text-sm leading-5 text-gray-600">{description}</div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          onClick={action}
-          disabled={disabled}
-          className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
-        >
-          {loading ? "Generating..." : actionLabel}
-        </button>
-        <button
-          onClick={onEmail}
-          disabled={disabled}
-          className="inline-flex min-h-9 items-center justify-center rounded-xl border border-gray-200 bg-white px-3.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
-        >
-          Email
-        </button>
-      </div>
+      ) : null}
     </div>
   )
 }

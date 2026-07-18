@@ -25,6 +25,14 @@ const eslintConfig = defineConfig([
       ]
     }
   },
+  {
+    files: ["__tests__/**/*.ts", "__tests__/**/*.tsx"],
+    rules: {
+      // A small number of module-cache isolation tests intentionally use
+      // require() after vi.resetModules(); application source remains ESM-only.
+      "@typescript-eslint/no-require-imports": "off"
+    }
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -36,6 +44,9 @@ const eslintConfig = defineConfig([
     "packages/*/dist/**",
     "packages/*/node_modules/**",
     "coverage/**",
+    // Claude/Codex auxiliary worktrees are complete repository copies. Lint
+    // the active checkout only; copied source is validated in its own worktree.
+    ".claude/worktrees/**",
     // Hardhat/Solidity toolchain — separate CJS module system, not Next.js app source:
     "contracts/**",
   ]),

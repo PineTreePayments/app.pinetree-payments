@@ -7,8 +7,12 @@ import {
   translateEvent,
   verifyWebhook
 } from "@/providers/fluidpay"
+import { FLUIDPAY_API_CONTRACT_VERIFIED } from "@/providers/fluidpay/constants"
 
 describe("Fluid Pay provider scaffold", () => {
+  it("keeps the code-owned production contract gate disabled", () => {
+    expect(FLUIDPAY_API_CONTRACT_VERIFIED).toBe(false)
+  })
   it("fails closed for payment creation without verified official docs", async () => {
     await expect(createPayment({
       paymentId: "pay_123",

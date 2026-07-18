@@ -16,7 +16,10 @@ export async function GET(req: NextRequest) {
     const merchantId = await requireMerchantIdFromRequest(req)
     const { searchParams } = new URL(req.url)
     const type = normalizeReportType(searchParams.get("type"))
-    const format = type === "transactions" ? "csv" : "pdf"
+    const requestedFormat = searchParams.get("format")
+    const format = requestedFormat === "csv" || requestedFormat === "pdf"
+      ? requestedFormat
+      : type === "transactions" ? "csv" : "pdf"
     const report = await generateReportEngine({
       merchantId,
       startDate: searchParams.get("startDate") || undefined,

@@ -38,7 +38,7 @@ import {
 } from "@/database/merchantWalletOperations"
 import { listWalletBalanceSnapshots, upsertWalletBalanceSnapshot } from "@/database/merchantWalletBalanceSnapshots"
 
-const STALE_BALANCE_THRESHOLD_MS = 15 * 60 * 1000
+export const STALE_BALANCE_THRESHOLD_MS = 15 * 60 * 1000
 
 function toPineTreeWalletOperation(row: MerchantWalletOperation): PineTreeWalletOperation {
   return {
@@ -110,6 +110,8 @@ export async function getWalletCapabilities(merchantId: string): Promise<PineTre
 export async function getWalletBalances(merchantId: string): Promise<PineTreeWalletBalancesResult> {
   const { provider, adapter, context } = await resolveMerchantWalletProvider(merchantId)
   const capabilities = await adapter.getCapabilities(context)
+  let liveSyncSucceeded = false
+  let providerUnavailable = false
 
   if (capabilities.balances && adapter.getBalances) {
     try {
@@ -120,6 +122,7 @@ export async function getWalletBalances(merchantId: string): Promise<PineTreeWal
           upsertWalletBalanceSnapshot({
             merchantId,
             provider,
+            providerAccountId: context.providerAccountId,
             asset: entry.asset,
             network: entry.network ?? undefined,
             availableBaseUnits: entry.availableBaseUnits,
@@ -129,12 +132,27 @@ export async function getWalletBalances(merchantId: string): Promise<PineTreeWal
           })
         )
       )
+      liveSyncSucceeded = true
     } catch (error) {
-      if (!(error instanceof WalletApiRouteError) || error.code !== "WALLET_CAPABILITY_UNAVAILABLE") throw error
+      // A provider read must never destroy or hide a previously confirmed
+      // balance. The adapter has already normalized/logged the provider error;
+      // return the last successful snapshot and let the UI identify it as
+      // cached instead of rendering a provider failure as zero.
+      providerUnavailable = true
+      console.warn("[wallet-balances] live provider sync unavailable", {
+        merchantId,
+        provider,
+        code: error instanceof WalletApiRouteError ? error.code : "WALLET_PROVIDER_UNAVAILABLE"
+      })
+      if (error instanceof WalletApiRouteError && error.code === "WALLET_CAPABILITY_UNAVAILABLE") {
+        // Capability state may have changed between the capability check and
+        // the provider call. Treat it as unavailable, just like a transient
+        // provider failure, while preserving the snapshot.
+      }
     }
   }
 
-  const cached = await listWalletBalanceSnapshots(merchantId, provider)
+  const cached = await listWalletBalanceSnapshots(merchantId, provider, context.providerAccountId)
   const now = Date.now()
   const balances: PineTreeWalletBalance[] = cached.map((row) => {
     const cachedAtMs = new Date(row.cached_at).getTime()
@@ -151,9 +169,21 @@ export async function getWalletBalances(merchantId: string): Promise<PineTreeWal
     }
   })
 
+  const lastSuccessfulSyncAt = balances.reduce<string | null>((latest, balance) => {
+    const candidate = balance.providerUpdatedAt || balance.cachedAt
+    if (!candidate) return latest
+    return !latest || candidate > latest ? candidate : latest
+  }, null)
+
   return {
     capabilityAvailable: capabilities.balances,
-    unavailableReason: capabilities.balances ? null : "WALLET_CAPABILITY_UNAVAILABLE",
+    unavailableReason: !capabilities.balances
+      ? "WALLET_CAPABILITY_UNAVAILABLE"
+      : providerUnavailable
+        ? "WALLET_PROVIDER_UNAVAILABLE"
+        : null,
+    syncStatus: liveSyncSucceeded ? "live" : balances.length > 0 ? "cached" : "unavailable",
+    lastSuccessfulSyncAt,
     balances,
   }
 }

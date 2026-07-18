@@ -101,6 +101,13 @@ function requireCapability(key: SpeedWalletCapabilityKey): void {
  * contract only has to touch this file - callers never change.
  */
 function requireContractConfirmed(operation: string): never {
+  // Provider-contract TODO for Speed support:
+  // "For a platform API key acting on a Custom Connect account, what exact
+  // account identifier, header name/value, credential scope, and endpoint are
+  // required for /balances, balance transactions, Instant Send/withdrawals,
+  // payouts, and swaps? Does each response include an authoritative balance
+  // timestamp and idempotency contract?"
+  // Implement the confirmed answer only in this adapter boundary.
   throw new Error(
     `Speed has not documented the connected-account scoping mechanism for ${operation}. ` +
       "Implement the real request/response translation in providers/lightning/speedWalletManagement.ts only once Speed confirms it - do not guess it."

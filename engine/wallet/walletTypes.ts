@@ -50,6 +50,8 @@ export type PineTreeWalletBalance = {
 export type PineTreeWalletBalancesResult = {
   capabilityAvailable: boolean
   unavailableReason: string | null
+  syncStatus: "live" | "cached" | "unavailable"
+  lastSuccessfulSyncAt: string | null
   balances: PineTreeWalletBalance[]
 }
 
