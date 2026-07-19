@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import type { ReactNode } from "react"
 import { Activity, BookOpen, Code2, KeyRound, Plug, Webhook } from "lucide-react"
@@ -11,37 +13,33 @@ import {
   dashboardSectionLabelClass,
   dashboardSupportingTextClass,
 } from "@/components/dashboard/DashboardPrimitives"
-import { CheckoutWorkspace } from "../checkout/page"
-import PublicKeysPanel from "./PublicKeysPanel"
 import ShopifyIntegrationCard from "./ShopifyIntegrationCard"
 import WooCommerceIntegrationCard from "./WooCommerceIntegrationCard"
 
-type DeveloperTab = "keys" | "webhooks" | "sdks" | "integrations" | "docs"
-
 const overviewCards = [
   {
-    id: "keys" as const,
+    href: "/dashboard/developer/api-keys",
     title: "API Keys",
     description: "Server and browser keys.",
     action: "Manage keys",
     icon: KeyRound,
   },
   {
-    id: "webhooks" as const,
+    href: "/dashboard/developer/webhooks",
     title: "Webhooks",
     description: "Delivery settings and retries.",
     action: "Manage webhooks",
     icon: Webhook,
   },
   {
-    id: "sdks" as const,
+    href: "/dashboard/developer/sdks",
     title: "SDKs",
     description: "REST, Node, JavaScript, and React.",
     action: "View SDKs",
     icon: Code2,
   },
   {
-    id: "integrations" as const,
+    href: "/dashboard/developer/integrations",
     title: "Integrations",
     description: "Commerce platform connections.",
     action: "View integrations",
@@ -50,15 +48,14 @@ const overviewCards = [
 ]
 
 export default function DeveloperPage() {
-  const [tab, setTab] = useState<DeveloperTab>("keys")
-  const [docSection, setDocSection] = useState<DocSection>("overview")
+  const router = useRouter()
 
   useEffect(() => {
     const shopifyResult = new URLSearchParams(window.location.search).get("shopify")
     if (shopifyResult !== "connected") return
-    const timer = window.setTimeout(() => setTab("integrations"), 0)
+    const timer = window.setTimeout(() => router.replace("/dashboard/developer/integrations?shopify=connected"), 0)
     return () => window.clearTimeout(timer)
-  }, [])
+  }, [router])
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -68,17 +65,11 @@ export default function DeveloperPage() {
 
       <DashboardSection title="Developer tools" titleTone="blue">
         <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
-          {overviewCards.map(({ id, title, description, action, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTab(id)}
-              aria-pressed={tab === id}
-              className={`min-h-28 rounded-2xl border p-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition sm:min-h-0 sm:p-3.5 ${
-                tab === id
-                  ? "border-blue-200 bg-blue-50/60"
-                  : "border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/30"
-              } focus:outline-none focus:ring-4 focus:ring-blue-100`}
+          {overviewCards.map(({ href, title, description, action, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className="min-h-28 rounded-2xl border border-gray-200/80 bg-white p-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/30 focus:outline-none focus:ring-4 focus:ring-blue-100 sm:min-h-0 sm:p-3.5"
             >
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
                 <Icon className="h-3.5 w-3.5" />
@@ -86,22 +77,13 @@ export default function DeveloperPage() {
               <h2 className="mt-2.5 text-sm font-semibold text-gray-950">{title}</h2>
               <p className="mt-0.5 text-[11px] leading-4 text-gray-500 sm:text-xs">{description}</p>
               <span className="mt-2 inline-flex text-[11px] font-semibold text-blue-700">{action}</span>
-            </button>
+            </Link>
           ))}
         </div>
         <div className="grid gap-2 sm:gap-3 md:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => {
-              setDocSection("quickstart")
-              setTab("docs")
-            }}
-            aria-pressed={tab === "docs" && docSection === "quickstart"}
-            className={`rounded-2xl border p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition ${
-              tab === "docs" && docSection === "quickstart"
-                ? "border-blue-200 bg-blue-50/60"
-                : "border-gray-200/80 bg-white hover:border-blue-200 hover:bg-blue-50/30"
-            } focus:outline-none focus:ring-4 focus:ring-blue-100`}
+          <Link
+            href="/dashboard/developer/guides"
+            className="rounded-2xl border border-gray-200/80 bg-white p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/30 focus:outline-none focus:ring-4 focus:ring-blue-100"
           >
             <div className="flex min-w-0 items-start gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
@@ -122,7 +104,7 @@ export default function DeveloperPage() {
                 <span className="mt-3 inline-flex text-[11.5px] font-semibold leading-5 text-blue-700">Start quickstart</span>
               </div>
             </div>
-          </button>
+          </Link>
           <div className="rounded-2xl border border-gray-200/80 bg-white p-4 text-left shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition hover:border-blue-200 hover:bg-blue-50/30">
             <div className="flex min-w-0 items-start gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
@@ -136,15 +118,15 @@ export default function DeveloperPage() {
                 <div className="mt-3 space-y-2">
                   <div className="flex items-center justify-between gap-3 text-xs">
                     <span className="font-medium text-gray-600">API Keys</span>
-                    <button type="button" onClick={() => setTab("keys")} className="font-semibold leading-5 text-blue-700 hover:text-blue-800">
+                    <Link href="/dashboard/developer/api-keys" className="font-semibold leading-5 text-blue-700 hover:text-blue-800">
                       Manage keys
-                    </button>
+                    </Link>
                   </div>
                   <div className="flex items-center justify-between gap-3 text-xs">
                     <span className="font-medium text-gray-600">Webhooks</span>
-                    <button type="button" onClick={() => setTab("webhooks")} className="font-semibold leading-5 text-blue-700 hover:text-blue-800">
+                    <Link href="/dashboard/developer/webhooks" className="font-semibold leading-5 text-blue-700 hover:text-blue-800">
                       Manage webhooks
-                    </button>
+                    </Link>
                   </div>
                   <div className="flex items-center justify-between gap-3 text-xs">
                     <span className="font-medium text-gray-600">SDKs</span>
@@ -156,59 +138,6 @@ export default function DeveloperPage() {
           </div>
         </div>
       </DashboardSection>
-
-      {tab === "keys" && (
-        <div className="space-y-5 md:space-y-7">
-          <DashboardSection title="Getting Started" titleTone="blue">
-            <div className="rounded-2xl border border-gray-200/80 bg-white px-4 py-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-              <div className="grid gap-3 sm:grid-cols-3 sm:divide-x sm:divide-gray-100">
-                {[
-                  ["1", "Create keys"],
-                  ["2", "Choose REST or an SDK"],
-                  ["3", "Configure webhooks"],
-                ].map(([step, label]) => (
-                  <div key={step} className="flex items-center gap-3 sm:px-4 sm:first:pl-0">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-bold text-blue-700">{step}</span>
-                    <p className="text-sm font-medium text-gray-800">{label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </DashboardSection>
-
-          <div className="grid gap-2 rounded-2xl border border-blue-100 bg-blue-50/60 p-3 sm:grid-cols-2 sm:p-4">
-            <KeyHelper title="Secret API keys" prefix="pt_live_*">
-              Use these only on your server. They can create sessions, retrieve payments, and manage webhooks.
-            </KeyHelper>
-            <KeyHelper title="Public browser keys" prefix="pk_live_*">
-              Use these on websites, checkout buttons, or React apps. They can start customer checkout sessions but cannot access private account data.
-            </KeyHelper>
-          </div>
-
-          <CheckoutWorkspace
-            mode="developer"
-            showHeader={false}
-            showNavigation={false}
-            activeSection="developer"
-            compactDeveloper
-          />
-          <PublicKeysPanel />
-        </div>
-      )}
-
-      {tab === "webhooks" && (
-        <CheckoutWorkspace
-          mode="developer"
-          showHeader={false}
-          showNavigation={false}
-          activeSection="webhooks"
-          compactDeveloper
-        />
-      )}
-
-      {tab === "sdks" && <SdkCards />}
-      {tab === "integrations" && <IntegrationCards />}
-      {tab === "docs" && <ApiReferencePanel activeDoc={docSection} setActiveDoc={setDocSection} />}
     </div>
   )
 }
@@ -1346,3 +1275,8 @@ function ApiReferencePanel({
     </DashboardSection>
   )
 }
+
+void KeyHelper
+void SdkCards
+void IntegrationCards
+void ApiReferencePanel

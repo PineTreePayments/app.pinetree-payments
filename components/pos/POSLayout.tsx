@@ -1265,16 +1265,16 @@ export default function POSLayout({ terminalContext }: Props) {
     : fmtUsd(subtotalNum)
 
   return (
-    <div className="flex flex-col items-center w-full px-4">
+    <div className="flex h-full min-h-0 w-full flex-col items-center justify-center overflow-hidden px-0">
 
-      <div className={`${paymentMode === "card" ? "bg-[#F4F8FF]" : "bg-white"} rounded-2xl shadow-lg p-6 w-full max-w-[420px]`}>
+      <div className={`${paymentMode === "card" ? "bg-[#F4F8FF]" : "bg-white"} max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] overflow-y-auto overscroll-contain rounded-2xl p-4 shadow-lg sm:p-6`}>
 
         {/* ── READY ── */}
         {status === "ready" && (
           <div className="space-y-4">
             <AmountDisplay amount={displayAmount} />
             <Keypad digits={digits} setDigits={setDigits} showDecimal />
-            <div className="max-w-[340px] mx-auto mt-2">
+            <div className="mx-auto mt-2 max-w-[340px]">
               <Button fullWidth disabled={subtotalNum <= 0} onClick={goToConfirm}>
                 Charge
               </Button>

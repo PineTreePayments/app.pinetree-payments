@@ -98,6 +98,67 @@ type TransactionsChartResponse = {
   error?: string
 }
 
+type FocusedFilter = "provider" | "network" | "channel" | "method" | "asset" | "date"
+
+const focusedFilterOptions: Array<{ value: FocusedFilter; label: string }> = [
+  { value: "method", label: "Payment method" },
+  { value: "channel", label: "Channel" },
+  { value: "network", label: "Rail or network" },
+  { value: "asset", label: "Asset or currency" },
+  { value: "provider", label: "Provider" },
+  { value: "date", label: "Date range" },
+]
+
+const statusFilterOptions = [
+  { value: "all", label: "All statuses" },
+  { value: "CONFIRMED", label: "Confirmed" },
+  { value: "PROCESSING", label: "Processing" },
+  { value: "PENDING", label: "Waiting" },
+  { value: "INCOMPLETE", label: "Incomplete" },
+  { value: "FAILED", label: "Failed" },
+]
+
+const filterValueOptions: Record<Exclude<FocusedFilter, "date">, Array<{ value: string; label: string }>> = {
+  method: [
+    { value: "all", label: "All methods" },
+    { value: "card", label: "Card" },
+    { value: "crypto", label: "Crypto" },
+    { value: "cash", label: "Cash" },
+  ],
+  channel: [
+    { value: "all", label: "All channels" },
+    { value: "pos", label: "POS" },
+    { value: "online", label: "Online" },
+  ],
+  network: [
+    { value: "all", label: "All rails and networks" },
+    { value: "solana", label: "Solana" },
+    { value: "base", label: "Base" },
+    { value: "ethereum", label: "Ethereum" },
+    { value: "bitcoin_lightning", label: "Bitcoin Lightning" },
+  ],
+  asset: [
+    { value: "all", label: "All assets" },
+    { value: "USD", label: "USD" },
+    { value: "USDC", label: "USDC" },
+    { value: "USDT", label: "USDT" },
+    { value: "BTC", label: "BTC" },
+    { value: "ETH", label: "ETH" },
+    { value: "SOL", label: "SOL" },
+  ],
+  provider: [
+    { value: "all", label: "All providers" },
+    { value: "solana", label: "Solana Pay" },
+    { value: "base", label: "Base Pay" },
+    { value: "lightning_speed", label: "Bitcoin Lightning" },
+    { value: "stripe", label: "Stripe" },
+    { value: "shift4", label: "Shift4" },
+    { value: "fluidpay", label: "FluidPay" },
+    { value: "coinbase", label: "Coinbase Business" },
+    { value: "cash", label: "Cash" },
+  ],
+}
+
 function parseTimestamp(value: string) {
   const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value)
   return new Date(hasTimezone ? value : `${value}Z`)
@@ -120,6 +181,8 @@ export default function TransactionsPage() {
   const [currencyFilter, setCurrencyFilter] = useState("all")
   const [sourceFilter, setSourceFilter] = useState("all")
   const [methodFilter, setMethodFilter] = useState("all")
+  const [focusedFilter, setFocusedFilter] = useState<FocusedFilter>("method")
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false)
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
   const [page, setPage] = useState(1)
@@ -226,11 +289,16 @@ export default function TransactionsPage() {
   }, [])
 
   const calculateInsights = useCallback((data: Transaction[]) => {
+    const qualifying = data.filter((tx) => {
+      const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
+      const authoritativeStatus = String(payment?.status || tx.status || "").trim().toUpperCase()
+      return authoritativeStatus === "CONFIRMED"
+    })
     const hourMap: Record<string, number> = {}
     const dayMap: Record<string, number> = {}
     const channelMap: Record<string, number> = {}
 
-    data.forEach((tx) => {
+    qualifying.forEach((tx) => {
       const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
       if (!payment) return
 
@@ -250,30 +318,37 @@ export default function TransactionsPage() {
       channelMap[channel] = (channelMap[channel] || 0) + 1
     })
 
-    const providerMap = countBy(data, (tx) => tx.provider)
-    const networkMap = countBy(data, (tx) => tx.network)
+    const providerMap = countBy(qualifying, (tx) => tx.provider)
+    const networkMap = countBy(qualifying, (tx) => tx.network)
     const peakH = mostFrequentKey(hourMap)
     const peakD = mostFrequentKey(dayMap)
     const topP = mostFrequentKey(providerMap)
     const topN = mostFrequentKey(networkMap)
+
+    setPosTransactions(channelMap["pos"] || 0)
+    setOnlineTransactions(channelMap["online"] || 0)
+
+    if (qualifying.length < 2) {
+      setPeakHour("-")
+      setPeakDay("-")
+      setTopProvider("-")
+      setTopNetwork("-")
+      setTransactionInsight("")
+      return
+    }
 
     setPeakHour(peakH ? `${peakH}:00` : "-")
     setPeakDay(peakD || "-")
     setTopProvider(topP ? formatDashboardProvider(topP) : "-")
     setTopNetwork(topN ? formatDashboardNetwork(topN) : "-")
 
-    setPosTransactions(channelMap["pos"] || 0)
-    setOnlineTransactions(channelMap["online"] || 0)
-
-    if (!data.length) {
-      setTransactionInsight("")
-    } else if (topP && topN && peakH) {
+    if (topP && topN && peakH) {
       setTransactionInsight(
-        `Based on the current ledger, ${peakH}:00 is the busiest hour, ${formatDashboardProvider(topP)} leads provider activity, and ${formatDashboardNetwork(topN)} leads network activity.`
+        `Based on confirmed transactions in the current ledger, ${peakH}:00 is the busiest hour, ${formatDashboardProvider(topP)} leads provider activity, and ${formatDashboardNetwork(topN)} leads network activity.`
       )
     } else if (topP) {
       setTransactionInsight(
-        `${formatDashboardProvider(topP)} leads provider activity in the current ledger. Network mix will appear as more network-tagged transactions arrive.`
+        `${formatDashboardProvider(topP)} leads confirmed provider activity in the current ledger. Network mix will appear as more network-tagged transactions arrive.`
       )
     } else {
       setTransactionInsight("")
@@ -362,6 +437,54 @@ export default function TransactionsPage() {
 
   const filteredTransactions = transactions
 
+  const activeFilters = [
+    statusFilter !== "all" ? { label: "Status", value: statusFilterOptions.find((option) => option.value === statusFilter)?.label || statusFilter } : null,
+    walletFilter !== "all" ? { label: "Provider", value: filterValueOptions.provider.find((option) => option.value === walletFilter)?.label || walletFilter } : null,
+    networkFilter !== "all" ? { label: "Rail", value: filterValueOptions.network.find((option) => option.value === networkFilter)?.label || networkFilter } : null,
+    channelFilter !== "all" ? { label: "Channel", value: filterValueOptions.channel.find((option) => option.value === channelFilter)?.label || channelFilter } : null,
+    methodFilter !== "all" ? { label: "Method", value: filterValueOptions.method.find((option) => option.value === methodFilter)?.label || methodFilter } : null,
+    assetFilter !== "all" ? { label: "Asset", value: filterValueOptions.asset.find((option) => option.value === assetFilter)?.label || assetFilter } : null,
+    currencyFilter !== "all" ? { label: "Currency", value: currencyFilter } : null,
+    railFilter !== "all" ? { label: "Rail", value: railFilter } : null,
+    sourceFilter !== "all" ? { label: "Source", value: sourceFilter } : null,
+    startDate || endDate ? { label: "Dates", value: [startDate || "Any start", endDate || "Any end"].join(" to ") } : null,
+  ].filter(Boolean) as Array<{ label: string; value: string }>
+
+  const hasActiveFilters = activeFilters.length > 0
+
+  function clearFilters() {
+    setWalletFilter("all")
+    setNetworkFilter("all")
+    setChannelFilter("all")
+    setStatusFilter("all")
+    setRailFilter("all")
+    setAssetFilter("all")
+    setCurrencyFilter("all")
+    setSourceFilter("all")
+    setMethodFilter("all")
+    setStartDate("")
+    setEndDate("")
+    setPage(1)
+  }
+
+  function getFocusedFilterValue(filter: FocusedFilter) {
+    if (filter === "provider") return walletFilter
+    if (filter === "network") return networkFilter
+    if (filter === "channel") return channelFilter
+    if (filter === "asset") return assetFilter
+    if (filter === "method") return methodFilter
+    return "all"
+  }
+
+  function setFocusedFilterValue(filter: FocusedFilter, value: string) {
+    if (filter === "provider") setWalletFilter(value)
+    if (filter === "network") setNetworkFilter(value)
+    if (filter === "channel") setChannelFilter(value)
+    if (filter === "asset") setAssetFilter(value)
+    if (filter === "method") setMethodFilter(value)
+    setPage(1)
+  }
+
   const showChannelTransactions = useCallback((mode: "pos" | "online") => {
     setChartMode(mode)
     setChannelFilter(mode)
@@ -372,12 +495,8 @@ export default function TransactionsPage() {
     void loadChartData(chartRange, mode)
   }, [chartRange, loadChartData])
 
-  const filterRowClass =
-    "min-w-0"
-  const filterLabelClass =
-    "sr-only"
   const filterSelectClass =
-    "h-8 w-full min-w-0 truncate rounded-full border border-gray-200 bg-white px-2 text-[10px] font-medium text-gray-900 shadow-sm outline-none transition focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100 sm:h-9 sm:px-3 sm:text-sm sm:font-normal"
+    "h-11 w-full min-w-0 rounded-xl border border-gray-200 bg-white px-3 text-base font-medium text-gray-900 shadow-sm outline-none transition focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100 sm:text-sm sm:font-normal"
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -451,159 +570,113 @@ export default function TransactionsPage() {
       <PineTreeInsightsCard
         insights={[transactionInsight]}
         emptyText={buildNeutralInsight(
-          transactions.length > 0,
-          "Ledger insights will appear as provider and network activity builds."
-        ) || "Ledger activity is available; additional network-tagged transactions will sharpen insights."}
+          transactions.some((tx) => {
+            const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
+            return String(payment?.status || tx.status || "").trim().toUpperCase() === "CONFIRMED"
+          }),
+          "Complete more transactions to unlock activity insights."
+        ) || "Complete more transactions to unlock activity insights."}
       />
 
       <DashboardSection title="Transaction Ledger" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200/80 bg-white p-2 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-2.5">
-          <div className="grid min-w-0 grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-3">
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Wallet</span>
-            <select
-              aria-label="Wallet filter"
-              className={filterSelectClass}
-              value={walletFilter}
-              onChange={(e) => { setWalletFilter(e.target.value); setPage(1) }}
-            >
-              <option value="all">All Wallets</option>
-              <option value="solana">Solana Pay</option>
-              <option value="coinbase">Coinbase Business</option>
-              <option value="shift4">Shift4</option>
-              <option value="stripe">Stripe</option>
-              <option value="fluidpay">FluidPay</option>
-              <option value="base">Base Pay</option>
-              <option value="lightning_speed">Bitcoin Lightning</option>
-              <option value="cash">Cash</option>
-            </select>
-          </label>
-
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Network</span>
-            <select
-              aria-label="Network filter"
-              className={filterSelectClass}
-              value={networkFilter}
-              onChange={(e) => { setNetworkFilter(e.target.value); setPage(1) }}
-            >
-              <option value="all">All Networks</option>
-              <option value="solana">Solana</option>
-              <option value="base">Base</option>
-              <option value="ethereum">Ethereum</option>
-              <option value="bitcoin_lightning">Bitcoin Lightning</option>
-            </select>
-          </label>
-
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Channel</span>
-            <select
-              aria-label="Channel filter"
-              className={filterSelectClass}
-              value={channelFilter}
-              onChange={(e) => { setChannelFilter(e.target.value); setPage(1) }}
-            >
-              <option value="all">All Channels</option>
-              <option value="pos">POS</option>
-              <option value="online">Online</option>
-            </select>
-          </label>
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Status</span>
+        <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
+          <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center">
+          <label className="min-w-0 lg:w-52">
+            <span className="sr-only">Status</span>
             <select
               aria-label="Status filter"
               className={filterSelectClass}
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
             >
-              <option value="all">All Statuses</option>
-              <option value="CONFIRMED">Confirmed</option>
-              <option value="PROCESSING">Processing</option>
-              <option value="PENDING">Pending</option>
-              <option value="INCOMPLETE">Incomplete</option>
-              <option value="FAILED">Failed</option>
+              {statusFilterOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
-          </label>
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Rail</span>
-            <select aria-label="Rail filter" className={filterSelectClass} value={railFilter} onChange={(event) => { setRailFilter(event.target.value); setPage(1) }}>
-              <option value="all">All Rails</option>
-              <option value="card">Card rail</option>
-              <option value="solana">Solana rail</option>
-              <option value="base">Base rail</option>
-              <option value="bitcoin_lightning">Lightning rail</option>
-              <option value="cash">Cash rail</option>
-            </select>
-          </label>
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Currency or asset</span>
-            <select aria-label="Currency or asset filter" className={filterSelectClass} value={assetFilter} onChange={(event) => { setAssetFilter(event.target.value); setPage(1) }}>
-              <option value="all">All Assets</option>
-              <option value="USD">USD</option>
-              <option value="USDC">USDC</option>
-              <option value="USDT">USDT</option>
-              <option value="BTC">BTC</option>
-              <option value="ETH">ETH</option>
-              <option value="SOL">SOL</option>
-            </select>
-          </label>
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Payment method</span>
-            <select aria-label="Payment method filter" className={filterSelectClass} value={methodFilter} onChange={(event) => { setMethodFilter(event.target.value); setPage(1) }}>
-              <option value="all">All Methods</option>
-              <option value="card">Card</option>
-              <option value="crypto">Crypto</option>
-              <option value="cash">Cash</option>
-            </select>
-          </label>
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Settlement currency</span>
-            <select aria-label="Settlement currency filter" className={filterSelectClass} value={currencyFilter} onChange={(event) => { setCurrencyFilter(event.target.value); setPage(1) }}>
-              <option value="all">All Currencies</option>
-              <option value="USD">USD</option>
-              <option value="USDC">USDC</option>
-              <option value="USDT">USDT</option>
-              <option value="BTC">BTC</option>
-            </select>
-          </label>
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Source</span>
-            <select aria-label="Source filter" className={filterSelectClass} value={sourceFilter} onChange={(event) => { setSourceFilter(event.target.value); setPage(1) }}>
-              <option value="all">All Sources</option>
-              <option value="pos">POS</option>
-              <option value="online">Online</option>
-              <option value="api">API</option>
-              <option value="shopify">Shopify</option>
-              <option value="woocommerce">WooCommerce</option>
-            </select>
-          </label>
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Page size</span>
-            <select aria-label="Page size" className={filterSelectClass} value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }}>
-              <option value={25}>25 per page</option>
-              <option value={50}>50 per page</option>
-              <option value={100}>100 per page</option>
-            </select>
-          </label>
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>Start date</span>
-            <input aria-label="Start date" type="date" className={filterSelectClass} value={startDate} onChange={(event) => { setStartDate(event.target.value); setPage(1) }} />
-          </label>
-          <label className={filterRowClass}>
-            <span className={filterLabelClass}>End date</span>
-            <input aria-label="End date" type="date" min={startDate || undefined} className={filterSelectClass} value={endDate} onChange={(event) => { setEndDate(event.target.value); setPage(1) }} />
           </label>
           <button
             type="button"
-            onClick={() => {
-              setWalletFilter("all"); setNetworkFilter("all"); setChannelFilter("all"); setStatusFilter("all")
-               setRailFilter("all"); setAssetFilter("all"); setCurrencyFilter("all"); setSourceFilter("all"); setMethodFilter("all"); setStartDate(""); setEndDate(""); setPage(1)
-            }}
-            className={`${filterSelectClass} text-gray-600`}
+            onClick={() => setAdvancedFiltersOpen((value) => !value)}
+            className="inline-flex h-11 min-w-0 items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-base font-semibold text-gray-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-50/60 focus:outline-none focus:ring-4 focus:ring-blue-100 sm:text-sm lg:w-auto"
+            aria-expanded={advancedFiltersOpen}
           >
-            Clear filters
+            Filter{hasActiveFilters ? ` (${activeFilters.length})` : ""}
+          </button>
+          <button
+            type="button"
+            onClick={clearFilters}
+            className={`h-11 rounded-xl border border-gray-200 bg-white px-4 text-base font-semibold text-gray-600 transition hover:bg-gray-50 sm:text-sm ${hasActiveFilters ? "inline-flex items-center justify-center" : "hidden"}`}
+          >
+            Clear
           </button>
           </div>
+          {advancedFiltersOpen ? (
+            <div className="mt-3 rounded-2xl border border-blue-100 bg-blue-50/50 p-3">
+              <div className="grid gap-2 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto_auto] md:items-end">
+                <label className="min-w-0">
+                  <span className="mb-1 block text-xs font-semibold text-gray-600">Filter by</span>
+                  <select
+                    value={focusedFilter}
+                    onChange={(event) => setFocusedFilter(event.target.value as FocusedFilter)}
+                    className={filterSelectClass}
+                  >
+                    {focusedFilterOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                {focusedFilter === "date" ? (
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+                    <label className="min-w-0">
+                      <span className="mb-1 block text-xs font-semibold text-gray-600">Start date</span>
+                      <input aria-label="Start date" type="date" className={filterSelectClass} value={startDate} onChange={(event) => { setStartDate(event.target.value); setPage(1) }} />
+                    </label>
+                    <label className="min-w-0">
+                      <span className="mb-1 block text-xs font-semibold text-gray-600">End date</span>
+                      <input aria-label="End date" type="date" min={startDate || undefined} className={filterSelectClass} value={endDate} onChange={(event) => { setEndDate(event.target.value); setPage(1) }} />
+                    </label>
+                  </div>
+                ) : (
+                  <label className="min-w-0">
+                    <span className="mb-1 block text-xs font-semibold text-gray-600">Value</span>
+                    <select
+                      aria-label={`${focusedFilterOptions.find((option) => option.value === focusedFilter)?.label || "Filter"} value`}
+                      className={filterSelectClass}
+                      value={getFocusedFilterValue(focusedFilter)}
+                      onChange={(event) => setFocusedFilterValue(focusedFilter, event.target.value)}
+                    >
+                      {filterValueOptions[focusedFilter].map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setAdvancedFiltersOpen(false)}
+                  className="h-11 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                >
+                  Apply filters
+                </button>
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 transition hover:bg-gray-50"
+                >
+                  Clear filters
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {activeFilters.length ? (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {activeFilters.map((filter) => (
+                <span key={`${filter.label}-${filter.value}`} className="inline-flex max-w-full items-center rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-800">
+                  <span className="truncate">{filter.label}: {filter.value}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
 
       <div
@@ -616,9 +689,21 @@ export default function TransactionsPage() {
           </div>
         ) : null}
         {loadingTransactions ? <p className="px-4 py-8 text-center text-sm text-gray-500">Loading transactions…</p> : <TransactionActivityTable transactions={filteredTransactions} />}
-        <div className="flex items-center justify-between border-t border-gray-100 px-2 py-3 text-sm text-gray-600">
+        <div className="flex flex-col gap-3 border-t border-gray-100 px-2 py-3 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
           <span>{totalTransactions} transactions</span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="sr-only" htmlFor="transactions-page-size">Page size</label>
+            <select
+              id="transactions-page-size"
+              aria-label="Page size"
+              className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-sm font-medium text-gray-700"
+              value={pageSize}
+              onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }}
+            >
+              <option value={25}>25 per page</option>
+              <option value={50}>50 per page</option>
+              <option value={100}>100 per page</option>
+            </select>
             <button
               type="button"
               disabled={page <= 1}

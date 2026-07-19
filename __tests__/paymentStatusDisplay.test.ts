@@ -64,9 +64,10 @@ describe("shared payment status display", () => {
     expect(getPaymentStatusLabel("CONFIRMED")).not.toBe("Success")
   })
 
-  it("Waiting uses gray classes", () => {
+  it("Waiting uses PineTree blue classes", () => {
     const display = getPaymentDisplayStatus("PENDING")
-    expect(display.classes).toContain("gray")
+    expect(display.classes).toContain("blue")
+    expect(display.iconClassName).toContain("#2f5bea")
     expect(display.tone).toBe("waiting")
   })
 

@@ -269,7 +269,7 @@ export default function TerminalInner() {
 
   if (!terminal) {
     return (
-      <div className="h-screen w-screen bg-gray-100 flex items-center justify-center">
+      <div className="flex h-[100dvh] w-full items-center justify-center bg-gray-100">
         <div className="text-sm font-medium text-gray-500">
           {terminalId ? "Loading terminal..." : "Missing terminal id"}
         </div>
@@ -279,11 +279,11 @@ export default function TerminalInner() {
 
   return (
 
-    <div className="h-screen w-screen bg-gray-100 flex items-center justify-center relative">
+    <div className="relative flex h-[100dvh] w-full items-center justify-center overflow-hidden overscroll-none bg-gray-100 px-[max(0.75rem,env(safe-area-inset-left))] py-[calc(env(safe-area-inset-top)+0.75rem)] pb-[calc(env(safe-area-inset-bottom)+0.75rem)] touch-manipulation">
 
       {terminal && unlockMode && (
 
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 text-center">
+        <div className="absolute left-1/2 top-[calc(env(safe-area-inset-top)+1rem)] -translate-x-1/2 text-center">
 
           <div className="text-sm text-gray-600 font-medium">
             POS {terminal.id}
@@ -293,7 +293,7 @@ export default function TerminalInner() {
 
       )}
 
-      <div className="fixed right-6 top-24 space-y-3 z-50">
+      <div className="fixed right-[max(1rem,env(safe-area-inset-right))] top-[calc(env(safe-area-inset-top)+4.5rem)] z-50 space-y-3">
 
         {toasts.map((toast)=>(
           <div
@@ -312,7 +312,7 @@ export default function TerminalInner() {
 
       <button
         onClick={requestUnlock}
-        className="absolute top-6 right-6 hover:scale-110 transition"
+        className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[calc(env(safe-area-inset-top)+3rem)] touch-manipulation transition hover:scale-110"
       >
 
         <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
@@ -331,7 +331,7 @@ export default function TerminalInner() {
       </button>
 
       {!unlockMode && terminal && !shiftStarted && Number(terminal.drawer_starting_amount ?? 0) > 0 && (
-        <div className="bg-white shadow-xl rounded-2xl p-8 w-[92vw] max-w-[420px] text-center space-y-5">
+        <div className="max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] space-y-5 overflow-y-auto rounded-2xl bg-white p-6 text-center shadow-xl sm:p-8">
           <div>
             <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">{terminal.name}</p>
             <h1 className="text-2xl font-bold text-gray-900">Start Shift</h1>
@@ -375,7 +375,7 @@ export default function TerminalInner() {
 
       {unlockMode && (
 
-        <div className="bg-white shadow-xl rounded-2xl p-6 sm:p-12 w-[92vw] max-w-[420px]">
+        <div className="max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] overflow-y-auto rounded-2xl bg-white p-5 shadow-xl sm:p-10">
 
           <div className="text-center mb-8">
 
@@ -415,13 +415,13 @@ export default function TerminalInner() {
                 value={recoveryPhrase}
                 onChange={(e) => setRecoveryPhrase(e.target.value)}
                 placeholder="Recovery phrase"
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-base text-black sm:text-sm"
               />
               <input
                 value={recoveryPin}
                 onChange={(e) => setRecoveryPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
                 placeholder="New 4-digit PIN"
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-black text-center tracking-widest"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-center text-base tracking-widest text-black sm:text-sm"
               />
               <div className="flex flex-col sm:flex-row gap-2">
                   <Button

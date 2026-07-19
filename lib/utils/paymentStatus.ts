@@ -38,9 +38,9 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     message: "Payment request created and awaiting customer action.",
     tone: "waiting",
     icon: "clock",
-    classes: "border border-gray-200 bg-gray-100 text-gray-800",
-    iconClassName: "text-gray-600",
-    iconBgClassName: "bg-gray-50",
+    classes: "border border-blue-200 bg-blue-50 text-blue-800",
+    iconClassName: "text-[#2f5bea]",
+    iconBgClassName: "bg-blue-50",
   },
   processing: {
     label: "Processing",

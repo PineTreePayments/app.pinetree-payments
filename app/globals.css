@@ -58,6 +58,41 @@ body.pinetree-modal-open {
 }
 
 /* Sidebar navigation — PineTree glass scrollbar */
+@keyframes pinetreeWaitingPulse {
+  0%, 100% {
+    opacity: 0.65;
+    transform: scale(0.94);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+.pinetree-waiting-indicator {
+  animation: pinetreeWaitingPulse 1.4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pinetree-waiting-indicator {
+    animation: none;
+  }
+}
+
+.pinetree-pos-terminal {
+  -webkit-text-size-adjust: 100%;
+}
+
+.pinetree-pos-terminal button,
+.pinetree-pos-terminal a,
+.pinetree-pos-terminal input,
+.pinetree-pos-terminal select,
+.pinetree-pos-terminal textarea {
+  touch-action: manipulation;
+}
+
 .pinetree-sidebar-nav {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;

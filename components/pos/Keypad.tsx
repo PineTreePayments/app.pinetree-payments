@@ -41,10 +41,10 @@ export default function Keypad({
   }
 
   const btn =
-    "h-14 rounded-xl border border-gray-200 bg-white text-gray-900 font-semibold text-base shadow transition-all duration-150 hover:border-blue-300 hover:bg-blue-50 hover:shadow-md active:translate-y-[1px] active:bg-blue-100 active:shadow-sm"
+    "h-[3.25rem] min-h-12 touch-manipulation rounded-xl border border-gray-200 bg-white text-gray-900 font-semibold text-base shadow transition-all duration-150 hover:border-blue-300 hover:bg-blue-50 hover:shadow-md active:translate-y-[1px] active:bg-blue-100 active:shadow-sm sm:h-14"
 
   return (
-    <div className="grid grid-cols-3 gap-3 max-w-[340px] mx-auto">
+    <div className="mx-auto grid w-full max-w-[340px] grid-cols-3 gap-2.5 sm:gap-3">
 
       {[1,2,3,4,5,6,7,8,9].map((n) => (
         <button
