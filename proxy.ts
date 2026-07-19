@@ -132,7 +132,13 @@ export async function proxy(req: NextRequest) {
 
   if (!user && (protectedPage || protectedApi)) {
     if (protectedApi) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        {
+          status: 401,
+          headers: { "Cache-Control": "private, no-store, max-age=0" },
+        }
+      )
     }
 
     const loginUrl = req.nextUrl.clone()

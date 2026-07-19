@@ -12,4 +12,10 @@ describe("middleware bearer authentication", () => {
     expect(source).toContain("user = bearerAuth.data.user")
     expect(source).toContain('!bearerToken.startsWith("pt_live_")')
   })
+
+  it("prevents unauthenticated protected API responses from being cached", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "proxy.ts"), "utf8")
+
+    expect(source).toContain('headers: { "Cache-Control": "private, no-store, max-age=0" }')
+  })
 })
