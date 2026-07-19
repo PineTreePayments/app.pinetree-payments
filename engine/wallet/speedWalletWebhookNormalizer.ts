@@ -14,22 +14,22 @@
  * else is recorded in speed_webhook_events for idempotency/diagnostics and
  * otherwise ignored - never guessed into a wallet operation.
  *
- * Scope note: only payment.paid / payment.confirmed are normalized into a
- * wallet operation today. withdraw.*, withdraw_request.*, and
- * connect.completed events are stored for idempotency + diagnostics only,
- * because PineTree
- * cannot yet create a connected-account withdrawal/payout itself (see
- * providers/lightning/speedWalletManagement.ts) - a webhook confirming a
- * withdrawal PineTree never initiated is a signal worth keeping, not one
- * this module should turn into an authoritative ledger row on its own.
+ * payment.paid/payment.confirmed create or update incoming activity.
+ * withdraw.created/paid/failed may update an existing PineTree-initiated
+ * Instant Send by its account-scoped reference IDs, but never create a new
+ * authoritative withdrawal row on their own. Other events remain diagnostic.
  */
 
 import { extractSpeedWebhookAccountId, isSpeedConnectedAccountWebhookPayload } from "@/providers/lightning/speedClient"
 import { getMerchantIdBySpeedAccountId } from "@/database/merchantLightningProfiles"
 import { claimSpeedWebhookEvent, markSpeedWebhookEventProcessed } from "@/database/speedWebhookEvents"
-import { upsertWalletOperationFromWebhook } from "@/database/merchantWalletOperations"
+import {
+  updateWalletOperationFromProviderEvent,
+  upsertWalletOperationFromWebhook,
+} from "@/database/merchantWalletOperations"
 
 const WALLET_RELEVANT_PAYMENT_EVENTS = new Set(["payment.paid", "payment.confirmed"])
+const WALLET_RELEVANT_WITHDRAW_EVENTS = new Set(["withdraw.created", "withdraw.paid", "withdraw.failed"])
 
 function readPath(input: unknown, path: string[]): unknown {
   let cursor: unknown = input
@@ -56,9 +56,13 @@ function getPaymentTargetAmount(payload: unknown): { amount: bigint; asset: stri
   const targetAmount = readPath(payload, ["data", "object", "target_amount"]) ?? readPath(payload, ["target_amount"])
   const targetCurrency =
     readPath(payload, ["data", "object", "target_currency"]) ?? readPath(payload, ["target_currency"]) ?? "SATS"
-  const amountNumber = Number(targetAmount)
-  if (!Number.isFinite(amountNumber) || amountNumber <= 0) return null
-  return { amount: BigInt(Math.round(amountNumber)), asset: String(targetCurrency || "SATS").trim().toUpperCase() }
+  const asset = String(targetCurrency || "SATS").trim().toUpperCase()
+  const amountText = String(targetAmount ?? "").trim()
+  // PineTree-created Speed payments settle to SATS. Reject any unexpected
+  // asset/fraction instead of rounding a webhook amount into a ledger value.
+  if (asset !== "SATS" || !/^\d+$/.test(amountText)) return null
+  const amount = BigInt(amountText)
+  return amount > BigInt(0) ? { amount, asset } : null
 }
 
 export type NormalizeWalletWebhookResult = {
@@ -100,7 +104,35 @@ export async function normalizeSpeedWebhookForWallet(
   }
 
   if (!WALLET_RELEVANT_PAYMENT_EVENTS.has(eventType)) {
-    return { handled: false, reason: "event_not_wallet_relevant" }
+    if (!WALLET_RELEVANT_WITHDRAW_EVENTS.has(eventType)) {
+      return { handled: false, reason: "event_not_wallet_relevant" }
+    }
+
+    const object = (readPath(payload, ["data", "object"]) || readPath(payload, ["data"]) || payload) as Record<string, unknown>
+    const withdrawId = String(object?.id || "").trim()
+    const instantSendId = String(object?.reference_id || "").trim()
+    if (!withdrawId || !instantSendId || String(object?.reference_type || "") !== "instant_send") {
+      return { handled: false, reason: "withdraw_event_missing_reference" }
+    }
+    const status = eventType === "withdraw.paid"
+      ? "COMPLETED" as const
+      : eventType === "withdraw.failed"
+        ? "FAILED" as const
+        : "PENDING" as const
+    const operation = await updateWalletOperationFromProviderEvent({
+      merchantId,
+      providerAccountId: accountId!,
+      providerReference: instantSendId,
+      providerSecondaryReference: withdrawId,
+      status,
+      providerStatus: eventType,
+      failureReason: typeof object.failure_reason === "string" ? object.failure_reason.slice(0, 200) : null,
+      txHash: typeof object.transaction_hash === "string" ? object.transaction_hash : null,
+      completedAt: status === "COMPLETED" ? new Date().toISOString() : null,
+    })
+    if (!operation) return { handled: false, reason: "withdraw_operation_not_matched" }
+    await markSpeedWebhookEventProcessed(claim.record.id, operation.id)
+    return { handled: true, reason: "withdraw_operation_updated" }
   }
 
   const paymentReference = getPaymentReference(payload)
@@ -111,6 +143,7 @@ export async function normalizeSpeedWebhookForWallet(
 
   const { operation } = await upsertWalletOperationFromWebhook({
     merchantId,
+    providerAccountId: accountId!,
     operationType: "PAYMENT",
     direction: "credit",
     status: "COMPLETED",

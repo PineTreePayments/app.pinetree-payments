@@ -29,7 +29,7 @@ function statusError(message: string, status: number): StatusError {
 }
 
 // Non-secret summary - safe for an admin list/detail view. Deliberately
-// excludes the raw BOLT11 invoice, invoice hash, resolved X-Speed-Account
+// excludes the raw BOLT11 invoice, invoice hash, resolved speed-account
 // header value, and raw provider_status payload - none of those are on the
 // explicit admin-visibility list and there is no operational need to widen
 // exposure beyond it.

@@ -370,13 +370,16 @@ export class SpeedApiError extends Error {
   providerCode: string | null
   providerMessage: string | null
   fieldErrors: SpeedFieldError[]
+  requestId: string | null
+  retryable: boolean
 
   constructor(
     message: string,
     status: number,
     providerCode: string | null,
     fieldErrors: SpeedFieldError[],
-    providerMessage: string | null = null
+    providerMessage: string | null = null,
+    requestId: string | null = null
   ) {
     super(message)
     this.name = "SpeedApiError"
@@ -384,6 +387,31 @@ export class SpeedApiError extends Error {
     this.providerCode = providerCode
     this.fieldErrors = fieldErrors
     this.providerMessage = providerMessage ?? fieldErrors[0]?.message ?? null
+    this.requestId = requestId
+    this.retryable = status === 429 || status >= 500
+  }
+}
+
+export type SpeedMerchantRequestContext = {
+  merchantId: string
+  connectedAccountId: string
+  operation: string
+}
+
+export type SpeedRequestResult<T> = {
+  data: T
+  status: number
+  requestId: string | null
+}
+
+export class SpeedTransportError extends Error {
+  readonly retryable = true
+  readonly timedOut: boolean
+
+  constructor(message: string, timedOut: boolean) {
+    super(message)
+    this.name = "SpeedTransportError"
+    this.timedOut = timedOut
   }
 }
 
@@ -646,49 +674,92 @@ function getConnectCustomRequestMetadata(body: unknown) {
   }
 }
 
-async function speedRequestWithStatus<T>(
+function speedRequestId(response: Response): string | null {
+  return (
+    response.headers?.get("speed-request-id") ||
+    response.headers?.get("request-id") ||
+    response.headers?.get("x-request-id") ||
+    null
+  )
+}
+
+function parseSpeedSuccessBody<T>(body: string): T {
+  if (!body.trim()) return undefined as T
+  try {
+    return JSON.parse(body) as T
+  } catch {
+    throw new SpeedTransportError("Speed API returned a malformed JSON response.", false)
+  }
+}
+
+export async function speedRequestWithStatus<T>(
   path: string,
-  init?: Omit<RequestInit, "headers"> & { headers?: Record<string, string> }
-): Promise<{ data: T; status: number }> {
+  init?: Omit<RequestInit, "headers" | "signal"> & {
+    headers?: Record<string, string>
+    merchantContext?: SpeedMerchantRequestContext
+  }
+): Promise<SpeedRequestResult<T>> {
   const config = getPineTreeSpeedConfigStatus()
   const startedAt = Date.now()
   let response: Response
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const merchantId = init?.merchantContext?.merchantId || null
+  const providerAccountId = String(init?.merchantContext?.connectedAccountId || "").trim()
+  const operation = init?.merchantContext?.operation || `${init?.method || "GET"} ${path}`
+
+  if (init?.merchantContext && !providerAccountId) {
+    clearTimeout(timeout)
+    throw new SpeedApiError("Speed connected account is not configured.", 400, "connected_account_missing", [], null)
+  }
+  if (init?.merchantContext && !providerAccountId.startsWith("acct_")) {
+    clearTimeout(timeout)
+    throw new SpeedApiError("Speed connected account is invalid.", 400, "connected_account_invalid", [], null)
+  }
+  const requestInit = { ...(init || {}) }
+  delete requestInit.merchantContext
 
   try {
     if (path === "/connect/custom") {
       console.info("[speed] speed_connect_custom_prefetch_diagnostic", getConnectCustomRequestMetadata(init?.body))
     }
     response = await fetch(`${config.apiBaseUrl}${path}`, {
-      ...init,
+      ...requestInit,
       headers: {
+        ...(init?.headers || {}),
         ...getSpeedAuthHeaders(),
-        ...(init?.headers || {})
+        ...(providerAccountId ? { "speed-account": providerAccountId } : {}),
       },
-      signal: init?.signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      signal: controller.signal
     })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    throw new Error(
-      message.includes("timed out") || message.includes("timeout")
-        ? "Speed API request timed out. Check PineTree's Speed platform connectivity."
-        : `Speed API unreachable: ${message}`
+  } catch {
+    const timedOut = controller.signal.aborted
+    console.warn("[speed] request_transport_failure", {
+      merchantId,
+      providerAccountId: providerAccountId || null,
+      operation,
+      timedOut,
+      elapsedMs: Date.now() - startedAt,
+    })
+    throw new SpeedTransportError(
+      timedOut ? "Speed API request timed out." : "Speed API is temporarily unreachable.",
+      timedOut
     )
+  } finally {
+    clearTimeout(timeout)
   }
 
-  if (response.status === 401) {
-    throw new Error("PineTree Speed platform API key is invalid.")
-  }
-
-  if (response.status === 403) {
-    throw new Error("PineTree Speed platform API key lacks permission for this Speed operation.")
-  }
+  const requestId = speedRequestId(response)
+  const body = await response.text().catch(() => "")
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "")
     const { providerCode, fieldErrors } = parseSpeedErrorBody(body)
     console.error("[speed] API request failed", {
-      path,
+      merchantId,
+      providerAccountId: providerAccountId || null,
+      operation,
       status: response.status,
+      requestId,
       safeCode: safeSpeedErrorCode(response.status, body),
       providerCode,
       fieldErrorCount: fieldErrors.length,
@@ -714,15 +785,32 @@ async function speedRequestWithStatus<T>(
       throw new Error(SPEED_TRANSFER_SPLIT_ERROR)
     }
 
-    throw new SpeedApiError(`Speed API returned ${response.status}`, response.status, providerCode, fieldErrors)
+    const safeMessage = response.status === 401
+      ? "Speed authentication failed."
+      : response.status === 403
+        ? "Speed denied this operation."
+        : `Speed API returned ${response.status}`
+    throw new SpeedApiError(safeMessage, response.status, providerCode, fieldErrors, null, requestId)
   }
 
-  return { data: (await response.json()) as T, status: response.status }
+  const data = parseSpeedSuccessBody<T>(body)
+  console.info("[speed] request_succeeded", {
+    merchantId,
+    providerAccountId: providerAccountId || null,
+    operation,
+    status: response.status,
+    requestId,
+    elapsedMs: Date.now() - startedAt,
+  })
+  return { data, status: response.status, requestId }
 }
 
-async function speedRequest<T>(
+export async function speedRequest<T>(
   path: string,
-  init?: Omit<RequestInit, "headers"> & { headers?: Record<string, string> }
+  init?: Omit<RequestInit, "headers" | "signal"> & {
+    headers?: Record<string, string>
+    merchantContext?: SpeedMerchantRequestContext
+  }
 ): Promise<T> {
   const { data } = await speedRequestWithStatus<T>(path, init)
   return data
@@ -825,6 +913,9 @@ export async function createSpeedLightningPayment(
   if (!useTreasurySweep && !merchantSpeedAccountId) {
     throw new Error("Merchant Speed account ID is required for Speed Lightning payments.")
   }
+  if (!useTreasurySweep && !merchantSpeedAccountId.startsWith("acct_")) {
+    throw new Error("Merchant Speed account ID is invalid for Speed Lightning payments.")
+  }
 
   const grossAmount = Number(params.amount)
   const merchantAmount = Number(params.merchantAmount)
@@ -884,14 +975,22 @@ export async function createSpeedLightningPayment(
     ...(useTreasurySweep
       ? {}
       : {
-          account_id: merchantSpeedAccountId,
           application_fee: pineTreeFeeAmount
         }),
   }
 
   const payment = await speedRequest<SpeedPaymentObject>("/payments", {
     method: "POST",
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    ...(!useTreasurySweep
+      ? {
+          merchantContext: {
+            merchantId: params.merchantId,
+            connectedAccountId: merchantSpeedAccountId,
+            operation: "payment.create",
+          },
+        }
+      : {}),
   })
 
   const paymentRequest = getLightningPaymentRequest(payment)
@@ -959,10 +1058,16 @@ export async function createSpeedWithdrawRequest(
   })
 }
 
-export async function retrieveSpeedPayment(paymentId: string): Promise<SpeedPaymentObject> {
+export async function retrieveSpeedPayment(
+  paymentId: string,
+  merchantContext?: SpeedMerchantRequestContext
+): Promise<SpeedPaymentObject> {
   const id = String(paymentId || "").trim()
   if (!id) throw new Error("Missing Speed payment ID")
-  return speedRequest<SpeedPaymentObject>(`/payments/${encodeURIComponent(id)}`, { method: "GET" })
+  return speedRequest<SpeedPaymentObject>(`/payments/${encodeURIComponent(id)}`, {
+    method: "GET",
+    ...(merchantContext ? { merchantContext } : {}),
+  })
 }
 
 export async function createSpeedConnectAccountLink(params: {
@@ -1134,9 +1239,9 @@ function readSpeedWebhookField(payload: unknown, path: string[]): unknown {
 
 /**
  * Speed marks connected-account/sub-account events with an `account_id` on the
- * event payload (top-level or nested under data.object), mirroring how those
- * payments are created with `account_id` set. Account-level (platform) events
- * never carry this field.
+ * event payload (top-level or nested under data.object). PineTree scopes the
+ * corresponding API request with `speed-account`; platform events do not carry
+ * a connected-account identifier.
  */
 export function isSpeedConnectedAccountWebhookPayload(payload: unknown): boolean {
   return Boolean(extractSpeedWebhookAccountId(payload))

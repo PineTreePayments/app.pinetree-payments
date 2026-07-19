@@ -8,10 +8,9 @@
 
 import type { ProviderAdapter, ProviderCapabilities, LightningInvoiceRequest } from "@/types/provider"
 import { registerProvider } from "@/providers/registry"
-import {
-  SPEED_PROVIDER_NAME,
-  getMerchantSpeedProvider
-} from "@/database/merchantProviders"
+import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
+import { resolveSpeedHeaderAccountId } from "./speedHeaderAccountResolver"
 import {
   createSpeedLightningPayment,
   retrieveSpeedPayment,
@@ -80,6 +79,23 @@ export function normalizeSpeedStatus(status: string) {
   return "UNKNOWN" as const
 }
 
+async function resolveMerchantSpeedAccount(merchantId: string): Promise<string> {
+  const profile = await getMerchantLightningProfile(merchantId)
+  if (!profile || profile.status !== "ready") {
+    throw new Error("Speed Lightning is not ready for this merchant.")
+  }
+  return resolveSpeedHeaderAccountId(profile)
+}
+
+export async function retrieveMerchantSpeedPayment(paymentId: string, merchantId: string) {
+  const connectedAccountId = await resolveMerchantSpeedAccount(merchantId)
+  return retrieveSpeedPayment(paymentId, {
+    merchantId,
+    connectedAccountId,
+    operation: "payment.retrieve",
+  })
+}
+
 export const speedAdapter: ProviderAdapter = {
   metadata: {
     adapterId: SPEED_ADAPTER_ID,
@@ -91,19 +107,9 @@ export const speedAdapter: ProviderAdapter = {
 
   async createLightningInvoice(input: LightningInvoiceRequest) {
     const treasurySweepEnabled = isSpeedPlatformTreasurySweepEnabled()
-    const merchantSpeed = treasurySweepEnabled ? null : await getMerchantSpeedProvider(input.merchantId)
     const merchantSpeedAccountId = treasurySweepEnabled
       ? ""
-      : input.merchantWallet || merchantSpeed?.accountId || ""
-
-    if (!treasurySweepEnabled) {
-      if (!merchantSpeedAccountId) {
-        throw new Error("Merchant Speed Account ID is required for Speed Lightning payments.")
-      }
-      if (!merchantSpeed?.readyForPayments && merchantSpeedAccountId !== input.merchantWallet) {
-        throw new Error("Speed Lightning is not ready for this merchant. Run the Speed setup test and save a Merchant Speed Account ID.")
-      }
-    }
+      : await resolveMerchantSpeedAccount(input.merchantId)
 
     const speedPayment = await createSpeedLightningPayment({
       amount: Number(input.grossAmount),
@@ -164,13 +170,15 @@ export const speedAdapter: ProviderAdapter = {
     })
   },
 
-  async getLightningInvoiceStatus(providerReference: string) {
-    const payment = await retrieveSpeedPayment(providerReference)
+  async getLightningInvoiceStatus(providerReference: string, merchantId?: string) {
+    if (!merchantId) throw new Error("Merchant ID is required for Speed payment retrieval.")
+    const payment = await retrieveMerchantSpeedPayment(providerReference, merchantId)
     return { status: normalizeSpeedStatus(String(payment.status || "")) }
   },
 
-  async getPaymentStatus(providerReference: string) {
-    const payment = await retrieveSpeedPayment(providerReference)
+  async getPaymentStatus(providerReference: string, merchantId?: string) {
+    if (!merchantId) throw new Error("Merchant ID is required for Speed payment retrieval.")
+    const payment = await retrieveMerchantSpeedPayment(providerReference, merchantId)
     return { status: normalizeSpeedStatus(String(payment.status || "")) }
   },
 

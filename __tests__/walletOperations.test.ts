@@ -219,7 +219,11 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
       }),
     })
     const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "fake-provider", adapter, context: fakeContext })
-    const existing = operationRow({ status: "FAILED", failure_code: "WALLET_CAPABILITY_UNAVAILABLE" })
+    const existing = operationRow({
+      status: "FAILED",
+      failure_code: "WALLET_CAPABILITY_UNAVAILABLE",
+      destination_summary: "lnbc1q...qqqq",
+    })
     const createWalletOperation = vi.fn().mockResolvedValue({ operation: existing, created: false })
     const updateWalletOperation = vi.fn()
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))

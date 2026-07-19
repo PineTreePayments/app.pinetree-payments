@@ -7,7 +7,8 @@ import {
 } from "@/engine/eventProcessor"
 import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
-import { isSpeedPaymentPaid, retrieveSpeedPayment } from "@/providers/lightning/speedClient"
+import { isSpeedPaymentPaid } from "@/providers/lightning/speedClient"
+import { retrieveMerchantSpeedPayment } from "@/providers/lightning/speedAdapter"
 
 type Params = { params: Promise<{ paymentId: string }> }
 
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Missing Speed payment reference" }, { status: 400 })
     }
 
-    const speedPayment = await retrieveSpeedPayment(speedPaymentId)
+    const speedPayment = await retrieveMerchantSpeedPayment(speedPaymentId, payment.merchant_id)
     const detected = isSpeedPaymentPaid(speedPayment)
     const speedStatus = String(speedPayment.status || "").toLowerCase().trim()
 

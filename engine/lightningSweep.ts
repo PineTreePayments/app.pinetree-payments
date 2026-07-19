@@ -8,13 +8,9 @@
  * fresh BOLT11 invoice from the same merchant's PineTree Wallet via Speed
  * Instant Send.
  *
- * The live Speed Instant Send request is feature-flagged
- * (SPEED_LIGHTNING_SWEEP_ENABLED) and fails closed until Speed's exact
- * endpoint contract is confirmed - see providers/lightning/speedInstantSend.ts.
- * This module is fully wired end-to-end and safe to ship now: every sweep
- * created today will settle into `awaiting_configuration` and stay there,
- * never touching Speed, never blocking the underlying payment's own
- * CONFIRMED status.
+ * Live Instant Send remains feature-flagged with
+ * SPEED_LIGHTNING_SWEEP_ENABLED. Merchant identity is server-resolved and
+ * every Speed call is scoped to the canonical connected account.
  */
 
 import { getPaymentById } from "@/database/payments"
@@ -28,6 +24,7 @@ import {
 } from "@/providers/lightning/speedHeaderAccountResolver"
 import {
   getConnectedAccountBalance,
+  getInstantSendStatus,
   sendToLightningInvoice,
   SpeedInstantSendNotConfiguredError,
   SpeedInstantSendProviderError,
@@ -201,6 +198,7 @@ export async function processOneLightningSweep(sweepId: string): Promise<SweepSt
     try {
       speedHeaderAccountId = resolveSpeedHeaderAccountId({
         merchant_id: claimed.merchant_id,
+        speed_account_id: lightningProfile?.speed_account_id ?? null,
         speed_header_account_id: lightningProfile?.speed_header_account_id ?? null,
       })
     } catch (error) {
@@ -270,7 +268,10 @@ export async function processOneLightningSweep(sweepId: string): Promise<SweepSt
     // available right now.
     let availableSats: number
     try {
-      const balance = await getConnectedAccountBalance({ speedHeaderAccountId })
+      const balance = await getConnectedAccountBalance({
+        speedHeaderAccountId,
+        merchantId: claimed.merchant_id,
+      })
       availableSats = balance.availableSats
     } catch (error) {
       if (error instanceof SpeedInstantSendNotConfiguredError) {
@@ -309,6 +310,7 @@ export async function processOneLightningSweep(sweepId: string): Promise<SweepSt
         invoice: String(invoice),
         amountSats: sendAmountSats,
         idempotencyKey: claimed.idempotency_key,
+        merchantId: claimed.merchant_id,
       })
 
       await updateLightningSweep(claimed.id, {
@@ -402,6 +404,41 @@ async function handleSendFailure(
  * or a verified destination-wallet receipt" requirement.
  */
 async function recheckSweepConfirmation(sweep: MerchantLightningSweep): Promise<SweepStepOutcome> {
+  if (sweep.provider_send_id && sweep.speed_header_account_id) {
+    try {
+      const provider = await getInstantSendStatus({
+        speedHeaderAccountId: sweep.speed_header_account_id,
+        providerSendId: sweep.provider_send_id,
+        merchantId: sweep.merchant_id,
+      })
+      const status = provider.providerStatus.trim().toLowerCase()
+      if (status === "paid") {
+        await updateLightningSweep(sweep.id, {
+          status: "confirmed",
+          providerStatus: provider.providerStatus,
+          completedAt: new Date().toISOString(),
+          lastErrorCode: null,
+          lastErrorMessage: null,
+        })
+        return "confirmed"
+      }
+      if (status === "failed") {
+        await updateLightningSweep(sweep.id, {
+          status: "failed",
+          providerStatus: provider.providerStatus,
+          lastErrorCode: "provider_send_failed",
+          lastErrorMessage: "Speed reported that the Instant Send failed.",
+        })
+        return "failed"
+      }
+    } catch (error) {
+      console.warn("[lightning-sweep] provider status lookup failed", {
+        sweepId: sweep.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   if (sweep.destination_invoice_hash) {
     const nwc = await getMerchantNwcSetup(sweep.merchant_id)
     if (nwc) {

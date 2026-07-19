@@ -32,17 +32,28 @@ describe("MerchantWalletManagementPanel", () => {
       "/api/wallets/balances",
       "/api/wallets/activity",
       "/api/wallets/withdrawals",
-      "/api/wallets/payouts",
-      "/api/wallets/swaps/quote",
-      "/api/wallets/swaps",
-      "/api/wallets/preferences",
     ]) {
       expect(componentSource).toContain(path)
     }
+    expect(componentSource).not.toContain("/api/wallets/payouts")
+    expect(componentSource).not.toContain("/api/wallets/swaps")
+    expect(componentSource).not.toContain("/api/wallets/preferences")
   })
 
   it("derives any provider display label from the normalized API response, never a hardcoded provider name", () => {
     expect(componentSource).toContain("providerDisplayName")
     expect(componentSource).not.toMatch(/"Speed"/)
+  })
+
+  it("keeps unsupported automation non-interactive and requires withdrawal review", () => {
+    expect(componentSource).toContain("Automatic conversion and scheduled payouts are not currently available for Bitcoin Lightning.")
+    expect(componentSource).not.toContain("ToggleSwitch")
+    expect(componentSource).toContain("Review")
+    expect(componentSource).toContain("Confirm withdrawal")
+  })
+
+  it("keeps one idempotency key for the dialog so rapid duplicate submits converge", () => {
+    expect(componentSource).toContain("const [idempotencyKey] = useState(() => crypto.randomUUID())")
+    expect(componentSource).toContain('headers: { "Idempotency-Key": idempotencyKey }')
   })
 })

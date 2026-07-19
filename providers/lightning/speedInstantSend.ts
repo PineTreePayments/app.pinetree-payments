@@ -1,36 +1,18 @@
 /**
- * Speed Instant Send adapter boundary.
- *
- * Speed has confirmed PineTree can programmatically send SATS from a Custom
- * Connect merchant account to a BOLT11 invoice using PineTree's platform API
- * key, with connected-account context supplied via
- * `X-Speed-Account: {connected_account_id}` (below Speed's $20 automatic
- * payout minimum). Speed has NOT yet supplied the exact:
- *   - Instant Send endpoint URL / HTTP method / request body schema
- *   - response schema
- *   - balance endpoint
- *   - idempotency header or request field
- *   - connected-account identifier format required by X-Speed-Account
- *   - success/failure event names
- *
- * This module is the ONLY place allowed to eventually translate Speed's raw
- * request/response shape - engine code (engine/lightningSweep.ts) must only
- * ever depend on the stable types exported here, never on Speed's payload
- * shape directly.
- *
- * Until Speed supplies the exact contract, every exported function here
- * throws SpeedInstantSendNotConfiguredError and issues ZERO HTTP requests -
- * see the reason codes below. Implementing the real request/response
- * translation is a follow-up change once the contract is confirmed; this
- * file intentionally does not guess at it.
+ * Lightning-sweep compatibility adapter over the confirmed Speed wallet
+ * boundary. All HTTP/auth/header construction remains centralized in
+ * speedClient.ts via speedWalletManagement.ts.
  */
 
-import { getSpeedApiHost } from "./speedClient"
+import {
+  SpeedWalletCapabilityUnavailableError,
+  SpeedWalletProviderError,
+  createConnectedAccountWithdrawal,
+  getConnectedAccountBalances,
+  getConnectedAccountSendStatus,
+} from "./speedWalletManagement"
 
-export type SpeedInstantSendConfigReason =
-  | "feature_disabled"
-  | "endpoint_not_configured"
-  | "contract_unconfirmed"
+export type SpeedInstantSendConfigReason = "feature_disabled" | "contract_unconfirmed"
 
 export class SpeedInstantSendNotConfiguredError extends Error {
   readonly reason: SpeedInstantSendConfigReason
@@ -42,15 +24,6 @@ export class SpeedInstantSendNotConfiguredError extends Error {
   }
 }
 
-/**
- * PineTree's own stable internal error shape for a real (post-contract)
- * Speed Instant Send failure - the future implementation of
- * sendToLightningInvoice/getConnectedAccountBalance must translate Speed's
- * raw error response into this shape rather than letting engine code depend
- * on Speed's payload directly. `retryable: false` means a deterministic
- * rejection (bad request, permanently invalid account, etc.) that must not
- * be retried; `retryable: true` covers network failures, HTTP 429, and 5xx.
- */
 export class SpeedInstantSendProviderError extends Error {
   readonly httpStatus: number | null
   readonly retryable: boolean
@@ -76,65 +49,59 @@ function requireSweepEnabled(): void {
   if (!isSpeedLightningSweepEnabled()) {
     throw new SpeedInstantSendNotConfiguredError(
       "feature_disabled",
-      "SPEED_LIGHTNING_SWEEP_ENABLED is not exactly \"true\". No outbound Speed Instant Send call may occur."
+      "SPEED_LIGHTNING_SWEEP_ENABLED is not exactly \"true\"."
     )
   }
 }
 
-function requireEndpointConfigured(envVar: string, label: string): string {
-  const value = String(process.env[envVar] || "").trim()
-  if (!value) {
-    throw new SpeedInstantSendNotConfiguredError(
-      "endpoint_not_configured",
-      `${envVar} (${label}) is not set. This is a placeholder variable until Speed supplies the exact endpoint - it must remain unset until then.`
-    )
+async function translate<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call()
+  } catch (error) {
+    if (error instanceof SpeedWalletCapabilityUnavailableError) {
+      throw new SpeedInstantSendNotConfiguredError("contract_unconfirmed", "The connected-account capability is disabled.")
+    }
+    if (error instanceof SpeedWalletProviderError) {
+      throw new SpeedInstantSendProviderError("Speed could not complete the Instant Send request.", {
+        httpStatus: error.httpStatus,
+        retryable: error.retryable,
+        providerCode: error.providerCode,
+      })
+    }
+    throw error
   }
-  return value
-}
-
-/**
- * Every call currently reaches this before any HTTP request would be made.
- * Even with the feature flag on and endpoint URLs configured, the exact
- * request/response schema is unknown, so no request can be safely built or
- * parsed yet. This function exists as a single, obvious chokepoint so a
- * future change wiring the real contract only has to touch one place.
- */
-function requireContractConfirmed(operation: string): never {
-  throw new SpeedInstantSendNotConfiguredError(
-    "contract_unconfirmed",
-    `Speed has not yet supplied the ${operation} request/response schema. ` +
-      "Implement the real translation in providers/lightning/speedInstantSend.ts once Speed's contract is confirmed - do not guess it."
-  )
 }
 
 export type SpeedConnectedAccountBalance = {
   availableSats: number
   asOf: string
-  raw: unknown
+  raw: null
 }
 
 export type GetConnectedAccountBalanceInput = {
   speedHeaderAccountId: string
+  merchantId?: string
 }
 
-/**
- * Retrieves the connected account's available SATS balance. Throws
- * SpeedInstantSendNotConfiguredError (never issues an HTTP request) until
- * SPEED_CONNECTED_BALANCE_ENDPOINT and the response schema are confirmed.
- */
 export async function getConnectedAccountBalance(
   input: GetConnectedAccountBalanceInput
 ): Promise<SpeedConnectedAccountBalance> {
   requireSweepEnabled()
-  requireEndpointConfigured("SPEED_CONNECTED_BALANCE_ENDPOINT", "connected-account balance endpoint")
-  // Prove the resolved header account id and platform credentials are at
-  // least present before failing on the unconfirmed contract, so a
-  // misconfigured deploy fails with the most specific reason available.
-  if (!input.speedHeaderAccountId.trim()) {
-    throw new SpeedInstantSendNotConfiguredError("contract_unconfirmed", "Missing resolved X-Speed-Account value.")
-  }
-  getSpeedApiHost()
-  requireContractConfirmed("connected-account balance")
+  return translate(async () => {
+    const balance = await getConnectedAccountBalances({
+      merchantId: input.merchantId || "lightning-sweep",
+      speedAccountId: input.speedHeaderAccountId,
+    })
+    const sats = balance.available.find((entry) => String(entry.target_currency).toUpperCase() === "SATS")
+    const amount = sats ? Number(sats.amount) : 0
+    if (!Number.isSafeInteger(amount) || amount < 0) {
+      throw new SpeedInstantSendProviderError("Speed returned an invalid SATS balance.", {
+        retryable: true,
+        providerCode: "malformed_balance",
+      })
+    }
+    return { availableSats: amount, asOf: new Date().toISOString(), raw: null }
+  })
 }
 
 export type SendToLightningInvoiceInput = {
@@ -142,56 +109,49 @@ export type SendToLightningInvoiceInput = {
   invoice: string
   amountSats: number
   idempotencyKey: string
+  merchantId?: string
 }
 
 export type SpeedInstantSendResult = {
   providerSendId: string
   providerStatus: string
-  raw: unknown
+  raw: null
 }
 
-/**
- * Sends SATS from the connected Speed account to a BOLT11 invoice via
- * Instant Send. Throws SpeedInstantSendNotConfiguredError (never issues an
- * HTTP request) until SPEED_INSTANT_SEND_ENDPOINT and the request/response
- * schema are confirmed.
- */
 export async function sendToLightningInvoice(
   input: SendToLightningInvoiceInput
 ): Promise<SpeedInstantSendResult> {
   requireSweepEnabled()
-  requireEndpointConfigured("SPEED_INSTANT_SEND_ENDPOINT", "Instant Send endpoint")
-  if (!input.speedHeaderAccountId.trim() || !input.invoice.trim() || !input.idempotencyKey.trim()) {
-    throw new SpeedInstantSendNotConfiguredError(
-      "contract_unconfirmed",
-      "Missing resolved X-Speed-Account value, invoice, or idempotency key."
-    )
-  }
-  getSpeedApiHost()
-  requireContractConfirmed("Instant Send")
+  return translate(async () => {
+    const result = await createConnectedAccountWithdrawal({
+      merchantId: input.merchantId || "lightning-sweep",
+      speedAccountId: input.speedHeaderAccountId,
+      amount: input.amountSats,
+      currency: "SATS",
+      withdrawMethod: "lightning",
+      withdrawRequest: input.invoice,
+      idempotencyKey: input.idempotencyKey,
+    })
+    return { providerSendId: result.id, providerStatus: result.status, raw: null }
+  })
 }
 
 export type GetInstantSendStatusInput = {
   speedHeaderAccountId: string
   providerSendId: string
+  merchantId?: string
 }
 
-/**
- * Retrieves the current status of a previously-submitted Instant Send.
- * Throws SpeedInstantSendNotConfiguredError (never issues an HTTP request)
- * until the status-check contract is confirmed.
- */
 export async function getInstantSendStatus(
   input: GetInstantSendStatusInput
-): Promise<{ providerStatus: string; raw: unknown }> {
+): Promise<{ providerStatus: string; raw: null }> {
   requireSweepEnabled()
-  requireEndpointConfigured("SPEED_INSTANT_SEND_ENDPOINT", "Instant Send endpoint")
-  if (!input.speedHeaderAccountId.trim() || !input.providerSendId.trim()) {
-    throw new SpeedInstantSendNotConfiguredError(
-      "contract_unconfirmed",
-      "Missing resolved X-Speed-Account value or provider send id."
-    )
-  }
-  getSpeedApiHost()
-  requireContractConfirmed("Instant Send status check")
+  return translate(async () => {
+    const result = await getConnectedAccountSendStatus({
+      merchantId: input.merchantId || "lightning-sweep",
+      speedAccountId: input.speedHeaderAccountId,
+      providerSendId: input.providerSendId,
+    })
+    return { providerStatus: result.status, raw: null }
+  })
 }

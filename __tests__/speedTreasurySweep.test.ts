@@ -18,16 +18,12 @@ describe("Speed treasury-sweep invoice creation", () => {
     process.env.SPEED_API_BASE_URL = "https://api.tryspeed.test"
     process.env.PINE_TREE_LIGHTNING_PROVIDER = "speed"
     process.env.PINE_TREE_LIGHTNING_SETTLEMENT_MODE = SPEED_PLATFORM_TREASURY_SWEEP_MODE
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
         id: "speed_pay_1",
         status: "unpaid",
         payment_request: "lnbc1test",
         transfers: [],
-      }),
-    }))
+      }), { status: 200 })))
   })
 
   afterEach(() => {
@@ -94,7 +90,7 @@ describe("Speed treasury-sweep invoice creation", () => {
     })
   })
 
-  it("creates connected-account payments with account_id and fixed application_fee", async () => {
+  it("creates connected-account payments with speed-account and fixed application_fee", async () => {
     await createSpeedLightningPayment({
       amount: 10.25,
       currency: "USD",
@@ -109,16 +105,18 @@ describe("Speed treasury-sweep invoice creation", () => {
     const fetchMock = vi.mocked(fetch)
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String(init?.body || "{}"))
+    const headers = new Headers(init?.headers)
 
     expect(body).toMatchObject({
       currency: "USD",
       amount: 10.25,
       target_currency: "SATS",
       ttl: 300,
-      account_id: "acct_speed_merchant",
       application_fee: 0.25,
       statement_descriptor: "PineTree",
     })
+    expect(headers.get("speed-account")).toBe("acct_speed_merchant")
+    expect(body.account_id).toBeUndefined()
     expect(body.transfers).toBeUndefined()
     expect(body.application_fee_percentage).toBeUndefined()
   })

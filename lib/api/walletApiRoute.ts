@@ -11,11 +11,13 @@ export function walletErrorResponse(error: unknown): NextResponse {
   if (error instanceof WalletApiRouteError) {
     return NextResponse.json(walletError(error.code, error.message, error.retryable), {
       status: walletErrorHttpStatus(error.code),
+      headers: { "Cache-Control": "private, no-store, max-age=0" },
     })
   }
   console.error("[wallet-api] unhandled error", error instanceof Error ? error.message : error)
   return NextResponse.json(walletError("INTERNAL_ERROR", "Something went wrong. Please try again."), {
     status: 500,
+    headers: { "Cache-Control": "private, no-store, max-age=0" },
   })
 }
 
@@ -35,12 +37,17 @@ export async function withWalletMerchant<T>(
   try {
     merchantId = await requireMerchantIdFromRequest(req)
   } catch {
-    return NextResponse.json(walletError("UNAUTHORIZED", "Unauthorized."), { status: 401 })
+    return NextResponse.json(walletError("UNAUTHORIZED", "Unauthorized."), {
+      status: 401,
+      headers: { "Cache-Control": "private, no-store, max-age=0" },
+    })
   }
 
   try {
     const data = await handler(merchantId)
-    return NextResponse.json(walletOk(data))
+    return NextResponse.json(walletOk(data), {
+      headers: { "Cache-Control": "private, no-store, max-age=0" },
+    })
   } catch (error) {
     return walletErrorResponse(error)
   }
@@ -51,5 +58,28 @@ export function requireIdempotencyKey(req: NextRequest): string {
   if (!key) {
     throw new WalletApiRouteError("IDEMPOTENCY_KEY_REQUIRED", "An Idempotency-Key header is required for this request.")
   }
+  if (key.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(key)) {
+    throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Idempotency-Key is invalid.")
+  }
   return key
+}
+
+export async function readWalletJsonBody(req: NextRequest): Promise<Record<string, unknown>> {
+  const contentType = req.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase()
+  if (contentType !== "application/json") {
+    throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Content-Type must be application/json.")
+  }
+  const declaredLength = Number(req.headers.get("content-length") || "0")
+  if (Number.isFinite(declaredLength) && declaredLength > 8_192) {
+    throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Request body is too large.")
+  }
+  const raw = await req.text()
+  if (raw.length > 8_192) throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Request body is too large.")
+  try {
+    const value = JSON.parse(raw) as unknown
+    if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("not an object")
+    return value as Record<string, unknown>
+  } catch {
+    throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Request body must be valid JSON.")
+  }
 }

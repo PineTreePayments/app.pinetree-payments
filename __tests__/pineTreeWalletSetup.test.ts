@@ -2317,7 +2317,8 @@ describe("PineTree embedded wallet setup", () => {
   it("existing POS and checkout payment creation remain unchanged", () => {
     expect(speedClient).toContain("createSpeedLightningPayment")
     expect(speedAdapter).toContain("createLightningInvoice")
-    expect(speedAdapter).toContain("getMerchantSpeedProvider")
+    expect(speedAdapter).toContain("resolveMerchantSpeedAccount")
+    expect(speedAdapter).toContain("resolveSpeedHeaderAccountId")
     expect(paymentsRoute).toContain("getSafeSpeedCustomerErrorMessage")
     expect(page).not.toContain("/api/payments")
     expect(page).not.toContain("createSpeedLightningPayment")

@@ -36,6 +36,7 @@ import {
   ProviderStatusPill,
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
+import MerchantWalletManagementPanel from "@/components/dashboard/MerchantWalletManagementPanel"
 import StatusBadge from "@/components/ui/StatusBadge"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
@@ -8433,7 +8434,12 @@ function PineTreeWalletRuntime() {
               ) : null}
 
               {activeTab === "activity" ? (
-                <ActivityTab sync={walletSync} syncing={walletSyncing} />
+                <div className="space-y-5">
+                  <ActivityTab sync={walletSync} syncing={walletSyncing} />
+                  {lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready" ? (
+                    <MerchantWalletManagementPanel accessToken={accessTokenRef.current} />
+                  ) : null}
+                </div>
               ) : null}
 
             </div>

@@ -1,33 +1,17 @@
 /**
  * Speed Custom Connect wallet-management provider boundary.
  *
- * This is the ONLY place allowed to eventually translate Speed's raw
+ * This is the ONLY place allowed to translate Speed's raw
  * connected-account balance/transaction/withdrawal/payout/swap
  * request/response shapes - engine code (engine/wallet/*) must only ever
  * depend on the stable types exported here, never on Speed's payload shape
  * directly. Mirrors the existing, already-shipped pattern in
  * providers/lightning/speedInstantSend.ts.
  *
- * Every exported function below:
- *   1. Checks the relevant SpeedWalletCapabilities flag
- *      (providers/lightning/speedWalletCapabilities.ts) and throws
- *      SpeedWalletCapabilityUnavailableError if it is not available.
- *   2. Even when the capability flag IS set, still calls
- *      requireContractConfirmed() unconditionally before issuing any HTTP
- *      request - because the exact connected-account scoping mechanism
- *      (header? query param? separate credential?) for /balances,
- *      /balance-transactions, /withdraw-requests, /send, and
- *      /balances/swap is not documented by Speed for ANY of them (see the
- *      research note in speedWalletCapabilities.ts). No request is ever
- *      built or sent by this module today - issuing one would mean
- *      guessing a provider contract, which this integration must not do.
- *
- * Implementing the real HTTP calls is a follow-up change once Speed
- * confirms the connected-account scoping contract for each endpoint - this
- * file intentionally does not guess it. Only the response *shapes* below are
- * taken directly from Speed's official API reference (apidocs.tryspeed.com),
- * so the eventual real implementation has an accurate target to normalize
- * into PineTree's types against.
+ * PineTree uses its server-side platform credentials for every request and
+ * the shared Speed client adds `speed-account: <connected_account_id>` from
+ * server-resolved merchant context. Raw provider payloads never cross this
+ * boundary.
  */
 
 import {
@@ -35,6 +19,7 @@ import {
   type SpeedWalletCapabilityKey,
   type SpeedWalletCapabilityReason,
 } from "./speedWalletCapabilities"
+import { SpeedApiError, SpeedTransportError, speedRequest } from "./speedClient"
 
 export class SpeedWalletCapabilityUnavailableError extends Error {
   readonly capability: SpeedWalletCapabilityKey
@@ -58,8 +43,8 @@ export type SpeedWalletErrorCategory =
   | "unknown"
 
 /**
- * PineTree's own stable internal error shape for a real (post-contract)
- * Speed wallet-management failure - the future implementation must translate
+ * PineTree's own stable internal error shape for a Speed wallet-management
+ * failure. This boundary translates
  * Speed's raw error response into this shape rather than letting engine code
  * depend on Speed's payload directly.
  */
@@ -100,18 +85,56 @@ function requireCapability(key: SpeedWalletCapabilityKey): void {
  * capability flag passes. A future change wiring the real, Speed-confirmed
  * contract only has to touch this file - callers never change.
  */
-function requireContractConfirmed(operation: string): never {
-  // Provider-contract TODO for Speed support:
-  // "For a platform API key acting on a Custom Connect account, what exact
-  // account identifier, header name/value, credential scope, and endpoint are
-  // required for /balances, balance transactions, Instant Send/withdrawals,
-  // payouts, and swaps? Does each response include an authoritative balance
-  // timestamp and idempotency contract?"
-  // Implement the confirmed answer only in this adapter boundary.
-  throw new Error(
-    `Speed has not documented the connected-account scoping mechanism for ${operation}. ` +
-      "Implement the real request/response translation in providers/lightning/speedWalletManagement.ts only once Speed confirms it - do not guess it."
-  )
+function providerError(error: unknown): never {
+  if (error instanceof SpeedWalletCapabilityUnavailableError || error instanceof SpeedWalletProviderError) throw error
+  if (error instanceof SpeedTransportError) {
+    throw new SpeedWalletProviderError(error.message, {
+      category: "provider_unavailable",
+      retryable: true,
+      providerCode: error.timedOut ? "timeout" : "transport_error",
+    })
+  }
+  if (error instanceof SpeedApiError) {
+    const category: SpeedWalletErrorCategory = error.status === 401
+      ? "authentication"
+      : error.status === 403
+        ? "permission"
+        : error.status === 429
+          ? "rate_limit"
+          : error.status >= 500
+            ? "provider_unavailable"
+            : "validation"
+    throw new SpeedWalletProviderError("Speed could not complete the wallet request.", {
+      category,
+      httpStatus: error.status,
+      retryable: error.retryable,
+      providerCode: error.providerCode,
+    })
+  }
+  throw new SpeedWalletProviderError("Speed returned an invalid wallet response.", {
+    category: "provider_unavailable",
+    retryable: true,
+    providerCode: "malformed_response",
+  })
+}
+
+function merchantContext(context: ConnectedAccountContext, operation: string) {
+  const connectedAccountId = String(context.speedAccountId || "").trim()
+  if (!connectedAccountId) {
+    throw new SpeedWalletProviderError("Speed connected account is missing.", {
+      category: "permission",
+      retryable: false,
+      providerCode: "connected_account_missing",
+    })
+  }
+  return { merchantId: context.merchantId, connectedAccountId, operation }
+}
+
+function assertNonNegativeAmount(value: unknown, field: string): string | number {
+  if (typeof value !== "number" && typeof value !== "string") throw new Error(`Invalid ${field}`)
+  const text = String(value).trim()
+  if (!/^\d+(?:\.\d+)?$/.test(text)) throw new Error(`Invalid ${field}`)
+  return value
 }
 
 export type ConnectedAccountContext = {
@@ -124,7 +147,7 @@ export type ConnectedAccountContext = {
 // ---------------------------------------------------------------------------
 
 export type SpeedBalanceEntry = {
-  amount: number
+  amount: number | string
   target_currency: string
 }
 
@@ -137,8 +160,22 @@ export async function getConnectedAccountBalances(
   context: ConnectedAccountContext
 ): Promise<SpeedBalanceObject> {
   requireCapability("balances")
-  void context
-  requireContractConfirmed("GET /balances (connected-account balance retrieval)")
+  try {
+    const response = await speedRequest<SpeedBalanceObject>("/balances", {
+      method: "GET",
+      merchantContext: merchantContext(context, "balance.retrieve"),
+    })
+    if (response?.object !== "balance" || !Array.isArray(response.available) || response.available.length === 0) {
+      throw new Error("Malformed balance")
+    }
+    for (const entry of response.available) {
+      assertNonNegativeAmount(entry?.amount, "balance amount")
+      if (!String(entry?.target_currency || "").trim()) throw new Error("Missing balance currency")
+    }
+    return response
+  } catch (error) {
+    providerError(error)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -148,9 +185,9 @@ export async function getConnectedAccountBalances(
 export type SpeedBalanceTransactionObject = {
   id: string
   object: "balance_transaction"
-  amount: number
-  fee: number
-  net: number
+  amount: number | string
+  fee: number | string
+  net: number | string
   target_currency: string
   type: string
   transaction_type: "credit" | "debit"
@@ -173,8 +210,32 @@ export async function listConnectedAccountTransactions(
   input: ListConnectedTransactionsInput
 ): Promise<SpeedBalanceTransactionList> {
   requireCapability("transactions")
-  void input
-  requireContractConfirmed("GET /balance-transactions (connected-account transaction list)")
+  try {
+    const limit = Math.min(Math.max(Math.trunc(input.limit ?? 50), 1), 100)
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (input.cursor?.trim()) params.set("ending_before", input.cursor.trim())
+    const response = await speedRequest<SpeedBalanceTransactionList>(`/balance-transactions?${params}`, {
+      method: "GET",
+      merchantContext: merchantContext(input, "transaction.list"),
+    })
+    if (response?.object !== "list" || typeof response.has_more !== "boolean" || !Array.isArray(response.data)) {
+      throw new Error("Malformed transaction list")
+    }
+    for (const transaction of response.data) {
+      if (!String(transaction?.id || "").trim() || !String(transaction?.target_currency || "").trim()) {
+        throw new Error("Malformed transaction")
+      }
+      assertNonNegativeAmount(transaction.amount, "transaction amount")
+      assertNonNegativeAmount(transaction.fee, "transaction fee")
+      assertNonNegativeAmount(transaction.net, "transaction net")
+      if (!Number.isFinite(Number(transaction.created)) || Number(transaction.created) <= 0) {
+        throw new Error("Malformed transaction timestamp")
+      }
+    }
+    return response
+  } catch (error) {
+    providerError(error)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -183,15 +244,20 @@ export async function listConnectedAccountTransactions(
 
 export type SpeedInstantSendObject = {
   id: string
+  object?: "instant_send"
   status: string
-  amount: number
+  withdraw_id?: string | null
+  amount: number | string
   currency: string
-  target_amount: number
+  target_amount: number | string
   target_currency: string
-  fees: number
+  fees: number | string
+  speed_fee?: { percentage?: number | string; amount?: number | string }
   withdraw_method: string
   withdraw_type: string
-  explorer_link?: string
+  withdraw_request?: string
+  failure_reason?: string | null
+  explorer_link?: string | null
   created: number
   modified: number
 }
@@ -209,8 +275,24 @@ export async function createConnectedAccountWithdrawal(
   input: CreateConnectedWithdrawalInput
 ): Promise<SpeedInstantSendObject> {
   requireCapability("withdrawals")
-  void input
-  requireContractConfirmed("POST /send (connected-account withdrawal)")
+  try {
+    const body = {
+      amount: input.amount,
+      currency: input.currency,
+      target_currency: input.currency,
+      withdraw_method: input.withdrawMethod,
+      withdraw_request: input.withdrawRequest,
+      ...(input.note?.trim() ? { note: input.note.trim().slice(0, 200) } : {}),
+    }
+    const response = await speedRequest<SpeedInstantSendObject>("/send", {
+      method: "POST",
+      body: JSON.stringify(body),
+      merchantContext: merchantContext(input, "instant_send.create"),
+    })
+    return validateInstantSend(response)
+  } catch (error) {
+    providerError(error)
+  }
 }
 
 export type CreateConnectedPayoutInput = CreateConnectedWithdrawalInput
@@ -220,7 +302,7 @@ export async function createConnectedAccountPayout(
 ): Promise<SpeedInstantSendObject> {
   requireCapability("payouts")
   void input
-  requireContractConfirmed("POST /send (connected-account payout)")
+  throw new SpeedWalletCapabilityUnavailableError("payouts", "provider_not_supported")
 }
 
 export type GetPayoutOrWithdrawalStatusInput = ConnectedAccountContext & {
@@ -231,8 +313,31 @@ export async function getConnectedAccountSendStatus(
   input: GetPayoutOrWithdrawalStatusInput
 ): Promise<SpeedInstantSendObject> {
   requireCapability("payoutStatus")
-  void input
-  requireContractConfirmed("GET /send/{id} (connected-account withdrawal/payout status)")
+  try {
+    const id = String(input.providerSendId || "").trim()
+    if (!id) throw new SpeedWalletProviderError("Missing Instant Send reference.", {
+      category: "validation",
+      retryable: false,
+      providerCode: "send_id_missing",
+    })
+    const response = await speedRequest<SpeedInstantSendObject>(`/send/${encodeURIComponent(id)}`, {
+      method: "GET",
+      merchantContext: merchantContext(input, "instant_send.retrieve"),
+    })
+    return validateInstantSend(response)
+  } catch (error) {
+    providerError(error)
+  }
+}
+
+function validateInstantSend(response: SpeedInstantSendObject): SpeedInstantSendObject {
+  if (!response || !String(response.id || "").trim() || !String(response.status || "").trim()) {
+    throw new Error("Malformed Instant Send response")
+  }
+  assertNonNegativeAmount(response.amount, "Instant Send amount")
+  assertNonNegativeAmount(response.fees, "Instant Send fee")
+  if (!String(response.currency || "").trim()) throw new Error("Missing Instant Send currency")
+  return response
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +373,7 @@ export async function createConnectedAccountSwapQuote(
 ): Promise<SpeedSwapQuoteObject> {
   requireCapability("manualSwap")
   void input
-  requireContractConfirmed("POST /balances/swap/quote (connected-account swap quote)")
+  throw new SpeedWalletCapabilityUnavailableError("manualSwap", "provider_not_supported")
 }
 
 export type SpeedSwapObject = {
@@ -299,7 +404,7 @@ export type CreateSwapInput = ConnectedAccountContext & {
 export async function createConnectedAccountSwap(input: CreateSwapInput): Promise<SpeedSwapObject> {
   requireCapability("manualSwap")
   void input
-  requireContractConfirmed("POST /balances/swap (connected-account swap execution)")
+  throw new SpeedWalletCapabilityUnavailableError("manualSwap", "provider_not_supported")
 }
 
 export type GetSwapStatusInput = ConnectedAccountContext & {
@@ -309,5 +414,5 @@ export type GetSwapStatusInput = ConnectedAccountContext & {
 export async function getConnectedAccountSwapStatus(input: GetSwapStatusInput): Promise<SpeedSwapObject> {
   requireCapability("manualSwap")
   void input
-  requireContractConfirmed("GET /balances/swap/{id} (connected-account swap status)")
+  throw new SpeedWalletCapabilityUnavailableError("manualSwap", "provider_not_supported")
 }

@@ -138,7 +138,7 @@ export interface ProviderAdapter {
   PAYMENT STATUS
   -------------------------------- */
 
-  getPaymentStatus?(providerReference: string): Promise<{
+  getPaymentStatus?(providerReference: string, merchantId?: string): Promise<{
     status: PaymentStatus
   }>
 
@@ -148,7 +148,7 @@ export interface ProviderAdapter {
 
   createLightningInvoice?(input: LightningInvoiceRequest): Promise<LightningInvoice>
 
-  getLightningInvoiceStatus?(providerReference: string): Promise<{
+  getLightningInvoiceStatus?(providerReference: string, merchantId?: string): Promise<{
     status: LightningInvoiceStatus
   }>
 

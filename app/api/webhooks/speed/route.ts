@@ -26,11 +26,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Connected-account events route on the event's own account_id (matched
-    // against the merchant's saved Speed account_id), never on request
-    // headers or an assumed payload shape. Diagnostic/identification only for
-    // now - not yet wired into settlement/fee logic, since exactly how Speed
-    // structures a connected-account payment's body/metadata is still an open
-    // provider-contract question (see PAYMENT CREATION GAP).
+    // against the merchant's canonical server-side Speed account_id), never
+    // on request headers or browser input. The signed payload then continues
+    // through the existing canonical payment processor and the idempotent
+    // wallet-operation normalizer below.
     if (isSpeedConnectedAccountWebhookPayload(payload)) {
       const accountId = extractSpeedWebhookAccountId(payload)
       const merchantId = accountId ? await getMerchantIdBySpeedAccountId(accountId) : null

@@ -15,7 +15,11 @@
  * (or the adapter-local input/result types below) before returning.
  */
 
-import type { WalletOperationStatus } from "@/database/merchantWalletOperations"
+import type {
+  WalletOperationDirection,
+  WalletOperationStatus,
+  WalletOperationType,
+} from "@/database/merchantWalletOperations"
 import type { PineTreeWalletCapabilities, PineTreeWalletSwapQuote } from "./walletTypes"
 
 /**
@@ -44,6 +48,25 @@ export type WalletAdapterBalance = {
   providerUpdatedAt: string | null
 }
 
+export type WalletAdapterActivity = {
+  providerTransactionId: string
+  providerReference: string | null
+  operationType: WalletOperationType
+  direction: WalletOperationDirection
+  status: WalletOperationStatus
+  providerStatus: string | null
+  asset: string
+  network: string | null
+  amountBaseUnits: bigint
+  feeBaseUnits: bigint | null
+  providerCreatedAt: string
+}
+
+export type WalletAdapterActivityPage = {
+  activity: WalletAdapterActivity[]
+  nextCursor: string | null
+}
+
 export type WalletAdapterWriteInput = {
   asset: string
   amountBaseUnits: bigint
@@ -59,6 +82,8 @@ export type WalletAdapterOperationResult = {
   txHash?: string | null
   explorerUrl?: string | null
   feeBaseUnits?: bigint | null
+  providerSecondaryReference?: string | null
+  rawProviderStatus?: Record<string, unknown> | null
 }
 
 export type WalletAdapterSwapQuoteInput = {
@@ -87,7 +112,13 @@ export interface WalletProviderAdapter {
 
   getBalances?(context: WalletAdapterContext): Promise<WalletAdapterBalance[]>
 
-  listActivity?(context: WalletAdapterContext): Promise<void>
+  readonly requiresFreshBalanceForWithdrawal?: boolean
+  validateWithdrawal?(input: WalletAdapterWriteInput): void
+
+  listActivity?(
+    context: WalletAdapterContext,
+    input: { cursor?: string | null; limit?: number }
+  ): Promise<WalletAdapterActivityPage>
 
   createWithdrawal?(
     context: WalletAdapterContext,

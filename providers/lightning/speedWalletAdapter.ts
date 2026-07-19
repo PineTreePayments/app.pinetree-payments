@@ -13,6 +13,7 @@
  */
 
 import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
+import { resolveSpeedHeaderAccountId } from "./speedHeaderAccountResolver"
 import { getSpeedWalletCapabilities } from "./speedWalletCapabilities"
 import {
   SpeedWalletCapabilityUnavailableError,
@@ -24,7 +25,9 @@ import {
   getConnectedAccountBalances,
   getConnectedAccountSendStatus,
   getConnectedAccountSwapStatus,
+  listConnectedAccountTransactions,
   type SpeedInstantSendObject,
+  type SpeedBalanceTransactionObject,
   type SpeedSwapObject,
 } from "./speedWalletManagement"
 import { WalletApiRouteError, type WalletApiErrorCode } from "@/engine/wallet/walletErrors"
@@ -39,7 +42,7 @@ import type {
   WalletProviderAdapter,
 } from "@/engine/wallet/walletProviderAdapter"
 import type { PineTreeWalletSwapQuote } from "@/engine/wallet/walletTypes"
-import type { WalletOperationStatus } from "@/database/merchantWalletOperations"
+import type { WalletOperationStatus, WalletOperationType } from "@/database/merchantWalletOperations"
 
 const PROVIDER = "speed"
 
@@ -63,7 +66,9 @@ function translateSpeedWalletError(error: unknown): never {
       unknown: "WALLET_PROVIDER_UNAVAILABLE",
     }
     throw new WalletApiRouteError(
-      codeByCategory[error.category] ?? "WALLET_PROVIDER_UNAVAILABLE",
+      error.providerCode === "timeout"
+        ? "WALLET_PROVIDER_TIMEOUT"
+        : codeByCategory[error.category] ?? "WALLET_PROVIDER_UNAVAILABLE",
       "Your wallet provider could not complete this request. Please try again.",
       error.retryable
     )
@@ -78,19 +83,49 @@ function mapSpeedStatusToOperationStatus(status: string | null | undefined): Wal
   if (normalized === "failed") return "FAILED"
   if (normalized === "expired") return "EXPIRED"
   if (normalized === "canceled" || normalized === "cancelled") return "CANCELED"
-  if (normalized === "pending") return "PENDING"
+  if (normalized === "pending" || normalized === "unpaid") return "PENDING"
   if (!normalized) return "PROCESSING"
   return "PROCESSING"
 }
 
 function toAdapterOperationResult(payment: SpeedInstantSendObject): WalletAdapterOperationResult {
+  const fee = decimalToBaseUnits(payment.fees, payment.currency)
   return {
     providerReference: payment.id ?? null,
     providerStatus: payment.status ?? null,
     status: mapSpeedStatusToOperationStatus(payment.status),
     explorerUrl: payment.explorer_link ?? null,
-    feeBaseUnits: Number.isFinite(payment.fees) ? BigInt(Math.round(payment.fees)) : null,
+    feeBaseUnits: fee,
+    providerSecondaryReference: payment.withdraw_id ?? null,
+    rawProviderStatus: {
+      ...(payment.withdraw_id ? { withdrawId: payment.withdraw_id } : {}),
+      ...(payment.failure_reason ? { failureReason: payment.failure_reason } : {}),
+    },
   }
+}
+
+function decimalToBaseUnits(value: number | string, asset: string): bigint {
+  const text = String(value).trim()
+  if (!/^\d+(?:\.\d+)?$/.test(text)) throw new Error("Invalid provider amount")
+  const decimals = asset.toUpperCase() === "SATS" ? 0 : 6
+  const [whole, fraction = ""] = text.split(".")
+  if (fraction.length > decimals && /[1-9]/.test(fraction.slice(decimals))) {
+    throw new Error("Provider amount exceeds supported precision")
+  }
+  return BigInt(whole) * (BigInt(10) ** BigInt(decimals)) + BigInt(fraction.slice(0, decimals).padEnd(decimals, "0") || "0")
+}
+
+function speedTransactionType(transaction: SpeedBalanceTransactionObject): WalletOperationType {
+  const type = transaction.type.trim().toLowerCase()
+  if (type === "payment") return "PAYMENT"
+  if (type === "withdraw" || type === "withdrawal") return "WITHDRAWAL"
+  if (type === "payout") return "PAYOUT"
+  if (type === "transfer in") return "TRANSFER_IN"
+  if (type === "transfer out") return "TRANSFER_OUT"
+  if (type === "swap in") return "SWAP_IN"
+  if (type === "swap out") return "SWAP_OUT"
+  if (type.includes("fee")) return "APPLICATION_FEE"
+  return "ADJUSTMENT"
 }
 
 function toAdapterSwapResult(swap: SpeedSwapObject): WalletAdapterOperationResult {
@@ -129,9 +164,15 @@ async function resolveContext(merchantId: string): Promise<WalletAdapterResoluti
     return { configured: false, reason: "No Speed Custom Connect profile exists for this merchant." }
   }
 
-  const providerAccountId = profile.speed_account_id?.trim() || null
-  if (profile.status !== "ready" || !providerAccountId) {
+  if (profile.status !== "ready") {
     return { configured: true, ready: false, reason: "Speed Custom Connect setup is not complete yet." }
+  }
+
+  let providerAccountId: string
+  try {
+    providerAccountId = resolveSpeedHeaderAccountId(profile)
+  } catch {
+    return { configured: true, ready: false, reason: "Speed connected-account identity is not configured safely." }
   }
 
   return { configured: true, ready: true, context: { merchantId, providerAccountId } }
@@ -148,6 +189,23 @@ async function withTranslatedErrors<T>(fn: () => Promise<T>): Promise<T> {
 export const speedWalletAdapter: WalletProviderAdapter = {
   provider: PROVIDER,
   providerDisplayName: "Speed",
+  requiresFreshBalanceForWithdrawal: true,
+
+  validateWithdrawal(input) {
+    if (input.asset !== "SATS") {
+      throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Bitcoin Lightning withdrawals must be denominated in SATS.")
+    }
+    if (input.amountBaseUnits > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Withdrawal amount is too large.")
+    }
+    const destination = input.destination.trim().toLowerCase()
+    const valid = /^ln(bc|tb|bcrt)[a-z0-9]{20,}$/.test(destination)
+      || /^lnurl[0-9a-z]{20,}$/.test(destination)
+      || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(destination)
+    if (!valid) {
+      throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Enter a valid Lightning invoice, LNURL, or Lightning address.")
+    }
+  },
 
   resolveContext,
 
@@ -170,17 +228,40 @@ export const speedWalletAdapter: WalletProviderAdapter = {
         speedAccountId: context.providerAccountId,
       })
       return balance.available.map((entry) => ({
-        // Speed reports Bitcoin in SATS base units. PineTree keeps that raw
-        // integer amount but exposes the merchant-facing asset as BTC with
-        // eight decimals so the unified wallet never presents SATS as a
-        // separate asset.
-        asset: entry.target_currency === "SATS" ? "BTC" : entry.target_currency,
-        availableBaseUnits: BigInt(Math.round(entry.amount)),
+        asset: entry.target_currency.toUpperCase(),
+        availableBaseUnits: decimalToBaseUnits(entry.amount, entry.target_currency),
         pendingBaseUnits: BigInt(0),
-        totalBaseUnits: BigInt(Math.round(entry.amount)),
-        network: null,
+        totalBaseUnits: decimalToBaseUnits(entry.amount, entry.target_currency),
+        network: entry.target_currency.toUpperCase() === "SATS" ? "bitcoin_lightning" : null,
         providerUpdatedAt: null,
       }))
+    })
+  },
+
+  async listActivity(context, input) {
+    return withTranslatedErrors(async () => {
+      const page = await listConnectedAccountTransactions({
+        merchantId: context.merchantId,
+        speedAccountId: context.providerAccountId,
+        cursor: input.cursor,
+        limit: input.limit,
+      })
+      return {
+        activity: page.data.map((transaction) => ({
+          providerTransactionId: transaction.id,
+          providerReference: transaction.source || null,
+          operationType: speedTransactionType(transaction),
+          direction: transaction.transaction_type === "debit" ? "debit" as const : "credit" as const,
+          status: "COMPLETED" as const,
+          providerStatus: transaction.type || null,
+          asset: transaction.target_currency.toUpperCase(),
+          network: transaction.target_currency.toUpperCase() === "SATS" ? "bitcoin_lightning" : null,
+          amountBaseUnits: decimalToBaseUnits(transaction.amount, transaction.target_currency),
+          feeBaseUnits: decimalToBaseUnits(transaction.fee, transaction.target_currency),
+          providerCreatedAt: new Date(transaction.created).toISOString(),
+        })),
+        nextCursor: page.has_more ? page.data.at(-1)?.id ?? null : null,
+      }
     })
   },
 
@@ -190,8 +271,8 @@ export const speedWalletAdapter: WalletProviderAdapter = {
         merchantId: context.merchantId,
         speedAccountId: context.providerAccountId,
         amount: Number(input.amountBaseUnits),
-        currency: input.asset as "SATS" | "USDT" | "USDC",
-        withdrawMethod: input.asset === "SATS" ? "lightning" : "ethereum",
+        currency: "SATS",
+        withdrawMethod: "lightning",
         withdrawRequest: input.destination,
         note: input.note,
         idempotencyKey: input.idempotencyKey,

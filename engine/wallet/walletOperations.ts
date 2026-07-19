@@ -31,6 +31,7 @@ import {
   createWalletOperation,
   getWalletOperationForMerchant,
   listWalletOperations,
+  upsertWalletOperationFromProviderActivity,
   updateWalletOperation,
   type MerchantWalletOperation,
   type WalletOperationStatus,
@@ -57,7 +58,7 @@ function toPineTreeWalletOperation(row: MerchantWalletOperation): PineTreeWallet
     // Deliberately omits provider_reference/provider_status/raw_provider_status -
     // those are internal reconciliation fields, never returned to the browser.
     failureReason: row.failure_reason,
-    createdAt: row.created_at,
+    createdAt: row.provider_created_at || row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
   }
@@ -112,11 +113,13 @@ export async function getWalletBalances(merchantId: string): Promise<PineTreeWal
   const capabilities = await adapter.getCapabilities(context)
   let liveSyncSucceeded = false
   let providerUnavailable = false
+  const liveBalanceKeys = new Set<string>()
 
   if (capabilities.balances && adapter.getBalances) {
     try {
       const live = await adapter.getBalances(context)
       const now = new Date().toISOString()
+      for (const entry of live) liveBalanceKeys.add(`${entry.asset}:${entry.network ?? ""}`)
       await Promise.all(
         live.map((entry) =>
           upsertWalletBalanceSnapshot({
@@ -152,7 +155,10 @@ export async function getWalletBalances(merchantId: string): Promise<PineTreeWal
     }
   }
 
-  const cached = await listWalletBalanceSnapshots(merchantId, provider, context.providerAccountId)
+  const allCached = await listWalletBalanceSnapshots(merchantId, provider, context.providerAccountId)
+  const cached = liveSyncSucceeded
+    ? allCached.filter((row) => liveBalanceKeys.has(`${row.asset}:${row.network || ""}`))
+    : allCached
   const now = Date.now()
   const balances: PineTreeWalletBalance[] = cached.map((row) => {
     const cachedAtMs = new Date(row.cached_at).getTime()
@@ -203,10 +209,44 @@ export async function getWalletActivity(
   merchantId: string,
   input: ListActivityInput
 ): Promise<PineTreeWalletActivityPage> {
-  await resolveMerchantWalletProvider(merchantId)
+  const resolution = await resolveMerchantWalletProvider(merchantId)
+
+  if (resolution.adapter.listActivity) {
+    try {
+      let providerCursor: string | null = null
+      const seenTransactions = new Set<string>()
+      for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {
+        let pageHasNewTransactions = false
+        const page = await resolution.adapter.listActivity(resolution.context, {
+          cursor: providerCursor,
+          limit: 100,
+        })
+        for (const item of page.activity) {
+          if (seenTransactions.has(item.providerTransactionId)) continue
+          seenTransactions.add(item.providerTransactionId)
+          const sync = await upsertWalletOperationFromProviderActivity({
+            merchantId,
+            provider: resolution.provider,
+            providerAccountId: resolution.context.providerAccountId,
+            ...item,
+          })
+          if (!sync.transactionWasKnown) pageHasNewTransactions = true
+        }
+        if (!page.nextCursor || page.nextCursor === providerCursor || !pageHasNewTransactions) break
+        providerCursor = page.nextCursor
+      }
+    } catch (error) {
+      console.warn("[wallet-activity] provider synchronization unavailable", {
+        merchantId,
+        provider: resolution.provider,
+        code: error instanceof WalletApiRouteError ? error.code : "WALLET_PROVIDER_UNAVAILABLE",
+      })
+    }
+  }
 
   const page = await listWalletOperations({
     merchantId,
+    providerAccountId: resolution.context.providerAccountId,
     type: input.type,
     status: input.status,
     cursor: input.cursor,
@@ -220,9 +260,14 @@ export async function getWalletActivity(
 }
 
 export async function getWalletOperation(merchantId: string, operationId: string): Promise<PineTreeWalletOperation> {
-  await resolveMerchantWalletProvider(merchantId)
+  const resolution = await resolveMerchantWalletProvider(merchantId)
   const operation = await getWalletOperationForMerchant(merchantId, operationId)
   if (!operation) {
+    throw new WalletApiRouteError("WALLET_OPERATION_NOT_FOUND", "Wallet operation not found.")
+  }
+  const operationAccountId = operation.provider_account_id
+    || String(operation.raw_provider_status?.providerAccountId || "")
+  if (operationAccountId && operationAccountId !== resolution.context.providerAccountId) {
     throw new WalletApiRouteError("WALLET_OPERATION_NOT_FOUND", "Wallet operation not found.")
   }
   return toPineTreeWalletOperation(operation)
@@ -277,12 +322,16 @@ function maskDestination(destination: string): string {
 async function reconcileOperationWithAdapterResult(
   merchantId: string,
   operationId: string,
+  providerAccountId: string,
   result: WalletAdapterOperationResult
 ): Promise<MerchantWalletOperation> {
   return updateWalletOperation(merchantId, operationId, {
+    providerAccountId,
     status: result.status,
     providerReference: result.providerReference,
     providerStatus: result.providerStatus,
+    providerSecondaryReference: result.providerSecondaryReference,
+    rawProviderStatus: result.rawProviderStatus,
     txHash: result.txHash ?? undefined,
     explorerUrl: result.explorerUrl ?? undefined,
     feeBaseUnits: result.feeBaseUnits ?? undefined,
@@ -315,6 +364,8 @@ async function createWalletWrite(
 
   const { operation, created } = await createWalletOperation({
     merchantId,
+    provider: resolution.provider,
+    providerAccountId: resolution.context.providerAccountId,
     operationType,
     direction: "debit",
     status: "CREATED",
@@ -325,6 +376,19 @@ async function createWalletWrite(
   })
 
   if (!created) {
+    const operationProviderAccountId = operation.provider_account_id
+      || String(operation.raw_provider_status?.providerAccountId || "")
+    if (
+      operation.asset !== input.asset ||
+      operation.amount_base_units !== input.amountBaseUnits.toString() ||
+      operation.destination_summary !== destinationSummary ||
+      (operationProviderAccountId && operationProviderAccountId !== resolution.context.providerAccountId)
+    ) {
+      throw new WalletApiRouteError(
+        "IDEMPOTENCY_KEY_CONFLICT",
+        "This Idempotency-Key was already used for a different wallet operation."
+      )
+    }
     const capabilities = await resolution.adapter.getCapabilities(resolution.context)
     const capabilityAvailable =
       operationType === "WITHDRAWAL"
@@ -352,6 +416,37 @@ async function createWalletWrite(
     return { operation: toPineTreeWalletOperation(failed), capabilityAvailable: false }
   }
 
+  if (operationType === "WITHDRAWAL" && resolution.adapter.requiresFreshBalanceForWithdrawal) {
+    if (!resolution.adapter.getBalances || !capabilities.balances) {
+      const failed = await updateWalletOperation(merchantId, operation.id, {
+        status: "FAILED",
+        failureCode: "WALLET_CAPABILITY_UNAVAILABLE",
+        failureReason: "A current available balance is required before withdrawal.",
+      })
+      return { operation: toPineTreeWalletOperation(failed), capabilityAvailable: false }
+    }
+    let balances
+    try {
+      balances = await resolution.adapter.getBalances(resolution.context)
+    } catch (error) {
+      await updateWalletOperation(merchantId, operation.id, {
+        status: "FAILED",
+        failureCode: "WALLET_PROVIDER_UNAVAILABLE",
+        failureReason: "The current available balance could not be verified.",
+      })
+      throw error
+    }
+    const available = balances.find((balance) => balance.asset.toUpperCase() === input.asset)?.availableBaseUnits
+    if (available == null || available < input.amountBaseUnits) {
+      await updateWalletOperation(merchantId, operation.id, {
+        status: "FAILED",
+        failureCode: "INSUFFICIENT_BALANCE",
+        failureReason: "The available balance is insufficient for this withdrawal.",
+      })
+      throw new WalletApiRouteError("INSUFFICIENT_BALANCE", "The available balance is insufficient for this withdrawal.")
+    }
+  }
+
   const call = adapterCall(resolution)
   if (!call) {
     const failed = await failOperationAsCapabilityUnavailable(
@@ -362,9 +457,26 @@ async function createWalletWrite(
     return { operation: toPineTreeWalletOperation(failed), capabilityAvailable: false }
   }
 
-  const result = await call
-  const reconciled = await reconcileOperationWithAdapterResult(merchantId, operation.id, result)
-  return { operation: toPineTreeWalletOperation(reconciled), capabilityAvailable: true }
+  await updateWalletOperation(merchantId, operation.id, { status: "PROCESSING" })
+  try {
+    const result = await call
+    const reconciled = await reconcileOperationWithAdapterResult(
+      merchantId,
+      operation.id,
+      resolution.context.providerAccountId,
+      result
+    )
+    return { operation: toPineTreeWalletOperation(reconciled), capabilityAvailable: true }
+  } catch (error) {
+    if (error instanceof WalletApiRouteError && !error.retryable) {
+      await updateWalletOperation(merchantId, operation.id, {
+        status: "FAILED",
+        failureCode: error.code,
+        failureReason: error.message,
+      })
+    }
+    throw error
+  }
 }
 
 export async function createWalletWithdrawal(
@@ -379,6 +491,8 @@ export async function createWalletWithdrawal(
     note: input.note,
     idempotencyKey: input.idempotencyKey,
   }
+  const resolution = await resolveMerchantWalletProvider(merchantId)
+  resolution.adapter.validateWithdrawal?.(adapterInput)
   return createWalletWrite(merchantId, "WITHDRAWAL", adapterInput, maskDestination(validated.destination), (resolution) =>
     resolution.adapter.createWithdrawal?.(resolution.context, adapterInput)
   )
@@ -414,6 +528,14 @@ async function refreshWriteOperationStatus(
   if (!operation) {
     throw new WalletApiRouteError("WALLET_OPERATION_NOT_FOUND", "Wallet operation not found.")
   }
+  const operationAccountId = operation.provider_account_id
+    || String(operation.raw_provider_status?.providerAccountId || "")
+  if (
+    operation.provider !== resolution.provider
+    || (operationAccountId && operationAccountId !== resolution.context.providerAccountId)
+  ) {
+    throw new WalletApiRouteError("WALLET_OPERATION_NOT_FOUND", "Wallet operation not found.")
+  }
   if (!operation.provider_reference) {
     return toPineTreeWalletOperation(operation)
   }
@@ -422,7 +544,12 @@ async function refreshWriteOperationStatus(
   if (!call) return toPineTreeWalletOperation(operation)
 
   const result = await call
-  const reconciled = await reconcileOperationWithAdapterResult(merchantId, operation.id, result)
+  const reconciled = await reconcileOperationWithAdapterResult(
+    merchantId,
+    operation.id,
+    resolution.context.providerAccountId,
+    result
+  )
   return toPineTreeWalletOperation(reconciled)
 }
 

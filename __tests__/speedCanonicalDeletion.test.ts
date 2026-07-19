@@ -21,20 +21,12 @@ describe("speedCapabilities.ts", () => {
     expect(src).toContain("export async function checkSpeedCapabilities")
   })
 
-  it("probes /payments endpoint for invoice capability", () => {
-    expect(src).toContain('"/payments"')
-  })
-
-  it("probes /send endpoint for send capability", () => {
-    expect(src).toContain('"/send"')
-  })
-
-  it("probes /connect/custom for merchant account capability", () => {
-    expect(src).toContain('"/connect/custom"')
-  })
-
-  it("probes /account for balance read capability", () => {
-    expect(src).toContain('"/account"')
+  it("reports configuration without mutation-shaped provider probes", () => {
+    expect(src).not.toContain("fetch(")
+    expect(src).not.toContain('"/payments"')
+    expect(src).not.toContain('"/send"')
+    expect(src).not.toContain('"/connect/custom"')
+    expect(src).toContain("checked: false")
   })
 
   it("returns SpeedCapabilitiesResult shape", () => {
@@ -50,9 +42,11 @@ describe("speedCapabilities.ts", () => {
     expect(src).not.toContain("api_key:")
   })
 
-  it("constructs Basic auth from SPEED_API_KEY env var only (server-side)", () => {
+  it("leaves Basic authentication construction in the shared Speed client", () => {
     expect(src).toContain("SPEED_API_KEY")
-    expect(src).toContain("Authorization")
+    expect(src).not.toContain("Authorization")
+    const client = read("providers/lightning/speedClient.ts")
+    expect(client).toContain("Authorization")
   })
 })
 

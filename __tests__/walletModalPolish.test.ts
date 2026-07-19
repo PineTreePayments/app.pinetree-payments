@@ -239,12 +239,12 @@ describe("Provider-branded wallet tab removed", () => {
     expect(src).not.toContain("Auto-settlement")
   })
 
-  it("does not mount a provider-branded wallet management panel inside the PineTree Wallet modal", () => {
+  it("mounts the provider-neutral Bitcoin Lightning wallet panel without exposing provider identity", () => {
     const modalSrc = runtimeSrc().slice(
       runtimeSrc().indexOf('aria-labelledby="pinetree-wallet-modal-title"'),
       runtimeSrc().indexOf("// ---------------------------------------------------------------------------\n// Page")
     )
-    expect(modalSrc).not.toContain("MerchantWalletManagementPanel")
+    expect(modalSrc).toContain("MerchantWalletManagementPanel")
     expect(modalSrc).not.toContain("providerDisplayName")
     expect(modalSrc).not.toMatch(/\bSpeed\b/)
   })

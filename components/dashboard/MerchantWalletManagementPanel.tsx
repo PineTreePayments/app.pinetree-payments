@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react"
 import { Loader2, RefreshCw, X } from "lucide-react"
 import Card from "@/components/ui/Card"
 import Button from "@/components/ui/Button"
-import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import StatusBadge from "@/components/ui/StatusBadge"
 
 // ---------------------------------------------------------------------------
@@ -73,18 +72,6 @@ type WalletOperation = {
 
 type ActivityData = { operations: WalletOperation[]; nextCursor: string | null }
 
-type Preferences = {
-  autoPayoutEnabled: boolean
-  autoPayoutSchedule: "disabled" | "daily" | "weekly" | "threshold"
-  autoPayoutDestination: string | null
-  autoPayoutSourceAsset: string | null
-  autoPayoutMinThresholdBaseUnits: string | null
-  autoSwapEnabled: boolean
-  autoSwapSourceAsset: string | null
-  autoSwapTargetAsset: string | null
-  autoSwapStatus: "active" | "pending_provider_support" | "unavailable"
-}
-
 const CAPABILITY_LABELS: Record<keyof PineTreeWalletCapabilities, string> = {
   balances: "Balances",
   activity: "Activity",
@@ -94,8 +81,6 @@ const CAPABILITY_LABELS: Record<keyof PineTreeWalletCapabilities, string> = {
   automaticPayouts: "Automatic payouts",
   automaticConversion: "Automatic conversion",
 }
-
-const ASSET_OPTIONS = ["SATS", "USDT", "USDC"]
 
 async function callWalletApi<T>(
   path: string,
@@ -199,12 +184,9 @@ export default function MerchantWalletManagementPanel({ accessToken }: { accessT
   const [capabilities, setCapabilities] = useState<CapabilitiesData | null>(null)
   const [balances, setBalances] = useState<BalancesData | null>(null)
   const [activity, setActivity] = useState<ActivityData | null>(null)
-  const [preferences, setPreferences] = useState<Preferences | null>(null)
   const [notConfigured, setNotConfigured] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [activeDialog, setActiveDialog] = useState<"withdraw" | "payout" | "swap" | null>(null)
-  const [savingPreferences, setSavingPreferences] = useState(false)
-  const [preferencesSavedAt, setPreferencesSavedAt] = useState<number | null>(null)
+  const [activeDialog, setActiveDialog] = useState<"withdraw" | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -225,17 +207,15 @@ export default function MerchantWalletManagementPanel({ accessToken }: { accessT
       return
     }
 
-    const [balRes, actRes, prefRes] = await Promise.all([
+    const [balRes, actRes] = await Promise.all([
       callWalletApi<BalancesData>("/api/wallets/balances", accessToken),
       callWalletApi<ActivityData>("/api/wallets/activity", accessToken),
-      callWalletApi<Preferences>("/api/wallets/preferences", accessToken),
     ])
 
     if (balRes.ok) setBalances(balRes.data)
     else setError(balRes.error.message)
 
     if (actRes.ok) setActivity(actRes.data)
-    if (prefRes.ok) setPreferences(prefRes.data)
 
     setLoading(false)
   }, [accessToken])
@@ -280,10 +260,7 @@ export default function MerchantWalletManagementPanel({ accessToken }: { accessT
 
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Wallet Management</p>
-          {capabilities?.providerDisplayName ? (
-            <p className="text-[11px] text-gray-400">Powered by {capabilities.providerDisplayName}</p>
-          ) : null}
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Bitcoin Lightning</p>
         </div>
         <button
           type="button"
@@ -301,46 +278,22 @@ export default function MerchantWalletManagementPanel({ accessToken }: { accessT
       <BalancesCard balances={balances} />
 
       <div className="flex flex-wrap gap-2">
-        <Button variant="secondary" onClick={() => setActiveDialog("withdraw")}>
+        <Button
+          variant="secondary"
+          disabled={!capabilities?.capabilities.withdrawals}
+          onClick={() => setActiveDialog("withdraw")}
+        >
           Withdraw
-        </Button>
-        <Button variant="secondary" onClick={() => setActiveDialog("payout")}>
-          Payout
-        </Button>
-        <Button variant="secondary" onClick={() => setActiveDialog("swap")}>
-          Convert / Swap
         </Button>
       </div>
 
       <ActivityCard activity={activity} />
 
-      {preferences ? (
-        <PreferencesCard
-          preferences={preferences}
-          capabilities={capabilities}
-          saving={savingPreferences}
-          savedAt={preferencesSavedAt}
-          onSave={async (next) => {
-            setSavingPreferences(true)
-            const res = await callWalletApi<Preferences>("/api/wallets/preferences", accessToken, {
-              method: "PUT",
-              body: JSON.stringify(next),
-            })
-            setSavingPreferences(false)
-            if (res.ok) {
-              setPreferences(res.data)
-              setPreferencesSavedAt(Date.now())
-            } else {
-              setError(res.error.message)
-            }
-          }}
-        />
-      ) : null}
+      <PreferencesCard />
 
-      {activeDialog === "withdraw" || activeDialog === "payout" ? (
+      {activeDialog === "withdraw" ? (
         <SendDialog
-          kind={activeDialog}
-          capabilityAvailable={Boolean(capabilities?.capabilities[activeDialog === "withdraw" ? "withdrawals" : "payouts"])}
+          capabilityAvailable={Boolean(capabilities?.capabilities.withdrawals)}
           accessToken={accessToken}
           onClose={() => setActiveDialog(null)}
           onSubmitted={() => {
@@ -350,17 +303,6 @@ export default function MerchantWalletManagementPanel({ accessToken }: { accessT
         />
       ) : null}
 
-      {activeDialog === "swap" ? (
-        <SwapDialog
-          capabilityAvailable={Boolean(capabilities?.capabilities.swaps)}
-          accessToken={accessToken}
-          onClose={() => setActiveDialog(null)}
-          onSubmitted={() => {
-            setActiveDialog(null)
-            void refresh()
-          }}
-        />
-      ) : null}
     </div>
   )
 }
@@ -461,7 +403,8 @@ function ActivityCard({ activity }: { activity: ActivityData | null }) {
                   {operationTypeLabel(op.operationType)}
                   {op.destinationSummary ? ` - ${op.destinationSummary}` : ""}
                 </p>
-                <p className="text-xs text-gray-500">{new Date(op.createdAt).toLocaleString()}</p>
+                <p className="text-xs text-gray-500">Bitcoin Lightning · {new Date(op.createdAt).toLocaleString()}</p>
+                {op.feeBaseUnits ? <p className="text-xs text-gray-500">Fee: {op.feeBaseUnits} {op.asset}</p> : null}
                 {op.failureReason ? <p className="text-xs text-red-600">{op.failureReason}</p> : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -479,133 +422,44 @@ function ActivityCard({ activity }: { activity: ActivityData | null }) {
   )
 }
 
-function PreferencesCard({
-  preferences,
-  capabilities,
-  saving,
-  savedAt,
-  onSave,
-}: {
-  preferences: Preferences
-  capabilities: CapabilitiesData | null
-  saving: boolean
-  savedAt: number | null
-  onSave: (next: Record<string, unknown>) => Promise<void>
-}) {
-  const [autoPayoutEnabled, setAutoPayoutEnabled] = useState(preferences.autoPayoutEnabled)
-  const [schedule, setSchedule] = useState(preferences.autoPayoutSchedule)
-  const [destination, setDestination] = useState(preferences.autoPayoutDestination ?? "")
-  const [autoSwapEnabled, setAutoSwapEnabled] = useState(preferences.autoSwapEnabled)
-
-  const automaticPayoutsAvailable = Boolean(capabilities?.capabilities.automaticPayouts)
-  const automaticConversionAvailable = Boolean(capabilities?.capabilities.automaticConversion)
-
+function PreferencesCard() {
   return (
     <Card>
       <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
         Automatic payouts & conversion
       </p>
-
-      <div className="space-y-4">
-        <div>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-900">Automatic payouts</p>
-              <p className="text-xs text-gray-500">
-                {automaticPayoutsAvailable
-                  ? "Funds will be sent on your schedule."
-                  : "Saved as a preference now - execution starts once your provider enables automatic payouts."}
-              </p>
-            </div>
-            <ToggleSwitch checked={autoPayoutEnabled} onChange={setAutoPayoutEnabled} />
-          </div>
-          {autoPayoutEnabled ? (
-            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <select
-                value={schedule}
-                onChange={(e) => setSchedule(e.target.value as Preferences["autoPayoutSchedule"])}
-                className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
-              >
-                <option value="disabled">Disabled</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="threshold">Threshold-based</option>
-              </select>
-              <input
-                value={destination}
-                onChange={(e) => setDestination(e.target.value)}
-                placeholder="Destination address"
-                className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
-              />
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex items-center justify-between border-t border-gray-100 pt-3">
-          <div>
-            <p className="text-sm font-medium text-gray-900">Automatic conversion (swap)</p>
-            <p className="text-xs text-gray-500">
-              {automaticConversionAvailable
-                ? "Active."
-                : preferences.autoSwapStatus === "pending_provider_support"
-                  ? "Saved - pending provider support."
-                  : "Not available yet."}
-            </p>
-          </div>
-          <ToggleSwitch checked={autoSwapEnabled} onChange={setAutoSwapEnabled} />
-        </div>
-      </div>
-
-      <div className="mt-4 flex items-center gap-3">
-        <Button
-          variant="primary"
-          disabled={saving}
-          onClick={() =>
-            void onSave({
-              auto_payout_enabled: autoPayoutEnabled,
-              auto_payout_schedule: schedule,
-              auto_payout_destination: destination || null,
-              auto_swap_enabled: autoSwapEnabled,
-            })
-          }
-        >
-          {saving ? "Saving..." : "Save preferences"}
-        </Button>
-        {savedAt ? <span className="text-xs text-gray-400">Saved</span> : null}
-      </div>
+      <p className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
+        Automatic conversion and scheduled payouts are not currently available for Bitcoin Lightning.
+      </p>
     </Card>
   )
 }
 
 function SendDialog({
-  kind,
   capabilityAvailable,
   accessToken,
   onClose,
   onSubmitted,
 }: {
-  kind: "withdraw" | "payout"
   capabilityAvailable: boolean
   accessToken: string | null
   onClose: () => void
   onSubmitted: () => void
 }) {
-  const [asset, setAsset] = useState("SATS")
   const [amount, setAmount] = useState("")
   const [destination, setDestination] = useState("")
+  const [reviewing, setReviewing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-
-  const path = kind === "withdraw" ? "/api/wallets/withdrawals" : "/api/wallets/payouts"
-  const title = kind === "withdraw" ? "Withdraw funds" : "Send payout"
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
 
   async function submit() {
     setSubmitting(true)
     setSubmitError(null)
-    const res = await callWalletApi(path, accessToken, {
+    const res = await callWalletApi("/api/wallets/withdrawals", accessToken, {
       method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({ asset, amount_decimal: amount, destination }),
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ asset: "SATS", amount_decimal: amount, destination }),
     })
     setSubmitting(false)
     if (res.ok) {
@@ -616,10 +470,10 @@ function SendDialog({
   }
 
   return (
-    <Dialog title={title} onClose={onClose}>
+    <Dialog title="Withdraw Bitcoin Lightning" onClose={onClose}>
       {!capabilityAvailable ? (
         <div className="mb-4 rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
-          {kind === "withdraw" ? "Withdrawals" : "Payouts"} are not currently available for this wallet.
+          Withdrawals are not currently available for this wallet.
           Submission is disabled until this becomes available.
         </div>
       ) : null}
@@ -627,14 +481,14 @@ function SendDialog({
         <div className="mb-4 rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{submitError}</div>
       ) : null}
 
+      {reviewing ? (
+        <div className="space-y-3 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-700">
+          <p><span className="font-medium text-gray-900">Amount:</span> {amount} SATS</p>
+          <p className="break-all"><span className="font-medium text-gray-900">Destination:</span> {destination}</p>
+          <p className="text-xs text-gray-500">Network fees, if any, are determined by the provider.</p>
+        </div>
+      ) : (
       <div className="space-y-3">
-        <select value={asset} onChange={(e) => setAsset(e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm">
-          {ASSET_OPTIONS.map((a) => (
-            <option key={a} value={a}>
-              {a}
-            </option>
-          ))}
-        </select>
         <input
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
@@ -649,126 +503,19 @@ function SendDialog({
           className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
         />
       </div>
+      )}
 
       <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
+        <Button variant="secondary" onClick={reviewing ? () => setReviewing(false) : onClose}>
+          {reviewing ? "Back" : "Cancel"}
         </Button>
         <Button
           variant="primary"
           disabled={!capabilityAvailable || submitting || !amount || !destination}
-          onClick={() => void submit()}
+          onClick={() => reviewing ? void submit() : setReviewing(true)}
         >
-          {submitting ? "Submitting..." : "Confirm"}
+          {submitting ? "Submitting..." : reviewing ? "Confirm withdrawal" : "Review"}
         </Button>
-      </div>
-    </Dialog>
-  )
-}
-
-function SwapDialog({
-  capabilityAvailable,
-  accessToken,
-  onClose,
-  onSubmitted,
-}: {
-  capabilityAvailable: boolean
-  accessToken: string | null
-  onClose: () => void
-  onSubmitted: () => void
-}) {
-  const [sourceAsset, setSourceAsset] = useState("SATS")
-  const [targetAsset, setTargetAsset] = useState("USDC")
-  const [amount, setAmount] = useState("")
-  const [quote, setQuote] = useState<Record<string, unknown> | null>(null)
-  const [quoting, setQuoting] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-
-  async function getQuote() {
-    setQuoting(true)
-    setSubmitError(null)
-    const res = await callWalletApi<Record<string, unknown>>("/api/wallets/swaps/quote", accessToken, {
-      method: "POST",
-      body: JSON.stringify({ source_asset: sourceAsset, target_asset: targetAsset, amount_decimal: amount }),
-    })
-    setQuoting(false)
-    if (res.ok) setQuote(res.data)
-    else setSubmitError(res.error.message)
-  }
-
-  async function submit() {
-    setSubmitting(true)
-    setSubmitError(null)
-    const res = await callWalletApi("/api/wallets/swaps", accessToken, {
-      method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({ source_asset: sourceAsset, target_asset: targetAsset, amount_decimal: amount }),
-    })
-    setSubmitting(false)
-    if (res.ok) onSubmitted()
-    else setSubmitError(res.error.message)
-  }
-
-  return (
-    <Dialog title="Convert / Swap" onClose={onClose}>
-      {!capabilityAvailable ? (
-        <div className="mb-4 rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
-          Swaps are not currently available for this wallet. Submission is disabled until this becomes
-          available.
-        </div>
-      ) : null}
-      {submitError ? (
-        <div className="mb-4 rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{submitError}</div>
-      ) : null}
-
-      <div className="grid grid-cols-2 gap-2">
-        <select value={sourceAsset} onChange={(e) => setSourceAsset(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm">
-          {ASSET_OPTIONS.map((a) => (
-            <option key={a} value={a}>
-              From {a}
-            </option>
-          ))}
-        </select>
-        <select value={targetAsset} onChange={(e) => setTargetAsset(e.target.value)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm">
-          {ASSET_OPTIONS.map((a) => (
-            <option key={a} value={a}>
-              To {a}
-            </option>
-          ))}
-        </select>
-      </div>
-      <input
-        value={amount}
-        onChange={(e) => {
-          setAmount(e.target.value)
-          setQuote(null)
-        }}
-        placeholder="Amount"
-        inputMode="decimal"
-        className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-      />
-
-      {quote ? (
-        <div className="mt-3 rounded-xl bg-gray-50 px-3 py-2.5 text-xs text-gray-600">
-          Quote received - review before confirming. Rates are provided by your wallet provider at execution
-          time.
-        </div>
-      ) : null}
-
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-        {quote ? (
-          <Button variant="primary" disabled={!capabilityAvailable || submitting} onClick={() => void submit()}>
-            {submitting ? "Confirming..." : "Confirm swap"}
-          </Button>
-        ) : (
-          <Button variant="primary" disabled={!capabilityAvailable || quoting || !amount} onClick={() => void getQuote()}>
-            {quoting ? "Getting quote..." : "Get quote"}
-          </Button>
-        )}
       </div>
     </Dialog>
   )

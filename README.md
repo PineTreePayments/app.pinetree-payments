@@ -97,16 +97,29 @@ Speed dashboard may warn about unrestricted API keys. Do not configure IP restri
 
 ---
 
-## Legacy Lightning Modes
+## Speed Connected-Account Wallet Management
 
-Legacy Speed Connect and NWC modules remain for old records and explicit non-canonical modes. They are not active or visible in the canonical PineTree Wallet treasury-sweep path.
+PineTree can provision a Speed subaccount for a merchant while keeping Speed
+provider details server-side. `merchant_lightning_profiles.speed_account_id`
+is the canonical account identity. PineTree uses its platform credentials and
+adds `speed-account: <acct_...>` to merchant-scoped payment, balance,
+transaction-list, and Instant Send requests.
 
-Speed Connect server-only env vars, if an old deployment explicitly enables that mode:
+Connected-account mode requires:
 
 ```bash
 SPEED_CONNECT_ENABLED=true
-SPEED_CONNECT_RETURN_URL=https://app.pinetree-payments.com/api/wallets/lightning/speed/connect-return
 ```
+
+Balances are cached by merchant, provider, provider account, asset, and
+network. Transaction sync is cursor-paginated and merges Speed transaction
+IDs/source IDs into the existing wallet-operation ledger. User-triggered
+Bitcoin Lightning withdrawals use Instant Send and are completed only when
+Speed reports `paid`. Speed does not expose AutoSwap or AutoPayout APIs;
+PineTree does not simulate either feature. See
+`docs/environment/lightning-sweep-env-checklist.md`.
+
+## Legacy Lightning Mode
 
 NWC direct wallet mode requires a Nostr Wallet Connect URI with `make_invoice`, `lookup_invoice`, and `pay_invoice` permissions. The NWC URI is stored server-side in `merchant_providers.credentials` and never returned to the browser.
 

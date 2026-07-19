@@ -28,10 +28,8 @@ export type MerchantLightningProfile = {
   speed_connected_account_id: string | null
   speed_connected_account_relationship_id: string | null
   speed_account_id: string | null
-  // Provider-confirmed X-Speed-Account header value for Instant Send calls -
-  // deliberately separate from speed_account_id/speed_connected_account_relationship_id.
-  // NULL until Speed confirms the ca_ vs acct_ identifier format. See
-  // providers/lightning/speedHeaderAccountResolver.ts - never inferred automatically.
+  // Legacy compatibility copy. speed_account_id is the canonical acct_ value
+  // used by the confirmed `speed-account` header contract.
   speed_header_account_id: string | null
   speed_connected_account_status: string | null
   speed_connect_setup_url: string | null
@@ -158,10 +156,8 @@ export async function upsertMerchantLightningProfile(
     ...(existing ? {} : { created_at: now }),
   }
 
-  // speed_header_account_id is for a later Instant Send contract question and
-  // is not required for Custom Connect intake. Some restored production
-  // schemas do not have the column yet, so only write it when explicitly set
-  // or when an existing selected row proves the column is present.
+  // Keep the legacy compatibility column untouched unless it already exists
+  // or is explicitly supplied. New routing resolves speed_account_id only.
   if (
     input.speedHeaderAccountId !== undefined ||
     (existing && Object.prototype.hasOwnProperty.call(existing, "speed_header_account_id"))

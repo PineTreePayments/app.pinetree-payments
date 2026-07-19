@@ -90,7 +90,7 @@ describe("normalizeSpeedWebhookForWallet", () => {
   })
 
   it("does not normalize an event type outside the documented wallet-relevant set", async () => {
-    const claimSpeedWebhookEvent = vi.fn().mockResolvedValue({ claimed: true, record: claimedRecord({ event_type: "withdraw.created" }) })
+    const claimSpeedWebhookEvent = vi.fn().mockResolvedValue({ claimed: true, record: claimedRecord({ event_type: "connect.completed" }) })
     const upsertWalletOperationFromWebhook = vi.fn()
     vi.doMock("@/database/speedWebhookEvents", () => ({ claimSpeedWebhookEvent, markSpeedWebhookEventProcessed: vi.fn() }))
     vi.doMock("@/database/merchantLightningProfiles", () => ({ getMerchantIdBySpeedAccountId: vi.fn().mockResolvedValue("merchant-1") }))
@@ -98,12 +98,44 @@ describe("normalizeSpeedWebhookForWallet", () => {
 
     const { normalizeSpeedWebhookForWallet } = await import("@/engine/wallet/speedWalletWebhookNormalizer")
     const result = await normalizeSpeedWebhookForWallet(
-      { type: "withdraw.created", account_id: "acct_1" },
+      { type: "connect.completed", account_id: "acct_1" },
       { "webhook-id": "wh_1" }
     )
 
     expect(result).toEqual({ handled: false, reason: "event_not_wallet_relevant" })
     expect(upsertWalletOperationFromWebhook).not.toHaveBeenCalled()
+  })
+
+  it("updates only the matched account-scoped Instant Send operation for withdraw.paid", async () => {
+    const claimSpeedWebhookEvent = vi.fn().mockResolvedValue({ claimed: true, record: claimedRecord({ event_type: "withdraw.paid" }) })
+    const markSpeedWebhookEventProcessed = vi.fn()
+    const updateWalletOperationFromProviderEvent = vi.fn().mockResolvedValue({ id: "op-withdraw-1" })
+    vi.doMock("@/database/speedWebhookEvents", () => ({ claimSpeedWebhookEvent, markSpeedWebhookEventProcessed }))
+    vi.doMock("@/database/merchantLightningProfiles", () => ({ getMerchantIdBySpeedAccountId: vi.fn().mockResolvedValue("merchant-1") }))
+    vi.doMock("@/database/merchantWalletOperations", () => ({
+      upsertWalletOperationFromWebhook: vi.fn(),
+      updateWalletOperationFromProviderEvent,
+    }))
+
+    const { normalizeSpeedWebhookForWallet } = await import("@/engine/wallet/speedWalletWebhookNormalizer")
+    const result = await normalizeSpeedWebhookForWallet({
+      type: "withdraw.paid",
+      account_id: "acct_1",
+      data: { object: {
+        id: "wi_1", reference_id: "is_1", reference_type: "instant_send",
+        status: "paid", transaction_hash: "tx_1",
+      } },
+    }, { "webhook-id": "wh_withdraw_1" })
+
+    expect(result).toEqual({ handled: true, reason: "withdraw_operation_updated" })
+    expect(updateWalletOperationFromProviderEvent).toHaveBeenCalledWith(expect.objectContaining({
+      merchantId: "merchant-1",
+      providerAccountId: "acct_1",
+      providerReference: "is_1",
+      providerSecondaryReference: "wi_1",
+      status: "COMPLETED",
+    }))
+    expect(markSpeedWebhookEventProcessed).toHaveBeenCalledWith("event-row-1", "op-withdraw-1")
   })
 
   it("normalizes payment.paid on a matched connected account into a COMPLETED PAYMENT wallet operation, keyed for idempotent replay", async () => {
