@@ -173,6 +173,11 @@ function getLookbackWindow(network: string): number {
  * @returns false if no matching transaction was found in the lookback window.
  */
 export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> {
+  const normalizedNetwork = String(input.network || "").trim().toLowerCase()
+  // Lightning is provider-reconciled through Speed webhooks and the bounded
+  // Lightning check route. It is never an RPC network.
+  if (normalizedNetwork === "bitcoin_lightning") return false
+
   const matchRatio = getAmountMatchRatio(input.network)
 
   const merchantWallet = String(input.merchantWallet || "").trim()

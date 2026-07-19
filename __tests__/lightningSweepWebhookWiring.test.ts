@@ -6,56 +6,50 @@ function read(relativePath: string) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8")
 }
 
-describe("Lightning sweep webhook wiring", () => {
+describe("legacy Lightning automation is inactive", () => {
   const eventProcessor = read("engine/eventProcessor.ts")
   const speedWebhookRoute = read("app/api/webhooks/speed/route.ts")
   const pinetreeManagedRoute = read("app/api/wallets/lightning/pinetree-managed/route.ts")
 
-  it("only queues a sweep after webhook signature verification succeeds", () => {
+  it("keeps webhook verification while removing all automatic sweep and settlement calls", () => {
     const verifyIndex = eventProcessor.indexOf("adapter.verifyWebhook")
     const rejectionIndex = eventProcessor.indexOf('throw new Error("Webhook verification failed")')
-    const sweepCallIndex = eventProcessor.lastIndexOf("ensureLightningSweepQueued(paymentId)")
 
     expect(verifyIndex).toBeGreaterThan(-1)
-    expect(sweepCallIndex).toBeGreaterThan(-1)
     expect(verifyIndex).toBeLessThan(rejectionIndex)
-    expect(rejectionIndex).toBeLessThan(sweepCallIndex)
+    expect(eventProcessor).not.toContain("ensureLightningSweepQueued")
+    expect(eventProcessor).not.toContain("ensurePineTreeLightningSettlementJob")
+    expect(eventProcessor).not.toContain("ensureSpeedTreasurySweepPayoutJob")
   })
 
-  it("queues the sweep from both the fresh-confirmation and idempotent-terminal-replay branches, gated to Speed only", () => {
-    const matches = eventProcessor.match(/ensureLightningSweepQueued\(paymentId\)/g) || []
-    expect(matches.length).toBe(2)
-
-    // Both call sites must be inside a `provider === SPEED_PROVIDER_NAME` guard.
-    const occurrences = [...eventProcessor.matchAll(/ensureLightningSweepQueued\(paymentId\)/g)]
-    for (const occurrence of occurrences) {
-      const before = eventProcessor.slice(Math.max(0, occurrence.index! - 400), occurrence.index)
-      expect(before).toContain("provider === SPEED_PROVIDER_NAME")
-    }
+  it("does not read missing legacy tables during normal Speed payment processing", () => {
+    expect(eventProcessor).not.toContain("merchant_lightning_sweeps")
+    expect(eventProcessor).not.toContain("lightning_settlement_settings")
+    expect(speedWebhookRoute).not.toContain("merchant_lightning_sweeps")
+    expect(speedWebhookRoute).not.toContain("lightning_settlement_settings")
   })
 
-  it("only queues the sweep on a confirmed event, never on pending/processing/failed", () => {
-    const occurrences = [...eventProcessor.matchAll(/ensureLightningSweepQueued\(paymentId\)/g)]
-    for (const occurrence of occurrences) {
-      const before = eventProcessor.slice(Math.max(0, occurrence.index! - 1000), occurrence.index)
-      expect(before).toMatch(/payment\.confirmed|event\.event === "payment\.confirmed"/)
-    }
+  it("still applies incoming payment events and writes the confirmed ledger entry", () => {
+    expect(eventProcessor).toContain("advancePaymentToTargetStatus")
+    expect(eventProcessor).toContain("upsertLedgerEntry")
+    expect(eventProcessor).toContain('event.event === "payment.confirmed"')
   })
 
-  it("delegates queueing to the dedicated engine module rather than inlining sweep logic in the event processor", () => {
-    expect(eventProcessor).toContain('await import("./lightningSweep")')
-    expect(eventProcessor).toContain("ensureLightningSweepForConfirmedPayment")
+  it("does not simulate AutoSwap, AutoPayout, or a treasury transfer", () => {
+    expect(eventProcessor).not.toContain("processLightningPayoutJobByPayment")
+    expect(speedWebhookRoute).not.toContain("scheduleLightningSweepProcessing")
+    expect(speedWebhookRoute).toContain("normalizeSpeedWebhookForWallet")
   })
 
-  it("schedules bounded, deferred sweep processing after the webhook responds - never inside the verified-webhook processing itself", () => {
+  it("processes and normalizes the signed webhook without scheduling legacy maintenance", () => {
     const processIndex = speedWebhookRoute.indexOf("await processWebhook(")
-    const scheduleIndex = speedWebhookRoute.indexOf("scheduleLightningSweepProcessing(")
+    const normalizeIndex = speedWebhookRoute.indexOf("normalizeSpeedWebhookForWallet(")
     const responseIndex = speedWebhookRoute.indexOf('NextResponse.json({ received: true })')
 
     expect(processIndex).toBeGreaterThan(-1)
-    expect(scheduleIndex).toBeGreaterThan(-1)
-    expect(processIndex).toBeLessThan(scheduleIndex)
-    expect(scheduleIndex).toBeLessThan(responseIndex)
+    expect(normalizeIndex).toBeGreaterThan(processIndex)
+    expect(normalizeIndex).toBeLessThan(responseIndex)
+    expect(speedWebhookRoute).not.toContain("scheduleLightningSweepProcessing")
   })
 
   it("the wallet page-load route only schedules processing when a sweep is actually due, never unconditionally", () => {

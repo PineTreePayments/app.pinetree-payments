@@ -304,7 +304,7 @@ describe("PineTree Wallet balance sync", () => {
     expect(result.recentActivity[0].rail).toBe("bitcoin")
   })
 
-  it("returns normalized provider-agnostic rail contract without stale BTC balances", async () => {
+  it("returns a normalized provider-agnostic rail contract with an explicit stale BTC balance", async () => {
     storedRows = [
       {
         id: "btc-stale",
@@ -346,17 +346,17 @@ describe("PineTree Wallet balance sync", () => {
         withdrawal_available: false,
         balance: {
           asset: "BTC",
-          amount: null,
+          amount: "0.5",
           usd_value: null,
-          status: "unavailable",
+          status: "stale",
         },
       }),
     ]))
     expect(result.balances.bitcoin[0]).toMatchObject({
       asset: "BTC",
-      balance: null,
+      balance: "0.5",
       usdValue: null,
-      status: "unavailable",
+      status: "stale",
     })
     expect(serialized).not.toContain("speed")
     expect(serialized).not.toContain("dynamic")

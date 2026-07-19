@@ -82,13 +82,13 @@ describe("POST /api/webhooks/speed - connected-account event routing", () => {
     expect(mocks.processWebhook).toHaveBeenCalled()
   })
 
-  it("schedules bounded, deferred Lightning sweep processing after every successfully processed webhook", async () => {
+  it("does not schedule obsolete Lightning sweep processing after a successfully processed webhook", async () => {
     const { POST } = await import("@/app/api/webhooks/speed/route")
     const body = JSON.stringify({ type: "payment.paid" })
     await POST(
       new Request("https://app.test/api/webhooks/speed", { method: "POST", body }) as unknown as import("next/server").NextRequest
     )
 
-    expect(mocks.scheduleLightningSweepProcessing).toHaveBeenCalledWith("webhook:speed")
+    expect(mocks.scheduleLightningSweepProcessing).not.toHaveBeenCalled()
   })
 })

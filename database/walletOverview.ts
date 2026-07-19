@@ -61,7 +61,7 @@ export async function getMerchantAssetBalances(merchantId: string) {
 
 export async function upsertMerchantAssetBalances(
   merchantId: string,
-  balances: Array<{ asset: string; balance: number }>,
+  balances: Array<{ asset: string; balance: number | string }>,
   timestamp: string
 ) {
   if (balances.length === 0) return

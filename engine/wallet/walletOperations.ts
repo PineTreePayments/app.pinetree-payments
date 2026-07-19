@@ -41,6 +41,15 @@ import { listWalletBalanceSnapshots, upsertWalletBalanceSnapshot } from "@/datab
 
 export const STALE_BALANCE_THRESHOLD_MS = 15 * 60 * 1000
 
+function canonicalWalletBalanceIdentity(asset: string, network: string | null | undefined) {
+  const normalizedAsset = String(asset || "").trim().toLowerCase()
+  const normalizedNetwork = String(network || "").trim().toLowerCase()
+  if (["btc", "sats", "bitcoin", "bitcoin_lightning"].includes(normalizedAsset) || normalizedNetwork === "bitcoin_lightning") {
+    return { asset: "BTC", network: "bitcoin_lightning" }
+  }
+  return { asset: String(asset || "").trim().toUpperCase(), network: network || null }
+}
+
 function toPineTreeWalletOperation(row: MerchantWalletOperation): PineTreeWalletOperation {
   return {
     id: row.id,
@@ -160,20 +169,37 @@ export async function getWalletBalances(merchantId: string): Promise<PineTreeWal
     ? allCached.filter((row) => liveBalanceKeys.has(`${row.asset}:${row.network || ""}`))
     : allCached
   const now = Date.now()
-  const balances: PineTreeWalletBalance[] = cached.map((row) => {
+  const normalizedBalances: PineTreeWalletBalance[] = cached.map((row) => {
     const cachedAtMs = new Date(row.cached_at).getTime()
+    const identity = canonicalWalletBalanceIdentity(row.asset, row.network)
     return {
-      asset: row.asset,
+      asset: identity.asset,
       availableBaseUnits: row.available_base_units,
       pendingBaseUnits: row.pending_base_units,
       totalBaseUnits: row.total_base_units,
-      decimals: getWalletAssetDecimals(row.asset),
-      network: row.network || null,
+      decimals: getWalletAssetDecimals(identity.asset),
+      network: identity.network,
       providerUpdatedAt: row.provider_updated_at,
       cachedAt: row.cached_at,
       stale: !Number.isFinite(cachedAtMs) || now - cachedAtMs > STALE_BALANCE_THRESHOLD_MS,
     }
   })
+  const balances = Array.from(new Map(
+    normalizedBalances.map((balance) => [`${balance.asset}:${balance.network || ""}`, balance])
+  ).values())
+  if (provider === "speed" && !balances.some((balance) => balance.asset === "BTC" && balance.network === "bitcoin_lightning")) {
+    balances.push({
+      asset: "BTC",
+      availableBaseUnits: "0",
+      pendingBaseUnits: null,
+      totalBaseUnits: null,
+      decimals: 8,
+      network: "bitcoin_lightning",
+      providerUpdatedAt: null,
+      cachedAt: null,
+      stale: false,
+    })
+  }
 
   const lastSuccessfulSyncAt = balances.reduce<string | null>((latest, balance) => {
     const candidate = balance.providerUpdatedAt || balance.cachedAt
@@ -188,7 +214,7 @@ export async function getWalletBalances(merchantId: string): Promise<PineTreeWal
       : providerUnavailable
         ? "WALLET_PROVIDER_UNAVAILABLE"
         : null,
-    syncStatus: liveSyncSucceeded ? "live" : balances.length > 0 ? "cached" : "unavailable",
+    syncStatus: liveSyncSucceeded ? "live" : normalizedBalances.length > 0 ? "cached" : "unavailable",
     lastSuccessfulSyncAt,
     balances,
   }
@@ -436,7 +462,10 @@ async function createWalletWrite(
       })
       throw error
     }
-    const available = balances.find((balance) => balance.asset.toUpperCase() === input.asset)?.availableBaseUnits
+    const requestedBalanceAsset = input.asset === "SATS" ? "BTC" : input.asset
+    const available = balances.find((balance) =>
+      canonicalWalletBalanceIdentity(balance.asset, balance.network).asset === requestedBalanceAsset
+    )?.availableBaseUnits
     if (available == null || available < input.amountBaseUnits) {
       await updateWalletOperation(merchantId, operation.id, {
         status: "FAILED",

@@ -107,6 +107,18 @@ type WithdrawalSubmitResponse = {
   message: string
 }
 
+type WalletWithdrawalResponse = {
+  ok: boolean
+  data?: {
+    operation?: {
+      id: string
+      status: string
+      txHash?: string | null
+    }
+  }
+  error?: { message?: string }
+}
+
 type WithdrawalPrepareResponse = {
   request: WithdrawalReviewResponse["request"]
   approvalMethod: "dynamic_browser"
@@ -142,10 +154,10 @@ type SyncedBalanceAsset = {
   key: string
   rail: "base" | "solana" | "bitcoin"
   asset: "ETH" | "USDC" | "SOL" | "BTC"
-  balance: number | null
+  balance: number | string | null
   usdValue: number | null
   lastSyncedAt: string | null
-  status: "synced" | "pending_sync" | "config_missing" | "unavailable" | "stale"
+  status: "synced" | "cached" | "pending_sync" | "config_missing" | "unavailable" | "stale"
 }
 
 type PineTreeWalletSyncResponse = {
@@ -922,13 +934,22 @@ function isNativeWithdrawalAsset(asset: WithdrawalAsset) {
   return asset === "ETH" || asset === "SOL" || asset === "BTC"
 }
 
-function formatCryptoAmount(value: number | null, asset: string) {
+function formatCryptoAmount(value: number | string | null, asset: string) {
   if (value === null) return null
+  if (asset === "BTC" && typeof value === "string") return value
+  const numericValue = typeof value === "string" ? Number(value) : value
   const decimals = asset === "USDC" ? 6 : asset === "BTC" ? 8 : 9
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: 0,
     maximumFractionDigits: decimals,
-  }).format(value)
+  }).format(numericValue)
+}
+
+function btcDecimalToSats(value: string): string | null {
+  const normalized = value.trim()
+  if (!/^\d+(?:\.\d{1,8})?$/.test(normalized)) return null
+  const [whole, fraction = ""] = normalized.split(".")
+  return (BigInt(whole) * BigInt(100_000_000) + BigInt(fraction.padEnd(8, "0"))).toString()
 }
 
 function railDisplayName(rail: WithdrawalRail) {
@@ -942,12 +963,15 @@ function assetOptionKey(option: Pick<WithdrawalAssetOption, "rail" | "asset">) {
 }
 
 function formatBalanceLabel(balance: SyncedBalanceAsset | null, asset: WithdrawalAsset) {
-  if (!balance || balance.status !== "synced" || balance.balance === null) return "Balance indexing pending"
-  return `${formatCryptoAmount(balance.balance, asset)} ${asset}`
+  if (!balance || balance.balance === null) {
+    return balance?.status === "unavailable" ? "Balance temporarily unavailable" : "Balance indexing pending"
+  }
+  const suffix = balance.status === "stale" ? " (stale)" : balance.status === "cached" ? " (cached)" : ""
+  return `${formatCryptoAmount(balance.balance, asset)} ${asset}${suffix}`
 }
 
 function formatUsdEstimate(balance: SyncedBalanceAsset | null) {
-  if (!balance || balance.status !== "synced") return "Balance will be verified before processing"
+  if (!balance || !["synced", "cached", "stale"].includes(balance.status)) return "Balance will be verified before processing"
   if (balance.usdValue === null || balance.usdValue === undefined) return "USD value pending"
   return `~ ${formatUsd(balance.usdValue)}`
 }
@@ -1944,15 +1968,17 @@ function WithdrawalFormShell({
   const amountTrimmed = amountDecimal.trim()
   const selectedBalanceAmount = selectedBalance?.balance ?? null
   const selectedBalanceKnown = selectedBalanceAmount !== null && selectedBalance?.status === "synced"
-  const selectedBalanceZero = selectedBalanceKnown && selectedBalanceAmount <= 0
+  const selectedBalanceNumeric = selectedBalanceAmount === null ? null : Number(selectedBalanceAmount)
+  const selectedBalanceZero = selectedBalanceKnown && selectedBalanceNumeric !== null && selectedBalanceNumeric <= 0
   const amountValue = Number(amountTrimmed)
   const missingAmount = amountTrimmed.length === 0
   const amountParseError = amountTrimmed.length > 0 && !Number.isFinite(amountValue)
   const invalidAmount = amountTrimmed.length > 0 && Number.isFinite(amountValue) && !(amountValue > 0)
-  const amountExceedsBalance = selectedBalanceKnown && amountValue > selectedBalanceAmount
+  const amountExceedsBalance = selectedBalanceKnown && selectedBalanceNumeric !== null && amountValue > selectedBalanceNumeric
   const missingDestination = destinationAddress.trim().length === 0
   const noWithdrawableAssets = assetOptions.length === 0
-  const reviewBlockedByInput = reviewing || noWithdrawableAssets || missingDestination || missingAmount || amountParseError || invalidAmount || selectedBalanceZero || amountExceedsBalance
+  const bitcoinBalanceUnavailable = rail === "bitcoin" && !selectedBalanceKnown
+  const reviewBlockedByInput = reviewing || noWithdrawableAssets || missingDestination || missingAmount || amountParseError || invalidAmount || selectedBalanceZero || amountExceedsBalance || bitcoinBalanceUnavailable
   const reviewDisabled = reviewBlockedByInput
   const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
@@ -1969,6 +1995,8 @@ function WithdrawalFormShell({
           ? "Enter a valid withdrawal amount."
           : invalidAmount
             ? "Enter an amount greater than 0."
+              : bitcoinBalanceUnavailable
+                ? "Balance temporarily unavailable. Refresh before withdrawing."
               : selectedBalanceZero
                 ? "No available balance for this asset."
                 : noWithdrawableAssets
@@ -2263,13 +2291,15 @@ function formatUsd(value: number | null) {
   }).format(value)
 }
 
-function formatBalance(value: number | null, asset: string) {
+function formatBalance(value: number | string | null, asset: string) {
   if (value === null) return "Pending sync"
+  if (asset === "BTC" && typeof value === "string") return `${value} ${asset}`
+  const numericValue = typeof value === "string" ? Number(value) : value
   const decimals = asset === "USDC" ? 2 : asset === "BTC" ? 8 : 6
   return `${new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: value === 0 ? 0 : 0,
+    minimumFractionDigits: numericValue === 0 ? 0 : 0,
     maximumFractionDigits: decimals,
-  }).format(value)} ${asset}`
+  }).format(numericValue)} ${asset}`
 }
 
 function formatLastSynced(value: string | null) {
@@ -2463,6 +2493,7 @@ function BalanceRows({
   sync,
   syncing,
   profileAddresses,
+  bitcoinReady,
   bitcoinPayoutEntries,
   copiedAddress,
   selectedKey,
@@ -2472,6 +2503,7 @@ function BalanceRows({
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
   profileAddresses: Record<"base" | "solana" | "bitcoin", AddressEntry[]>
+  bitcoinReady: boolean
   bitcoinPayoutEntries: AddressEntry[]
   copiedAddress: string
   selectedKey: string
@@ -2484,14 +2516,15 @@ function BalanceRows({
     const rows: SyncedBalanceAsset[] = []
     if (profileAddresses.base.length > 0) rows.push(...(sync?.balances.base ?? []))
     if (profileAddresses.solana.length > 0) rows.push(...(sync?.balances.solana ?? []))
-    if (bitcoinPayoutEntries.length > 0) rows.push(...(sync?.balances.bitcoin ?? []))
-    return rows.filter((row) => {
-      if (row.rail === "bitcoin" && bitcoinPayoutEntries.length === 0) return false
+    if (bitcoinReady) rows.push(...(sync?.balances.bitcoin ?? []))
+    const visible = rows.filter((row) => {
+      if (row.rail === "bitcoin") return bitcoinReady
       if (row.rail === "base" && profileAddresses.base.length === 0) return false
       if (row.rail === "solana" && profileAddresses.solana.length === 0) return false
       return row.status === "synced" || row.balance !== null || row.usdValue !== null
     })
-  }, [bitcoinPayoutEntries.length, profileAddresses.base.length, profileAddresses.solana.length, sync?.balances])
+    return Array.from(new Map(visible.map((row) => [row.key, row])).values())
+  }, [bitcoinReady, profileAddresses.base.length, profileAddresses.solana.length, sync?.balances])
 
   const preferredSelectedKey =
     balanceOptions.find((row) => row.key === "BASE_ETH")?.key ??
@@ -2514,7 +2547,7 @@ function BalanceRows({
     asset: row.asset,
     railLabel: assetRailLabel(row.rail),
     balanceLabel: formatBalance(row.balance, row.asset),
-    usdLabel: row.status === "synced" && row.usdValue !== null ? `~ ${formatUsd(row.usdValue)}` : null,
+    usdLabel: ["synced", "cached", "stale"].includes(row.status) && row.usdValue !== null ? `~ ${formatUsd(row.usdValue)}` : null,
   }))
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
 
@@ -2563,7 +2596,9 @@ function BalanceRows({
             <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Estimated USD value</dt>
               <dd className="min-w-0 text-right font-semibold text-gray-950">
-                {selectedAsset.status === "synced" && selectedAsset.usdValue !== null ? formatUsd(selectedAsset.usdValue) : "Pending value"}
+                {["synced", "cached", "stale"].includes(selectedAsset.status) && selectedAsset.usdValue !== null
+                  ? formatUsd(selectedAsset.usdValue)
+                  : selectedAsset.status === "unavailable" ? "Balance temporarily unavailable" : "Pending value"}
               </dd>
             </div>
             <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
@@ -2816,6 +2851,7 @@ function PineTreeWalletRuntime() {
   const [withdrawalSubmitResult, setWithdrawalSubmitResult] = useState<WithdrawalSubmitResponse | null>(null)
   const [withdrawalError, setWithdrawalError] = useState("")
   const [withdrawalApprovalError, setWithdrawalApprovalError] = useState("")
+  const [instantSendIdempotencyKey, setInstantSendIdempotencyKey] = useState<string | null>(null)
   const [reviewingWithdrawal, setReviewingWithdrawal] = useState(false)
   const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
   const [withdrawalAuthorizationRecoveryOpen, setWithdrawalAuthorizationRecoveryOpen] = useState(false)
@@ -6440,8 +6476,8 @@ function PineTreeWalletRuntime() {
   const withdrawalWalletRows = useMemo(() => [
     { rail: "base" as const, configured: baseReady && enabledRails.base },
     { rail: "solana" as const, configured: solanaReady && enabledRails.solana },
-    { rail: "bitcoin" as const, configured: btcPayoutReady && enabledRails.bitcoin },
-  ], [baseReady, btcPayoutReady, enabledRails.base, enabledRails.bitcoin, enabledRails.solana, solanaReady])
+    { rail: "bitcoin" as const, configured: bitcoinReady && enabledRails.bitcoin },
+  ], [baseReady, bitcoinReady, enabledRails.base, enabledRails.bitcoin, enabledRails.solana, solanaReady])
 
   const withdrawableAssetOptions = useMemo((): WithdrawalAssetOption[] => {
     return withdrawalWalletRows
@@ -7606,6 +7642,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalSubmitResult(null)
     setWithdrawalError("")
     setWithdrawalApprovalError("")
+    setInstantSendIdempotencyKey(null)
   }
 
   const handleOverviewRailSelect = useCallback((rail: WithdrawalRail) => {
@@ -7631,6 +7668,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalSubmitResult(null)
     setWithdrawalApprovalError("")
     setWithdrawalError("")
+    setInstantSendIdempotencyKey(null)
     setWalletOpen(false)
   }
 
@@ -7659,19 +7697,32 @@ function PineTreeWalletRuntime() {
       return
     }
     const amountNumber = Number(amount)
-    if (!(amountNumber > 0)) {
+    const amountSats = withdrawalRail === "bitcoin" ? btcDecimalToSats(amount) : null
+    if (withdrawalRail === "bitcoin" ? !amountSats || BigInt(amountSats) <= BigInt(0) : !(amountNumber > 0)) {
       setWithdrawalError("Enter an amount greater than 0.")
       return
     }
     if (selectedWithdrawalBalance?.status === "synced" && selectedWithdrawalBalance.balance !== null) {
-      if (selectedWithdrawalBalance.balance <= 0) {
+      const availableSats = withdrawalRail === "bitcoin"
+        ? btcDecimalToSats(String(selectedWithdrawalBalance.balance))
+        : null
+      const availableBalance = Number(selectedWithdrawalBalance.balance)
+      if (withdrawalRail === "bitcoin" ? !availableSats || BigInt(availableSats) <= BigInt(0) : availableBalance <= 0) {
         setWithdrawalError("No available balance for this asset.")
         return
       }
-      if (amountNumber > selectedWithdrawalBalance.balance) {
+      if (
+        withdrawalRail === "bitcoin"
+          ? Boolean(amountSats && availableSats && BigInt(amountSats) > BigInt(availableSats))
+          : amountNumber > availableBalance
+      ) {
         setWithdrawalError("Amount exceeds available balance.")
         return
       }
+    }
+    if (withdrawalRail === "bitcoin" && selectedWithdrawalBalance?.status !== "synced") {
+      setWithdrawalError("Balance temporarily unavailable. Refresh before withdrawing.")
+      return
     }
     if (!withdrawalAssetsByRail[withdrawalRail].includes(withdrawalAsset)) {
       setWithdrawalError("Unsupported rail/asset combination.")
@@ -7679,6 +7730,31 @@ function PineTreeWalletRuntime() {
     }
     if (!withdrawableAssetOptions.some((option) => option.rail === withdrawalRail && option.asset === withdrawalAsset)) {
       setWithdrawalError("Withdrawals are being finalized. Receiving funds is available now.")
+      return
+    }
+    if (withdrawalRail === "bitcoin") {
+      setInstantSendIdempotencyKey((current) => current ?? crypto.randomUUID())
+      setWithdrawalReview({
+        request: {
+          id: `instant-send:${crypto.randomUUID()}`,
+          status: "review_required",
+          provider_reference: null,
+          tx_hash: null,
+          error_message: null,
+        },
+        review: {
+          rail: "bitcoin",
+          asset: "BTC",
+          destinationAddress: destination,
+          amountDecimal: amount,
+          estimatedStatus: "Ready to submit",
+          approvalMethod: "manual_review",
+          message: "Confirm this Bitcoin Lightning withdrawal.",
+        },
+        canSubmit: true,
+      })
+      setWithdrawalError("")
+      setWithdrawalScreen("review")
       return
     }
     const reviewSourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
@@ -7738,7 +7814,7 @@ function PineTreeWalletRuntime() {
     if (
       selectedWithdrawalBalance?.status !== "synced" ||
       selectedWithdrawalBalance.balance === null ||
-      selectedWithdrawalBalance.balance <= 0
+      Number(selectedWithdrawalBalance.balance) <= 0
     ) {
       return
     }
@@ -7790,6 +7866,62 @@ function PineTreeWalletRuntime() {
     const token = accessTokenRef.current
     const withdrawalId = withdrawalReview?.request.id
     if (!token || !withdrawalId) return
+
+    if (withdrawalReview.review.rail === "bitcoin") {
+      const amountSats = btcDecimalToSats(withdrawalReview.review.amountDecimal)
+      if (!amountSats || !instantSendIdempotencyKey) {
+        setWithdrawalApprovalError("Review this withdrawal again before submitting.")
+        setWithdrawalScreen("failed")
+        return
+      }
+      setSubmittingWithdrawal(true)
+      setWithdrawalError("")
+      setWithdrawalApprovalError("")
+      setWithdrawalSubmitResult(null)
+      setWithdrawalScreen("approving")
+      try {
+        const response = await fetch("/api/wallets/withdrawals", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": instantSendIdempotencyKey,
+          },
+          body: JSON.stringify({
+            asset: "SATS",
+            amount_decimal: amountSats,
+            destination: withdrawalReview.review.destinationAddress,
+          }),
+        })
+        const result = (await response.json()) as WalletWithdrawalResponse
+        if (!response.ok || !result.ok || !result.data?.operation) {
+          setWithdrawalApprovalError(
+            result.error?.message || "We couldn't submit this Bitcoin Lightning withdrawal. Please try again."
+          )
+          setWithdrawalScreen("failed")
+          return
+        }
+        setWithdrawalSubmitResult({
+          request: {
+            id: result.data.operation.id,
+            status: "processing",
+            provider_reference: null,
+            tx_hash: result.data.operation.txHash ?? null,
+            error_message: null,
+          },
+          merchantStatus: "Processing",
+          message: "Your Bitcoin Lightning withdrawal was submitted.",
+        })
+        setWithdrawalScreen("submitted")
+        void syncPineTreeWallet()
+      } catch {
+        setWithdrawalApprovalError("We couldn't submit this Bitcoin Lightning withdrawal. Please try again.")
+        setWithdrawalScreen("failed")
+      } finally {
+        setSubmittingWithdrawal(false)
+      }
+      return
+    }
 
     const _debugRail = withdrawalReview?.review.rail
     const _debugApprovalMethod = withdrawalReview?.review.approvalMethod
@@ -8379,6 +8511,7 @@ function PineTreeWalletRuntime() {
                     sync={walletSync}
                     syncing={walletSyncing}
                     profileAddresses={profileAddresses}
+                    bitcoinReady={bitcoinReady}
                     bitcoinPayoutEntries={bitcoinPayoutEntries}
                     copiedAddress={copiedAddress}
                     selectedKey={selectedWalletBalanceKey}
@@ -8414,6 +8547,7 @@ function PineTreeWalletRuntime() {
                     setWithdrawalSubmitResult(null)
                     setWithdrawalError("")
                     setWithdrawalApprovalError("")
+                    setInstantSendIdempotencyKey(null)
                   }}
                   onAmountChange={(value) => {
                     setWithdrawalAmount(value)
@@ -8422,6 +8556,7 @@ function PineTreeWalletRuntime() {
                     setWithdrawalSubmitResult(null)
                     setWithdrawalError("")
                     setWithdrawalApprovalError("")
+                    setInstantSendIdempotencyKey(null)
                   }}
                   onMaxAmount={handleMaxWithdrawalAmount}
                   onEdit={handleEditWithdrawal}

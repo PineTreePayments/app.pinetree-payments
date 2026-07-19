@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import WalletPickerModal, { type WalletPickerSection } from "@/components/payment/WalletPickerModal"
+import { acquireLightningStatusPoller } from "@/lib/lightning/lightningStatusPoller"
 
 type LightningWallet = {
   id: string
@@ -150,13 +151,27 @@ function getStoreFallbackUrl(wallet: LightningWallet): string {
   return wallet.universalUrl || wallet.iosStoreUrl || wallet.androidStoreUrl || ""
 }
 
-async function logLightning(stage: string, payload: Record<string, unknown> = {}): Promise<void> {
-  console.log("[LIGHTNING DEBUG]", stage, payload)
-  await fetch("/api/debug/lightning", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ stage, payload }),
-  }).catch(() => null)
+function logLightning(stage: string, payload: Record<string, unknown> = {}): void {
+  if (process.env.NODE_ENV !== "production") {
+    console.debug("[LIGHTNING]", stage, payload)
+  }
+}
+
+function getLightningCreationIdempotencyKey(intentId: string): string {
+  const storageKey = `pinetree:lightning:create:${intentId}`
+  if (typeof window !== "undefined") {
+    try {
+      const existing = window.sessionStorage.getItem(storageKey)
+      if (existing) return existing
+      const created = crypto.randomUUID()
+      window.sessionStorage.setItem(storageKey, created)
+      return created
+    } catch {
+      // Storage can be unavailable in privacy-restricted browsers. The mounted
+      // component still retains one stable key for its full creation attempt.
+    }
+  }
+  return crypto.randomUUID()
 }
 
 export default function LightningPayment({
@@ -181,6 +196,11 @@ export default function LightningPayment({
   const [noPayAfterReturn, setNoPayAfterReturn] = useState(false)
   const [launchedWalletName, setLaunchedWalletName] = useState("")
   const autoPrepareStartedRef = useRef(false)
+  const [creationIdempotencyKey] = useState(() => getLightningCreationIdempotencyKey(intentId))
+  const checkoutTokenRef = useRef(checkoutToken)
+  const onPaymentCreatedRef = useRef(onPaymentCreated)
+  checkoutTokenRef.current = checkoutToken
+  onPaymentCreatedRef.current = onPaymentCreated
 
   const invoice = String(payment?.paymentUrl || "")
   const invoiceUri = useMemo(() => normalizeLightningUri(invoice), [invoice])
@@ -209,6 +229,7 @@ export default function LightningPayment({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "Idempotency-Key": creationIdempotencyKey,
             ...(checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {}),
           },
           body: JSON.stringify({ network: "bitcoin_lightning", asset: "BTC" }),
@@ -217,7 +238,10 @@ export default function LightningPayment({
 
       const data = (await res.json()) as LightningSelectionResult & { error?: string }
       if (!res.ok) {
-        throw new Error(data.error || "Bitcoin Lightning is unavailable for this merchant")
+        const providerSafeMessage = String(data.error || "")
+        throw new Error(/Speed API|speed status|provider payload/i.test(providerSafeMessage)
+          ? "We couldn't create this Bitcoin Lightning payment. Please choose another payment method or try again."
+          : providerSafeMessage || "Bitcoin Lightning is unavailable for this merchant")
       }
 
       setPayment(data)
@@ -228,24 +252,7 @@ export default function LightningPayment({
     } finally {
       setLoading(false)
     }
-  }, [checkoutToken, intentId, onPaymentCreated])
-
-  const checkLightningStatus = useCallback(async () => {
-    const paymentId = String(payment?.paymentId || "").trim()
-    if (!paymentId || !checkoutToken || terminalStatus) return
-
-    try {
-      const res = await fetch(`/api/payments/${encodeURIComponent(paymentId)}/lightning/check`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${checkoutToken}` },
-      })
-      if (res.ok) {
-        onPaymentCreated?.()
-      }
-    } catch {
-      // Status checks are opportunistic; the customer can still retry manually.
-    }
-  }, [checkoutToken, onPaymentCreated, payment?.paymentId, terminalStatus])
+  }, [checkoutToken, creationIdempotencyKey, intentId, onPaymentCreated])
 
   useEffect(() => {
     if (autoPrepareStartedRef.current || hasInvoice) return
@@ -254,13 +261,42 @@ export default function LightningPayment({
   }, [hasInvoice, prepareInvoice])
 
   useEffect(() => {
-    if (!hasInvoice || terminalStatus || !checkoutToken) return
-    void checkLightningStatus()
-    const interval = window.setInterval(() => {
-      void checkLightningStatus()
-    }, 4_000)
-    return () => window.clearInterval(interval)
-  }, [checkLightningStatus, checkoutToken, hasInvoice, terminalStatus])
+    const paymentId = String(payment?.paymentId || "").trim()
+    if (!hasInvoice || terminalStatus || !checkoutToken || !paymentId) return
+
+    const { poller, release } = acquireLightningStatusPoller(paymentId, {
+      check: async (signal) => {
+        const token = checkoutTokenRef.current
+        if (!token) return { status: "" }
+        const res = await fetch(`/api/payments/${encodeURIComponent(paymentId)}/lightning/check`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+          signal,
+        })
+        const data = await res.json().catch(() => ({})) as { status?: string }
+        if (!res.ok) throw new Error("Lightning reconciliation is temporarily unavailable.")
+        return { status: data.status }
+      },
+      onResult: () => onPaymentCreatedRef.current?.(),
+    })
+
+    const updateVisibility = () => document.hidden ? poller.pause() : poller.resume()
+    const handleOffline = () => poller.setOffline(true)
+    const handleOnline = () => poller.setOffline(false)
+    updateVisibility()
+    if (typeof navigator !== "undefined" && !navigator.onLine) handleOffline()
+    document.addEventListener("visibilitychange", updateVisibility)
+    window.addEventListener("offline", handleOffline)
+    window.addEventListener("online", handleOnline)
+
+    return () => {
+      document.removeEventListener("visibilitychange", updateVisibility)
+      window.removeEventListener("offline", handleOffline)
+      window.removeEventListener("online", handleOnline)
+      release()
+    }
+  }, [checkoutToken, hasInvoice, payment?.paymentId, terminalStatus])
 
   // When the customer returns to this page after being sent to a Lightning wallet,
   // surface recovery actions if no payment was completed.
@@ -268,8 +304,7 @@ export default function LightningPayment({
     function handleReturn() {
       if (!walletLaunchedRef.current) return
       setNoPayAfterReturn(true)
-      void checkLightningStatus()
-      void logLightning("wallet_returned_without_payment", { walletName: launchedWalletName || null, rail: "lightning" })
+      logLightning("wallet_returned_without_payment", { walletName: launchedWalletName || null, rail: "lightning" })
     }
     function handleVisibility() {
       if (document.visibilityState === "visible") handleReturn()
@@ -280,7 +315,7 @@ export default function LightningPayment({
       document.removeEventListener("visibilitychange", handleVisibility)
       window.removeEventListener("pageshow", handleReturn)
     }
-  }, [checkLightningStatus, launchedWalletName])
+  }, [launchedWalletName])
 
   const openLightningWallet = useCallback((wallet: LightningWallet) => {
     if (!invoiceUri) return
@@ -293,13 +328,13 @@ export default function LightningPayment({
     setLaunchedWalletName(wallet.name)
     onExecutionStarted?.()
 
-    void logLightning("wallet_selected", { walletId: wallet.id, walletName: wallet.name, rail: "lightning" })
+    logLightning("wallet_selected", { walletId: wallet.id, walletName: wallet.name, rail: "lightning" })
 
     if (wallet.invoiceUrlBuilder) {
       const bolt11 = getBolt11Invoice(invoiceUri)
       const appUrl = wallet.invoiceUrlBuilder(bolt11)
 
-      void logLightning("lightning_uri_generated", {
+      logLightning("lightning_uri_generated", {
         walletId: wallet.id,
         rail: "lightning",
         scheme: appUrl.split(":")[0],
@@ -312,7 +347,7 @@ export default function LightningPayment({
       // This is the safest pattern available since browsers cannot detect installed apps.
       const fallbackTimer = window.setTimeout(() => {
         if (document.visibilityState === "visible") {
-          void logLightning("app_store_fallback_triggered", { walletId: wallet.id, rail: "lightning", reason: "timeout_1400ms" })
+          logLightning("app_store_fallback_triggered", { walletId: wallet.id, rail: "lightning", reason: "timeout_1400ms" })
           const storeUrl = getStoreFallbackUrl(wallet)
           if (storeUrl) window.open(storeUrl, "_blank", "noopener,noreferrer")
         }
@@ -328,7 +363,7 @@ export default function LightningPayment({
         { once: true },
       )
 
-      void logLightning("app_open_attempted", { walletId: wallet.id, rail: "lightning", scheme: appUrl.split(":")[0] })
+      logLightning("app_open_attempted", { walletId: wallet.id, rail: "lightning", scheme: appUrl.split(":")[0] })
       window.location.href = appUrl
       return
     }
@@ -339,7 +374,7 @@ export default function LightningPayment({
       return
     }
 
-    void logLightning("app_store_fallback_triggered", { walletId: wallet.id, rail: "lightning", reason: "no_invoice_url_builder" })
+    logLightning("app_store_fallback_triggered", { walletId: wallet.id, rail: "lightning", reason: "no_invoice_url_builder" })
     window.open(installUrl, "_blank", "noopener,noreferrer")
     setPendingWalletId("")
   }, [invoiceUri, onExecutionStarted])
@@ -374,9 +409,6 @@ export default function LightningPayment({
   }
 
   if (terminalStatus) {
-    if (terminalStatus === "CONFIRMED") {
-      void logLightning("payment_confirmed", { rail: "lightning", status: terminalStatus })
-    }
     return (
       <div className="space-y-3">
         <div className="text-center text-xs font-semibold uppercase tracking-widest text-gray-500">
@@ -432,7 +464,7 @@ export default function LightningPayment({
           <Button
             fullWidth
             onClick={() => {
-              void logLightning("retry_requested", { walletName: launchedWalletName || null, rail: "lightning" })
+              logLightning("retry_requested", { walletName: launchedWalletName || null, rail: "lightning" })
               setWalletSearch("")
               setWalletPickerOpen(true)
             }}
@@ -443,7 +475,7 @@ export default function LightningPayment({
             <button
               type="button"
               onClick={() => {
-                void logLightning("switch_method", { walletName: launchedWalletName || null, rail: "lightning" })
+                logLightning("switch_method", { walletName: launchedWalletName || null, rail: "lightning" })
                 setWalletLaunched(false)
                 setNoPayAfterReturn(false)
                 walletLaunchedRef.current = false

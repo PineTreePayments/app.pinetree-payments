@@ -60,7 +60,7 @@ describe("PineTree rail readiness consumers", () => {
     expect(src).not.toContain('"Available"')
   })
 
-  it("Wallet page connected pills use walletProvisioned and withdrawal assets use payout/address gates", () => {
+  it("Wallet page connected pills and Bitcoin withdrawal visibility use walletProvisioned", () => {
     const src = read("app/dashboard/wallet-setup/page.tsx")
 
     expect(src).toContain("railReadiness?.base.walletProvisioned")
@@ -68,6 +68,6 @@ describe("PineTree rail readiness consumers", () => {
     expect(src).toContain("railReadiness?.bitcoin_lightning.walletProvisioned")
     expect(src).toContain("configured: baseReady && enabledRails.base")
     expect(src).toContain("configured: solanaReady && enabledRails.solana")
-    expect(src).toContain("configured: btcPayoutReady && enabledRails.bitcoin")
+    expect(src).toContain("configured: bitcoinReady && enabledRails.bitcoin")
   })
 })

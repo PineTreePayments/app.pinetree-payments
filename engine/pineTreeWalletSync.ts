@@ -8,6 +8,7 @@ import {
   listRecentWalletWithdrawalsForActivity,
 } from "@/database/walletWithdrawalRequests"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
+import { getConnectedAccountBalances, type SpeedBalanceEntry } from "@/providers/lightning/speedWalletManagement"
 import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
 import { PINETREE_INTERNAL_RAIL_PROVIDER, type PineTreeWalletRail } from "@/lib/pinetreeRailProviderMapping"
 
@@ -15,10 +16,10 @@ export type PineTreeBalanceAsset = {
   key: "BASE_ETH" | "BASE_USDC" | "SOLANA_SOL" | "SOLANA_USDC" | "BTC"
   rail: "base" | "solana" | "bitcoin"
   asset: "ETH" | "USDC" | "SOL" | "BTC"
-  balance: number | null
+  balance: number | string | null
   usdValue: number | null
   lastSyncedAt: string | null
-  status: "synced" | "pending_sync" | "config_missing" | "unavailable" | "stale"
+  status: "synced" | "cached" | "pending_sync" | "config_missing" | "unavailable" | "stale"
 }
 
 export type PineTreeNormalizedRail = {
@@ -84,7 +85,8 @@ function latestTimestamp(values: Array<string | null>) {
   return new Date(Math.max(...dates)).toISOString()
 }
 
-function formatDecimal(value: number | null): string | null {
+function formatDecimal(value: number | string | null): string | null {
+  if (typeof value === "string") return value
   if (value === null || !Number.isFinite(value)) return null
   return String(value)
 }
@@ -179,7 +181,7 @@ async function safeFetchBaseUsdcBalance(address: string): Promise<number | null>
 
 async function persistSyncedBalances(
   merchantId: string,
-  balances: Array<{ asset: string; balance: number }>
+  balances: Array<{ asset: string; balance: number | string }>
 ) {
   if (balances.length === 0) return null
   const timestamp = new Date().toISOString()
@@ -187,9 +189,60 @@ async function persistSyncedBalances(
   return timestamp
 }
 
+const BTC_STALE_AFTER_MS = 15 * 60 * 1000
+
+function normalizeBtcDecimal(value: unknown): string | null {
+  const raw = String(value ?? "").trim()
+  if (!/^\d+(?:\.\d{1,8})?$/.test(raw)) return null
+  const [wholeRaw, fractionRaw = ""] = raw.split(".")
+  const whole = wholeRaw.replace(/^0+(?=\d)/, "") || "0"
+  const fraction = fractionRaw.padEnd(8, "0").slice(0, 8)
+  return fraction.replace(/0+$/, "") ? `${whole}.${fraction.replace(/0+$/, "")}` : whole
+}
+
+export function satsToBtcDecimal(value: unknown): string | null {
+  const raw = String(value ?? "").trim()
+  if (!/^\d+$/.test(raw)) return null
+  const sats = BigInt(raw)
+  const whole = sats / BigInt(100_000_000)
+  const fraction = (sats % BigInt(100_000_000)).toString().padStart(8, "0").replace(/0+$/, "")
+  return fraction ? `${whole}.${fraction}` : whole.toString()
+}
+
+export function normalizeSpeedBitcoinBalance(entries: SpeedBalanceEntry[]): string | null {
+  const normalized = entries.map((entry) => ({
+    unit: String(entry.target_currency || "").trim().toLowerCase(),
+    amount: entry.amount,
+  }))
+  const sats = normalized.find((entry) => entry.unit === "sats")
+  if (sats) return satsToBtcDecimal(sats.amount)
+  const btc = normalized.find((entry) => ["btc", "bitcoin", "bitcoin_lightning"].includes(entry.unit))
+  return btc ? normalizeBtcDecimal(btc.amount) : null
+}
+
+type SpeedBitcoinSyncState = "live" | "failed" | "not_configured" | "cached"
+
+async function syncSpeedBitcoinBalance(merchantId: string): Promise<SpeedBitcoinSyncState> {
+  const profile = await import("@/database/merchantLightningProfiles")
+    .then((mod) => mod.getMerchantLightningProfile(merchantId))
+    .catch(() => null)
+  const accountId = String(profile?.speed_account_id || profile?.speed_connected_account_id || "").trim()
+  if (profile?.status !== "ready" || !accountId.startsWith("acct_")) return "not_configured"
+
+  try {
+    const response = await getConnectedAccountBalances({ merchantId, speedAccountId: accountId })
+    const btc = normalizeSpeedBitcoinBalance(response.available)
+    if (btc === null) throw new Error("Speed returned no canonical Bitcoin balance")
+    await persistSyncedBalances(merchantId, [{ asset: "BTC", balance: btc }])
+    return "live"
+  } catch {
+    return "failed"
+  }
+}
+
 export async function syncPineTreeWalletBalances(merchantId: string): Promise<PineTreeWalletSyncResult> {
   const profile = await getPineTreeWalletProfile(merchantId)
-  const updates: Array<{ asset: string; balance: number }> = []
+  const updates: Array<{ asset: string; balance: number | string }> = []
 
   if (profile?.solana_address) {
     try {
@@ -218,7 +271,8 @@ export async function syncPineTreeWalletBalances(merchantId: string): Promise<Pi
   }
 
   await persistSyncedBalances(merchantId, updates)
-  return getPineTreeWalletBalanceSnapshot(merchantId)
+  const speedBitcoinSyncState = await syncSpeedBitcoinBalance(merchantId)
+  return getPineTreeWalletBalanceSnapshot(merchantId, speedBitcoinSyncState)
 }
 
 function isBaseRpcConfigured(): boolean {
@@ -226,7 +280,8 @@ function isBaseRpcConfigured(): boolean {
 }
 
 export async function getPineTreeWalletBalanceSnapshot(
-  merchantId: string
+  merchantId: string,
+  speedBitcoinSyncState: SpeedBitcoinSyncState = "cached"
 ): Promise<PineTreeWalletSyncResult> {
   await cancelStaleUnsignedWithdrawalReviews(merchantId).catch(() => ({ canceled: 0 }))
   const [profile, rows, prices, recentWithdrawals, providers, lightningProfile] = await Promise.all([
@@ -265,13 +320,25 @@ export async function getPineTreeWalletBalanceSnapshot(
   const toBalance = (def: typeof BALANCE_DEFS[number]): PineTreeBalanceAsset => {
     const key = balanceKey(def.rail, def.asset)
     const row = byAsset.get(key)
-    const rowBalance = row ? Number(row.balance ?? 0) : null
-    const balance = def.rail === "bitcoin" ? null : rowBalance
+    const rowBalance = row ? row.balance ?? 0 : null
+    const balance = def.rail === "bitcoin"
+      ? (row ? String(row.balance ?? "0") : null)
+      : row
+        ? Number(rowBalance)
+        : null
     const price = def.asset === "USDC" ? 1 : def.asset === "SOL" ? prices.SOL : def.asset === "ETH" ? prices.ETH : prices.BTC
 
     let status: PineTreeBalanceAsset["status"]
     if (def.rail === "bitcoin") {
-      status = speedAccountReady ? "unavailable" : "pending_sync"
+      const updatedAtMs = row?.last_updated ? new Date(row.last_updated).getTime() : Number.NaN
+      const stale = !Number.isFinite(updatedAtMs) || Date.now() - updatedAtMs > BTC_STALE_AFTER_MS
+      status = !speedAccountReady
+        ? "pending_sync"
+        : speedBitcoinSyncState === "live" && row
+          ? "synced"
+          : row
+            ? stale ? "stale" : "cached"
+            : "unavailable"
     } else if (row) {
       status = "synced"
     } else if (def.rail === "base" && hasBaseAddress && !baseConfigured) {
@@ -285,7 +352,11 @@ export async function getPineTreeWalletBalanceSnapshot(
       rail: def.rail,
       asset: def.asset,
       balance,
-      usdValue: balance === null ? null : balance * price,
+      usdValue: balance === null
+        ? null
+        : def.rail === "bitcoin"
+          ? String(balance) === "0" ? 0 : null
+          : Number(balance) * price,
       lastSyncedAt: row?.last_updated || null,
       status,
     }
@@ -357,11 +428,11 @@ export async function getPineTreeWalletBalanceSnapshot(
       connected: bitcoinReady,
       balance: {
         asset: "BTC",
-        amount: null,
-        usd_value: null,
-        status: bitcoinReady ? "unavailable" : "pending_sync",
+        amount: formatDecimal(all.find((item) => item.key === "BTC")?.balance ?? null),
+        usd_value: formatUsd(all.find((item) => item.key === "BTC")?.usdValue ?? null),
+        status: all.find((item) => item.key === "BTC")?.status ?? (bitcoinReady ? "unavailable" : "pending_sync"),
       },
-      withdrawal_available: false,
+      withdrawal_available: railReadiness.bitcoin_lightning.withdrawalReady,
     },
   ]
   void PINETREE_INTERNAL_RAIL_PROVIDER

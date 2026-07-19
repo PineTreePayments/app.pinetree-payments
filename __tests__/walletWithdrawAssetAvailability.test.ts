@@ -65,7 +65,7 @@ describe("Withdraw asset dropdown source of truth", () => {
 
   it("withdrawalWalletRows requires address AND provider enabled for Bitcoin", () => {
     const src = withdrawalWalletRowsSrc()
-    expect(src).toContain("configured: btcPayoutReady && enabledRails.bitcoin")
+    expect(src).toContain("configured: bitcoinReady && enabledRails.bitcoin")
   })
 
   it("withdrawableAssetOptions filters by configured only — balance status does not gate assets", () => {
@@ -110,11 +110,9 @@ describe("Bitcoin withdrawal availability", () => {
     expect(src).toContain("btcPayoutReady")
   })
 
-  it("Bitcoin does not appear in withdrawal dropdown when btc_payout_enabled is false", () => {
-    // The configured gate for bitcoin is: btcPayoutReady && enabledRails.bitcoin
-    // So BTC cannot appear when payout is not enabled.
+  it("Bitcoin remains in the withdrawal dropdown when the Speed account is ready", () => {
     const rowSrc = withdrawalWalletRowsSrc()
-    expect(rowSrc).toContain("configured: btcPayoutReady && enabledRails.bitcoin")
+    expect(rowSrc).toContain("configured: bitcoinReady && enabledRails.bitcoin")
   })
 
   it("auto-provisioned btc_address alone does not make Bitcoin withdrawable", () => {
@@ -228,7 +226,7 @@ describe("Balance status does not gate asset options in dropdown", () => {
 
   it("formatBalanceLabel shows pending copy when balance is not synced", () => {
     expect(walletPage).toContain('"Balance indexing pending"')
-    expect(walletPage).toContain("balance.status !== \"synced\"")
+    expect(walletPage).toContain('balance?.status === "unavailable"')
   })
 
   it("pending or config_missing balance still results in asset appearing in dropdown", () => {

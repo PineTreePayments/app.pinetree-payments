@@ -20,8 +20,6 @@ import { syncTransactionProgressForPayment } from "./transactionProgress"
 import { getMerchantStripeAccountId } from "./stripeConnect"
 import { releaseTerminalReaderClaim } from "@/database/merchantTerminalReaders"
 
-const SPEED_PROVIDER_NAME = "lightning_speed"
-
 export type WebhookInput = {
   provider: string
   payload: unknown
@@ -105,34 +103,6 @@ function getProviderEventId(payload: unknown): string {
       readPath(payload, ["event_id"]) ||
       ""
   ).trim()
-}
-
-async function ensureSpeedTreasurySweepPayoutJob(paymentId: string, payload: unknown): Promise<void> {
-  const {
-    ensureLightningPayoutJobForConfirmedSpeedPayment,
-    processLightningPayoutJobByPayment
-  } = await import("./lightningPayouts")
-  const job = await ensureLightningPayoutJobForConfirmedSpeedPayment({ paymentId, payload })
-  if (job) {
-    await processLightningPayoutJobByPayment({ paymentId })
-  }
-}
-
-async function ensurePineTreeLightningSettlementJob(paymentId: string, payload: unknown): Promise<void> {
-  const { ensureLightningSettlementJobForConfirmedSpeedPayment } = await import("./lightningSettlement")
-  await ensureLightningSettlementJobForConfirmedSpeedPayment({ paymentId, payload })
-}
-
-/**
- * Idempotently queues a merchant_lightning_sweeps row for a confirmed Speed
- * Lightning payment (speed_connect_split mode only - see
- * engine/lightningSweep.ts). Only queues the sweep here; actual processing
- * is deferred to a bounded after() pass triggered by the webhook route so a
- * live provider call never happens inside this request.
- */
-async function ensureLightningSweepQueued(paymentId: string): Promise<void> {
-  const { ensureLightningSweepForConfirmedPayment } = await import("./lightningSweep")
-  await ensureLightningSweepForConfirmedPayment({ paymentId })
 }
 
 async function resolvePaymentIdFromEvent(input: {
@@ -383,11 +353,6 @@ export async function processWebhook({
     })
   }
   if (TERMINAL_STATES.has(currentStatus)) {
-    if (provider === SPEED_PROVIDER_NAME && event.event === "payment.confirmed") {
-      await ensureSpeedTreasurySweepPayoutJob(paymentId, payload)
-      await ensurePineTreeLightningSettlementJob(paymentId, payload)
-      await ensureLightningSweepQueued(paymentId)
-    }
     console.info("[eventProcessor] idempotent:terminal_state_skip", {
       provider,
       paymentId,
@@ -465,11 +430,9 @@ export async function processWebhook({
         status: "CONFIRMED"
       })
 
-      if (provider === SPEED_PROVIDER_NAME) {
-        await ensureSpeedTreasurySweepPayoutJob(paymentId, payload)
-        await ensurePineTreeLightningSettlementJob(paymentId, payload)
-        await ensureLightningSweepQueued(paymentId)
-      }
+      // Connected-account BTC remains at Speed. Merchant withdrawals are
+      // user-triggered Instant Send operations; no automatic settlement,
+      // treasury sweep, AutoSwap, or AutoPayout runs during payment webhooks.
     }
 
 

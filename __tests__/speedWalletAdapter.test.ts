@@ -42,7 +42,7 @@ describe("Speed wallet adapter normalization", () => {
     const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
     const balances = await speedWalletAdapter.getBalances!({ merchantId: "m1", providerAccountId: "acct_1" })
     expect(balances).toEqual([
-      expect.objectContaining({ asset: "SATS", availableBaseUnits: BigInt(2217713), network: "bitcoin_lightning" }),
+      expect.objectContaining({ asset: "BTC", availableBaseUnits: BigInt(2217713), network: "bitcoin_lightning" }),
       expect.objectContaining({ asset: "USDC", availableBaseUnits: BigInt(3125001), network: null }),
     ])
   })

@@ -294,6 +294,7 @@ export default function MerchantWalletManagementPanel({ accessToken }: { accessT
       {activeDialog === "withdraw" ? (
         <SendDialog
           capabilityAvailable={Boolean(capabilities?.capabilities.withdrawals)}
+          balances={balances}
           accessToken={accessToken}
           onClose={() => setActiveDialog(null)}
           onSubmitted={() => {
@@ -374,11 +375,12 @@ function BalancesCard({ balances }: { balances: BalancesData | null }) {
           ) : null}
           {balances.balances.map((row) => (
             <div key={`${row.asset}-${row.network ?? ""}`} className="flex items-center justify-between text-sm">
-              <span className="font-medium text-gray-900">
-                {row.asset}
-                {row.stale ? <span className="ml-1.5 text-xs font-normal text-amber-600">(stale)</span> : balances.syncStatus === "cached" ? <span className="ml-1.5 text-xs font-normal text-amber-600">(cached)</span> : null}
+              <span>
+                <span className="block font-medium text-gray-900">{row.asset}</span>
+                <span className="block text-xs text-gray-500">{row.network === "bitcoin_lightning" ? "Bitcoin Lightning" : row.network}</span>
+                {row.stale ? <span className="text-xs font-normal text-amber-600">Stale</span> : balances.syncStatus === "cached" ? <span className="text-xs font-normal text-amber-600">Cached</span> : null}
               </span>
-              <span className="text-gray-600">{formatAmount(row.availableBaseUnits, row.decimals, row.asset)}</span>
+              <span className="text-gray-600">{balances.syncStatus === "unavailable" ? "Balance temporarily unavailable" : formatAmount(row.availableBaseUnits, row.decimals, row.asset)}</span>
             </div>
           ))}
         </div>
@@ -437,11 +439,13 @@ function PreferencesCard() {
 
 function SendDialog({
   capabilityAvailable,
+  balances,
   accessToken,
   onClose,
   onSubmitted,
 }: {
   capabilityAvailable: boolean
+  balances: BalancesData | null
   accessToken: string | null
   onClose: () => void
   onSubmitted: () => void
@@ -452,14 +456,30 @@ function SendDialog({
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [idempotencyKey] = useState(() => crypto.randomUUID())
+  const bitcoinBalance = balances?.balances.find((row) => row.asset === "BTC" && row.network === "bitcoin_lightning") ?? null
+  const spendableBalanceKnown = balances?.syncStatus === "live" && bitcoinBalance !== null
+  const spendableBalanceSats = bitcoinBalance ? BigInt(bitcoinBalance.availableBaseUnits) : BigInt(0)
+  const hasSpendableBalance = spendableBalanceKnown && spendableBalanceSats > BigInt(0)
+
+  function btcToSats(value: string): string | null {
+    const normalized = value.trim()
+    if (!/^\d+(?:\.\d{1,8})?$/.test(normalized)) return null
+    const [whole, fraction = ""] = normalized.split(".")
+    return (BigInt(whole) * BigInt(100_000_000) + BigInt(fraction.padEnd(8, "0"))).toString()
+  }
 
   async function submit() {
+    const amountSats = btcToSats(amount)
+    if (!amountSats || BigInt(amountSats) <= BigInt(0) || BigInt(amountSats) > spendableBalanceSats) {
+      setSubmitError("Enter a Bitcoin amount within your available balance.")
+      return
+    }
     setSubmitting(true)
     setSubmitError(null)
     const res = await callWalletApi("/api/wallets/withdrawals", accessToken, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ asset: "SATS", amount_decimal: amount, destination }),
+      body: JSON.stringify({ asset: "SATS", amount_decimal: amountSats, destination }),
     })
     setSubmitting(false)
     if (res.ok) {
@@ -477,22 +497,30 @@ function SendDialog({
           Submission is disabled until this becomes available.
         </div>
       ) : null}
+      {!spendableBalanceKnown ? (
+        <div className="mb-4 rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-800">Balance temporarily unavailable. Refresh before withdrawing.</div>
+      ) : !hasSpendableBalance ? (
+        <div className="mb-4 rounded-xl bg-gray-50 px-3 py-2.5 text-sm text-gray-600">No BTC is currently available to withdraw.</div>
+      ) : null}
       {submitError ? (
         <div className="mb-4 rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{submitError}</div>
       ) : null}
 
       {reviewing ? (
         <div className="space-y-3 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-700">
-          <p><span className="font-medium text-gray-900">Amount:</span> {amount} SATS</p>
+          <p><span className="font-medium text-gray-900">Amount:</span> {amount} BTC</p>
           <p className="break-all"><span className="font-medium text-gray-900">Destination:</span> {destination}</p>
           <p className="text-xs text-gray-500">Network fees, if any, are determined by the provider.</p>
         </div>
       ) : (
       <div className="space-y-3">
+        <select value="BTC" disabled className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm">
+          <option value="BTC">BTC - Bitcoin Lightning</option>
+        </select>
         <input
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder="Amount"
+          placeholder="Amount in BTC"
           inputMode="decimal"
           className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
         />
@@ -511,7 +539,7 @@ function SendDialog({
         </Button>
         <Button
           variant="primary"
-          disabled={!capabilityAvailable || submitting || !amount || !destination}
+          disabled={!capabilityAvailable || !hasSpendableBalance || submitting || !amount || !destination}
           onClick={() => reviewing ? void submit() : setReviewing(true)}
         >
           {submitting ? "Submitting..." : reviewing ? "Confirm withdrawal" : "Review"}

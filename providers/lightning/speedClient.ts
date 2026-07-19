@@ -17,7 +17,7 @@ import { createHmac, timingSafeEqual } from "crypto"
 
 const DEFAULT_SPEED_API_BASE_URL = "https://api.tryspeed.com"
 const TEST_ENDPOINT = "/payments?limit=1"
-const REQUEST_TIMEOUT_MS = 12_000
+const REQUEST_TIMEOUT_MS = 8_000
 const SPEED_VERSION = "2022-10-15"
 
 export type SpeedMode = "test" | "live" | "production" | "unknown"
@@ -372,6 +372,8 @@ export class SpeedApiError extends Error {
   fieldErrors: SpeedFieldError[]
   requestId: string | null
   retryable: boolean
+  retryAfterMs: number | null
+  readonly outcomeUncertain = false
 
   constructor(
     message: string,
@@ -379,7 +381,8 @@ export class SpeedApiError extends Error {
     providerCode: string | null,
     fieldErrors: SpeedFieldError[],
     providerMessage: string | null = null,
-    requestId: string | null = null
+    requestId: string | null = null,
+    retryAfterMs: number | null = null
   ) {
     super(message)
     this.name = "SpeedApiError"
@@ -388,7 +391,8 @@ export class SpeedApiError extends Error {
     this.fieldErrors = fieldErrors
     this.providerMessage = providerMessage ?? fieldErrors[0]?.message ?? null
     this.requestId = requestId
-    this.retryable = status === 429 || status >= 500
+    this.retryable = [408, 429, 500, 502, 503, 504].includes(status)
+    this.retryAfterMs = retryAfterMs
   }
 }
 
@@ -396,6 +400,8 @@ export type SpeedMerchantRequestContext = {
   merchantId: string
   connectedAccountId: string
   operation: string
+  pineTreePaymentId?: string | null
+  pineTreePaymentIntentId?: string | null
 }
 
 export type SpeedRequestResult<T> = {
@@ -407,11 +413,13 @@ export type SpeedRequestResult<T> = {
 export class SpeedTransportError extends Error {
   readonly retryable = true
   readonly timedOut: boolean
+  readonly outcomeUncertain: boolean
 
-  constructor(message: string, timedOut: boolean) {
+  constructor(message: string, timedOut: boolean, outcomeUncertain = timedOut) {
     super(message)
     this.name = "SpeedTransportError"
     this.timedOut = timedOut
+    this.outcomeUncertain = outcomeUncertain
   }
 }
 
@@ -431,6 +439,8 @@ function sanitizeSpeedFieldErrorMessage(value: unknown): string | null {
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/password\s*[:=]\s*[^,\s}]+/gi, "password=[redacted]")
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
+    .replace(/(?:lightning:)?ln(?:bc|tb|bcrt)[a-z0-9]{20,}/gi, "[redacted-lightning-invoice]")
+    .replace(/\b(?:bc1|tb1|bcrt1)[a-z0-9]{20,}\b/gi, "[redacted-bitcoin-address]")
     .slice(0, 200)
 }
 
@@ -683,6 +693,15 @@ function speedRequestId(response: Response): string | null {
   )
 }
 
+function speedRetryAfterMs(response: Response): number | null {
+  const value = response.headers?.get("retry-after")
+  if (!value) return null
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(10_000, Math.round(seconds * 1_000))
+  const dateMs = new Date(value).getTime()
+  return Number.isFinite(dateMs) ? Math.min(10_000, Math.max(0, dateMs - Date.now())) : null
+}
+
 function parseSpeedSuccessBody<T>(body: string): T {
   if (!body.trim()) return undefined as T
   try {
@@ -707,6 +726,8 @@ export async function speedRequestWithStatus<T>(
   const merchantId = init?.merchantContext?.merchantId || null
   const providerAccountId = String(init?.merchantContext?.connectedAccountId || "").trim()
   const operation = init?.merchantContext?.operation || `${init?.method || "GET"} ${path}`
+  const pineTreePaymentId = init?.merchantContext?.pineTreePaymentId || null
+  const pineTreePaymentIntentId = init?.merchantContext?.pineTreePaymentIntentId || null
 
   if (init?.merchantContext && !providerAccountId) {
     clearTimeout(timeout)
@@ -738,8 +759,11 @@ export async function speedRequestWithStatus<T>(
       merchantId,
       providerAccountId: providerAccountId || null,
       operation,
+      pineTreePaymentId,
+      pineTreePaymentIntentId,
       timedOut,
       elapsedMs: Date.now() - startedAt,
+      retryClassification: timedOut ? "uncertain_post_dispatch_timeout" : "retryable_transport_failure",
     })
     throw new SpeedTransportError(
       timedOut ? "Speed API request timed out." : "Speed API is temporarily unreachable.",
@@ -750,6 +774,7 @@ export async function speedRequestWithStatus<T>(
   }
 
   const requestId = speedRequestId(response)
+  const retryAfterMs = speedRetryAfterMs(response)
   const body = await response.text().catch(() => "")
 
   if (!response.ok) {
@@ -758,13 +783,17 @@ export async function speedRequestWithStatus<T>(
       merchantId,
       providerAccountId: providerAccountId || null,
       operation,
+      pineTreePaymentId,
+      pineTreePaymentIntentId,
       status: response.status,
       requestId,
       safeCode: safeSpeedErrorCode(response.status, body),
       providerCode,
+      providerMessage: fieldErrors[0]?.message || null,
       fieldErrorCount: fieldErrors.length,
       apiHost: getSpeedApiHost(),
       elapsedMs: Date.now() - startedAt,
+      retryClassification: [408, 429, 500, 502, 503, 504].includes(response.status) ? "bounded_retry" : "permanent_no_retry",
     })
 
     // TEMPORARY diagnostic: parseSpeedErrorBody flattens each error to
@@ -790,7 +819,7 @@ export async function speedRequestWithStatus<T>(
       : response.status === 403
         ? "Speed denied this operation."
         : `Speed API returned ${response.status}`
-    throw new SpeedApiError(safeMessage, response.status, providerCode, fieldErrors, null, requestId)
+    throw new SpeedApiError(safeMessage, response.status, providerCode, fieldErrors, null, requestId, retryAfterMs)
   }
 
   const data = parseSpeedSuccessBody<T>(body)
@@ -798,6 +827,8 @@ export async function speedRequestWithStatus<T>(
     merchantId,
     providerAccountId: providerAccountId || null,
     operation,
+    pineTreePaymentId,
+    pineTreePaymentIntentId,
     status: response.status,
     requestId,
     elapsedMs: Date.now() - startedAt,
@@ -859,10 +890,69 @@ export function getSafeSpeedCustomerErrorMessage(error: unknown): string | null 
   if (message === SPEED_TRANSFER_SPLIT_ERROR || isSpeedTransferPercentageValidationMessage(message)) {
     return SPEED_TRANSFER_SPLIT_ERROR
   }
-  if (message.startsWith("Speed API returned")) {
-    return "Lightning invoice could not be created. Please retry or choose another payment method."
+  if (error instanceof SpeedTransportError || (error instanceof SpeedApiError && error.retryable)) {
+    return "We couldn't prepare the Bitcoin Lightning payment. Check your connection and try again."
+  }
+  if (error instanceof SpeedApiError || message.startsWith("Speed API returned")) {
+    return "We couldn't create this Bitcoin Lightning payment. Please choose another payment method or try again."
   }
   return null
+}
+
+export function shouldPreserveSpeedCreationIdempotencyClaim(error: unknown) {
+  return error instanceof SpeedTransportError && error.outcomeUncertain
+}
+
+function paymentCreateRetryDelay(error: SpeedApiError | SpeedTransportError, attempt: number) {
+  if (error instanceof SpeedApiError && error.retryAfterMs !== null) return error.retryAfterMs
+  const exponential = Math.min(2_000, 250 * (2 ** attempt))
+  return exponential + Math.floor(Math.random() * Math.max(1, Math.floor(exponential / 4)))
+}
+
+async function createSpeedPaymentRequest(
+  body: Record<string, unknown>,
+  context: SpeedMerchantRequestContext
+): Promise<SpeedPaymentObject> {
+  const maxAttempts = 2
+  const startedAt = Date.now()
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await speedRequest<SpeedPaymentObject>("/payments", {
+        method: "POST",
+        body: JSON.stringify(body),
+        merchantContext: context,
+      })
+    } catch (error) {
+      const retryable = error instanceof SpeedApiError
+        ? error.retryable
+        : error instanceof SpeedTransportError
+          ? error.retryable && !error.outcomeUncertain
+          : false
+      const willRetry = retryable && attempt + 1 < maxAttempts
+      console.warn("[speed] payment_create_attempt_failed", {
+        operation: "payment.create",
+        pineTreePaymentId: context.pineTreePaymentId || null,
+        pineTreePaymentIntentId: context.pineTreePaymentIntentId || null,
+        merchantId: context.merchantId,
+        providerAccountId: context.connectedAccountId,
+        httpStatus: error instanceof SpeedApiError ? error.status : null,
+        requestId: error instanceof SpeedApiError ? error.requestId : null,
+        providerCode: error instanceof SpeedApiError ? error.providerCode : null,
+        providerMessage: error instanceof SpeedApiError ? error.providerMessage : null,
+        elapsedMs: Date.now() - startedAt,
+        retryClassification: willRetry
+          ? "bounded_retry"
+          : error instanceof SpeedTransportError && error.outcomeUncertain
+            ? "uncertain_no_retry"
+            : "permanent_no_retry",
+        attempt: attempt + 1,
+        maxAttempts,
+      })
+      if (!willRetry) throw error
+      await new Promise((resolve) => setTimeout(resolve, paymentCreateRetryDelay(error as SpeedApiError | SpeedTransportError, attempt)))
+    }
+  }
+  throw new Error("Speed payment creation failed")
 }
 
 export function formatSpeedPercentage(value: number): number {
@@ -979,19 +1069,15 @@ export async function createSpeedLightningPayment(
         }),
   }
 
-  const payment = await speedRequest<SpeedPaymentObject>("/payments", {
-    method: "POST",
-    body: JSON.stringify(body),
-    ...(!useTreasurySweep
-      ? {
-          merchantContext: {
-            merchantId: params.merchantId,
-            connectedAccountId: merchantSpeedAccountId,
-            operation: "payment.create",
-          },
-        }
-      : {}),
-  })
+  const payment = useTreasurySweep
+    ? await speedRequest<SpeedPaymentObject>("/payments", { method: "POST", body: JSON.stringify(body) })
+    : await createSpeedPaymentRequest(body, {
+        merchantId: params.merchantId,
+        connectedAccountId: merchantSpeedAccountId,
+        operation: "payment.create",
+        pineTreePaymentId: params.pineTreePaymentId,
+        pineTreePaymentIntentId: params.pineTreePaymentIntentId || null,
+      })
 
   const paymentRequest = getLightningPaymentRequest(payment)
   if (!payment.id || !paymentRequest) {

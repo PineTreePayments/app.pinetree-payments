@@ -513,14 +513,15 @@ export async function selectPaymentIntentNetworkEngine(input: {
       "Payment preparation"
     )
 
+    const clientAttemptId = String(input.idempotencyKey || crypto.randomUUID()).trim()
     const payment = await withTimeout(
       createPayment({
         ...createPaymentInput,
         preferredNetwork: normalizedNetwork,
         asset: selectedAsset,
-        idempotencyKey: `payment-intent:${intent.id}:${crypto.randomUUID()}`
+        idempotencyKey: `payment-intent:${intent.id}:${normalizedNetwork}:${selectedAsset || "default"}:${clientAttemptId}`
       }),
-      PAYMENT_DETAILS_TIMEOUT_MS,
+      normalizedNetwork === "bitcoin_lightning" ? Math.max(PAYMENT_DETAILS_TIMEOUT_MS, 20_000) : PAYMENT_DETAILS_TIMEOUT_MS,
       "Payment creation"
     )
 

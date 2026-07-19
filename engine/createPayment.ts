@@ -31,7 +31,7 @@ import { getMerchantCredential } from "@/database/merchants"
 import { getMerchantStripeAccountId } from "./stripeConnect"
 import { getMerchantNwcUriForPayment } from "./lightningNwc"
 import { getMerchantSpeedProvider, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
-import { isSpeedPlatformTreasurySweepEnabled } from "@/providers/lightning/speedClient"
+import { isSpeedPlatformTreasurySweepEnabled, shouldPreserveSpeedCreationIdempotencyClaim } from "@/providers/lightning/speedClient"
 import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
 import { getMarketPricesUSD } from "./marketPrices"
 
@@ -704,7 +704,7 @@ export async function createPayment(
       : {})
   }
   } catch (error) {
-    if (claimedIdempotencyKey && input.idempotencyKey) {
+    if (claimedIdempotencyKey && input.idempotencyKey && !shouldPreserveSpeedCreationIdempotencyClaim(error)) {
       try {
         await releaseIdempotencyKey(input.idempotencyKey, paymentId)
       } catch (releaseError) {

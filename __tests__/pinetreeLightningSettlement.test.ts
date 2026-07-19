@@ -82,15 +82,14 @@ describe("PineTree-native Lightning settlement", () => {
     expect(adapter).toContain("Do not fake provider sync")
   })
 
-  it("webhook signature verification happens before settlement job creation", () => {
+  it("webhook signature verification remains and settlement job creation is inactive", () => {
     expect(eventProcessor).toContain("adapter.verifyWebhook")
     expect(eventProcessor).toContain('throw new Error("Webhook verification failed")')
     const verifyIndex = eventProcessor.indexOf("adapter.verifyWebhook")
     const rejectionIndex = eventProcessor.indexOf('throw new Error("Webhook verification failed")')
-    const settlementCallIndex = eventProcessor.lastIndexOf("ensurePineTreeLightningSettlementJob")
     expect(verifyIndex).toBeLessThan(rejectionIndex)
-    expect(rejectionIndex).toBeLessThan(settlementCallIndex)
-    expect(eventProcessor).toContain("ensureLightningSettlementJobForConfirmedSpeedPayment")
+    expect(eventProcessor).not.toContain("ensurePineTreeLightningSettlementJob")
+    expect(eventProcessor).not.toContain("ensureLightningSettlementJobForConfirmedSpeedPayment")
   })
 
   it("only confirmed Speed Lightning payments create settlement payout jobs", () => {

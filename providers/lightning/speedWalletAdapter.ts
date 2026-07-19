@@ -228,7 +228,7 @@ export const speedWalletAdapter: WalletProviderAdapter = {
         speedAccountId: context.providerAccountId,
       })
       return balance.available.map((entry) => ({
-        asset: entry.target_currency.toUpperCase(),
+        asset: entry.target_currency.toUpperCase() === "SATS" ? "BTC" : entry.target_currency.toUpperCase(),
         availableBaseUnits: decimalToBaseUnits(entry.amount, entry.target_currency),
         pendingBaseUnits: BigInt(0),
         totalBaseUnits: decimalToBaseUnits(entry.amount, entry.target_currency),

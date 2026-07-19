@@ -158,13 +158,13 @@ describe("Balances tab - compact selected asset detail", () => {
     expect(src).toContain("railLabel: assetRailLabel(row.rail)")
   })
 
-  it("BTC is only included for the Bitcoin rail when a Bitcoin payout address exists", () => {
+  it("BTC is included for a ready connected account without requiring a payout address", () => {
     const src = balanceRowsSrc()
     expect(walletPage).toContain('{ key: "BTC", rail: "bitcoin", asset: "BTC"')
     expect(src).toContain('if (profileAddresses.base.length > 0) rows.push(...(sync?.balances.base ?? []))')
     expect(src).toContain('if (profileAddresses.solana.length > 0) rows.push(...(sync?.balances.solana ?? []))')
-    expect(src).toContain('if (bitcoinPayoutEntries.length > 0) rows.push(...(sync?.balances.bitcoin ?? []))')
-    expect(src).toContain('if (row.rail === "bitcoin" && bitcoinPayoutEntries.length === 0) return false')
+    expect(src).toContain('if (bitcoinReady) rows.push(...(sync?.balances.bitcoin ?? []))')
+    expect(src).toContain('if (row.rail === "bitcoin") return bitcoinReady')
   })
 
   it("BalanceRows detail card does not render a Status field", () => {
@@ -184,7 +184,7 @@ describe("Balances tab - compact selected asset detail", () => {
     expect(src).toContain("bitcoinPayoutEntries[0]?.address")
     expect(src).toContain("formatBalance(row.balance, row.asset)")
     expect(walletPage).toContain('{ key: "BTC", rail: "bitcoin", asset: "BTC", balance: null')
-    expect(src).toContain('if (row.rail === "bitcoin" && bitcoinPayoutEntries.length === 0) return false')
+    expect(src).toContain('if (row.rail === "bitcoin") return bitcoinReady')
     expect(src).not.toContain("Speed")
   })
 

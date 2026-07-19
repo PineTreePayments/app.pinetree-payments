@@ -55,6 +55,12 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
     return checkNwcPaymentOnce(payment.id)
   }
 
+  // Speed Lightning is reconciled by its signed webhook and the authenticated
+  // Lightning check route, never by an EVM/Solana RPC scan.
+  if (String(payment.network || "").trim().toLowerCase() === "bitcoin_lightning") {
+    return false
+  }
+
   const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
   const isBase = String(payment.network || "").toLowerCase() === "base"
 

@@ -22,6 +22,81 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     vi.restoreAllMocks()
   })
 
+  const paymentInput = {
+    amount: 10,
+    currency: "USD",
+    merchantAmount: 9,
+    pineTreeFeeAmount: 1,
+    merchantSpeedAccountId: "acct_merchant_1",
+    pineTreePaymentId: "payment-1",
+    pineTreePaymentIntentId: "intent-1",
+    merchantId: "merchant-1",
+    settlementMode: "speed_connect_split" as const,
+  }
+
+  it("sanitizes a payment.create 400 and never retries it", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      code: "invalid_request", message: "invalid amount from provider",
+    }), { status: 400 }))
+    const { createSpeedLightningPayment, getSafeSpeedCustomerErrorMessage } = await import("@/providers/lightning/speedClient")
+    const error = await createSpeedLightningPayment(paymentInput).catch((caught) => caught)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(getSafeSpeedCustomerErrorMessage(error)).toBe("We couldn't create this Bitcoin Lightning payment. Please choose another payment method or try again.")
+    expect(getSafeSpeedCustomerErrorMessage(error)).not.toContain("400")
+  })
+
+  it("honors Retry-After for 429 with one bounded retry", async () => {
+    vi.useFakeTimers()
+    const fetchSpy = vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: "rate_limited" }), { status: 429, headers: { "retry-after": "0" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "pay_1", status: "unpaid", payment_request: "lnbc1invoice" }), { status: 200 }))
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    const promise = createSpeedLightningPayment(paymentInput)
+    await vi.advanceTimersByTimeAsync(0)
+    await expect(promise).resolves.toMatchObject({ speedPaymentId: "pay_1" })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it("bounds 500/503 retries to two total provider requests", async () => {
+    vi.useFakeTimers()
+    const fetchSpy = vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce(new Response("{}", { status: 500 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 503 }))
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    const promise = createSpeedLightningPayment(paymentInput)
+    const assertion = expect(promise).rejects.toMatchObject({ status: 503, retryable: true })
+    await vi.advanceTimersByTimeAsync(1_000)
+    await assertion
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it("retries a pre-response transport failure once", async () => {
+    vi.useFakeTimers()
+    const fetchSpy = vi.spyOn(global, "fetch")
+      .mockRejectedValueOnce(new TypeError("connection reset"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "pay_1", status: "unpaid", payment_request: "lnbc1invoice" }), { status: 200 }))
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    const promise = createSpeedLightningPayment(paymentInput)
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(promise).resolves.toMatchObject({ speedPaymentId: "pay_1" })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not retry an uncertain post-dispatch timeout", async () => {
+    vi.useFakeTimers()
+    const fetchSpy = vi.spyOn(global, "fetch").mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true })
+    }))
+    const { createSpeedLightningPayment, shouldPreserveSpeedCreationIdempotencyClaim } = await import("@/providers/lightning/speedClient")
+    const promise = createSpeedLightningPayment(paymentInput)
+    const errorPromise = promise.catch((error) => error)
+    await vi.advanceTimersByTimeAsync(8_000)
+    const error = await errorPromise
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(error).toMatchObject({ timedOut: true, outcomeUncertain: true })
+    expect(shouldPreserveSpeedCreationIdempotencyClaim(error)).toBe(true)
+  })
+
   it("retrieves a non-zero balance with canonical merchant scoping and server auth", async () => {
     const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
       object: "balance",

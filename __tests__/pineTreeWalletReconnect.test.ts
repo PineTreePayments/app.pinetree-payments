@@ -236,9 +236,10 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(dynamicSignerLookup).toContain("DYNAMIC_SOLANA_SIGN_TIMEOUT_MS = 45_000")
     expect(dynamicSignerLookup).toContain("Withdrawal approval is still pending. Check your wallet activity before trying again.")
     expect(page).toContain('if (raw === "Withdrawal approval is still pending. Check your wallet activity before trying again.") return raw')
+    const dynamicCatchStart = page.indexOf("} catch (error) {", page.indexOf("async function handleSubmitWithdrawal()"))
     const catchBlock = page.slice(
-      page.indexOf("} catch (error) {", page.indexOf("async function handleSubmitWithdrawal()")),
-      page.indexOf("} finally {", page.indexOf("async function handleSubmitWithdrawal()"))
+      dynamicCatchStart,
+      page.indexOf("} finally {", dynamicCatchStart)
     )
     expect(catchBlock).toContain("setWithdrawalApprovalError")
     expect(catchBlock).toContain('setWithdrawalScreen("failed")')

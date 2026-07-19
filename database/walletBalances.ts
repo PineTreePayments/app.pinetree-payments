@@ -5,7 +5,7 @@ export type WalletBalance = {
   id: string
   merchant_id: string
   asset: string
-  balance: number
+  balance: number | string
   last_updated: string
 }
 

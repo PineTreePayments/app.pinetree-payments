@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { selectPaymentIntentNetworkEngine } from "@/engine/paymentIntents"
 import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
+import { getSafeSpeedCustomerErrorMessage, SpeedApiError, SpeedTransportError } from "@/providers/lightning/speedClient"
 
 type Params = { params: Promise<{ intentId: string }> }
 
@@ -34,6 +35,7 @@ function classifySelectNetworkError(message: string) {
 
 export async function POST(req: NextRequest, { params }: Params) {
   let isBase = false
+  let selectedNetwork = ""
   try {
     const { intentId } = await params
 
@@ -54,6 +56,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     const body = (await req.json()) as { network?: string; asset?: string }
     const network = String(body?.network || "").trim().toLowerCase()
+    selectedNetwork = network
     const asset = body?.asset ? String(body.asset).trim().toUpperCase() : undefined
 
     if (!network) {
@@ -111,7 +114,16 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json(result)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to select payment network"
-    const { status, code } = classifySelectNetworkError(message)
+    const { status, code } = error instanceof SpeedApiError
+      ? { status: error.status >= 500 ? 503 : error.status, code: error.retryable ? "LIGHTNING_PROVIDER_TEMPORARY" : "LIGHTNING_PAYMENT_INVALID" }
+      : error instanceof SpeedTransportError
+        ? { status: 503, code: "LIGHTNING_PROVIDER_TEMPORARY" }
+        : classifySelectNetworkError(message)
+    const customerMessage = selectedNetwork === "bitcoin_lightning"
+      ? getSafeSpeedCustomerErrorMessage(error) || (/timed out|timeout|network|unreachable/i.test(message)
+          ? "We couldn't prepare the Bitcoin Lightning payment. Check your connection and try again."
+          : "We couldn't create this Bitcoin Lightning payment. Please choose another payment method or try again.")
+      : message
 
     if (isBase) {
       console.error("[PineTreeBaseTrace] select-network error", {
@@ -122,6 +134,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       })
     }
 
-    return NextResponse.json({ error: message, code }, { status })
+    return NextResponse.json({ error: customerMessage, code }, { status })
   }
 }
