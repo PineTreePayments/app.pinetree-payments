@@ -72,6 +72,12 @@ jobs:
       - name: Root production build
         if: matrix.node == '20'
         run: npm run build
+        env:
+          # Build-only placeholders satisfy module-level Supabase client creation.
+          # CI does not deploy this artifact or connect to a live Supabase project.
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
 
       - name: SDK release-candidate validation
         if: matrix.node == '20'
