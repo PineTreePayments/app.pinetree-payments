@@ -40,7 +40,7 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     icon: "clock",
     classes: "border border-blue-200 bg-blue-50 text-blue-800",
     iconClassName: "text-[#2f5bea]",
-    iconBgClassName: "bg-blue-50",
+    iconBgClassName: "bg-transparent",
   },
   processing: {
     label: "Processing",

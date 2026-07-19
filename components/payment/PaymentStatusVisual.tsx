@@ -65,10 +65,10 @@ export function PaymentStatusVisual({
   return (
     <div className={`flex flex-col items-center text-center ${gapClass} ${variantClass} ${className}`}>
       <div className={`rounded-full ${iconPadding} ${config.iconBgClassName} ${iconSurfaceClass}`}>
-        <span className={isWaiting ? "pinetree-waiting-indicator inline-flex" : "inline-flex"}>
+        <span className="inline-flex">
           <Icon
             size={resolvedIconSize}
-            className={`${config.iconClassName} ${config.spin ? "animate-spin" : ""}`}
+            className={`${config.iconClassName} ${config.spin ? "animate-spin" : ""} ${isWaiting ? "pinetree-waiting-indicator" : ""}`}
             strokeWidth={1.8}
           />
         </span>

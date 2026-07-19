@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import POSLayout from "@/components/pos/POSLayout"
 import Keypad from "@/components/pos/Keypad"
@@ -62,6 +62,11 @@ export default function TerminalInner() {
   const [shiftStarting, setShiftStarting] = useState(false)
   const [drawerSession, setDrawerSession] = useState<DrawerSession | null>(null)
   const [pendingProvider, setPendingProvider] = useState<string>("solana")
+  const [showUnlockControl, setShowUnlockControl] = useState(false)
+
+  const handleLockControlVisibilityChange = useCallback((visible: boolean) => {
+    setShowUnlockControl(visible)
+  }, [])
 
   function showToast(message:string,type:"success"|"error"){
 
@@ -310,25 +315,27 @@ export default function TerminalInner() {
 
       </div>
 
-      <button
-        onClick={requestUnlock}
-        className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[calc(env(safe-area-inset-top)+3rem)] touch-manipulation transition hover:scale-110"
-      >
+      {!unlockMode && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && showUnlockControl ? (
+        <button
+          onClick={requestUnlock}
+          className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[calc(env(safe-area-inset-top)+3rem)] touch-manipulation transition hover:scale-110"
+        >
 
-        <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
 
-          <rect x="6" y="10" width="12" height="10" rx="2" fill="#0052FF"/>
+            <rect x="6" y="10" width="12" height="10" rx="2" fill="#0052FF"/>
 
-          <path
-            d="M8 10V7a4 4 0 118 0v3"
-            stroke="#0052FF"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
+            <path
+              d="M8 10V7a4 4 0 118 0v3"
+              stroke="#0052FF"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
 
-        </svg>
+          </svg>
 
-      </button>
+        </button>
+      ) : null}
 
       {!unlockMode && terminal && !shiftStarted && Number(terminal.drawer_starting_amount ?? 0) > 0 && (
         <div className="max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] space-y-5 overflow-y-auto rounded-2xl bg-white p-6 text-center shadow-xl sm:p-8">
@@ -370,7 +377,11 @@ export default function TerminalInner() {
       )}
 
       {!unlockMode && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && (
-        <POSLayout locked={false} terminalContext={terminalContext} />
+        <POSLayout
+          locked={false}
+          terminalContext={terminalContext}
+          onLockControlVisibilityChange={handleLockControlVisibilityChange}
+        />
       )}
 
       {unlockMode && (

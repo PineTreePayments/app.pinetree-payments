@@ -19,6 +19,7 @@ import {
 
 type Props = {
   locked: boolean
+  onLockControlVisibilityChange?: (visible: boolean) => void
   terminalContext?: {
     merchantId: string
     terminalId?: string
@@ -278,7 +279,7 @@ async function executePosBaseAllowancePath(
   return paymentTxHash
 }
 
-export default function POSLayout({ terminalContext }: Props) {
+export default function POSLayout({ terminalContext, onLockControlVisibilityChange }: Props) {
 
   const [digits, setDigits] = useState("")
   const [status, setStatus] = useState<Status>("ready")
@@ -312,6 +313,11 @@ export default function POSLayout({ terminalContext }: Props) {
 
   const subtotalNum = digitsToNumber(digits)
   const displayAmount = digitsToDisplay(digits)
+
+  useEffect(() => {
+    onLockControlVisibilityChange?.(status === "ready" && paymentMode === null)
+    return () => onLockControlVisibilityChange?.(false)
+  }, [onLockControlVisibilityChange, paymentMode, status])
 
   function resetSale() {
     if (resetTimerRef.current) {

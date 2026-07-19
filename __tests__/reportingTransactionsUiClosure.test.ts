@@ -16,12 +16,18 @@ describe("reporting and transaction UI closure", () => {
     expect(page).toContain("transactionsTruncated")
   })
 
-  it("persists combined transaction filters in the URL and requests stable server pagination", () => {
+  it("persists lightweight transaction filters in the URL and requests stable server pagination", () => {
     const page = read("app/dashboard/transactions/page.tsx")
     const engine = read("engine/transactionsDashboard.ts")
-    for (const filter of ["provider", "network", "channel", "status", "rail", "asset", "currency", "source", "method", "startDate", "endDate"]) {
+    for (const filter of ["network", "time"]) {
       expect(page).toContain(`setFilter("${filter}"`)
     }
+    for (const removedFilter of ["provider", "channel", "status", "rail", "asset", "currency", "source", "method"]) {
+      expect(page).not.toContain(`setFilter("${removedFilter}"`)
+    }
+    expect(page).toContain("getTimeFilterBounds(timeFilter)")
+    expect(page).toContain('params.set("startDate", timeBounds.startDate)')
+    expect(page).toContain('params.set("endDate", timeBounds.endDate)')
     expect(page).toContain("window.history.replaceState")
     expect(engine).toContain('.order("created_at", { ascending: false })')
     expect(engine).toContain('.order("id", { ascending: false })')

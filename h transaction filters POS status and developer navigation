@@ -1,0 +1,12 @@
+warning: in the working copy of '__tests__/reportingTransactionsUiClosure.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '__tests__/responsiveUxCorrections.test.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/(pos)/terminal/TerminalInnerr.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/dashboard/developer/api-keys/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/dashboard/developer/guides/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/dashboard/developer/integrations/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/dashboard/developer/sdks/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/dashboard/developer/webhooks/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/dashboard/transactions/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'components/payment/PaymentStatusVisual.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'components/pos/POSLayout.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/utils/paymentStatus.ts', LF will be replaced by CRLF the next time Git touches it

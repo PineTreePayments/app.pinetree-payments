@@ -7,14 +7,23 @@ function read(relativePath: string) {
 }
 
 describe("responsive UX corrections", () => {
-  it("keeps transaction filters compact with contextual advanced controls", () => {
+  it("keeps transaction filters to compact Network and Time dropdowns", () => {
     const page = read("app/dashboard/transactions/page.tsx")
 
-    expect(page).toContain("advancedFiltersOpen")
-    expect(page).toContain("Filter by")
-    expect(page).toContain("Apply filters")
-    expect(page).toContain("Clear filters")
-    expect(page).toContain('type FocusedFilter = "provider" | "network" | "channel" | "method" | "asset" | "date"')
+    expect(page).toContain("baseNetworkFilterOptions")
+    expect(page).toContain("All Networks")
+    expect(page).toContain("Bitcoin Lightning")
+    expect(page).toContain("timeFilterOptions")
+    expect(page).toContain("Last Hour")
+    expect(page).toContain("All Time")
+    expect(page).toContain('aria-label="Network filter"')
+    expect(page).toContain('aria-label="Time filter"')
+    expect(page).toContain("grid min-w-0 grid-cols-2 gap-2")
+    expect(page).not.toContain("advancedFiltersOpen")
+    expect(page).not.toContain("Apply filters")
+    expect(page).not.toContain("Clear filters")
+    expect(page).not.toContain("Status filter")
+    expect(page).not.toContain("Status:")
     expect(page).not.toContain("All Wallets")
     expect(page).not.toContain("grid min-w-0 grid-cols-2 gap-1.5 sm:grid-cols-4")
     expect(page).toContain("Complete more transactions to unlock activity insights.")
@@ -40,21 +49,31 @@ describe("responsive UX corrections", () => {
     expect(sdks).toContain("npm install @pinetreepayments/node")
     expect(integrations).toContain("<ShopifyIntegrationCard />")
     expect(guides).toContain('DashboardSection title="Quickstart"')
+    for (const page of [apiKeys, webhooks, sdks, integrations, guides]) {
+      expect(page).not.toContain("Back to Developer")
+      expect(page).toContain('href="/dashboard/developer"')
+      expect(page).toContain("inline-flex h-10 w-10")
+      expect(page).toContain("<X size={18}")
+    }
   })
 
   it("scopes terminal viewport locking to the POS route group", () => {
     const rootLayout = read("app/layout.tsx")
-    const posLayout = read("app/(pos)/terminal/layout.tsx")
+    const posRouteLayout = read("app/(pos)/terminal/layout.tsx")
     const terminalInner = read("app/(pos)/terminal/TerminalInnerr.tsx")
     const keypad = read("components/pos/Keypad.tsx")
+    const posLayout = read("components/pos/POSLayout.tsx")
 
     expect(rootLayout).not.toContain("userScalable")
-    expect(posLayout).toContain("export const viewport")
-    expect(posLayout).toContain("maximumScale: 1")
-    expect(posLayout).toContain("userScalable: false")
-    expect(posLayout).toContain('viewportFit: "cover"')
+    expect(posRouteLayout).toContain("export const viewport")
+    expect(posLayout).toContain("onLockControlVisibilityChange")
+    expect(posLayout).toContain('status === "ready" && paymentMode === null')
+    expect(posRouteLayout).toContain("maximumScale: 1")
+    expect(posRouteLayout).toContain("userScalable: false")
+    expect(posRouteLayout).toContain('viewportFit: "cover"')
     expect(terminalInner).toContain("h-[100dvh]")
     expect(terminalInner).toContain("env(safe-area-inset-bottom)")
+    expect(terminalInner).toContain("showUnlockControl")
     expect(keypad).toContain("touch-manipulation")
     expect(keypad).toContain("min-h-12")
   })
@@ -65,8 +84,10 @@ describe("responsive UX corrections", () => {
     const status = read("lib/utils/paymentStatus.ts")
 
     expect(status).toContain("text-[#2f5bea]")
+    expect(status).toContain('iconBgClassName: "bg-transparent"')
     expect(visual).toContain("config.tone === \"waiting\"")
     expect(visual).toContain("pinetree-waiting-indicator")
+    expect(visual).toContain('${isWaiting ? "pinetree-waiting-indicator" : ""}')
     expect(css).toContain("@keyframes pinetreeWaitingPulse")
     expect(css).toContain("@media (prefers-reduced-motion: reduce)")
   })

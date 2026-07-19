@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
@@ -98,65 +98,61 @@ type TransactionsChartResponse = {
   error?: string
 }
 
-type FocusedFilter = "provider" | "network" | "channel" | "method" | "asset" | "date"
+type TimeFilter = "last_hour" | "last_24_hours" | "last_7_days" | "last_30_days" | "this_month" | "all"
 
-const focusedFilterOptions: Array<{ value: FocusedFilter; label: string }> = [
-  { value: "method", label: "Payment method" },
-  { value: "channel", label: "Channel" },
-  { value: "network", label: "Rail or network" },
-  { value: "asset", label: "Asset or currency" },
-  { value: "provider", label: "Provider" },
-  { value: "date", label: "Date range" },
+const baseNetworkFilterOptions = [
+  { value: "all", label: "All Networks" },
+  { value: "bitcoin_lightning", label: "Bitcoin Lightning" },
+  { value: "solana", label: "Solana" },
+  { value: "base", label: "Base" },
 ]
 
-const statusFilterOptions = [
-  { value: "all", label: "All statuses" },
-  { value: "CONFIRMED", label: "Confirmed" },
-  { value: "PROCESSING", label: "Processing" },
-  { value: "PENDING", label: "Waiting" },
-  { value: "INCOMPLETE", label: "Incomplete" },
-  { value: "FAILED", label: "Failed" },
+const timeFilterOptions: Array<{ value: TimeFilter; label: string }> = [
+  { value: "last_hour", label: "Last Hour" },
+  { value: "last_24_hours", label: "Last 24 Hours" },
+  { value: "last_7_days", label: "Last 7 Days" },
+  { value: "last_30_days", label: "Last 30 Days" },
+  { value: "this_month", label: "This Month" },
+  { value: "all", label: "All Time" },
 ]
 
-const filterValueOptions: Record<Exclude<FocusedFilter, "date">, Array<{ value: string; label: string }>> = {
-  method: [
-    { value: "all", label: "All methods" },
-    { value: "card", label: "Card" },
-    { value: "crypto", label: "Crypto" },
-    { value: "cash", label: "Cash" },
-  ],
-  channel: [
-    { value: "all", label: "All channels" },
-    { value: "pos", label: "POS" },
-    { value: "online", label: "Online" },
-  ],
-  network: [
-    { value: "all", label: "All rails and networks" },
-    { value: "solana", label: "Solana" },
-    { value: "base", label: "Base" },
-    { value: "ethereum", label: "Ethereum" },
-    { value: "bitcoin_lightning", label: "Bitcoin Lightning" },
-  ],
-  asset: [
-    { value: "all", label: "All assets" },
-    { value: "USD", label: "USD" },
-    { value: "USDC", label: "USDC" },
-    { value: "USDT", label: "USDT" },
-    { value: "BTC", label: "BTC" },
-    { value: "ETH", label: "ETH" },
-    { value: "SOL", label: "SOL" },
-  ],
-  provider: [
-    { value: "all", label: "All providers" },
-    { value: "solana", label: "Solana Pay" },
-    { value: "base", label: "Base Pay" },
-    { value: "lightning_speed", label: "Bitcoin Lightning" },
-    { value: "stripe", label: "Stripe" },
-    { value: "shift4", label: "Shift4" },
-    { value: "fluidpay", label: "FluidPay" },
-    { value: "coinbase", label: "Coinbase Business" },
-    { value: "cash", label: "Cash" },
-  ],
+function normalizeNetworkFilterValue(value: string | null | undefined) {
+  const normalized = String(value || "").trim().toLowerCase()
+  if (!normalized) return ""
+  if (["lightning", "bitcoin_lightning", "btc_lightning", "lightning_btc", "bitcoin lightning"].includes(normalized)) {
+    return "bitcoin_lightning"
+  }
+  return normalized.replace(/\s+/g, "_")
+}
+
+function getTimeFilterBounds(value: TimeFilter) {
+  const now = new Date()
+  const start = new Date(now)
+
+  if (value === "last_hour") {
+    start.setHours(start.getHours() - 1)
+    return { startDate: start.toISOString(), endDate: now.toISOString() }
+  }
+  if (value === "last_24_hours") {
+    start.setDate(start.getDate() - 1)
+    return { startDate: start.toISOString(), endDate: now.toISOString() }
+  }
+  if (value === "last_7_days") {
+    start.setDate(start.getDate() - 7)
+    return { startDate: start.toISOString(), endDate: now.toISOString() }
+  }
+  if (value === "last_30_days") {
+    start.setDate(start.getDate() - 30)
+    return { startDate: start.toISOString(), endDate: now.toISOString() }
+  }
+  if (value === "this_month") {
+    return {
+      startDate: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString(),
+      endDate: now.toISOString()
+    }
+  }
+
+  return { startDate: "", endDate: "" }
 }
 
 function parseTimestamp(value: string) {
@@ -172,19 +168,8 @@ export default function TransactionsPage() {
   const [todayTransactions, setTodayTransactions] = useState(0)
   const [confirmedRate, setConfirmedRate] = useState(0)
 
-  const [walletFilter, setWalletFilter] = useState("all")
   const [networkFilter, setNetworkFilter] = useState("all")
-  const [channelFilter, setChannelFilter] = useState("all")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [railFilter, setRailFilter] = useState("all")
-  const [assetFilter, setAssetFilter] = useState("all")
-  const [currencyFilter, setCurrencyFilter] = useState("all")
-  const [sourceFilter, setSourceFilter] = useState("all")
-  const [methodFilter, setMethodFilter] = useState("all")
-  const [focusedFilter, setFocusedFilter] = useState<FocusedFilter>("method")
-  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false)
-  const [startDate, setStartDate] = useState("")
-  const [endDate, setEndDate] = useState("")
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>("all")
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const [totalPages, setTotalPages] = useState(1)
@@ -212,17 +197,9 @@ export default function TransactionsPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const value = (name: string, fallback = "all") => params.get(name) || fallback
-    setWalletFilter(value("provider"))
-    setNetworkFilter(value("network"))
-    setChannelFilter(value("channel"))
-    setStatusFilter(value("status"))
-    setRailFilter(value("rail"))
-    setAssetFilter(value("asset"))
-    setCurrencyFilter(value("currency"))
-    setSourceFilter(value("source"))
-    setMethodFilter(value("method"))
-    setStartDate(value("startDate", ""))
-    setEndDate(value("endDate", ""))
+    setNetworkFilter(normalizeNetworkFilterValue(value("network")) || "all")
+    const time = value("time") as TimeFilter
+    setTimeFilter(timeFilterOptions.some((option) => option.value === time) ? time : "all")
     setPage(Math.max(1, Number(params.get("page") || 1) || 1))
     setPageSize([25, 50, 100].includes(Number(params.get("pageSize"))) ? Number(params.get("pageSize")) : 50)
     setFiltersHydrated(true)
@@ -234,22 +211,13 @@ export default function TransactionsPage() {
     const setFilter = (name: string, value: string) => {
       if (value && value !== "all") params.set(name, value)
     }
-    setFilter("provider", walletFilter)
     setFilter("network", networkFilter)
-    setFilter("channel", channelFilter)
-    setFilter("status", statusFilter)
-    setFilter("rail", railFilter)
-    setFilter("asset", assetFilter)
-    setFilter("currency", currencyFilter)
-    setFilter("source", sourceFilter)
-    setFilter("method", methodFilter)
-    setFilter("startDate", startDate)
-    setFilter("endDate", endDate)
+    setFilter("time", timeFilter)
     if (page > 1) params.set("page", String(page))
     if (pageSize !== 50) params.set("pageSize", String(pageSize))
     const query = params.toString()
     window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`)
-  }, [assetFilter, channelFilter, currencyFilter, endDate, filtersHydrated, methodFilter, networkFilter, page, pageSize, railFilter, sourceFilter, startDate, statusFilter, walletFilter])
+  }, [filtersHydrated, networkFilter, page, pageSize, timeFilter])
 
   const callTransactionsApi = useCallback(async (method: "GET" | "POST", body?: unknown, query = "") => {
     const {
@@ -357,26 +325,14 @@ export default function TransactionsPage() {
 
   const loadDashboardData = useCallback(async () => {
     if (!filtersHydrated) return
-    if (startDate && endDate && endDate < startDate) {
-      setTransactionError("End date must be on or after the start date.")
-      setLoadingTransactions(false)
-      return
-    }
     try {
       setLoadingTransactions(true)
       setTransactionError(null)
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
-      if (walletFilter !== "all") params.set("provider", walletFilter)
       if (networkFilter !== "all") params.set("network", networkFilter)
-      if (channelFilter !== "all") params.set("channel", channelFilter)
-      if (statusFilter !== "all") params.set("status", statusFilter)
-      if (railFilter !== "all") params.set("rail", railFilter)
-      if (assetFilter !== "all") params.set("asset", assetFilter)
-      if (currencyFilter !== "all") params.set("currency", currencyFilter)
-      if (sourceFilter !== "all") params.set("source", sourceFilter)
-      if (methodFilter !== "all") params.set("method", methodFilter)
-      if (startDate) params.set("startDate", startDate)
-      if (endDate) params.set("endDate", endDate)
+      const timeBounds = getTimeFilterBounds(timeFilter)
+      if (timeBounds.startDate) params.set("startDate", timeBounds.startDate)
+      if (timeBounds.endDate) params.set("endDate", timeBounds.endDate)
       const payload = (await callTransactionsApi("GET", undefined, `?${params.toString()}`)) as TransactionsDashboardResponse
 
       setTodayVolume(Number(payload.todayVolume || 0))
@@ -402,7 +358,7 @@ export default function TransactionsPage() {
     } finally {
       setLoadingTransactions(false)
     }
-  }, [assetFilter, callTransactionsApi, calculateInsights, channelFilter, currencyFilter, endDate, filtersHydrated, methodFilter, networkFilter, page, pageSize, railFilter, sourceFilter, startDate, statusFilter, walletFilter])
+  }, [callTransactionsApi, calculateInsights, filtersHydrated, networkFilter, page, pageSize, timeFilter])
 
   const loadChartData = useCallback(async (range: string, mode = chartMode) => {
     try {
@@ -437,66 +393,29 @@ export default function TransactionsPage() {
 
   const filteredTransactions = transactions
 
-  const activeFilters = [
-    statusFilter !== "all" ? { label: "Status", value: statusFilterOptions.find((option) => option.value === statusFilter)?.label || statusFilter } : null,
-    walletFilter !== "all" ? { label: "Provider", value: filterValueOptions.provider.find((option) => option.value === walletFilter)?.label || walletFilter } : null,
-    networkFilter !== "all" ? { label: "Rail", value: filterValueOptions.network.find((option) => option.value === networkFilter)?.label || networkFilter } : null,
-    channelFilter !== "all" ? { label: "Channel", value: filterValueOptions.channel.find((option) => option.value === channelFilter)?.label || channelFilter } : null,
-    methodFilter !== "all" ? { label: "Method", value: filterValueOptions.method.find((option) => option.value === methodFilter)?.label || methodFilter } : null,
-    assetFilter !== "all" ? { label: "Asset", value: filterValueOptions.asset.find((option) => option.value === assetFilter)?.label || assetFilter } : null,
-    currencyFilter !== "all" ? { label: "Currency", value: currencyFilter } : null,
-    railFilter !== "all" ? { label: "Rail", value: railFilter } : null,
-    sourceFilter !== "all" ? { label: "Source", value: sourceFilter } : null,
-    startDate || endDate ? { label: "Dates", value: [startDate || "Any start", endDate || "Any end"].join(" to ") } : null,
-  ].filter(Boolean) as Array<{ label: string; value: string }>
-
-  const hasActiveFilters = activeFilters.length > 0
-
-  function clearFilters() {
-    setWalletFilter("all")
-    setNetworkFilter("all")
-    setChannelFilter("all")
-    setStatusFilter("all")
-    setRailFilter("all")
-    setAssetFilter("all")
-    setCurrencyFilter("all")
-    setSourceFilter("all")
-    setMethodFilter("all")
-    setStartDate("")
-    setEndDate("")
-    setPage(1)
-  }
-
-  function getFocusedFilterValue(filter: FocusedFilter) {
-    if (filter === "provider") return walletFilter
-    if (filter === "network") return networkFilter
-    if (filter === "channel") return channelFilter
-    if (filter === "asset") return assetFilter
-    if (filter === "method") return methodFilter
-    return "all"
-  }
-
-  function setFocusedFilterValue(filter: FocusedFilter, value: string) {
-    if (filter === "provider") setWalletFilter(value)
-    if (filter === "network") setNetworkFilter(value)
-    if (filter === "channel") setChannelFilter(value)
-    if (filter === "asset") setAssetFilter(value)
-    if (filter === "method") setMethodFilter(value)
-    setPage(1)
-  }
+  const networkFilterOptions = useMemo(() => {
+    const options = new Map(baseNetworkFilterOptions.map((option) => [option.value, option.label]))
+    transactions.forEach((transaction) => {
+      const value = normalizeNetworkFilterValue(transaction.network)
+      if (value && !options.has(value)) {
+        options.set(value, formatDashboardNetwork(value))
+      }
+    })
+    if (networkFilter !== "all" && !options.has(networkFilter)) {
+      options.set(networkFilter, formatDashboardNetwork(networkFilter))
+    }
+    return Array.from(options, ([value, label]) => ({ value, label }))
+  }, [networkFilter, transactions])
 
   const showChannelTransactions = useCallback((mode: "pos" | "online") => {
     setChartMode(mode)
-    setChannelFilter(mode)
-    setWalletFilter("all")
-    setNetworkFilter("all")
     setShowChart(true)
     tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
     void loadChartData(chartRange, mode)
   }, [chartRange, loadChartData])
 
   const filterSelectClass =
-    "h-11 w-full min-w-0 rounded-xl border border-gray-200 bg-white px-3 text-base font-medium text-gray-900 shadow-sm outline-none transition focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100 sm:text-sm sm:font-normal"
+    "h-10 w-full min-w-0 rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm outline-none transition hover:border-blue-200 focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -580,103 +499,40 @@ export default function TransactionsPage() {
 
       <DashboardSection title="Transaction Ledger" titleTone="blue">
         <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
-          <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center">
-          <label className="min-w-0 lg:w-52">
-            <span className="sr-only">Status</span>
-            <select
-              aria-label="Status filter"
-              className={filterSelectClass}
-              value={statusFilter}
-              onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
-            >
-              {statusFilterOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={() => setAdvancedFiltersOpen((value) => !value)}
-            className="inline-flex h-11 min-w-0 items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-base font-semibold text-gray-800 shadow-sm transition hover:border-blue-200 hover:bg-blue-50/60 focus:outline-none focus:ring-4 focus:ring-blue-100 sm:text-sm lg:w-auto"
-            aria-expanded={advancedFiltersOpen}
-          >
-            Filter{hasActiveFilters ? ` (${activeFilters.length})` : ""}
-          </button>
-          <button
-            type="button"
-            onClick={clearFilters}
-            className={`h-11 rounded-xl border border-gray-200 bg-white px-4 text-base font-semibold text-gray-600 transition hover:bg-gray-50 sm:text-sm ${hasActiveFilters ? "inline-flex items-center justify-center" : "hidden"}`}
-          >
-            Clear
-          </button>
+          <div className="grid min-w-0 grid-cols-2 gap-2 sm:max-w-[520px]">
+            <label className="min-w-0">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.11em] text-gray-500">Network</span>
+              <select
+                aria-label="Network filter"
+                className={filterSelectClass}
+                value={networkFilter}
+                onChange={(event) => {
+                  setNetworkFilter(normalizeNetworkFilterValue(event.target.value) || "all")
+                  setPage(1)
+                }}
+              >
+                {networkFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="min-w-0">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.11em] text-gray-500">Time</span>
+              <select
+                aria-label="Time filter"
+                className={filterSelectClass}
+                value={timeFilter}
+                onChange={(event) => {
+                  setTimeFilter(event.target.value as TimeFilter)
+                  setPage(1)
+                }}
+              >
+                {timeFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
           </div>
-          {advancedFiltersOpen ? (
-            <div className="mt-3 rounded-2xl border border-blue-100 bg-blue-50/50 p-3">
-              <div className="grid gap-2 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto_auto] md:items-end">
-                <label className="min-w-0">
-                  <span className="mb-1 block text-xs font-semibold text-gray-600">Filter by</span>
-                  <select
-                    value={focusedFilter}
-                    onChange={(event) => setFocusedFilter(event.target.value as FocusedFilter)}
-                    className={filterSelectClass}
-                  >
-                    {focusedFilterOptions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-                {focusedFilter === "date" ? (
-                  <div className="grid min-w-0 gap-2 sm:grid-cols-2">
-                    <label className="min-w-0">
-                      <span className="mb-1 block text-xs font-semibold text-gray-600">Start date</span>
-                      <input aria-label="Start date" type="date" className={filterSelectClass} value={startDate} onChange={(event) => { setStartDate(event.target.value); setPage(1) }} />
-                    </label>
-                    <label className="min-w-0">
-                      <span className="mb-1 block text-xs font-semibold text-gray-600">End date</span>
-                      <input aria-label="End date" type="date" min={startDate || undefined} className={filterSelectClass} value={endDate} onChange={(event) => { setEndDate(event.target.value); setPage(1) }} />
-                    </label>
-                  </div>
-                ) : (
-                  <label className="min-w-0">
-                    <span className="mb-1 block text-xs font-semibold text-gray-600">Value</span>
-                    <select
-                      aria-label={`${focusedFilterOptions.find((option) => option.value === focusedFilter)?.label || "Filter"} value`}
-                      className={filterSelectClass}
-                      value={getFocusedFilterValue(focusedFilter)}
-                      onChange={(event) => setFocusedFilterValue(focusedFilter, event.target.value)}
-                    >
-                      {filterValueOptions[focusedFilter].map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setAdvancedFiltersOpen(false)}
-                  className="h-11 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                >
-                  Apply filters
-                </button>
-                <button
-                  type="button"
-                  onClick={clearFilters}
-                  className="h-11 rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 transition hover:bg-gray-50"
-                >
-                  Clear filters
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {activeFilters.length ? (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {activeFilters.map((filter) => (
-                <span key={`${filter.label}-${filter.value}`} className="inline-flex max-w-full items-center rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-800">
-                  <span className="truncate">{filter.label}: {filter.value}</span>
-                </span>
-              ))}
-            </div>
-          ) : null}
         </div>
 
       <div
