@@ -11,6 +11,7 @@ import {
 } from "@/database/merchantWebhooks"
 import { generateWebhookSecret } from "@/engine/webhookDelivery"
 import { insertMerchantAuditEvent } from "@/database/merchantAuditEvents"
+import { assertSafeWebhookUrl } from "@/lib/webhooks/outboundUrl"
 
 const VALID_EVENTS: readonly WebhookEvent[] = SUPPORTED_WEBHOOK_EVENTS
 
@@ -50,12 +51,12 @@ export async function POST(req: NextRequest) {
     if (!url) return NextResponse.json({ error: "url is required" }, { status: 400 })
 
     try {
-      const parsed = new URL(url)
-      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-        return NextResponse.json({ error: "url must be http or https" }, { status: 400 })
-      }
-    } catch {
-      return NextResponse.json({ error: "url must be a valid URL" }, { status: 400 })
+      await assertSafeWebhookUrl(url)
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Webhook URL is not allowed" },
+        { status: 400 },
+      )
     }
 
     const requestedEvents = Array.isArray(body.events) ? body.events : VALID_EVENTS

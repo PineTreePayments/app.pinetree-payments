@@ -2076,7 +2076,7 @@ describe("PineTree embedded wallet setup", () => {
       "@dynamic-labs/solana",
       "@dynamic-labs/bitcoin",
     ]) {
-      expect(packageJson.dependencies[dependency]).toBe("^4.90.0")
+      expect(packageJson.dependencies[dependency]).toBe("^4.92.4")
     }
     expect(provider).not.toContain("@dynamic-labs/spark")
   })

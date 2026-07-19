@@ -18,6 +18,7 @@ import {
   type WebhookEvent,
 } from "@/lib/webhooks/events"
 import type { PublicCheckoutSession } from "./publicCheckoutSessions"
+import { assertSafeWebhookUrl } from "@/lib/webhooks/outboundUrl"
 
 const WEBHOOK_TIMEOUT_MS = 10_000
 export const V1_WEBHOOK_VERSION = WEBHOOK_SCHEMA
@@ -258,21 +259,29 @@ async function sendStoredWebhookPayload(input: {
   let responseStatus: number | null = null
   let responseBody: string | null = null
   let lastError: string | null = null
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
   try {
+    const destination = await assertSafeWebhookUrl(input.config.url)
     const controller = new AbortController()
-    const timeoutHandle = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
-    const response = await fetch(input.config.url, {
+    timeoutHandle = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
+    const response = await fetch(destination, {
       method: "POST",
       headers,
       body: payloadJson,
       signal: controller.signal,
+      redirect: "manual",
     })
-    clearTimeout(timeoutHandle)
     responseStatus = response.status
     responseBody = (await response.text()).slice(0, 1000)
-    if (!response.ok) lastError = `HTTP ${response.status}`
+    if (response.status >= 300 && response.status < 400) {
+      lastError = "Webhook redirects are not followed"
+    } else if (!response.ok) {
+      lastError = `HTTP ${response.status}`
+    }
   } catch (error) {
     lastError = error instanceof Error ? error.message : "Delivery failed"
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
   }
 
   return {

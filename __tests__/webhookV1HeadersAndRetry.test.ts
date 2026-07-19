@@ -26,6 +26,10 @@ vi.mock("@/database/merchantWebhooks", () => ({
   updateWebhookDeliveryAttempt,
 }))
 
+vi.mock("@/lib/webhooks/outboundUrl", () => ({
+  assertSafeWebhookUrl: vi.fn(async (url: string) => new URL(url)),
+}))
+
 import {
   deliverWebhook,
   deliverV1CheckoutSessionWebhook,
@@ -138,6 +142,32 @@ describe("v1 webhook headers and retry", () => {
     expect(headers["PineTree-Timestamp"]).toBeTruthy()
     expect(headers["X-PineTree-Signature"]).toMatch(/^sha256=/)
     expect(headers["X-PineTree-Timestamp"]).toBeTruthy()
+  })
+
+  it("does not follow redirect responses", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("redirected", {
+        status: 302,
+        headers: { Location: "https://127.0.0.1/internal" },
+      })
+    )
+
+    await deliverWebhook("merchant-1", "payment.confirmed", {
+      paymentId: "payment-1",
+      merchantId: "merchant-1",
+      amount: 10,
+      currency: "USD",
+      status: "CONFIRMED",
+    })
+
+    expect(vi.mocked(fetch).mock.calls[0][1]).toMatchObject({ redirect: "manual" })
+    expect(insertWebhookDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "failed",
+        responseStatus: 302,
+        lastError: "Webhook redirects are not followed",
+      })
+    )
   })
 
   it("redelivers a stored failed event and increments durable attempts", async () => {
