@@ -73,9 +73,10 @@ describe("Business Profile onboarding UI", () => {
     expect(businessSection).toContain("flex items-center justify-between gap-3")
     expect(businessSection).toContain('ProviderStatusPill label={profileStatusLabel(profileStatus)} tone={profileStatusTone(profileStatus)} className="shrink-0"')
     expect(businessSection).not.toContain("shrink-0 rounded-full border px-1.5 py-px text-[10px]")
-    expect(editProfileButton).toContain("inline-flex h-10 w-auto min-w-[9.5rem] items-center justify-center rounded-lg bg-blue-600 px-5 text-sm")
+    expect(businessSection).toContain("<PrimaryActionButton onClick={() => setBusinessProfileOpen(true)}>")
     expect(editProfileButton).not.toContain("w-full")
     expect(editProfileButton).not.toContain("rounded-full")
+    expect(editProfileButton).not.toContain("min-w-[9.5rem]")
     expect(businessSection).not.toContain("inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm")
     expect(businessSection).not.toContain("Required business and owner information for payment activation and PineTree Wallet Lightning setup.")
     expect(businessSection).not.toContain("Complete this profile before activating payments.")
@@ -126,7 +127,7 @@ describe("Business Profile onboarding UI", () => {
     expect(headerBlock).toContain("Close")
     expect(modalBlock).toContain("min-h-0 flex-1 overflow-y-auto overscroll-contain")
     expect(modalBlock).toContain("[-webkit-overflow-scrolling:touch]")
-    expect(modalBlock).toContain("shrink-0 flex flex-col-reverse items-center")
+    expect(modalBlock).toContain("mt-2 flex flex-col-reverse items-center")
     expect(settings).not.toContain("document.body.style.overflow")
 
     expect(overlayManager).toContain('const OVERLAY_SELECTOR = \'[data-pinetree-overlay="true"]\'')
@@ -174,9 +175,10 @@ describe("Business Profile onboarding UI", () => {
       settings.indexOf('aria-labelledby="business-profile-modal-title"'),
       settings.indexOf('<DashboardSection title="Business Profile"')
     )
+    const footerStart = modalBlock.indexOf('<div className="mt-2 flex flex-col-reverse items-center')
     const footerBlock = modalBlock.slice(
-      modalBlock.indexOf('<footer className="shrink-0 flex flex-col-reverse items-center'),
-      modalBlock.indexOf("</footer>")
+      footerStart,
+      modalBlock.indexOf("</div>", footerStart)
     )
 
     expect(modalBlock).toContain("onClick={() => void saveBusinessProfile()}")
@@ -189,6 +191,22 @@ describe("Business Profile onboarding UI", () => {
     expect(footerBlock).toContain("bg-blue-600")
     expect(footerBlock).toContain("border border-gray-200 bg-white")
     expect(footerBlock).not.toContain("w-full")
+  })
+
+  it("Business Profile modal footer is no longer pinned outside the scrollable form body", () => {
+    const settings = read("app/dashboard/settings/page.tsx")
+    const modalBlock = settings.slice(
+      settings.indexOf('aria-labelledby="business-profile-modal-title"'),
+      settings.indexOf('<DashboardSection title="Business Profile"')
+    )
+    const scrollBody = modalBlock.slice(
+      modalBlock.indexOf('<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain'),
+      modalBlock.length
+    )
+
+    expect(modalBlock).not.toContain("<footer")
+    expect(scrollBody).toContain("disabled={saving}")
+    expect(scrollBody).toContain('onClick={() => void saveBusinessProfile()}')
   })
 
   it("Business Profile modal marks only shared required fields with red asterisks", () => {

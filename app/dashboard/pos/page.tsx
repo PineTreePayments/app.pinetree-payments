@@ -627,13 +627,13 @@ export default function POSPage() {
                   <Button
                     variant="secondary"
                     onClick={() => toggleTerminalDetails(t.id)}
-                    className="w-full rounded-xl px-3 text-xs sm:w-auto"
+                    className="w-full rounded-md px-3 text-xs sm:w-auto"
                   >
                     Details
                   </Button>
 
                   <Link href={`/terminal?tid=${t.id}`} className="block sm:inline-block">
-                    <Button variant="primary" className="w-full rounded-xl px-5 sm:w-auto">
+                    <Button variant="primary" className="w-full rounded-md px-5 sm:w-auto">
                       Launch
                     </Button>
                   </Link>
@@ -644,7 +644,7 @@ export default function POSPage() {
                       setTerminalToDelete(t.id)
                       setConfirmDelete(true)
                     }}
-                    className="w-full rounded-xl px-3 text-xs sm:w-auto"
+                    className="w-full rounded-md px-3 text-xs sm:w-auto"
                   >
                     Delete
                   </Button>

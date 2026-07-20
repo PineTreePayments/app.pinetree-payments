@@ -27,6 +27,7 @@ import {
 import PaymentStatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/SegmentedButtons"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
+import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 
 // ─── Overview types ────────────────────────────────────────────────────────────
 
@@ -1426,8 +1427,10 @@ export default function AdminPage() {
                   </h2>
                 </div>
                 <button
+                  type="button"
                   onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
-                  className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                  aria-label="Close transaction detail"
+                  className={modalCloseButtonClass}
                 >
                   <X size={18} />
                 </button>
@@ -1601,11 +1604,13 @@ export default function AdminPage() {
                       </div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => {
                         setSelectedTicketId(null)
                         setDetail(null)
                       }}
-                      className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                      aria-label="Close ticket detail"
+                      className={modalCloseButtonClass}
                     >
                       <X size={18} />
                     </button>

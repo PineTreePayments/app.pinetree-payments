@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import {
@@ -11,6 +12,7 @@ import {
 import Link from "next/link"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { PrimaryActionButton } from "@/components/ui/PrimaryActionButton"
+import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import {
   BUSINESS_PROFILE_COUNTRIES,
   US_STATES
@@ -637,9 +639,10 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={() => setBusinessProfileOpen(false)}
-                className="inline-flex h-9 min-w-9 items-center justify-center rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-600 shadow-sm transition hover:text-gray-950"
+                aria-label="Close Business Profile"
+                className={modalCloseButtonClass}
               >
-                Close
+                <X size={18} />
               </button>
             </header>
 
@@ -672,27 +675,27 @@ export default function SettingsPage() {
                     {renderBusinessProfileField("owner_phone", { type: "tel" })}
                   </div>
                 </div>
+
+                <div className="mt-2 flex flex-col-reverse items-center gap-2 border-t border-gray-100 pt-5 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:flex-row sm:justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setBusinessProfileOpen(false)}
+                    disabled={saving}
+                    className="inline-flex h-12 w-64 items-center justify-center rounded-lg border border-gray-200 bg-white px-6 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void saveBusinessProfile()}
+                    disabled={saving || !schemaReady}
+                    className="inline-flex h-12 w-64 items-center justify-center rounded-lg bg-blue-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {saving ? "Saving..." : "Save Business Profile"}
+                  </button>
+                </div>
               </div>
             </div>
-
-            <footer className="shrink-0 flex flex-col-reverse items-center gap-2 border-t border-gray-100 px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:flex-row sm:justify-center sm:px-7 sm:pb-4">
-              <button
-                type="button"
-                onClick={() => setBusinessProfileOpen(false)}
-                disabled={saving}
-                className="inline-flex h-12 w-64 items-center justify-center rounded-lg border border-gray-200 bg-white px-6 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void saveBusinessProfile()}
-                disabled={saving || !schemaReady}
-                className="inline-flex h-12 w-64 items-center justify-center rounded-lg bg-blue-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-              >
-                {saving ? "Saving..." : "Save Business Profile"}
-              </button>
-            </footer>
           </section>
         </div>
       ) : null}
@@ -707,13 +710,9 @@ export default function SettingsPage() {
             <p className="text-sm leading-5 text-gray-600">
               Business and owner details required for payment activation.
             </p>
-            <button
-              type="button"
-              onClick={() => setBusinessProfileOpen(true)}
-              className="inline-flex h-10 w-auto min-w-[9.5rem] items-center justify-center rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-            >
+            <PrimaryActionButton onClick={() => setBusinessProfileOpen(true)}>
               {profileActionLabel(profileStatus)}
-            </button>
+            </PrimaryActionButton>
           </div>
         </div>
       </DashboardSection>

@@ -38,6 +38,7 @@ import {
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import MerchantWalletManagementPanel from "@/components/dashboard/MerchantWalletManagementPanel"
 import StatusBadge from "@/components/ui/StatusBadge"
+import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 import {
@@ -8457,9 +8458,9 @@ function PineTreeWalletRuntime() {
                 type="button"
                 onClick={() => setWalletOpen(false)}
                 aria-label="Close PineTree Wallet"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 shadow-sm transition hover:text-gray-900"
+                className={modalCloseButtonClass}
               >
-                <X size={17} />
+                <X size={18} />
               </button>
             </header>
 

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ChevronDown } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
@@ -417,7 +418,7 @@ export default function TransactionsPage() {
   }, [chartRange, loadChartData])
 
   const filterSelectClass =
-    "h-10 w-full min-w-0 rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 shadow-sm outline-none transition hover:border-blue-200 focus:border-[#0052FF] focus:ring-4 focus:ring-blue-100"
+    "h-10 w-full min-w-0 appearance-none rounded-xl border border-blue-200 bg-blue-50/60 pl-3 pr-8 text-sm font-semibold text-[#0052FF] shadow-sm outline-none transition hover:border-blue-300 hover:bg-blue-50 focus:border-[#0052FF] focus:bg-white focus:ring-4 focus:ring-blue-100"
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -500,39 +501,45 @@ export default function TransactionsPage() {
       />
 
       <DashboardSection title="Transaction Ledger" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-4">
+        <div className="rounded-2xl border border-blue-100 bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_100%)] p-3 shadow-[0_10px_30px_rgba(37,99,235,0.06)] sm:p-4">
           <div className="grid min-w-0 grid-cols-2 gap-2 sm:max-w-[520px]">
             <label className="min-w-0">
-              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.11em] text-gray-500">Network</span>
-              <select
-                aria-label="Network filter"
-                className={filterSelectClass}
-                value={networkFilter}
-                onChange={(event) => {
-                  setNetworkFilter(normalizeNetworkFilterValue(event.target.value) || "all")
-                  setPage(1)
-                }}
-              >
-                {networkFilterOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
+              <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.11em] text-blue-700">Network</span>
+              <div className="relative">
+                <select
+                  aria-label="Network filter"
+                  className={filterSelectClass}
+                  value={networkFilter}
+                  onChange={(event) => {
+                    setNetworkFilter(normalizeNetworkFilterValue(event.target.value) || "all")
+                    setPage(1)
+                  }}
+                >
+                  {networkFilterOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <ChevronDown size={15} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-blue-400" />
+              </div>
             </label>
             <label className="min-w-0">
-              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.11em] text-gray-500">Time</span>
-              <select
-                aria-label="Time filter"
-                className={filterSelectClass}
-                value={timeFilter}
-                onChange={(event) => {
-                  setTimeFilter(event.target.value as TimeFilter)
-                  setPage(1)
-                }}
-              >
-                {timeFilterOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
+              <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.11em] text-blue-700">Time</span>
+              <div className="relative">
+                <select
+                  aria-label="Time filter"
+                  className={filterSelectClass}
+                  value={timeFilter}
+                  onChange={(event) => {
+                    setTimeFilter(event.target.value as TimeFilter)
+                    setPage(1)
+                  }}
+                >
+                  {timeFilterOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <ChevronDown size={15} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-blue-400" />
+              </div>
             </label>
           </div>
         </div>

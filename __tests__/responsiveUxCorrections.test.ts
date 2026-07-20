@@ -52,7 +52,8 @@ describe("responsive UX corrections", () => {
     for (const page of [apiKeys, webhooks, sdks, integrations, guides]) {
       expect(page).not.toContain("Back to Developer")
       expect(page).toContain('href="/dashboard/developer"')
-      expect(page).toContain("inline-flex h-10 w-10")
+      expect(page).toContain('import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"')
+      expect(page).toContain("${modalCloseButtonClass}")
       expect(page).toContain("<X size={18}")
     }
   })

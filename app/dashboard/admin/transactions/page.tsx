@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import { ArrowLeft, ChevronLeft, ChevronRight, Copy, RefreshCw, Search, X } from "lucide-react"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
+import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import {
   CompactMetricTile,
   DashboardSection,
@@ -964,8 +965,10 @@ export default function AdminTransactionsPage() {
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
-                  className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                  aria-label="Close transaction detail"
+                  className={modalCloseButtonClass}
                 >
                   <X size={18} />
                 </button>

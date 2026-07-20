@@ -28,6 +28,7 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import { PrimaryActionButton, primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
+import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 
 type InventoryItem = {
   id: string
@@ -685,7 +686,7 @@ export default function InventoryPage() {
           <div role="dialog" aria-modal="true" aria-label={editing ? "Edit inventory item" : "Add inventory item"} className="max-h-[100dvh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl sm:max-w-xl sm:rounded-3xl sm:p-6">
             <div className="flex items-start justify-between gap-3">
               <div><h2 className="text-xl font-semibold text-gray-950">{editing ? "Edit Item" : "Add Item"}</h2><p className="mt-1 text-sm text-gray-500">Inventory values are stored for this merchant only.</p></div>
-              <button onClick={() => setFormOpen(false)} aria-label="Close item form" className="rounded-xl p-2 text-gray-500 hover:bg-gray-100"><X size={18} /></button>
+              <button type="button" onClick={() => setFormOpen(false)} aria-label="Close item form" className={modalCloseButtonClass}><X size={18} /></button>
             </div>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <Field label="Item name"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="form-field" /></Field>
@@ -768,7 +769,7 @@ function OutOfStockModal({
               <h2 className="mt-0.5 text-xl font-semibold text-gray-950">Out of Stock</h2>
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close out-of-stock items" className="rounded-xl p-2 text-gray-500 hover:bg-gray-100">
+          <button type="button" onClick={onClose} aria-label="Close out-of-stock items" className={modalCloseButtonClass}>
             <X size={18} />
           </button>
         </div>
@@ -853,7 +854,7 @@ function ItemDetailModal({
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-600">Inventory Item</p>
             <h2 className="mt-1 truncate text-xl font-semibold text-gray-950">{item.name}</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close item details" className="rounded-xl p-2 text-gray-500 hover:bg-gray-100">
+          <button type="button" onClick={onClose} aria-label="Close item details" className={modalCloseButtonClass}>
             <X size={18} />
           </button>
         </div>
@@ -978,7 +979,7 @@ function ConnectorSetupModal({
               <h2 className="truncate text-xl font-semibold text-gray-950">{integration.label}</h2>
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close connector details" className="rounded-xl p-2 text-gray-500 hover:bg-gray-100">
+          <button type="button" onClick={onClose} aria-label="Close connector details" className={modalCloseButtonClass}>
             <X size={18} />
           </button>
         </div>
