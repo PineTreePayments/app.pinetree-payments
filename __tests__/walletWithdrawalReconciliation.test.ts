@@ -2,18 +2,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   listProcessingWithdrawalsForReconciliation: vi.fn(),
+  listProcessingBitcoinWithdrawalsForReconciliation: vi.fn(),
   updateWalletWithdrawalRequest: vi.fn(),
   insertWithdrawalAuditEvent: vi.fn(),
+  getMerchantLightningProfile: vi.fn(),
+  getConnectedAccountSendStatus: vi.fn(),
   fetch: vi.fn(),
 }))
 
 vi.mock("@/database/walletWithdrawalRequests", () => ({
   listProcessingWithdrawalsForReconciliation: mocks.listProcessingWithdrawalsForReconciliation,
+  listProcessingBitcoinWithdrawalsForReconciliation: mocks.listProcessingBitcoinWithdrawalsForReconciliation,
   updateWalletWithdrawalRequest: mocks.updateWalletWithdrawalRequest,
 }))
 
 vi.mock("@/database/merchantAuditEvents", () => ({
   insertWithdrawalAuditEvent: mocks.insertWithdrawalAuditEvent,
+}))
+
+vi.mock("@/database/merchantLightningProfiles", () => ({
+  getMerchantLightningProfile: mocks.getMerchantLightningProfile,
+}))
+
+vi.mock("@/providers/lightning/speedWalletManagement", () => ({
+  getConnectedAccountSendStatus: mocks.getConnectedAccountSendStatus,
 }))
 
 vi.stubGlobal("fetch", mocks.fetch)
@@ -86,6 +98,8 @@ describe("reconcileProcessingWithdrawals", () => {
     vi.clearAllMocks()
     mocks.updateWalletWithdrawalRequest.mockResolvedValue({})
     mocks.insertWithdrawalAuditEvent.mockResolvedValue(undefined)
+    mocks.listProcessingWithdrawalsForReconciliation.mockResolvedValue([])
+    mocks.listProcessingBitcoinWithdrawalsForReconciliation.mockResolvedValue([])
     // Clear any env vars that would affect Base RPC
     process.env.BASE_RPC_URL = "https://base-rpc.example.com"
     process.env.RPC_URL_SOLANA = "https://solana-rpc.example.com"
@@ -220,33 +234,85 @@ describe("reconcileProcessingWithdrawals", () => {
     expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
   })
 
-  it("skips bitcoin withdrawals without touching the DB", async () => {
-    const record = makeRecord({ rail: "bitcoin", asset: "BTC", tx_hash: "btc-txid-001" })
+  it("skips a bitcoin withdrawal with no provider_reference without touching the DB", async () => {
+    const record = makeRecord({
+      rail: "bitcoin", asset: "BTC", tx_hash: null, provider_reference: null,
+    })
     mocks.listProcessingWithdrawalsForReconciliation.mockResolvedValue([record])
 
     const result = await reconcileProcessingWithdrawals({})
 
     expect(result.skipped).toBe(1)
-    expect(result.confirmed).toBe(0)
-    expect(result.failed).toBe(0)
     expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
     expect(mocks.insertWithdrawalAuditEvent).not.toHaveBeenCalled()
-    expect(mocks.fetch).not.toHaveBeenCalled()
+  })
+
+  it("marks a Bitcoin/Lightning withdrawal confirmed when Speed's Instant Send status is paid", async () => {
+    const record = makeRecord({
+      rail: "bitcoin", asset: "BTC", tx_hash: null, provider_reference: "is_123",
+      merchant_id: "merch-btc",
+    })
+    mocks.listProcessingBitcoinWithdrawalsForReconciliation.mockResolvedValue([record])
+    mocks.getMerchantLightningProfile.mockResolvedValue({ speed_account_id: "acct_btc" })
+    mocks.getConnectedAccountSendStatus.mockResolvedValue({ id: "is_123", status: "paid", failure_reason: null })
+
+    const result = await reconcileProcessingWithdrawals({})
+
+    expect(result.confirmed).toBe(1)
+    expect(mocks.getConnectedAccountSendStatus).toHaveBeenCalledWith({
+      merchantId: "merch-btc",
+      speedAccountId: "acct_btc",
+      providerSendId: "is_123",
+    })
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith("merch-btc", "wd-001", { status: "confirmed" })
+    expect(mocks.insertWithdrawalAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "withdrawal.confirmed", withdrawalId: "wd-001" })
+    )
+  })
+
+  it("marks a Bitcoin/Lightning withdrawal failed when Speed reports a failure_reason", async () => {
+    const record = makeRecord({
+      rail: "bitcoin", asset: "BTC", tx_hash: null, provider_reference: "is_456",
+      merchant_id: "merch-btc",
+    })
+    mocks.listProcessingBitcoinWithdrawalsForReconciliation.mockResolvedValue([record])
+    mocks.getMerchantLightningProfile.mockResolvedValue({ speed_account_id: "acct_btc" })
+    mocks.getConnectedAccountSendStatus.mockResolvedValue({
+      id: "is_456", status: "unpaid", failure_reason: "insufficient_balance",
+    })
+
+    const result = await reconcileProcessingWithdrawals({})
+
+    expect(result.failed).toBe(1)
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith("merch-btc", "wd-001", { status: "failed" })
+  })
+
+  it("leaves a Bitcoin/Lightning withdrawal still_processing on an ambiguous Speed status", async () => {
+    const record = makeRecord({
+      rail: "bitcoin", asset: "BTC", tx_hash: null, provider_reference: "is_789",
+      merchant_id: "merch-btc",
+    })
+    mocks.listProcessingBitcoinWithdrawalsForReconciliation.mockResolvedValue([record])
+    mocks.getMerchantLightningProfile.mockResolvedValue({ speed_account_id: "acct_btc" })
+    mocks.getConnectedAccountSendStatus.mockResolvedValue({ id: "is_789", status: "unpaid", failure_reason: null })
+
+    const result = await reconcileProcessingWithdrawals({})
+
+    expect(result.still_processing).toBe(1)
+    expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
   })
 
   it("uses the provided limit when querying processing withdrawals", async () => {
-    mocks.listProcessingWithdrawalsForReconciliation.mockResolvedValue([])
-
     await reconcileProcessingWithdrawals({ limit: 10 })
 
     expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(10)
+    expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(10)
   })
 
   it("defaults limit to 50 when not provided", async () => {
-    mocks.listProcessingWithdrawalsForReconciliation.mockResolvedValue([])
-
     await reconcileProcessingWithdrawals({})
 
     expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(50)
+    expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(50)
   })
 })

@@ -235,7 +235,14 @@ async function syncSpeedBitcoinBalance(merchantId: string): Promise<SpeedBitcoin
     if (btc === null) throw new Error("Speed returned no canonical Bitcoin balance")
     await persistSyncedBalances(merchantId, [{ asset: "BTC", balance: btc }])
     return "live"
-  } catch {
+  } catch (error) {
+    // Non-fatal by design (the merchant falls back to their last cached
+    // balance) but must not fail silently - this is the only signal that a
+    // live Speed BTC sync didn't happen for this merchant this cycle.
+    console.warn("[pinetree-wallet-sync] speed_bitcoin_balance_sync_failed", {
+      merchantId,
+      reason: error instanceof Error ? error.message : "unknown_error",
+    })
     return "failed"
   }
 }

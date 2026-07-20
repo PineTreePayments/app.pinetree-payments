@@ -553,7 +553,7 @@ describe("PineTree Wallet withdrawals", () => {
     }, createDefaultWithdrawalSigner())).rejects.toThrow("PineTree Wallet source address is not available.")
   })
 
-  it("Bitcoin withdrawal review is unavailable by default even when Dynamic and Bitcoin provider env are configured", async () => {
+  it("Bitcoin withdrawal review requires a ready Speed account when the merchant has no connected Speed account and the legacy Dynamic PSBT flag is off", async () => {
     vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
     vi.stubEnv("BITCOIN_NETWORK", "mainnet")
     vi.stubEnv("BITCOIN_UTXO_PROVIDER", "esplora")
@@ -565,12 +565,11 @@ describe("PineTree Wallet withdrawals", () => {
       asset: "BTC",
       destinationAddress: BTC_DESTINATION,
       amountDecimal: "0.001",
-    }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin withdrawals are not available yet.")
-    expect(mocks.fetch).not.toHaveBeenCalled()
+    }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin withdrawals require a connected, ready Speed account.")
     expect(mocks.createWalletWithdrawalRequest).not.toHaveBeenCalled()
   })
 
-  it("Dynamic BTC legacy flag must be exactly true before Bitcoin can use Dynamic approval", async () => {
+  it("Dynamic BTC legacy PSBT flag must be exactly true before Bitcoin can use Dynamic approval (Speed remains the default path either way)", async () => {
     for (const flag of [undefined, "", "false", "TRUE", "1", "yes"]) {
       vi.unstubAllEnvs()
       vi.stubEnv("NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID", "dynamic_env_1")
@@ -581,12 +580,14 @@ describe("PineTree Wallet withdrawals", () => {
       if (flag !== undefined) vi.stubEnv("PINETREE_ENABLE_DYNAMIC_BTC_LEGACY", flag)
       mocks.createWalletWithdrawalRequest.mockClear()
 
+      // With no ready Speed account configured in this test and the legacy
+      // flag not exactly "true", neither execution path is available.
       await expect(createWalletWithdrawalReview("merchant_1", {
         rail: "bitcoin",
         asset: "BTC",
         destinationAddress: BTC_DESTINATION,
         amountDecimal: "0.0001",
-      }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin withdrawals are not available yet.")
+      }, createDefaultWithdrawalSigner())).rejects.toThrow("Bitcoin withdrawals require a connected, ready Speed account.")
       expect(mocks.createWalletWithdrawalRequest).not.toHaveBeenCalled()
     }
   })
@@ -614,13 +615,13 @@ describe("PineTree Wallet withdrawals", () => {
       asset: "BTC",
       destinationAddress: "not-a-btc-address",
       amountDecimal: "0.001",
-    })).toThrow("Destination address is invalid")
+    })).toThrow("Enter a valid Bitcoin address, Lightning Address, or Lightning invoice.")
     expect(() => validateWalletWithdrawalInput({
       rail: "bitcoin",
       asset: "BTC",
       destinationAddress: "tb1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjaq5ayy",
       amountDecimal: "0.001",
-    })).toThrow("Destination address is invalid")
+    })).toThrow("Enter a valid Bitcoin address, Lightning Address, or Lightning invoice.")
   })
 
   it("validates the source wallet belongs to the merchant profile before preparing", async () => {

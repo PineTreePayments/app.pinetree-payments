@@ -25,8 +25,8 @@ import {
   buildBitcoinWithdrawalPsbt,
   finalizeAndBroadcastBitcoinPsbt,
   getBitcoinProviderConfig,
-  validateBitcoinAddressForConfiguredNetwork,
 } from "@/providers/wallets/bitcoinNetworkProvider"
+import { classifyBitcoinWithdrawalDestination } from "@/providers/wallets/bitcoinWithdrawalDestination"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import {
   createDefaultWithdrawalSigner,
@@ -211,17 +211,25 @@ export function validateWalletWithdrawalInput(input: CreateWalletWithdrawalRevie
 } {
   const rail = normalizeWithdrawalRail(input.rail)
   const asset = normalizeWithdrawalAsset(input.asset)
-  const destinationAddress = input.destinationAddress.trim()
+  const rawDestination = input.destinationAddress.trim()
 
   if (!rail) throw Object.assign(new Error("Unsupported withdrawal rail."), { status: 400 })
   if (!asset || !SUPPORTED_ASSETS[rail].includes(asset)) {
     throw Object.assign(new Error("Unsupported rail/asset combination."), { status: 400 })
   }
-  if (!destinationAddress) {
+  if (!rawDestination) {
     throw Object.assign(new Error("Destination address is required."), { status: 400 })
   }
-  if (!isValidDestinationAddress(rail, destinationAddress)) {
-    throw Object.assign(new Error("Destination address is invalid for the selected rail."), { status: 400 })
+  const destinationAddress = normalizeDestinationAddress(rail, rawDestination)
+  if (destinationAddress === null) {
+    throw Object.assign(
+      new Error(
+        rail === "bitcoin"
+          ? "Enter a valid Bitcoin address, Lightning Address, or Lightning invoice."
+          : "Destination address is invalid for the selected rail."
+      ),
+      { status: 400 }
+    )
   }
 
   const amountDecimal = normalizeWithdrawalAmount(input.amountDecimal)
@@ -236,10 +244,17 @@ export function validateWalletWithdrawalInput(input: CreateWalletWithdrawalRevie
   return { rail, asset, destinationAddress, amountDecimal }
 }
 
-function isValidDestinationAddress(rail: WalletWithdrawalRail, address: string) {
-  if (rail === "base") return /^0x[a-fA-F0-9]{40}$/.test(address)
-  if (rail === "solana") return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)
-  return validateBitcoinAddressForConfiguredNetwork(address)
+/**
+ * Validates and canonicalizes a destination address. For Bitcoin this also
+ * normalizes BOLT11 invoices and Lightning Addresses to lowercase so the
+ * persisted destination_address is consistent for invoice-reuse detection
+ * (see findInFlightOrCompletedWithdrawalForDestination).
+ */
+function normalizeDestinationAddress(rail: WalletWithdrawalRail, address: string): string | null {
+  if (rail === "base") return /^0x[a-fA-F0-9]{40}$/.test(address) ? address : null
+  if (rail === "solana") return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address) ? address : null
+  const classified = classifyBitcoinWithdrawalDestination(address)
+  return classified.valid ? classified.normalized : null
 }
 
 export async function createWalletWithdrawalReview(
@@ -248,9 +263,6 @@ export async function createWalletWithdrawalReview(
   signer: WithdrawalSigner = createDefaultWithdrawalSigner()
 ): Promise<CreateWalletWithdrawalReviewResult> {
   const validated = validateWalletWithdrawalInput(input)
-  if (validated.rail === "bitcoin" && !isDynamicBtcLegacyEnabled()) {
-    throw Object.assign(new Error("Bitcoin withdrawals are not available yet."), { status: 409 })
-  }
   const [profile, providers, lightningProfile] = await Promise.all([
     getPineTreeWalletProfile(merchantId),
     import("@/database/merchants").then((mod) => mod.getMerchantProviders(merchantId)).catch(() => []),
@@ -301,10 +313,19 @@ export async function createWalletWithdrawalReview(
   if (!readiness.enabled) {
     throw Object.assign(new Error("This withdrawal rail is disabled."), { status: 409 })
   }
-  if (validated.rail === "bitcoin" && !readiness.withdrawalReady) {
+  // Bitcoin has two independent execution paths: the legacy PineTree-custodied
+  // on-chain PSBT flow (gated by isDynamicBtcLegacyEnabled + btc_payout_enabled,
+  // via readiness.withdrawalReady) and the default Speed connected-account
+  // Instant Send flow (gated only by the merchant's Speed account being
+  // ready - the same signal already exposed as sourceFields.speed_account_ready).
+  const usesLegacyBitcoinPsbt = validated.rail === "bitcoin" && isDynamicBtcLegacyEnabled()
+  if (usesLegacyBitcoinPsbt && !readiness.withdrawalReady) {
     throw Object.assign(new Error("Bitcoin payouts are not ready for this merchant."), { status: 409 })
   }
-  if (!readiness.walletProvisioned) {
+  if (validated.rail === "bitcoin" && !usesLegacyBitcoinPsbt && !readiness.sourceFields.speed_account_ready) {
+    throw Object.assign(new Error("Bitcoin withdrawals require a connected, ready Speed account."), { status: 409 })
+  }
+  if (!usesLegacyBitcoinPsbt && !readiness.walletProvisioned) {
     throw Object.assign(new Error("PineTree Wallet source address is not available."), { status: 409 })
   }
 
@@ -317,9 +338,15 @@ export async function createWalletWithdrawalReview(
     signer.canSignWithdrawal(signerInput),
     signer.createWithdrawalReview(signerInput),
   ])
-  const sourceAddress = getSourceAddressForRailOrNull(profile, validated.rail)
+  // Only rails/paths that execute via a PineTree-held source address (Base,
+  // Solana, and the legacy Dynamic-signed Bitcoin PSBT) need one. The default
+  // Bitcoin path executes through the merchant's own Speed connected account
+  // balance, which has no PineTree-held source address at all.
+  const requiresPineTreeSourceAddress = validated.rail !== "bitcoin" || usesLegacyBitcoinPsbt
+  const sourceAddress = requiresPineTreeSourceAddress ? getSourceAddressForRailOrNull(profile, validated.rail) : null
   const bitcoinConfig = getBitcoinProviderConfig()
-  const canSign = signerCanSign && Boolean(sourceAddress)
+  const canSign = signerCanSign && (requiresPineTreeSourceAddress ? Boolean(sourceAddress) : true)
+  const approvalMethod = canSign ? (signerReview.approvalMethod || "manual_review") : "manual_review"
   console.info("[wallet-withdrawal] review decision", {
     merchantId,
     rail: validated.rail,
@@ -327,12 +354,13 @@ export async function createWalletWithdrawalReview(
     signerCanSign,
     sourceAddressPresent: Boolean(sourceAddress),
     canSign,
-    approvalMethod: canSign ? "dynamic_browser" : "manual_review",
+    approvalMethod,
   })
   const diagnostics = buildWithdrawalDiagnostics({
     rail: validated.rail,
     asset: validated.asset,
     sourceAddress,
+    requiresSourceAddress: requiresPineTreeSourceAddress,
     signerCanSign,
     bitcoinProviderConfigured: Boolean(bitcoinConfig),
     bitcoinBroadcastEnabled: Boolean(bitcoinConfig?.broadcastEnabled),
@@ -340,7 +368,7 @@ export async function createWalletWithdrawalReview(
   const review: WithdrawalReview = {
     ...signerReview,
     signerEnabled: canSign,
-    approvalMethod: canSign ? "dynamic_browser" : "manual_review",
+    approvalMethod,
     estimatedStatus: canSign ? "Ready to submit" : "Signer unavailable",
     message: canSign
       ? "Review this withdrawal before submitting."
@@ -733,17 +761,22 @@ function buildWithdrawalDiagnostics(input: {
   rail: WalletWithdrawalRail
   asset: WalletWithdrawalAsset
   sourceAddress: string | null
+  requiresSourceAddress: boolean
   signerCanSign: boolean
   bitcoinProviderConfigured: boolean
   bitcoinBroadcastEnabled: boolean
 }): WithdrawalFallbackDiagnostics {
+  // The default Bitcoin path executes through the merchant's connected Speed
+  // account balance, not a PineTree-held source address, so source-address
+  // presence is only a meaningful signal for rails/paths that need one.
+  const addressSatisfied = input.requiresSourceAddress ? Boolean(input.sourceAddress) : true
   const diagnostics: WithdrawalFallbackDiagnostics = {
     rail: input.rail,
     asset: input.asset,
     railEnabled: true,
-    walletConnected: Boolean(input.sourceAddress),
-    walletAddressExists: Boolean(input.sourceAddress),
-    walletProfileAddressPresent: Boolean(input.sourceAddress),
+    walletConnected: addressSatisfied,
+    walletAddressExists: addressSatisfied,
+    walletProfileAddressPresent: addressSatisfied,
     savedSourceAddress: input.sourceAddress,
     matchingDynamicWallet: input.signerCanSign,
     browserWalletAddresses: [],
@@ -751,14 +784,14 @@ function buildWithdrawalDiagnostics(input: {
     addressMismatch: false,
     btcBroadcastEnabled: input.bitcoinBroadcastEnabled,
     btcProviderConfigured: input.bitcoinProviderConfigured,
-    speedPayoutAvailable: false,
+    speedPayoutAvailable: input.rail === "bitcoin" && !input.requiresSourceAddress ? input.signerCanSign : false,
     fallbackReason: null,
   }
 
   if (!diagnostics.walletProfileAddressPresent) diagnostics.fallbackReason = "source_wallet_missing"
-  else if (input.rail === "bitcoin" && !diagnostics.btcProviderConfigured) diagnostics.fallbackReason = "btc_provider_missing"
-  else if (input.rail === "bitcoin" && !diagnostics.btcBroadcastEnabled) diagnostics.fallbackReason = "btc_broadcast_disabled"
-  else if (!diagnostics.matchingDynamicWallet) diagnostics.fallbackReason = "dynamic_wallet_unavailable"
+  else if (input.rail === "bitcoin" && input.requiresSourceAddress && !diagnostics.btcProviderConfigured) diagnostics.fallbackReason = "btc_provider_missing"
+  else if (input.rail === "bitcoin" && input.requiresSourceAddress && !diagnostics.btcBroadcastEnabled) diagnostics.fallbackReason = "btc_broadcast_disabled"
+  else if (!diagnostics.matchingDynamicWallet) diagnostics.fallbackReason = input.rail === "bitcoin" ? "speed_account_unavailable" : "dynamic_wallet_unavailable"
   else if (!diagnostics.dynamicMethodAvailable) diagnostics.fallbackReason = "dynamic_method_unavailable"
 
   return diagnostics

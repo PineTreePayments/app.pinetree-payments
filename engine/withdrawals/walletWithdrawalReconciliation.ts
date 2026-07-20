@@ -1,9 +1,12 @@
 import {
   listProcessingWithdrawalsForReconciliation,
+  listProcessingBitcoinWithdrawalsForReconciliation,
   updateWalletWithdrawalRequest,
   type WalletWithdrawalRequestRecord,
 } from "@/database/walletWithdrawalRequests"
 import { insertWithdrawalAuditEvent } from "@/database/merchantAuditEvents"
+import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
+import { getConnectedAccountSendStatus } from "@/providers/lightning/speedWalletManagement"
 
 export type ReconciliationResult = {
   checked: number
@@ -102,20 +105,48 @@ async function checkBaseTransaction(txHash: string): Promise<OnChainStatus> {
   }
 }
 
+/**
+ * Bitcoin/Lightning withdrawals executed via Speed's Instant Send have no
+ * on-chain tx_hash to poll - status comes from Speed's own send object.
+ * Only flips on an explicit signal (failure_reason present, or a known
+ * terminal status string) - anything ambiguous stays "pending" rather than
+ * guessing, matching this reconciler's existing conservative philosophy for
+ * Base/Solana.
+ */
+const SPEED_SEND_SUCCESS_STATUSES = new Set(["paid", "confirmed", "completed", "sent"])
+const SPEED_SEND_FAILURE_STATUSES = new Set(["failed", "expired", "canceled", "cancelled", "rejected"])
+
+async function checkSpeedInstantSend(merchantId: string, providerSendId: string): Promise<OnChainStatus> {
+  const profile = await getMerchantLightningProfile(merchantId).catch(() => null)
+  const speedAccountId = String(profile?.speed_account_id || "").trim()
+  if (!speedAccountId.startsWith("acct_")) return "pending"
+
+  try {
+    const send = await getConnectedAccountSendStatus({ merchantId, speedAccountId, providerSendId })
+    if (send.failure_reason) return "failed"
+    const status = String(send.status || "").trim().toLowerCase()
+    if (SPEED_SEND_FAILURE_STATUSES.has(status)) return "failed"
+    if (SPEED_SEND_SUCCESS_STATUSES.has(status)) return "confirmed"
+    return "pending"
+  } catch {
+    return "pending"
+  }
+}
+
 async function reconcileOne(
   withdrawal: WalletWithdrawalRequestRecord
 ): Promise<"confirmed" | "failed" | "pending" | "skipped"> {
-  const { id, merchant_id, rail, asset, tx_hash } = withdrawal
-  if (!tx_hash) return "skipped"
+  const { id, merchant_id, rail, asset, tx_hash, provider_reference } = withdrawal
 
   let onChainStatus: OnChainStatus
 
-  if (rail === "solana") {
+  if (rail === "solana" && tx_hash) {
     onChainStatus = await checkSolanaTransaction(tx_hash)
-  } else if (rail === "base") {
+  } else if (rail === "base" && tx_hash) {
     onChainStatus = await checkBaseTransaction(tx_hash)
+  } else if (rail === "bitcoin" && provider_reference) {
+    onChainStatus = await checkSpeedInstantSend(merchant_id, provider_reference)
   } else {
-    // Bitcoin not handled in this pass
     return "skipped"
   }
 
@@ -133,10 +164,10 @@ async function reconcileOne(
     rail,
     asset,
     status: newStatus,
-    metadata: { tx_hash },
+    metadata: { tx_hash, provider_reference },
   })
 
-  console.log(`[reconcile-withdrawals] ${id} → ${newStatus} (${rail}/${asset} tx=${tx_hash})`)
+  console.log(`[reconcile-withdrawals] ${id} → ${newStatus} (${rail}/${asset} tx=${tx_hash || provider_reference})`)
 
   return onChainStatus
 }
@@ -145,7 +176,11 @@ export async function reconcileProcessingWithdrawals(options: {
   limit?: number
 }): Promise<ReconciliationResult> {
   const limit = options.limit ?? 50
-  const withdrawals = await listProcessingWithdrawalsForReconciliation(limit)
+  const [onChainWithdrawals, bitcoinWithdrawals] = await Promise.all([
+    listProcessingWithdrawalsForReconciliation(limit),
+    listProcessingBitcoinWithdrawalsForReconciliation(limit),
+  ])
+  const withdrawals = [...onChainWithdrawals, ...bitcoinWithdrawals]
 
   const result: ReconciliationResult = {
     checked: withdrawals.length,

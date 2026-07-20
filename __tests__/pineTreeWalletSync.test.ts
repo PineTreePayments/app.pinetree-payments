@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getMerchantProviders: vi.fn(),
   getMerchantLightningProfile: vi.fn(),
   getPineTreeSpeedConfigStatus: vi.fn(),
+  getConnectedAccountBalances: vi.fn(),
 }))
 
 vi.mock("@/database/pineTreeWalletProfiles", () => ({
@@ -50,6 +51,10 @@ vi.mock("@/database/merchantLightningProfiles", () => ({
 
 vi.mock("@/providers/lightning/speedClient", () => ({
   getPineTreeSpeedConfigStatus: mocks.getPineTreeSpeedConfigStatus,
+}))
+
+vi.mock("@/providers/lightning/speedWalletManagement", () => ({
+  getConnectedAccountBalances: mocks.getConnectedAccountBalances,
 }))
 
 import {
@@ -362,5 +367,78 @@ describe("PineTree Wallet balance sync", () => {
     expect(serialized).not.toContain("dynamic")
     expect(serialized).not.toContain("nwc")
     expect(serialized).not.toContain("provider")
+  })
+
+  it("syncs a real, connected Speed BTC balance end to end and persists it as BTC", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue({
+      status: "ready",
+      speed_account_id: "acct_live_123",
+      speed_connected_account_status: "Active",
+    })
+    mocks.getMerchantProviders.mockResolvedValue([
+      { provider: "lightning_speed", enabled: true, status: "connected" },
+    ])
+    mocks.getConnectedAccountBalances.mockResolvedValue({
+      object: "balance",
+      available: [{ amount: 2217713, target_currency: "SATS" }],
+    })
+
+    const result = await syncPineTreeWalletBalances("merchant_1")
+
+    expect(mocks.getConnectedAccountBalances).toHaveBeenCalledWith({
+      merchantId: "merchant_1",
+      speedAccountId: "acct_live_123",
+    })
+    expect(mocks.upsertMerchantAssetBalances).toHaveBeenCalledWith(
+      "merchant_1",
+      [{ asset: "BTC", balance: "0.02217713" }],
+      expect.any(String)
+    )
+    expect(result.balances.bitcoin[0]).toMatchObject({
+      asset: "BTC",
+      balance: "0.02217713",
+      usdValue: 0.02217713 * 60000,
+      status: "synced",
+    })
+    const bitcoinRail = result.rails.find((r) => r.rail === "bitcoin")
+    expect(bitcoinRail?.balance).toMatchObject({ asset: "BTC", amount: "0.02217713", status: "synced" })
+  })
+
+  it("does not clobber a live BTC balance to not_configured when the merchant has no ready lightning profile", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(null)
+
+    const result = await syncPineTreeWalletBalances("merchant_1")
+
+    expect(mocks.getConnectedAccountBalances).not.toHaveBeenCalled()
+    const upsertedAssets = mocks.upsertMerchantAssetBalances.mock.calls.flatMap(
+      (call) => (call[1] as Array<{ asset: string }>).map((b) => b.asset)
+    )
+    expect(upsertedAssets).not.toContain("BTC")
+    expect(result.balances.bitcoin[0]).toMatchObject({ status: "pending_sync", balance: null })
+  })
+
+  it("keeps the last-known BTC balance visible (not zeroed) when a live Speed fetch fails", async () => {
+    storedRows = [
+      {
+        id: "btc-1",
+        merchant_id: "merchant_1",
+        asset: "BTC",
+        balance: 0.01,
+        last_updated: new Date().toISOString(),
+      },
+    ]
+    mocks.getMerchantLightningProfile.mockResolvedValue({
+      status: "ready",
+      speed_account_id: "acct_live_123",
+      speed_connected_account_status: "Active",
+    })
+    mocks.getMerchantProviders.mockResolvedValue([
+      { provider: "lightning_speed", enabled: true, status: "connected" },
+    ])
+    mocks.getConnectedAccountBalances.mockRejectedValue(new Error("Speed API is temporarily unreachable."))
+
+    const result = await syncPineTreeWalletBalances("merchant_1")
+
+    expect(result.balances.bitcoin[0]).toMatchObject({ asset: "BTC", balance: "0.01", status: "cached" })
   })
 })

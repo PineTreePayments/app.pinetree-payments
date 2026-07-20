@@ -1927,7 +1927,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(bitcoinProvider).toContain("BITCOIN_UTXO_PROVIDER")
     expect(bitcoinProvider).toContain("BITCOIN_ESPLORA_BASE_URL")
     expect(bitcoinProvider).toContain("BITCOIN_BROADCAST_ENABLED")
-    expect(withdrawalEngine).toContain("speedPayoutAvailable: false")
+    // Speed connected-account withdrawal is now the default, real Bitcoin
+    // path (providers/wallets/bitcoinWithdrawalDestination.ts +
+    // speedConnectedAccountWithdrawalSigner) - speedPayoutAvailable reflects
+    // genuine signer readiness, never a hardcoded/fabricated value.
+    expect(withdrawalEngine).toContain("input.rail === \"bitcoin\" && !input.requiresSourceAddress ? input.signerCanSign : false")
+    expect(withdrawalSigner).toContain("speedConnectedAccountWithdrawalSigner")
     expect(withdrawalEngine).not.toContain("nwc")
     expect(withdrawalEngine).not.toContain("spark")
   })

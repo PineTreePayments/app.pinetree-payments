@@ -41,7 +41,8 @@ describe("PineTree rail readiness consumers", () => {
     expect(src).toContain("buildPineTreeRailReadiness")
     expect(src).toContain("!readiness.enabled")
     expect(src).toContain("!readiness.walletProvisioned")
-    expect(src).toContain('validated.rail === "bitcoin" && !readiness.withdrawalReady')
+    expect(src).toContain("usesLegacyBitcoinPsbt && !readiness.withdrawalReady")
+    expect(src).toContain("readiness.sourceFields.speed_account_ready")
   })
 
   it("Providers page setup/status pill is decoupled from the enabled toggle", () => {

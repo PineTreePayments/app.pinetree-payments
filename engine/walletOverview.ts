@@ -265,10 +265,25 @@ async function listRecentWalletActivity(merchantId: string): Promise<WalletOverv
     .slice(0, 8)
 }
 
+// Bitcoin balance is synced exclusively by engine/pineTreeWalletSync.ts
+// (syncSpeedBitcoinBalance), which is the only writer of the "BTC" row in
+// wallet_balances. This module only ever READS that row - it must never
+// resync or overwrite it, or it will race the real Speed sync and clobber a
+// live merchant balance back to a stale/zero value.
+async function getPersistedBtcBalance(merchantId: string): Promise<number> {
+  const balances = await getMerchantAssetBalances(merchantId)
+  const row = balances.find((b) => String(b.asset || "").toUpperCase().trim() === "BTC")
+  const value = Number(row?.balance ?? 0)
+  return Number.isFinite(value) ? value : 0
+}
+
 async function getLightningPaymentRails(
   merchantId: string,
   prices: { BTC: number }
 ): Promise<WalletOverviewPaymentRail[]> {
+  const btcBalance = await getPersistedBtcBalance(merchantId)
+  const btcUsdValue = btcBalance * prices.BTC
+
   if (isSpeedPlatformTreasurySweepEnabled()) {
     const [profile, speedConfig] = await Promise.all([
       getPineTreeWalletProfile(merchantId),
@@ -286,8 +301,8 @@ async function getLightningPaymentRails(
       walletLabel: "Bitcoin Lightning",
       wallet_address: btcAddress || "PineTree managed",
       assetSymbol: "BTC",
-      nativeBalance: 0,
-      usdValue: 0,
+      nativeBalance: btcBalance,
+      usdValue: btcUsdValue,
       nwcConnectionStatus: null
     }]
   }
@@ -316,8 +331,8 @@ async function getLightningPaymentRails(
       walletLabel: "Bitcoin Lightning",
       wallet_address: speedAccountId,
       assetSymbol: "BTC",
-      nativeBalance: 0,
-      usdValue: 0,
+      nativeBalance: btcBalance,
+      usdValue: btcUsdValue,
       nwcConnectionStatus: null
     }]
   }
@@ -332,8 +347,8 @@ async function getLightningPaymentRails(
       walletLabel: "Bitcoin Lightning",
       wallet_address: nwcStatus.walletLabel,
       assetSymbol: "BTC",
-      nativeBalance: 0,
-      usdValue: 0,
+      nativeBalance: btcBalance,
+      usdValue: btcUsdValue,
       nwcConnectionStatus: buildNwcConnectionStatus(nwcStatus)
     }]
   }
@@ -450,12 +465,15 @@ export async function refreshWalletBalancesEngine(merchantId: string) {
 
   const btcBalance = paymentRails.reduce((sum, rail) => sum + rail.nativeBalance, 0)
 
+  // BTC is intentionally excluded here - engine/pineTreeWalletSync.ts is the
+  // sole writer of the "BTC" row in wallet_balances (see
+  // getPersistedBtcBalance above). Writing it here would race the real Speed
+  // sync and clobber a live merchant balance back to a stale read.
   await upsertMerchantAssetBalances(
     merchantId,
     [
       { asset: "SOL", balance: totalsByAsset.SOL },
-      { asset: "ETH", balance: totalsByAsset.ETH },
-      { asset: "BTC", balance: btcBalance }
+      { asset: "ETH", balance: totalsByAsset.ETH }
     ],
     now
   )
@@ -493,19 +511,15 @@ export async function refreshAllWalletBalancesEngine() {
   }
 
   for (const [merchantId, merchantWallets] of walletsByMerchant.entries()) {
-    const prices = await getMarketPricesUSD()
-    const [{ totalsByAsset }, paymentRails] = await Promise.all([
-      scanWalletBalances(merchantWallets),
-      getLightningPaymentRails(merchantId, prices)
-    ])
-    const btcBalance = paymentRails.reduce((sum, rail) => sum + rail.nativeBalance, 0)
-
+    const { totalsByAsset } = await scanWalletBalances(merchantWallets)
+    // BTC is intentionally excluded here - see refreshWalletBalancesEngine.
+    // This loop never touches Bitcoin, so it has no need to call
+    // getLightningPaymentRails (which would be a wasted per-merchant read).
     await upsertMerchantAssetBalances(
       merchantId,
       [
         { asset: "SOL", balance: totalsByAsset.SOL },
-        { asset: "ETH", balance: totalsByAsset.ETH },
-        { asset: "BTC", balance: btcBalance }
+        { asset: "ETH", balance: totalsByAsset.ETH }
       ],
       now
     )

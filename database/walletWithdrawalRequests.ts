@@ -303,3 +303,54 @@ export async function listProcessingWithdrawalsForReconciliation(
   if (error) throw new Error(`Failed to list processing withdrawals for reconciliation: ${error.message}`)
   return (data || []).map((row) => normalize(row as Record<string, unknown>))
 }
+
+/**
+ * Bitcoin/Lightning withdrawals executed via Speed's Instant Send never get
+ * an on-chain tx_hash (Lightning is off-chain, and Speed's onchain sends are
+ * tracked by provider_reference), so they need a dedicated reconciliation
+ * query separate from listProcessingWithdrawalsForReconciliation above.
+ */
+export async function listProcessingBitcoinWithdrawalsForReconciliation(
+  limit: number
+): Promise<WalletWithdrawalRequestRecord[]> {
+  const { data, error } = await db
+    .from(TABLE)
+    .select("*")
+    .eq("status", "processing")
+    .eq("rail", "bitcoin")
+    .not("provider_reference", "is", null)
+    .order("created_at", { ascending: true })
+    .limit(limit)
+
+  if (error) throw new Error(`Failed to list processing Bitcoin withdrawals for reconciliation: ${error.message}`)
+  return (data || []).map((row) => normalize(row as Record<string, unknown>))
+}
+
+/**
+ * Prevents a BOLT11 invoice from being reused across withdrawals: a prior
+ * attempt only blocks reuse while it is in-flight or already completed.
+ * A failed/canceled/blocked prior attempt never paid the invoice, so it must
+ * not block a fresh attempt at the same invoice.
+ */
+export async function findInFlightOrCompletedWithdrawalForDestination(
+  merchantId: string,
+  destinationAddress: string,
+  excludeId?: string | null
+): Promise<WalletWithdrawalRequestRecord | null> {
+  let query = db
+    .from(TABLE)
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .eq("rail", "bitcoin")
+    .eq("destination_address", destinationAddress.trim().toLowerCase())
+    .in("status", ["pending", "processing", "confirmed"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+
+  if (excludeId) query = query.neq("id", excludeId)
+
+  const { data, error } = await query
+  if (error) throw new Error(`Failed to check destination reuse: ${error.message}`)
+  const row = data?.[0]
+  return row ? normalize(row as Record<string, unknown>) : null
+}
