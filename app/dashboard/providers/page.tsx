@@ -52,7 +52,7 @@ const cardProviderSetupContent: Record<CardOnboardingProvider, {
 }> = {
   shift4: {
     name: "Shift4",
-    cta: "Start Shift4 Application",
+    cta: "Start application",
     modalTitle: "Shift4 Merchant Application",
     subtitle: "Complete the application to begin onboarding for card and crypto payment acceptance through Shift4.",
     primaryAction: "Begin Application",
@@ -68,7 +68,7 @@ const cardProviderSetupContent: Record<CardOnboardingProvider, {
   },
   fluidpay: {
     name: "Fluid Pay",
-    cta: "Start Fluid Pay Setup",
+    cta: "Start application",
     modalTitle: "Fluid Pay Merchant Setup",
     subtitle: "Complete setup to begin onboarding for card payment acceptance through Fluid Pay.",
     primaryAction: "Begin Setup",
@@ -995,9 +995,7 @@ function EngineSettingStatus({
         : getCardProviderSetupCta(provider)
       : connected
         ? "Disconnect"
-        : provider === "lightning"
-        ? "Connect"
-        : "Connect"
+        : "Connect account"
     const lightningCredentialLine =
       provider === "lightning" && lightningWalletLabel
         ? `Lightning • ${lightningWalletLabel}`
@@ -1095,10 +1093,10 @@ function EngineSettingStatus({
             }}
             className={
               connected && !isManagedCard
-                ? "inline-flex h-10 min-w-[200px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-50"
+                ? "inline-flex h-10 min-w-[150px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-50"
               : provider === "lightning" && status === "Provider unavailable"
-                  ? "inline-flex h-10 min-w-[200px] shrink-0 cursor-not-allowed items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-gray-100 px-4 text-sm font-semibold text-gray-500 shadow-sm"
-                  : `${primaryActionButtonClass} min-w-[200px] whitespace-nowrap`
+                  ? "inline-flex h-10 min-w-[150px] shrink-0 cursor-not-allowed items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-gray-100 px-4 text-sm font-semibold text-gray-500 shadow-sm"
+                  : `${primaryActionButtonClass} min-w-[150px] whitespace-nowrap`
             }
             disabled={provider === "lightning" && status === "Provider unavailable"}
           >

@@ -284,27 +284,14 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-5 md:space-y-7">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className={dashboardPageTitleClass}>Reports</h1>
-          {summary ? (
-            <p className="mt-1 text-sm text-gray-500">
-              {dateRangeLabel} · {summary.timeZone}
-              {summary.isInProgress ? " · In progress" : ""}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => void download("csv")} disabled={!summary || loading || Boolean(exporting)} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50">
-            {exporting === "csv" ? "Exporting…" : "Export CSV"}
-          </button>
-          <button onClick={() => void download("pdf")} disabled={!summary || loading || Boolean(exporting)} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50">
-            {exporting === "pdf" ? "Exporting…" : "Download PDF"}
-          </button>
-          <PrimaryActionButton onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading}>
-            Email report
-          </PrimaryActionButton>
-        </div>
+      <div>
+        <h1 className={dashboardPageTitleClass}>Reports</h1>
+        {summary ? (
+          <p className="mt-1 text-sm text-gray-500">
+            {dateRangeLabel} · {summary.timeZone}
+            {summary.isInProgress ? " · In progress" : ""}
+          </p>
+        ) : null}
       </div>
 
       {!loading && summary ? (
@@ -316,6 +303,18 @@ export default function ReportsPage() {
           secondary={<div className="grid min-w-[300px] grid-cols-2 divide-x divide-blue-200/80"><InlineMetric label="Merchant net" value={currency(summary.netSettlements)} className="pr-4" /><InlineMetric label="PineTree fees" value={currency(summary.pineTreeFees)} className="pl-4" /></div>}
         />
       ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => void download("csv")} disabled={!summary || loading || Boolean(exporting)} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50">
+          {exporting === "csv" ? "Exporting…" : "Export CSV"}
+        </button>
+        <button onClick={() => void download("pdf")} disabled={!summary || loading || Boolean(exporting)} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50">
+          {exporting === "pdf" ? "Exporting…" : "Download PDF"}
+        </button>
+        <PrimaryActionButton onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading}>
+          Email report
+        </PrimaryActionButton>
+      </div>
 
       <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-sm">
         <SegmentedButtons
@@ -353,15 +352,23 @@ export default function ReportsPage() {
           )}
 
           <DashboardSection title="Summary" titleTone="blue">
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-              <GroupedMetricSurface dense><InlineMetric size="compact" label="Average confirmed transaction" value={currency(summary.avgTransaction)} /></GroupedMetricSurface>
-              <GroupedMetricSurface dense><InlineMetric size="compact" label="Card volume" value={currency(summary.cardVolume)} /></GroupedMetricSurface>
-              <GroupedMetricSurface dense><InlineMetric size="compact" label="Crypto volume" value={currency(summary.cryptoVolume)} /></GroupedMetricSurface>
-              <GroupedMetricSurface dense><InlineMetric size="compact" label="Cash volume" value={currency(summary.cashVolume)} /></GroupedMetricSurface>
-              <GroupedMetricSurface dense><InlineMetric size="compact" label="Tax collected" value={currency(summary.taxesCollected)} /></GroupedMetricSurface>
-              <GroupedMetricSurface dense><InlineMetric size="compact" label="Refunds" value={`${summary.refundedCount} · ${currency(summary.refundedAmount)}`} /></GroupedMetricSurface>
-              <GroupedMetricSurface dense><InlineMetric size="compact" label="Pending / processing" value={`${summary.waitingCount} / ${summary.processingCount}`} /></GroupedMetricSurface>
-              <GroupedMetricSurface dense><InlineMetric size="compact" label="Failed / incomplete" value={`${summary.failedCount} / ${summary.incompleteCount}`} /></GroupedMetricSurface>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <GroupedMetricSurface dense titleTone="blue" title="Volume Summary">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 lg:grid-cols-4">
+                  <InlineMetric size="compact" label="Average confirmed transaction" value={currency(summary.avgTransaction)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
+                  <InlineMetric size="compact" label="Card volume" value={currency(summary.cardVolume)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
+                  <InlineMetric size="compact" label="Crypto volume" value={currency(summary.cryptoVolume)} />
+                  <InlineMetric size="compact" label="Cash volume" value={currency(summary.cashVolume)} />
+                </div>
+              </GroupedMetricSurface>
+              <GroupedMetricSurface dense titleTone="blue" title="Payment Activity">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 lg:grid-cols-4">
+                  <InlineMetric size="compact" label="Tax collected" value={currency(summary.taxesCollected)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
+                  <InlineMetric size="compact" label="Refunds" value={`${summary.refundedCount} · ${currency(summary.refundedAmount)}`} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
+                  <InlineMetric size="compact" label="Pending / processing" value={`${summary.waitingCount} / ${summary.processingCount}`} />
+                  <InlineMetric size="compact" label="Failed / incomplete" value={`${summary.failedCount} / ${summary.incompleteCount}`} />
+                </div>
+              </GroupedMetricSurface>
             </div>
           </DashboardSection>
 

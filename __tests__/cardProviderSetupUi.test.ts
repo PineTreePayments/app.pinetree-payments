@@ -53,7 +53,7 @@ describe("card provider setup UI", () => {
     expect(source).toContain('provider="fluidpay"')
     expect(source).toContain('settlement="Fluid Pay merchant account"')
     expect(source).toContain("Accept card payments through Fluid Pay once merchant onboarding is approved.")
-    expect(source).toContain("Start Fluid Pay Setup")
+    expect(source).toContain('cta: "Start application"')
   })
 
   it("renders Stripe and Fluid Pay setup modal content", () => {

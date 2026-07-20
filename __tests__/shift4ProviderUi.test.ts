@@ -22,7 +22,7 @@ describe("Shift4 provider setup UI", () => {
   it("uses the application CTA and removes manual setup fields", () => {
     const source = read("app/dashboard/providers/page.tsx")
 
-    expect(source).toContain("Start Shift4 Application")
+    expect(source).toContain('cta: "Start application"')
     expect(source).toContain("Shift4 Merchant Application")
     expect(source).toContain("Complete the application to begin onboarding for card and crypto payment acceptance through Shift4.")
     expect(source).toContain("Begin Application")
