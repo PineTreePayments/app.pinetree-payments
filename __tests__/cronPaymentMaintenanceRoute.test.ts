@@ -60,7 +60,10 @@ describe("payment maintenance cron route", () => {
       watcherChecks: 1,
       watcherErrors: 0,
       reconciled: 1,
-      reconcileErrors: 0
+      reconcileErrors: 0,
+      lightningCandidates: 0,
+      lightningReconciled: 0,
+      lightningErrors: 0
     })
 
     const response = await GET(request("expected-secret"))
@@ -69,7 +72,8 @@ describe("payment maintenance cron route", () => {
     expect(response.status).toBe(200)
     expect(runPaymentMaintenanceTick).toHaveBeenCalledWith(expect.objectContaining({
       throttleMs: 1_000,
-      sweepLimit: 25
+      sweepLimit: 25,
+      lightningReconcileLimit: 25
     }))
     expect(body).toMatchObject({
       runId: "run-1",

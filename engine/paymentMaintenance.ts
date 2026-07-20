@@ -1,12 +1,14 @@
 import { getPaymentById } from "@/database"
 import {
   getPaymentMaintenanceCandidates,
-  getTerminalPaymentMaintenanceCandidates
+  getTerminalPaymentMaintenanceCandidates,
+  getLightningReconciliationCandidates
 } from "@/database/paymentMaintenance"
 import { getPaymentEvents } from "@/database/paymentEvents"
 import { getTransactionByPaymentId } from "@/database/transactions"
 import { CHECKOUT_TIMEOUT_MS } from "./config"
 import { runPaymentWatcher } from "./checkPaymentOnce"
+import { reconcileSpeedLightningPayment } from "./lightningSpeedReconciliation"
 import { paymentHasProcessingEvidence } from "./paymentEvidence"
 import { markPaymentIncomplete } from "./paymentStateActions"
 import {
@@ -14,6 +16,12 @@ import {
   type TerminalPaymentStatus
 } from "./reconcileTransaction"
 import { sweepStalePayments, type StalePaymentSweepSummary } from "./stalePaymentSweep"
+
+// Payments with no checkout-session poller active for at least this long
+// before a background reconciliation pass will consider re-asking Speed -
+// keeps this from duplicating the customer-facing checkout poller's own
+// work during a payment's first few minutes (lib/lightning/lightningStatusPoller.ts).
+const LIGHTNING_RECONCILE_MIN_AGE_MS = 3 * 60_000
 
 const DEFAULT_THROTTLE_MS = 60_000
 const DEFAULT_WATCHER_TIMEOUT_MS = 4_000
@@ -111,6 +119,9 @@ export type PaymentMaintenanceSummary = {
   watcherErrors: number
   reconciled: number
   reconcileErrors: number
+  lightningCandidates: number
+  lightningReconciled: number
+  lightningErrors: number
 }
 
 export type PaymentFreshnessResult = {
@@ -212,6 +223,7 @@ export async function runPaymentMaintenanceTick(options?: {
   watcherLimit?: number
   reconcileLimit?: number
   watcherTimeoutMs?: number
+  lightningReconcileLimit?: number
   now?: number
 }): Promise<PaymentMaintenanceSummary> {
   const lease = getMaintenanceLease()
@@ -237,7 +249,10 @@ export async function runPaymentMaintenanceTick(options?: {
     watcherChecks: 0,
     watcherErrors: 0,
     reconciled: 0,
-    reconcileErrors: 0
+    reconcileErrors: 0,
+    lightningCandidates: 0,
+    lightningReconciled: 0,
+    lightningErrors: 0
   }
 
   if (lease.running) {
@@ -325,8 +340,29 @@ export async function runPaymentMaintenanceTick(options?: {
       }
     }
 
+    let lightningReconciled = 0
+    let lightningErrors = 0
+    const lightningLimit = Math.max(1, Math.min(options?.lightningReconcileLimit ?? 5, 25))
+    const lightningCutoff = new Date(now - LIGHTNING_RECONCILE_MIN_AGE_MS).toISOString()
+    const lightningCandidates = await getLightningReconciliationCandidates({
+      limit: lightningLimit,
+      cutoff: lightningCutoff
+    })
+    for (const payment of lightningCandidates) {
+      try {
+        const result = await reconcileSpeedLightningPayment(payment)
+        if (result.checked) lightningReconciled += 1
+      } catch (error) {
+        lightningErrors += 1
+        console.warn("[payment-maintenance] lightning reconciliation failed", {
+          paymentId: payment.id,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+
     const completedAt = new Date(options?.now ?? Date.now()).toISOString()
-    const failures = sweep.failures + watcherErrors + reconcileErrors
+    const failures = sweep.failures + watcherErrors + reconcileErrors + lightningErrors
     const summary: PaymentMaintenanceSummary = {
       runId,
       startedAt,
@@ -345,7 +381,10 @@ export async function runPaymentMaintenanceTick(options?: {
       watcherChecks,
       watcherErrors,
       reconciled,
-      reconcileErrors
+      reconcileErrors,
+      lightningCandidates: lightningCandidates.length,
+      lightningReconciled,
+      lightningErrors
     }
     console.info("[payment-maintenance] run completed", summary)
     return summary

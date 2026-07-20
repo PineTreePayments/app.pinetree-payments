@@ -91,4 +91,30 @@ describe("POST /api/webhooks/speed - connected-account event routing", () => {
 
     expect(mocks.scheduleLightningSweepProcessing).not.toHaveBeenCalled()
   })
+
+  it("returns 400 for an invalid signature, without retrying", async () => {
+    mocks.processWebhook.mockRejectedValue(new Error("Webhook verification failed"))
+
+    const { POST } = await import("@/app/api/webhooks/speed/route")
+    const body = JSON.stringify({ type: "payment.paid" })
+    const response = await POST(
+      new Request("https://app.test/api/webhooks/speed", { method: "POST", body }) as unknown as import("next/server").NextRequest
+    )
+
+    expect(response.status).toBe(400)
+  })
+
+  it("returns 500 (not a silently-acknowledged 200) when processing genuinely fails, so Speed retries delivery", async () => {
+    mocks.processWebhook.mockRejectedValue(new Error("database unavailable"))
+
+    const { POST } = await import("@/app/api/webhooks/speed/route")
+    const body = JSON.stringify({ type: "payment.paid" })
+    const response = await POST(
+      new Request("https://app.test/api/webhooks/speed", { method: "POST", body }) as unknown as import("next/server").NextRequest
+    )
+
+    expect(response.status).toBe(500)
+    const payload = await response.json()
+    expect(payload).toEqual({ error: "Webhook processing failed" })
+  })
 })

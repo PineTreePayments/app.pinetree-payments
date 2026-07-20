@@ -22,7 +22,8 @@ export async function GET(req: NextRequest) {
       sweepLimit: 25,
       watcherLimit: 10,
       reconcileLimit: 25,
-      watcherTimeoutMs: 8_000
+      watcherTimeoutMs: 8_000,
+      lightningReconcileLimit: 25
     })
     return NextResponse.json(summary)
   } catch (err) {

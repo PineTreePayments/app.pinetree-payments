@@ -19,6 +19,7 @@ import { getPaymentEventByProviderEvent } from "@/database/paymentEvents"
 import { syncTransactionProgressForPayment } from "./transactionProgress"
 import { getMerchantStripeAccountId } from "./stripeConnect"
 import { releaseTerminalReaderClaim } from "@/database/merchantTerminalReaders"
+import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 
 export type WebhookInput = {
   provider: string
@@ -343,7 +344,7 @@ export async function processWebhook({
   // webhook has arrived. Log and return without writing anything to the database.
   const TERMINAL_STATES = new Set<string>(["CONFIRMED", "FAILED", "INCOMPLETE"])
   const currentStatus = normalizeToStrictPaymentStatus(payment.status)
-  if (provider === "lightning") {
+  if (provider === SPEED_PROVIDER_NAME) {
     console.info("[lightning/confirmation] webhook translated", {
       paymentId,
       provider_reference: payment.provider_reference || null,
@@ -394,7 +395,7 @@ export async function processWebhook({
       rawPayload: sanitizeProviderPayload(provider, payload)
     })
 
-    if (provider === "lightning") {
+    if (provider === SPEED_PROVIDER_NAME) {
       const finalizedPayment = await getPaymentById(paymentId)
       console.info("[lightning/confirmation] status advanced", {
         paymentId,
@@ -451,7 +452,7 @@ export async function processWebhook({
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error)
 
-    if (provider === "lightning") {
+    if (provider === SPEED_PROVIDER_NAME) {
       console.warn("[lightning/confirmation] status advance failed", {
         paymentId,
         provider_reference: payment.provider_reference || null,

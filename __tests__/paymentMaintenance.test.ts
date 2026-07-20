@@ -16,11 +16,16 @@ vi.mock("@/database/transactions", () => ({
 
 vi.mock("@/database/paymentMaintenance", () => ({
   getPaymentMaintenanceCandidates: vi.fn().mockResolvedValue([]),
-  getTerminalPaymentMaintenanceCandidates: vi.fn().mockResolvedValue([])
+  getTerminalPaymentMaintenanceCandidates: vi.fn().mockResolvedValue([]),
+  getLightningReconciliationCandidates: vi.fn().mockResolvedValue([])
 }))
 
 vi.mock("@/engine/checkPaymentOnce", () => ({
   runPaymentWatcher: vi.fn().mockResolvedValue(false)
+}))
+
+vi.mock("@/engine/lightningSpeedReconciliation", () => ({
+  reconcileSpeedLightningPayment: vi.fn()
 }))
 
 vi.mock("@/engine/paymentStateActions", () => ({
@@ -52,11 +57,13 @@ vi.mock("@/engine/stalePaymentSweep", () => ({
 import { getPaymentById } from "@/database"
 import {
   getPaymentMaintenanceCandidates,
-  getTerminalPaymentMaintenanceCandidates
+  getTerminalPaymentMaintenanceCandidates,
+  getLightningReconciliationCandidates
 } from "@/database/paymentMaintenance"
 import { getPaymentEvents } from "@/database/paymentEvents"
 import { getTransactionByPaymentId } from "@/database/transactions"
 import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
+import { reconcileSpeedLightningPayment } from "@/engine/lightningSpeedReconciliation"
 import {
   ensurePaymentFresh,
   resetPaymentMaintenanceLeaseForTests,
@@ -96,7 +103,9 @@ describe("payment maintenance", () => {
     vi.mocked(getTransactionByPaymentId).mockResolvedValue(null)
     vi.mocked(getPaymentMaintenanceCandidates).mockResolvedValue([])
     vi.mocked(getTerminalPaymentMaintenanceCandidates).mockResolvedValue([])
+    vi.mocked(getLightningReconciliationCandidates).mockResolvedValue([])
     vi.mocked(runPaymentWatcher).mockResolvedValue(false)
+    vi.mocked(reconcileSpeedLightningPayment).mockReset()
     vi.mocked(markPaymentIncomplete).mockResolvedValue(false)
     vi.mocked(reconcileTransactionForPayment).mockResolvedValue({ skipped: true } as never)
     vi.mocked(sweepStalePayments).mockResolvedValue({
@@ -247,6 +256,56 @@ describe("payment maintenance", () => {
     })
     expect(runPaymentWatcher).toHaveBeenCalledWith("pay-processing")
     expect(reconcileTransactionForPayment).toHaveBeenCalledWith("pay-confirmed", "CONFIRMED")
+  })
+
+  it("reconciles stuck Speed Lightning payments during a tick, independent of local evidence", async () => {
+    const lightningPayment = payment("PENDING", {
+      id: "pay-lightning",
+      provider: "lightning_speed",
+      network: "bitcoin_lightning",
+      provider_reference: "speed_pay_123"
+    })
+    vi.mocked(getLightningReconciliationCandidates).mockResolvedValue([lightningPayment] as never)
+    vi.mocked(reconcileSpeedLightningPayment).mockResolvedValue({
+      checked: true,
+      detected: true,
+      speedStatus: "paid",
+      status: "CONFIRMED"
+    })
+
+    const result = await runPaymentMaintenanceTick({ now: 120_000 })
+
+    expect(reconcileSpeedLightningPayment).toHaveBeenCalledWith(lightningPayment)
+    expect(getLightningReconciliationCandidates).toHaveBeenCalledWith({
+      limit: expect.any(Number),
+      cutoff: expect.any(String)
+    })
+    expect(result).toMatchObject({
+      lightningCandidates: 1,
+      lightningReconciled: 1,
+      lightningErrors: 0,
+      failures: 0
+    })
+  })
+
+  it("counts a failed Lightning reconciliation attempt without aborting the rest of the tick", async () => {
+    vi.mocked(getLightningReconciliationCandidates).mockResolvedValue([
+      payment("PROCESSING", { id: "pay-lightning-1", provider: "lightning_speed", network: "bitcoin_lightning" }),
+      payment("PROCESSING", { id: "pay-lightning-2", provider: "lightning_speed", network: "bitcoin_lightning" })
+    ] as never)
+    vi.mocked(reconcileSpeedLightningPayment)
+      .mockRejectedValueOnce(new Error("speed unavailable"))
+      .mockResolvedValueOnce({ checked: true, detected: false, speedStatus: "processing", status: "PROCESSING" })
+
+    const result = await runPaymentMaintenanceTick({ now: 120_000 })
+
+    expect(reconcileSpeedLightningPayment).toHaveBeenCalledTimes(2)
+    expect(result).toMatchObject({
+      lightningCandidates: 2,
+      lightningReconciled: 1,
+      lightningErrors: 1,
+      failures: 1
+    })
   })
 
   it("throttles concurrent watcher rechecks for the same payment into one underlying call", async () => {

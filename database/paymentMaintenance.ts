@@ -1,5 +1,6 @@
 import type { Payment } from "./payments"
 import { supabaseAdmin, supabase as supabaseAnon } from "./supabase"
+import { SPEED_PROVIDER_NAME } from "./merchantProviders"
 
 const db = supabaseAdmin || supabaseAnon
 
@@ -77,4 +78,36 @@ export async function getTerminalPaymentMaintenanceCandidates(
   }
 
   return Array.from(unique.values()).slice(0, boundedLimit)
+}
+
+/**
+ * Non-terminal Speed Lightning payments, oldest first. Unlike
+ * getPaymentMaintenanceCandidates, this is not gated on local "processing
+ * evidence" - for Speed there is no local signal to gate on (all evidence
+ * lives at Speed), and the whole point of reconciliation is to ask Speed
+ * directly for payments nobody is actively polling anymore. `cutoff` keeps
+ * this from racing the customer-facing checkout poller (lib/lightning/
+ * lightningStatusPoller.ts), which already covers a payment's first few
+ * minutes while a checkout session is typically still open.
+ */
+export async function getLightningReconciliationCandidates(input: {
+  limit: number
+  cutoff: string
+}): Promise<Payment[]> {
+  const boundedLimit = Math.max(1, Math.min(input.limit, 25))
+  const { data, error } = await db
+    .from("payments")
+    .select("*")
+    .in("status", ["PENDING", "PROCESSING"])
+    .eq("network", "bitcoin_lightning")
+    .eq("provider", SPEED_PROVIDER_NAME)
+    .lt("updated_at", input.cutoff)
+    .order("updated_at", { ascending: true })
+    .limit(boundedLimit)
+
+  if (error) {
+    throw new Error(`Failed to load Lightning reconciliation candidates: ${error.message}`)
+  }
+
+  return (data || []) as Payment[]
 }

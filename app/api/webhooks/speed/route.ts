@@ -74,10 +74,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid webhook signature" }, { status: 400 })
     }
 
-    console.error("[webhooks/speed] non-critical processing error acknowledged", {
+    // Anything other than a signature failure is unexpected (DB error, unknown
+    // provider, etc.) - return 5xx so Speed retries delivery instead of
+    // silently dropping a payment event that PineTree failed to apply.
+    console.error("[webhooks/speed] processing failed - returning 5xx for retry", {
       error: message,
       bodyLength: rawBody.length
     })
-    return NextResponse.json({ received: true, processed: false, provider: "speed" })
+    return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 })
   }
 }

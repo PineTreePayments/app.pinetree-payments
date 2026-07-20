@@ -7,7 +7,8 @@ export function schedulePaymentMaintenance(trigger: string): void {
       await runPaymentMaintenanceTick({
         sweepLimit: 10,
         watcherLimit: 2,
-        reconcileLimit: 10
+        reconcileLimit: 10,
+        lightningReconcileLimit: 5
       })
     } catch (error) {
       console.warn("[payment-maintenance] tick failed", {

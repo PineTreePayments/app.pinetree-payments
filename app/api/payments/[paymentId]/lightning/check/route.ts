@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getPaymentById, getPaymentIntentById } from "@/database"
 import { runPaymentWatcher } from "@/engine/checkPaymentOnce"
-import {
-  advancePaymentToTargetStatus,
-  processPaymentEvent
-} from "@/engine/eventProcessor"
+import { reconcileSpeedLightningPayment } from "@/engine/lightningSpeedReconciliation"
 import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
-import { isSpeedPaymentPaid } from "@/providers/lightning/speedClient"
-import { retrieveMerchantSpeedPayment } from "@/providers/lightning/speedAdapter"
 
 type Params = { params: Promise<{ paymentId: string }> }
 
@@ -62,44 +57,12 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   if (provider === SPEED_PROVIDER_NAME) {
-    const speedPaymentId = String(payment.provider_reference || "").trim()
-    if (!speedPaymentId) {
+    if (!String(payment.provider_reference || "").trim()) {
       return NextResponse.json({ error: "Missing Speed payment reference" }, { status: 400 })
     }
 
-    const speedPayment = await retrieveMerchantSpeedPayment(speedPaymentId, payment.merchant_id)
-    const detected = isSpeedPaymentPaid(speedPayment)
-    const speedStatus = String(speedPayment.status || "").toLowerCase().trim()
-
-    if (detected) {
-      await processPaymentEvent({
-        type: "payment.confirmed",
-        paymentId,
-        feeCaptureValidated: true
-      })
-    } else if (speedStatus === "processing" || speedStatus === "settling") {
-      await processPaymentEvent({
-        type: "payment.processing",
-        paymentId
-      })
-    } else if (
-      speedStatus === "expired" ||
-      speedStatus === "cancelled" ||
-      speedStatus === "canceled"
-    ) {
-      await advancePaymentToTargetStatus(paymentId, "INCOMPLETE", {
-        providerEvent: "payment.expired",
-        rawPayload: { speedPaymentId, speedStatus }
-      })
-    }
-
-    const updatedPayment = await getPaymentById(paymentId)
-    return NextResponse.json({
-      checked: true,
-      detected,
-      speedStatus: String(speedPayment.status || ""),
-      status: String(updatedPayment?.status || payment.status || "").toUpperCase()
-    })
+    const result = await reconcileSpeedLightningPayment(payment)
+    return NextResponse.json(result)
   }
 
   const detected = await runPaymentWatcher(paymentId)

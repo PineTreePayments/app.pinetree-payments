@@ -14,6 +14,7 @@ import { getPaymentById } from "@/database"
 import { watchPaymentOnce } from "./paymentWatcher"
 import { StoredPaymentSplitMetadata } from "@/types/payment"
 import { markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
+import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 
 /**
  * Load a payment by ID and run a single blockchain check via watchPaymentOnce.
@@ -55,9 +56,26 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
     return checkNwcPaymentOnce(payment.id)
   }
 
-  // Speed Lightning is reconciled by its signed webhook and the authenticated
-  // Lightning check route, never by an EVM/Solana RPC scan.
+  // Speed Lightning is never checked via an EVM/Solana RPC scan. Its signed
+  // webhook and the authenticated customer-facing Lightning check route both
+  // reconcile it while a checkout session is active; this call site covers
+  // an explicit on-demand recheck (e.g. a merchant viewing a stuck payment)
+  // once no checkout session is polling it anymore, via the same shared
+  // reconciliation helper.
   if (String(payment.network || "").trim().toLowerCase() === "bitcoin_lightning") {
+    if (String(payment.provider || "").toLowerCase() === SPEED_PROVIDER_NAME) {
+      const { reconcileSpeedLightningPayment } = await import("./lightningSpeedReconciliation")
+      try {
+        const result = await reconcileSpeedLightningPayment(payment)
+        return result.detected
+      } catch (error) {
+        console.error("[checkPaymentOnce] speed lightning reconciliation failed", {
+          paymentId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+        return false
+      }
+    }
     return false
   }
 
