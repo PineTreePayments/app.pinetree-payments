@@ -715,10 +715,6 @@ function EngineSettingStatus({
     return primaryActionButtonClass
   }
 
-  function secondaryButtonClass() {
-    return "rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:bg-gray-50"
-  }
-
   function compactPrimaryButtonClass() {
     return "inline-flex h-10 items-center justify-center rounded-lg bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
   }
@@ -1519,9 +1515,11 @@ function EngineSettingStatus({
                     <p className="mt-1 text-sm leading-5 text-gray-500">
                       {getCardProviderModalSubtitle(activeProvider)}
                     </p>
-                    <div className="mt-3 rounded-lg bg-blue-50 px-3.5 py-3 text-xs leading-5 text-blue-800">
-                      PineTree will keep this provider status updated after approval is completed.
-                    </div>
+                    {activeProvider !== "stripe" ? (
+                      <div className="mt-3 rounded-lg bg-blue-50 px-3.5 py-3 text-xs leading-5 text-blue-800">
+                        PineTree will keep this provider status updated after approval is completed.
+                      </div>
+                    ) : null}
                   </>
                 ) : null}
               </div>
@@ -1549,7 +1547,7 @@ function EngineSettingStatus({
 
             {activeProvider === "coinbase" && (
               <div className="mb-4 space-y-4">
-                <p className="text-sm text-black">
+                <p className="text-sm leading-5 text-gray-600">
                   Log into Coinbase Business and generate an API key.
                 </p>
 
@@ -1561,6 +1559,13 @@ function EngineSettingStatus({
                 >
                   Open Coinbase Business
                 </a>
+
+                <input
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  placeholder="Enter Coinbase API Key"
+                  className={lightningInputClass()}
+                />
               </div>
             )}
 
@@ -1578,28 +1583,17 @@ function EngineSettingStatus({
                     }}
                   />
                 ) : (
-                  <div className="space-y-3">
-                    <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-4">
-                      <p className="text-sm font-semibold text-blue-900">
-                        {stripeConnection.connectionStatus === "pending_verification"
-                          ? "Verification pending"
-                          : stripeConnection.connectionStatus === "active"
-                            ? "Stripe is connected"
-                            : "Stripe account disabled"}
-                      </p>
-                      <p className="mt-1.5 text-xs leading-5 text-blue-700">
-                        {getStripeProviderStatusLine(getProvider("stripe"))}
-                      </p>
-                    </div>
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={closeProviderModal}
-                        className={secondaryButtonClass()}
-                      >
-                        Close
-                      </button>
-                    </div>
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-4">
+                    <p className="text-sm font-semibold text-blue-900">
+                      {stripeConnection.connectionStatus === "pending_verification"
+                        ? "Verification pending"
+                        : stripeConnection.connectionStatus === "active"
+                          ? "Stripe is connected"
+                          : "Stripe account disabled"}
+                    </p>
+                    <p className="mt-1.5 text-xs leading-5 text-blue-700">
+                      {getStripeProviderStatusLine(getProvider("stripe"))}
+                    </p>
                   </div>
                 )}
               </div>
@@ -1629,25 +1623,8 @@ function EngineSettingStatus({
               </div>
             )}
 
-            {activeProvider === "coinbase" && (
-                <input
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  placeholder="Enter Coinbase API Key"
-                  className="w-full border border-gray-300 rounded p-2 mb-4 text-black bg-white"
-                />
-              )}
-
             {isManagedCardProvider(activeProvider) && activeProvider !== "stripe" && (
-            <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 border-t border-gray-100 bg-white p-4 sm:-mx-5 sm:-mb-5 sm:flex-row sm:items-center sm:justify-between sm:p-5 sticky bottom-0">
-              <button
-                type="button"
-                onClick={closeProviderModal}
-                className={`${secondaryButtonClass()} w-full sm:w-auto`}
-              >
-                Cancel
-              </button>
-
+            <div className="-mx-4 -mb-4 flex flex-col-reverse gap-2 border-t border-gray-100 bg-white p-4 sm:-mx-5 sm:-mb-5 sm:flex-row sm:items-center sm:justify-end sm:p-5 sticky bottom-0">
               <div className="flex w-full flex-col gap-1 sm:w-auto sm:items-end">
                 <button
                   type="button"
@@ -1671,18 +1648,11 @@ function EngineSettingStatus({
             )}
 
             {activeProvider === "coinbase" && (
-            <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
-              <button
-                onClick={closeProviderModal}
-                className="px-3 py-1.5 text-sm border rounded bg-white text-black w-full sm:w-auto"
-              >
-                Cancel
-              </button>
-
+            <div className="-mx-4 -mb-4 flex border-t border-gray-100 bg-white p-4 sm:-mx-5 sm:-mb-5 sm:p-5">
               <button
                 onClick={() => saveProvider(activeProvider)}
                 disabled={loading}
-                className={`${primaryActionButtonClass} w-full sm:w-auto`}
+                className={`${primaryActionButtonClass} w-full sm:ml-auto sm:w-auto`}
               >
                 {loading ? "Saving..." : "Save"}
               </button>

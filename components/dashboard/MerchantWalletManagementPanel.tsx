@@ -72,16 +72,6 @@ type WalletOperation = {
 
 type ActivityData = { operations: WalletOperation[]; nextCursor: string | null }
 
-const CAPABILITY_LABELS: Record<keyof PineTreeWalletCapabilities, string> = {
-  balances: "Balances",
-  activity: "Activity",
-  withdrawals: "Withdrawals",
-  payouts: "Payouts",
-  swaps: "Swaps",
-  automaticPayouts: "Automatic payouts",
-  automaticConversion: "Automatic conversion",
-}
-
 async function callWalletApi<T>(
   path: string,
   accessToken: string | null,
@@ -273,8 +263,6 @@ export default function MerchantWalletManagementPanel({ accessToken }: { accessT
         </button>
       </div>
 
-      <CapabilitySummary capabilities={capabilities} />
-
       <BalancesCard balances={balances} />
 
       <div className="flex flex-wrap gap-2">
@@ -288,8 +276,6 @@ export default function MerchantWalletManagementPanel({ accessToken }: { accessT
       </div>
 
       <ActivityCard activity={activity} />
-
-      <PreferencesCard />
 
       {activeDialog === "withdraw" ? (
         <SendDialog
@@ -305,36 +291,6 @@ export default function MerchantWalletManagementPanel({ accessToken }: { accessT
       ) : null}
 
     </div>
-  )
-}
-
-function CapabilitySummary({ capabilities }: { capabilities: CapabilitiesData | null }) {
-  if (!capabilities) return null
-  return (
-    <Card className="!p-4">
-      <p className="mb-2 text-xs font-semibold text-gray-500">Capabilities</p>
-      <div className="flex flex-wrap gap-2">
-        {(Object.keys(CAPABILITY_LABELS) as Array<keyof PineTreeWalletCapabilities>).map((key) => {
-          const available = Boolean(capabilities.capabilities[key])
-          return (
-            <span
-              key={key}
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                available ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
-              }`}
-            >
-              {CAPABILITY_LABELS[key]}: {available ? "Available" : "Not yet available"}
-            </span>
-          )
-        })}
-      </div>
-      {!capabilities.capabilities.balances ? (
-        <p className="mt-2 text-xs text-gray-400">
-          Some wallet operations are not yet enabled by your connected provider. PineTree will enable them
-          automatically once available - no action is needed from you.
-        </p>
-      ) : null}
-    </Card>
   )
 }
 
@@ -420,19 +376,6 @@ function ActivityCard({ activity }: { activity: ActivityData | null }) {
           ))}
         </div>
       )}
-    </Card>
-  )
-}
-
-function PreferencesCard() {
-  return (
-    <Card>
-      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
-        Automatic payouts & conversion
-      </p>
-      <p className="rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
-        Automatic conversion and scheduled payouts are not currently available for Bitcoin Lightning.
-      </p>
     </Card>
   )
 }

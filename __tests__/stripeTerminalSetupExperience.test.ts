@@ -168,12 +168,12 @@ describe("Stripe Terminal setup UI and POS wiring", () => {
     }
   })
 
-  it("offers complete reader actions and makes Tap to Pay informational only", () => {
+  it("offers complete reader actions and keeps the Tap to Pay routing option informational only, without a merchant-facing Tap to Pay card", () => {
     for (const action of ["Register Physical Reader", "Create Sandbox Reader", "Refresh Readers", "Set Default Reader"]) {
       expect(dashboard).toContain(action)
     }
-    expect(dashboard).toContain("Native PineTree mobile app required")
-    expect(dashboard).toContain("future native application using the Stripe Terminal SDK")
+    expect(dashboard).not.toContain("Native PineTree mobile app required")
+    expect(dashboard).not.toContain("future native application using the Stripe Terminal SDK")
     expect(dashboard).not.toMatch(/Enable Tap to Pay/)
     expect(dashboard).toContain('<option value="tap_to_pay_first" disabled>')
   })

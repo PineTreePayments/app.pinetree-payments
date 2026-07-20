@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
@@ -265,17 +265,6 @@ export default function ReportsPage() {
     }
   }
 
-  const dateRangeLabel = useMemo(() => {
-    if (!summary) return ""
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: summary.timeZone,
-      year: "numeric",
-      month: "short",
-      day: "numeric"
-    })
-    return `${formatter.format(new Date(summary.startDate))} – ${formatter.format(new Date(summary.endDate))}`
-  }, [summary])
-
   const reconciled = Boolean(
     summary?.reconciliation.providerMatchesGross &&
     summary.reconciliation.railMatchesGross &&
@@ -284,15 +273,7 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-5 md:space-y-7">
-      <div>
-        <h1 className={dashboardPageTitleClass}>Reports</h1>
-        {summary ? (
-          <p className="mt-1 text-sm text-gray-500">
-            {dateRangeLabel} · {summary.timeZone}
-            {summary.isInProgress ? " · In progress" : ""}
-          </p>
-        ) : null}
-      </div>
+      <h1 className={dashboardPageTitleClass}>Reports</h1>
 
       {!loading && summary ? (
         <DashboardHeroCard

@@ -311,14 +311,6 @@ export default function StripeTerminalSettings() {
         )}
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-3">
-        <div className="flex items-center justify-between gap-3">
-          <h4 className="text-sm font-semibold text-gray-950">Tap to Pay</h4>
-          <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">Native PineTree mobile app required</span>
-        </div>
-        <p className="mt-2 text-sm text-gray-600">Tap to Pay on iPhone and Android requires PineTree’s future native application using the Stripe Terminal SDK.</p>
-      </div>
-
       {error && <p className="text-sm text-red-600" role="alert">{error}</p>}
     </section>
   )

@@ -46,10 +46,20 @@ describe("MerchantWalletManagementPanel", () => {
   })
 
   it("keeps unsupported automation non-interactive and requires withdrawal review", () => {
-    expect(componentSource).toContain("Automatic conversion and scheduled payouts are not currently available for Bitcoin Lightning.")
+    expect(componentSource).not.toContain("Automatic conversion and scheduled payouts are not currently available for Bitcoin Lightning.")
     expect(componentSource).not.toContain("ToggleSwitch")
     expect(componentSource).toContain("Review")
     expect(componentSource).toContain("Confirm withdrawal")
+  })
+
+  it("removes the merchant-facing capability diagnostics summary from the Activity tab", () => {
+    expect(componentSource).not.toContain("function CapabilitySummary")
+    expect(componentSource).not.toContain("function PreferencesCard")
+    expect(componentSource).not.toContain("Not yet available")
+    expect(componentSource).not.toContain("<CapabilitySummary")
+    expect(componentSource).not.toContain("<PreferencesCard")
+    expect(componentSource).toContain("<BalancesCard")
+    expect(componentSource).toContain("<ActivityCard")
   })
 
   it("keeps one idempotency key for the dialog so rapid duplicate submits converge", () => {
