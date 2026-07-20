@@ -3,6 +3,8 @@
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   ResponsiveContainer,
@@ -57,7 +59,7 @@ export default function TransactionVolumeChart({
   gradientId = "transactionVolume"
 }: Props) {
   const hasVolume = hasTransactionVolume(data, series)
-  const displayData = prepareTransactionVolumeData(data, xKey)
+  const isStackedByRail = series.length > 1
 
   if (!hasVolume) {
     return (
@@ -67,6 +69,60 @@ export default function TransactionVolumeChart({
       </div>
     )
   }
+
+  const tooltipProps = {
+    formatter: (value: unknown, name: unknown) => [formatUsd(Number(value)), String(name)],
+    contentStyle: {
+      background: "#fff",
+      border: "1px solid #dbeafe",
+      borderRadius: "12px",
+      boxShadow: "0 18px 50px rgba(15,23,42,0.12)",
+      fontSize: "12px"
+    }
+  }
+
+  if (isStackedByRail) {
+    return (
+      <div className={className}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 16 }}>
+            <CartesianGrid stroke="#f1f5f9" strokeDasharray="2 8" vertical={false} />
+            <XAxis
+              dataKey={xKey}
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: "#64748b", fontSize: 9 }}
+              interval="preserveStartEnd"
+              minTickGap={36}
+              dy={8}
+            />
+            <YAxis
+              axisLine={false}
+              tickLine={false}
+              width={52}
+              tick={{ fill: "#64748b", fontSize: 9 }}
+              tickFormatter={(value) => formatUsd(Number(value))}
+            />
+            <Tooltip {...tooltipProps} cursor={{ fill: "rgba(37,99,235,0.06)" }} />
+            <Legend wrapperStyle={{ fontSize: "11px" }} />
+            {series.map((item, index) => (
+              <Bar
+                key={item.key}
+                dataKey={item.key}
+                name={item.label}
+                stackId="volume"
+                fill={item.color}
+                maxBarSize={56}
+                radius={index === series.length - 1 ? [4, 4, 0, 0] : 0}
+              />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+
+  const displayData = prepareTransactionVolumeData(data, xKey)
 
   return (
     <div className={className}>
@@ -97,24 +153,13 @@ export default function TransactionVolumeChart({
             tick={{ fill: "#64748b", fontSize: 9 }}
             tickFormatter={(value) => formatUsd(Number(value))}
           />
-          <Tooltip
-            formatter={(value, name) => [formatUsd(Number(value)), String(name)]}
-            contentStyle={{
-              background: "#fff",
-              border: "1px solid #dbeafe",
-              borderRadius: "12px",
-              boxShadow: "0 18px 50px rgba(15,23,42,0.12)",
-              fontSize: "12px"
-            }}
-          />
-          {series.length > 1 ? <Legend wrapperStyle={{ fontSize: "11px" }} /> : null}
+          <Tooltip {...tooltipProps} />
           {series.map((item) => (
             <Area
               key={item.key}
               type="monotone"
               dataKey={item.key}
               name={item.label}
-              stackId={series.length > 1 ? "volume" : undefined}
               stroke={item.color}
               strokeWidth={2}
               fill={`url(#${gradientId}-${item.key})`}

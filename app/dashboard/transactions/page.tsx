@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, X } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
@@ -17,7 +17,7 @@ import {
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
-import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
+import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import {
   buildNeutralInsight,
   countBy,
@@ -595,10 +595,12 @@ export default function TransactionsPage() {
         <div data-pinetree-overlay="true" className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-3">
           <div className="relative max-h-[90vh] w-full max-w-[900px] overflow-y-auto rounded-2xl bg-white shadow-xl">
             <button
+              type="button"
               onClick={() => setShowChart(false)}
-              className={`${primaryActionButtonClass} absolute right-3 top-3 z-10`}
+              aria-label="Close expanded chart"
+              className={`${modalCloseButtonClass} absolute right-3 top-3 z-10`}
             >
-              Close
+              <X size={18} aria-hidden="true" />
             </button>
             <ChartCard
               title={

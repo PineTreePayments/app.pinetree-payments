@@ -10,7 +10,8 @@ import {
   Link2,
   ReceiptText,
   ShoppingCart,
-  WalletCards
+  WalletCards,
+  X
 } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { AUTO_POLLING_ENABLED } from "@/lib/utils/polling"
@@ -24,7 +25,8 @@ import {
 
 import TransactionVolumeChart from "@/components/dashboard/TransactionVolumeChart"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
-import { PrimaryActionButton } from "@/components/ui/PrimaryActionButton"
+import { ExpandIconButton } from "@/components/ui/ExpandIconButton"
+import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import {
   ChartCard,
@@ -224,13 +226,10 @@ export default function DashboardPage() {
         }))}
       />
       {showExpand && (
-        <button
-          type="button"
+        <ExpandIconButton
           onClick={() => setChartExpanded(true)}
-          className="inline-flex h-8 items-center justify-center rounded-xl border border-gray-200 bg-white px-3 text-[11px] font-semibold text-gray-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100"
-        >
-          Expand
-        </button>
+          ariaLabel="Expand transaction volume chart"
+        />
       )}
     </div>
   )
@@ -375,10 +374,18 @@ export default function DashboardPage() {
             role="dialog"
             aria-modal="true"
             aria-label="Expanded transaction volume chart"
-            className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/70 bg-white p-4 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:p-5"
+            className="relative max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/70 bg-white p-4 shadow-[0_24px_80px_rgba(15,23,42,0.22)] sm:p-5"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <button
+              type="button"
+              onClick={() => setChartExpanded(false)}
+              aria-label="Close expanded chart"
+              className={`${modalCloseButtonClass} absolute right-3 top-3 z-10 sm:right-4 sm:top-4`}
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+            <div className="mb-4 flex flex-col gap-3 pr-12 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className={dashboardSectionLabelClass}>
                   Transaction Volume
@@ -387,9 +394,6 @@ export default function DashboardPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {renderChartControls(false)}
-                <PrimaryActionButton onClick={() => setChartExpanded(false)}>
-                  Close
-                </PrimaryActionButton>
               </div>
             </div>
             {renderVolumeChart("h-[320px] sm:h-[520px]", "overviewVolumeGradientExpanded")}
