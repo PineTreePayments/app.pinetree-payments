@@ -14,6 +14,7 @@
 
 import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
 import { resolveSpeedHeaderAccountId } from "./speedHeaderAccountResolver"
+import { classifyBitcoinWithdrawalDestination } from "@/providers/wallets/bitcoinWithdrawalDestination"
 import { getSpeedWalletCapabilities } from "./speedWalletCapabilities"
 import {
   SpeedWalletCapabilityUnavailableError,
@@ -193,17 +194,19 @@ export const speedWalletAdapter: WalletProviderAdapter = {
 
   validateWithdrawal(input) {
     if (input.asset !== "SATS") {
-      throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Bitcoin Lightning withdrawals must be denominated in SATS.")
+      throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Bitcoin withdrawals must be denominated in SATS.")
     }
     if (input.amountBaseUnits > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Withdrawal amount is too large.")
     }
-    const destination = input.destination.trim().toLowerCase()
-    const valid = /^ln(bc|tb|bcrt)[a-z0-9]{20,}$/.test(destination)
-      || /^lnurl[0-9a-z]{20,}$/.test(destination)
-      || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(destination)
-    if (!valid) {
-      throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Enter a valid Lightning invoice, LNURL, or Lightning address.")
+    // Bitcoin is one asset with two destination methods (Bitcoin Network
+    // on-chain address, or Lightning via BOLT11/Lightning Address) - this
+    // must accept both, never just Lightning-shaped destinations.
+    if (!classifyBitcoinWithdrawalDestination(input.destination).valid) {
+      throw new WalletApiRouteError(
+        "WALLET_VALIDATION_ERROR",
+        "Enter a valid Bitcoin address, Lightning Address, or Lightning invoice."
+      )
     }
   },
 
@@ -267,13 +270,20 @@ export const speedWalletAdapter: WalletProviderAdapter = {
 
   async createWithdrawal(context: WalletAdapterContext, input: WalletAdapterWriteInput) {
     return withTranslatedErrors(async () => {
+      const classified = classifyBitcoinWithdrawalDestination(input.destination)
+      if (!classified.valid) {
+        throw new WalletApiRouteError(
+          "WALLET_VALIDATION_ERROR",
+          "Enter a valid Bitcoin address, Lightning Address, or Lightning invoice."
+        )
+      }
       const payment = await createConnectedAccountWithdrawal({
         merchantId: context.merchantId,
         speedAccountId: context.providerAccountId,
         amount: Number(input.amountBaseUnits),
         currency: "SATS",
-        withdrawMethod: "lightning",
-        withdrawRequest: input.destination,
+        withdrawMethod: classified.method === "onchain" ? "onchain" : "lightning",
+        withdrawRequest: classified.normalized,
         note: input.note,
         idempotencyKey: input.idempotencyKey,
       })

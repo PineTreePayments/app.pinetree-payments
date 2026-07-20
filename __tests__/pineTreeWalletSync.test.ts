@@ -53,9 +53,13 @@ vi.mock("@/providers/lightning/speedClient", () => ({
   getPineTreeSpeedConfigStatus: mocks.getPineTreeSpeedConfigStatus,
 }))
 
-vi.mock("@/providers/lightning/speedWalletManagement", () => ({
-  getConnectedAccountBalances: mocks.getConnectedAccountBalances,
-}))
+vi.mock("@/providers/lightning/speedWalletManagement", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/providers/lightning/speedWalletManagement")>()
+  return {
+    ...actual,
+    getConnectedAccountBalances: mocks.getConnectedAccountBalances,
+  }
+})
 
 import {
   getPineTreeWalletBalanceSnapshot,

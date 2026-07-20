@@ -59,14 +59,23 @@ describe("Withdrawal destination address book", () => {
     )
   })
 
-  it("saves a Lightning BOLT11 invoice tagged with method 'lightning'", async () => {
+  it("saves a Lightning Address tagged with method 'lightning'", async () => {
     const destination = await saveWithdrawalDestination("merchant_1", {
       rail: "bitcoin",
       asset: "BTC",
-      destinationAddress: MAINNET_BOLT11,
+      destinationAddress: "merchant@speed.app",
     })
 
     expect(destination.method).toBe("lightning")
+  })
+
+  it("refuses to save a BOLT11 invoice - it's single-use, so saving it is useless and would clutter the address book", async () => {
+    await expect(saveWithdrawalDestination("merchant_1", {
+      rail: "bitcoin",
+      asset: "BTC",
+      destinationAddress: MAINNET_BOLT11,
+    })).rejects.toThrow("Lightning invoices are single-use and can't be saved. Save a Lightning Address instead.")
+    expect(mocks.createWithdrawalDestination).not.toHaveBeenCalled()
   })
 
   it("rejects an invalid Bitcoin destination before it ever reaches the database", async () => {

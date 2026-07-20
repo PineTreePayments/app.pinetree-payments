@@ -8,7 +8,11 @@ import {
   listRecentWalletWithdrawalsForActivity,
 } from "@/database/walletWithdrawalRequests"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
-import { getConnectedAccountBalances, type SpeedBalanceEntry } from "@/providers/lightning/speedWalletManagement"
+import {
+  getConnectedAccountBalances,
+  SpeedWalletProviderError,
+  type SpeedBalanceEntry,
+} from "@/providers/lightning/speedWalletManagement"
 import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
 import { PINETREE_INTERNAL_RAIL_PROVIDER, type PineTreeWalletRail } from "@/lib/pinetreeRailProviderMapping"
 
@@ -200,10 +204,27 @@ function normalizeBtcDecimal(value: unknown): string | null {
   return fraction.replace(/0+$/, "") ? `${whole}.${fraction.replace(/0+$/, "")}` : whole
 }
 
+/**
+ * Speed's live /balances response can return a SATS amount with a fractional
+ * component (e.g. 1596.27, observed against a real connected account) - the
+ * ledger apparently tracks sub-satoshi remainders internally, even though a
+ * satoshi is Bitcoin's actual smallest spendable unit. Round to the nearest
+ * whole satoshi (never truncate, which would systematically undercount)
+ * before the exact integer sats -> BTC conversion, so the stored balance
+ * never exceeds Bitcoin's 8-decimal-place convention and never desyncs from
+ * parseBtcToSats' 8-decimal-place withdrawal validation downstream.
+ */
+function roundDecimalStringToInteger(raw: string): bigint {
+  const [wholePart, fracPart = ""] = raw.split(".")
+  const whole = wholePart || "0"
+  if (!fracPart) return BigInt(whole)
+  return fracPart[0] >= "5" ? BigInt(whole) + BigInt(1) : BigInt(whole)
+}
+
 export function satsToBtcDecimal(value: unknown): string | null {
   const raw = String(value ?? "").trim()
-  if (!/^\d+$/.test(raw)) return null
-  const sats = BigInt(raw)
+  if (!/^\d+(?:\.\d+)?$/.test(raw)) return null
+  const sats = roundDecimalStringToInteger(raw)
   const whole = sats / BigInt(100_000_000)
   const fraction = (sats % BigInt(100_000_000)).toString().padStart(8, "0").replace(/0+$/, "")
   return fraction ? `${whole}.${fraction}` : whole.toString()
@@ -222,18 +243,39 @@ export function normalizeSpeedBitcoinBalance(entries: SpeedBalanceEntry[]): stri
 
 type SpeedBitcoinSyncState = "live" | "failed" | "not_configured" | "cached"
 
+/** Never logs the full account id - only enough to correlate log lines for one account across a session. */
+function redactSpeedAccountId(accountId: string): string {
+  if (!accountId) return "(none)"
+  return accountId.length > 10 ? `${accountId.slice(0, 9)}***${accountId.slice(-4)}` : "acct_***"
+}
+
 async function syncSpeedBitcoinBalance(merchantId: string): Promise<SpeedBitcoinSyncState> {
   const profile = await import("@/database/merchantLightningProfiles")
     .then((mod) => mod.getMerchantLightningProfile(merchantId))
     .catch(() => null)
   const accountId = String(profile?.speed_account_id || profile?.speed_connected_account_id || "").trim()
-  if (profile?.status !== "ready" || !accountId.startsWith("acct_")) return "not_configured"
+  if (profile?.status !== "ready" || !accountId.startsWith("acct_")) {
+    console.info("[pinetree-wallet-sync] speed_bitcoin_balance_not_configured", {
+      merchantId,
+      lightningProfileExists: Boolean(profile),
+      lightningProfileStatus: profile?.status || null,
+      speedAccountIdPresent: accountId.startsWith("acct_"),
+    })
+    return "not_configured"
+  }
 
   try {
     const response = await getConnectedAccountBalances({ merchantId, speedAccountId: accountId })
+    const currencyKeys = response.available.map((entry) => String(entry.target_currency || "").toUpperCase())
     const btc = normalizeSpeedBitcoinBalance(response.available)
     if (btc === null) throw new Error("Speed returned no canonical Bitcoin balance")
     await persistSyncedBalances(merchantId, [{ asset: "BTC", balance: btc }])
+    console.info("[pinetree-wallet-sync] speed_bitcoin_balance_sync_succeeded", {
+      merchantId,
+      speedAccountId: redactSpeedAccountId(accountId),
+      responseCurrencyKeys: currencyKeys,
+      normalizedBtcDecimal: btc,
+    })
     return "live"
   } catch (error) {
     // Non-fatal by design (the merchant falls back to their last cached
@@ -241,7 +283,11 @@ async function syncSpeedBitcoinBalance(merchantId: string): Promise<SpeedBitcoin
     // live Speed BTC sync didn't happen for this merchant this cycle.
     console.warn("[pinetree-wallet-sync] speed_bitcoin_balance_sync_failed", {
       merchantId,
+      speedAccountId: redactSpeedAccountId(accountId),
       reason: error instanceof Error ? error.message : "unknown_error",
+      providerCategory: error instanceof SpeedWalletProviderError ? error.category : null,
+      providerHttpStatus: error instanceof SpeedWalletProviderError ? error.httpStatus : null,
+      providerRetryable: error instanceof SpeedWalletProviderError ? error.retryable : null,
     })
     return "failed"
   }

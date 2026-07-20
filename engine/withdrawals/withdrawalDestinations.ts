@@ -57,6 +57,16 @@ export async function saveWithdrawalDestination(
         { status: 400 }
       )
     }
+    // BOLT11 invoices are single-use by design - saving one to the address
+    // book would just save something already useless for a second withdrawal.
+    // Only reusable destinations (an on-chain address, or a Lightning Address)
+    // may be saved.
+    if (classified.kind === "bolt11_invoice") {
+      throw Object.assign(
+        new Error("Lightning invoices are single-use and can't be saved. Save a Lightning Address instead."),
+        { status: 400 }
+      )
+    }
     method = classified.method
     destinationAddress = classified.normalized
   } else {

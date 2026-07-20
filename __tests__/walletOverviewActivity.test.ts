@@ -63,7 +63,7 @@ vi.mock("@/providers/lightning/speedClient", () => ({
 
 vi.stubGlobal("fetch", mocks.fetch)
 
-import { getWalletOverviewEngine } from "@/engine/walletOverview"
+import { getWalletOverviewEngine, refreshWalletBalancesEngine } from "@/engine/walletOverview"
 
 function makeWithdrawalRecord(overrides: Record<string, unknown> = {}) {
   return {
@@ -218,5 +218,81 @@ describe("walletOverview listRecentWalletActivity", () => {
 
     expect(result).toBeDefined()
     expect(result.recentOperations).toEqual([])
+  })
+})
+
+describe("walletOverview Bitcoin balance ownership", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.listRecentWalletOperationsForMerchant.mockResolvedValue([])
+    mocks.listSettlementWithdrawalsForMerchant.mockResolvedValue([])
+    mocks.listLightningPayoutJobsForMerchant.mockResolvedValue([])
+    mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([])
+    mocks.getMerchantWalletRows.mockResolvedValue([])
+    mocks.getSystemLastRun.mockResolvedValue(null)
+    mocks.getMarketPricesUSD.mockResolvedValue({ SOL: 100, ETH: 2000, BTC: 60000 })
+    mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(false)
+    mocks.setSystemLastRun.mockResolvedValue(undefined)
+  })
+
+  it("refreshWalletBalancesEngine (the function every Base/Solana save and rail-sync calls) never writes a BTC row - engine/pineTreeWalletSync.ts is the sole writer", async () => {
+    mocks.getMerchantAssetBalances.mockResolvedValue([
+      { asset: "BTC", balance: "0.00001596" },
+    ])
+    mocks.getMerchantSpeedProvider.mockResolvedValue({
+      accountId: "acct_live_123",
+      accountStatus: "active",
+      providerRowId: "row-1",
+    })
+    mocks.getMerchantNwcStatus.mockResolvedValue(null)
+    mocks.getPineTreeWalletProfile.mockResolvedValue(null)
+
+    await refreshWalletBalancesEngine("merch-001")
+
+    const upsertedAssets = mocks.upsertMerchantAssetBalances.mock.calls.flatMap(
+      (call) => (call[1] as Array<{ asset: string }>).map((b) => b.asset)
+    )
+    expect(upsertedAssets).not.toContain("BTC")
+  })
+
+  it("reads (never recomputes) the real persisted Speed BTC balance for the payment rail - a Dynamic BTC address is not required", async () => {
+    mocks.getMerchantAssetBalances.mockResolvedValue([
+      { asset: "BTC", balance: "0.00001596" },
+    ])
+    mocks.getMerchantSpeedProvider.mockResolvedValue({
+      accountId: "acct_live_123",
+      accountStatus: "active",
+      providerRowId: "row-1",
+    })
+    mocks.getMerchantNwcStatus.mockResolvedValue(null)
+    // No Dynamic-created Bitcoin wallet profile at all.
+    mocks.getPineTreeWalletProfile.mockResolvedValue(null)
+
+    const result = await getWalletOverviewEngine("merch-001")
+    const btcRail = result.paymentRails.find((rail) => rail.assetSymbol === "BTC")
+
+    expect(btcRail).toMatchObject({
+      provider: "Speed",
+      status: "Connected",
+      nativeBalance: 0.00001596,
+      usdValue: 0.00001596 * 60000,
+    })
+  })
+
+  it("never hardcodes the Bitcoin payment rail balance to zero when a real balance is persisted", async () => {
+    mocks.getMerchantAssetBalances.mockResolvedValue([{ asset: "BTC", balance: "0.5" }])
+    mocks.getMerchantSpeedProvider.mockResolvedValue({
+      accountId: "acct_live_123",
+      accountStatus: "active",
+      providerRowId: "row-1",
+    })
+    mocks.getMerchantNwcStatus.mockResolvedValue(null)
+    mocks.getPineTreeWalletProfile.mockResolvedValue(null)
+
+    const result = await getWalletOverviewEngine("merch-001")
+    const btcRail = result.paymentRails.find((rail) => rail.assetSymbol === "BTC")
+
+    expect(btcRail?.nativeBalance).not.toBe(0)
+    expect(btcRail?.nativeBalance).toBe(0.5)
   })
 })

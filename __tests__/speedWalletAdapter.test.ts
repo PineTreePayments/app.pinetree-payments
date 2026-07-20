@@ -73,7 +73,7 @@ describe("Speed wallet adapter normalization", () => {
     const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
     const result = await speedWalletAdapter.createWithdrawal!(
       { merchantId: "m1", providerAccountId: "acct_1" },
-      { asset: "SATS", amountBaseUnits: BigInt(1000), destination: "lnbc1invoice", idempotencyKey: "key" }
+      { asset: "SATS", amountBaseUnits: BigInt(1000), destination: "lnbc10u1p3xnhl2sp5jctpcz4nkfjzaqwsjssjfw0abcdefghijklmnopqrstuvwxyz", idempotencyKey: "key" }
     )
     expect(result).toMatchObject({
       providerReference: "is_1",
@@ -89,5 +89,47 @@ describe("Speed wallet adapter normalization", () => {
       .toThrow(expect.objectContaining({ code: "WALLET_VALIDATION_ERROR" }))
     expect(() => speedWalletAdapter.validateWithdrawal!({ asset: "SATS", amountBaseUnits: BigInt(1), destination: "not-a-lightning-destination", idempotencyKey: "k" }))
       .toThrow(expect.objectContaining({ code: "WALLET_VALIDATION_ERROR" }))
+  })
+
+  it("accepts a Bitcoin Network on-chain address - this used to be rejected outright by a Lightning-only regex", async () => {
+    const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
+    const onchainAddress = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+    expect(() => speedWalletAdapter.validateWithdrawal!({
+      asset: "SATS", amountBaseUnits: BigInt(1000), destination: onchainAddress, idempotencyKey: "k",
+    })).not.toThrow()
+
+    mocks.withdrawal.mockResolvedValue({
+      id: "is_2", status: "unpaid", amount: 1000, currency: "SATS",
+      target_amount: 1000, target_currency: "SATS", fees: 5, withdraw_method: "onchain",
+      withdraw_type: "onchain_address", created: 1, modified: 1,
+    })
+    await speedWalletAdapter.createWithdrawal!(
+      { merchantId: "m1", providerAccountId: "acct_1" },
+      { asset: "SATS", amountBaseUnits: BigInt(1000), destination: onchainAddress, idempotencyKey: "key" }
+    )
+    // The actual production bug: withdrawMethod was always hardcoded "lightning"
+    // regardless of destination shape, so an on-chain address would have been
+    // sent to Speed mislabeled as a Lightning payment.
+    expect(mocks.withdrawal).toHaveBeenCalledWith(expect.objectContaining({ withdrawMethod: "onchain" }))
+  })
+
+  it("accepts a Lightning Address and still submits withdrawMethod lightning", async () => {
+    const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
+    expect(() => speedWalletAdapter.validateWithdrawal!({
+      asset: "SATS", amountBaseUnits: BigInt(1000), destination: "merchant@speed.app", idempotencyKey: "k",
+    })).not.toThrow()
+
+    mocks.withdrawal.mockResolvedValue({
+      id: "is_3", status: "unpaid", amount: 1000, currency: "SATS",
+      target_amount: 1000, target_currency: "SATS", fees: 1, withdraw_method: "lightning",
+      withdraw_type: "lightning_address", created: 1, modified: 1,
+    })
+    await speedWalletAdapter.createWithdrawal!(
+      { merchantId: "m1", providerAccountId: "acct_1" },
+      { asset: "SATS", amountBaseUnits: BigInt(1000), destination: "Merchant@Speed.App", idempotencyKey: "key" }
+    )
+    expect(mocks.withdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ withdrawMethod: "lightning", withdrawRequest: "merchant@speed.app" })
+    )
   })
 })

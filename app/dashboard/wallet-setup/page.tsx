@@ -36,6 +36,7 @@ import {
   ProviderStatusPill,
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
+import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import StatusBadge from "@/components/ui/StatusBadge"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
@@ -318,6 +319,18 @@ type WithdrawalAssetOption = {
   rail: WithdrawalRail
   asset: WithdrawalAsset
   balance: SyncedBalanceAsset | null
+}
+
+type BitcoinTransferType = "onchain" | "lightning"
+
+type SavedWithdrawalDestination = {
+  id: string
+  rail: WithdrawalRail
+  asset: WithdrawalAsset
+  method: BitcoinTransferType | null
+  destination_address: string
+  label: string
+  is_default: boolean
 }
 
 type AssetDropdownOption = {
@@ -1924,6 +1937,7 @@ function WithdrawalFormShell({
   selectedBalance,
   diagnostics,
   debugEnabled,
+  accessToken,
   onAssetSelect,
   onDestinationChange,
   onAmountChange,
@@ -1954,6 +1968,7 @@ function WithdrawalFormShell({
   selectedBalance: SyncedBalanceAsset | null
   diagnostics: WithdrawalDiagnostics
   debugEnabled?: boolean
+  accessToken: string | null
   onAssetSelect: (rail: WithdrawalRail, asset: WithdrawalAsset) => void
   onDestinationChange: (value: string) => void
   onAmountChange: (value: string) => void
@@ -1965,6 +1980,86 @@ function WithdrawalFormShell({
   onOpenWallet?: () => void
   onFinishSetup?: () => void
 }) {
+  // Bitcoin is one asset with two destination methods. This toggle is a UI
+  // filter/hint only - the merchant-entered destination is what's actually
+  // validated and classified server-side (providers/wallets/bitcoinWithdrawalDestination.ts).
+  const [bitcoinTransferType, setBitcoinTransferType] = useState<BitcoinTransferType>("onchain")
+  const [savedDestinations, setSavedDestinations] = useState<SavedWithdrawalDestination[]>([])
+  const [saveThisDestination, setSaveThisDestination] = useState(false)
+  const [saveDestinationLabel, setSaveDestinationLabel] = useState("")
+  const [savingDestination, setSavingDestination] = useState(false)
+  const [saveDestinationError, setSaveDestinationError] = useState("")
+  const [removingDestinationId, setRemovingDestinationId] = useState<string | null>(null)
+
+  const savedDestinationsMethod = rail === "bitcoin" ? bitcoinTransferType : undefined
+
+  const fetchSavedDestinations = useCallback(async () => {
+    if (!accessToken) return
+    const params = new URLSearchParams({ rail })
+    if (savedDestinationsMethod) params.set("method", savedDestinationsMethod)
+    try {
+      const res = await fetch(`/api/wallets/pinetree-wallet/withdrawal-destinations?${params}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        credentials: "include",
+        cache: "no-store",
+      })
+      if (!res.ok) return
+      const json = (await res.json()) as { destinations?: SavedWithdrawalDestination[] }
+      setSavedDestinations(json.destinations || [])
+    } catch {
+      // Saved destinations are a convenience layer - a fetch failure just
+      // means the quick-pick list is empty; manual entry always still works.
+    }
+  }, [accessToken, rail, savedDestinationsMethod])
+
+  useEffect(() => {
+    void fetchSavedDestinations()
+  }, [fetchSavedDestinations])
+
+  async function handleSaveDestination() {
+    const trimmedDestination = destinationAddress.trim()
+    if (!accessToken || !trimmedDestination) return
+    setSavingDestination(true)
+    setSaveDestinationError("")
+    try {
+      const res = await fetch("/api/wallets/pinetree-wallet/withdrawal-destinations", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rail,
+          asset,
+          destination_address: trimmedDestination,
+          label: saveDestinationLabel.trim(),
+        }),
+      })
+      const json = (await res.json()) as { error?: string }
+      if (!res.ok) {
+        setSaveDestinationError(json.error || "Couldn't save this destination.")
+        return
+      }
+      setSaveThisDestination(false)
+      setSaveDestinationLabel("")
+      void fetchSavedDestinations()
+    } catch {
+      setSaveDestinationError("Couldn't save this destination.")
+    } finally {
+      setSavingDestination(false)
+    }
+  }
+
+  async function handleRemoveDestination(id: string) {
+    if (!accessToken) return
+    setRemovingDestinationId(id)
+    try {
+      const res = await fetch(`/api/wallets/pinetree-wallet/withdrawal-destinations/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (res.ok) void fetchSavedDestinations()
+    } finally {
+      setRemovingDestinationId(null)
+    }
+  }
   const amountTrimmed = amountDecimal.trim()
   const selectedBalanceAmount = selectedBalance?.balance ?? null
   const selectedBalanceKnown = selectedBalanceAmount !== null && selectedBalance?.status === "synced"
@@ -2205,15 +2300,100 @@ function WithdrawalFormShell({
         </div>
       ) : null}
 
+      {rail === "bitcoin" ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase text-gray-500">Transfer type</p>
+          <SegmentedButtons
+            ariaLabel="Bitcoin transfer type"
+            value={bitcoinTransferType}
+            onChange={setBitcoinTransferType}
+            options={[
+              { value: "onchain", label: "Bitcoin Network" },
+              { value: "lightning", label: "Lightning" },
+            ]}
+          />
+        </div>
+      ) : null}
+
+      {savedDestinations.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase text-gray-500">Saved destinations</p>
+          <div className="flex flex-wrap gap-1.5">
+            {savedDestinations.map((saved) => (
+              <div
+                key={saved.id}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-white/70 px-2 py-1.5 text-xs"
+              >
+                <button
+                  type="button"
+                  onClick={() => onDestinationChange(saved.destination_address)}
+                  className="font-medium text-gray-600 hover:text-blue-600"
+                  title={saved.destination_address}
+                >
+                  {saved.label || `${saved.destination_address.slice(0, 6)}...${saved.destination_address.slice(-4)}`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRemoveDestination(saved.id)}
+                  disabled={removingDestinationId === saved.id}
+                  aria-label={`Remove saved destination ${saved.label || saved.destination_address}`}
+                  className="text-gray-400 hover:text-red-500 disabled:opacity-50"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase text-gray-500">Send to</p>
         <input
           value={destinationAddress}
           onChange={(event) => onDestinationChange(event.target.value)}
           aria-label="Destination address"
-          placeholder="Paste destination address"
+          placeholder={
+            rail === "bitcoin"
+              ? bitcoinTransferType === "onchain"
+                ? "Paste a Bitcoin address"
+                : "Paste a Lightning Address or invoice"
+              : "Paste destination address"
+          }
           className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 font-mono text-sm text-gray-900 outline-none transition placeholder:font-sans placeholder:text-gray-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
         />
+        {destinationAddress.trim() ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+            <label className="inline-flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={saveThisDestination}
+                onChange={(event) => setSaveThisDestination(event.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300"
+              />
+              Save this destination
+            </label>
+            {saveThisDestination ? (
+              <>
+                <input
+                  value={saveDestinationLabel}
+                  onChange={(event) => setSaveDestinationLabel(event.target.value)}
+                  placeholder="Label (optional)"
+                  className="h-7 w-40 rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-900 outline-none focus:border-blue-300"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSaveDestination()}
+                  disabled={savingDestination}
+                  className="inline-flex h-7 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 disabled:opacity-50"
+                >
+                  {savingDestination ? "Saving..." : "Save"}
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+        {saveDestinationError ? <p className="text-xs text-red-600">{saveDestinationError}</p> : null}
       </div>
 
       <div className="space-y-2">
@@ -8530,6 +8710,7 @@ function PineTreeWalletRuntime() {
                   selectedBalance={selectedWithdrawalBalance}
                   diagnostics={withdrawalDiagnostics}
                   debugEnabled={walletSyncDebugQueryEnabled}
+                  accessToken={accessTokenRef.current}
                   onAssetSelect={handleWithdrawalAssetSelect}
                   onDestinationChange={(value) => {
                     setWithdrawalDestination(value)
