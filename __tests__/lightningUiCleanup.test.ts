@@ -98,7 +98,7 @@ describe("Balances tab wallet details", () => {
     expect(balanceRowsSrc).toContain("No balances yet")
     expect(balanceRowsSrc).not.toContain("allAssets.map((row, index)")
     expect(balanceRowsSrc).not.toContain("ChevronRight")
-    expect(balanceRowsSrc).toContain('"Bitcoin Lightning"')
+    expect(balanceRowsSrc).toContain('"Bitcoin"')
     expect(balanceRowsSrc).toContain("Wallet address")
     expect(balanceRowsSrc).toContain('aria-label="Copy wallet address"')
     expect(balanceRowsSrc).not.toContain("Lightning settlement")

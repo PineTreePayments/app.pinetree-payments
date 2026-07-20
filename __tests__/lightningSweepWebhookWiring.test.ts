@@ -52,17 +52,10 @@ describe("legacy Lightning automation is inactive", () => {
     expect(speedWebhookRoute).not.toContain("scheduleLightningSweepProcessing")
   })
 
-  it("the wallet page-load route only schedules processing when a sweep is actually due, never unconditionally", () => {
-    expect(pinetreeManagedRoute).toContain(
-      "if (await hasProcessableLightningSweepForMerchant(merchantId)) {"
-    )
-    const guardIndex = pinetreeManagedRoute.indexOf(
-      "if (await hasProcessableLightningSweepForMerchant(merchantId)) {"
-    )
-    const scheduleIndex = pinetreeManagedRoute.indexOf("scheduleLightningSweepProcessing(")
-    expect(scheduleIndex).toBeGreaterThan(guardIndex)
-    // Must be inside the guard block, not a later sibling statement.
-    expect(scheduleIndex - guardIndex).toBeLessThan(150)
+  it("the wallet page-load route does not read or schedule obsolete sweeps", () => {
+    expect(pinetreeManagedRoute).not.toContain("hasProcessableLightningSweepForMerchant")
+    expect(pinetreeManagedRoute).not.toContain("scheduleLightningSweepProcessing")
+    expect(pinetreeManagedRoute).not.toContain("merchantLightningSweeps")
   })
 })
 

@@ -36,7 +36,6 @@ import {
   ProviderStatusPill,
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
-import MerchantWalletManagementPanel from "@/components/dashboard/MerchantWalletManagementPanel"
 import StatusBadge from "@/components/ui/StatusBadge"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
@@ -956,7 +955,7 @@ function btcDecimalToSats(value: string): string | null {
 function railDisplayName(rail: WithdrawalRail) {
   if (rail === "base") return "Base"
   if (rail === "solana") return "Solana"
-  return "Bitcoin Lightning"
+  return "Bitcoin"
 }
 
 function assetOptionKey(option: Pick<WithdrawalAssetOption, "rail" | "asset">) {
@@ -2512,7 +2511,7 @@ function BalanceRows({
   onSelectKey: (key: string) => void
 }) {
   const assetRailLabel = (rail: SyncedBalanceAsset["rail"]) =>
-    rail === "base" ? "Base" : rail === "solana" ? "Solana" : "Bitcoin Lightning"
+    rail === "base" ? "Base" : rail === "solana" ? "Solana" : "Bitcoin"
   const balanceOptions = useMemo(() => {
     const rows: SyncedBalanceAsset[] = []
     if (profileAddresses.base.length > 0) rows.push(...(sync?.balances.base ?? []))
@@ -8561,12 +8560,7 @@ function PineTreeWalletRuntime() {
               ) : null}
 
               {activeTab === "activity" ? (
-                <div className="space-y-5">
-                  <ActivityTab sync={walletSync} syncing={walletSyncing} />
-                  {lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready" ? (
-                    <MerchantWalletManagementPanel accessToken={accessTokenRef.current} />
-                  ) : null}
-                </div>
+                <ActivityTab sync={walletSync} syncing={walletSyncing} />
               ) : null}
 
             </div>

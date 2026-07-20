@@ -354,9 +354,7 @@ export async function getPineTreeWalletBalanceSnapshot(
       balance,
       usdValue: balance === null
         ? null
-        : def.rail === "bitcoin"
-          ? String(balance) === "0" ? 0 : null
-          : Number(balance) * price,
+        : Number(balance) * price,
       lastSyncedAt: row?.last_updated || null,
       status,
     }

@@ -360,26 +360,28 @@ describe("GET /api/wallets/lightning/pinetree-managed", () => {
     expect(mocks.ensureManagedLightningForMerchant).not.toHaveBeenCalled()
   })
 
-  it("schedules bounded sweep processing only when a sweep is actually due for this merchant", async () => {
+  it("does not read or schedule obsolete sweep processing in non-treasury mode", async () => {
     mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(false)
     mocks.getMerchantLightningProfile.mockResolvedValue(savedProfile({ status: "ready" }))
-    mocks.hasProcessableLightningSweepForMerchant.mockResolvedValue(true)
 
     const { GET } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
     await GET(request())
 
-    expect(mocks.hasProcessableLightningSweepForMerchant).toHaveBeenCalledWith(merchantId)
-    expect(mocks.scheduleLightningSweepProcessing).toHaveBeenCalledWith("wallet_page_load", { limit: 2 })
+    expect(mocks.hasProcessableLightningSweepForMerchant).not.toHaveBeenCalled()
+    expect(mocks.scheduleLightningSweepProcessing).not.toHaveBeenCalled()
   })
 
-  it("does not schedule sweep processing when nothing is due", async () => {
+  it("continues returning the profile without sweep maintenance side effects", async () => {
     mocks.isSpeedPlatformTreasurySweepEnabled.mockReturnValue(false)
     mocks.getMerchantLightningProfile.mockResolvedValue(savedProfile({ status: "ready" }))
-    mocks.hasProcessableLightningSweepForMerchant.mockResolvedValue(false)
 
     const { GET } = await import("@/app/api/wallets/lightning/pinetree-managed/route")
-    await GET(request())
+    const response = await GET(request())
+    const body = await response.json()
 
+    expect(response.status).toBe(200)
+    expect(body.profile.status).toBe("ready")
+    expect(mocks.hasProcessableLightningSweepForMerchant).not.toHaveBeenCalled()
     expect(mocks.scheduleLightningSweepProcessing).not.toHaveBeenCalled()
   })
 

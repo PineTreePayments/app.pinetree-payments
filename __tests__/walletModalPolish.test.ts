@@ -238,12 +238,15 @@ describe("Provider-branded wallet tab removed", () => {
     expect(src).not.toContain("Auto-settlement")
   })
 
-  it("mounts the provider-neutral Bitcoin Lightning wallet panel without exposing provider identity", () => {
+  it("does not mount a second Bitcoin Lightning wallet panel inside Activity", () => {
     const modalSrc = runtimeSrc().slice(
       runtimeSrc().indexOf('aria-labelledby="pinetree-wallet-modal-title"'),
       runtimeSrc().indexOf("// ---------------------------------------------------------------------------\n// Page")
     )
-    expect(modalSrc).toContain("MerchantWalletManagementPanel")
+    expect(modalSrc).not.toContain("MerchantWalletManagementPanel")
+    expect(modalSrc).not.toContain("Bitcoin Lightning</p>")
+    expect(modalSrc).not.toContain("<BalancesCard")
+    expect(modalSrc).not.toContain("<ActivityCard")
     expect(modalSrc).not.toContain("providerDisplayName")
     expect(modalSrc).not.toMatch(/\bSpeed\b/)
   })
@@ -264,6 +267,7 @@ describe("Provider-branded wallet tab removed", () => {
     expect(walletPage).toContain('{ key: "BTC", rail: "bitcoin", asset: "BTC"')
     expect(walletPage).toContain('bitcoin: ["BTC"]')
     expect(walletPage).toContain('railDisplayName(item.rail)')
+    expect(walletPage).toContain('return "Bitcoin"')
     expect(walletPage).not.toContain("/api/wallets/speed")
   })
 })

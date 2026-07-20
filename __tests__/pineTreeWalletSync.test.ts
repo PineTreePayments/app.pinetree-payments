@@ -347,7 +347,7 @@ describe("PineTree Wallet balance sync", () => {
         balance: {
           asset: "BTC",
           amount: "0.5",
-          usd_value: null,
+          usd_value: "30000.00",
           status: "stale",
         },
       }),
@@ -355,7 +355,7 @@ describe("PineTree Wallet balance sync", () => {
     expect(result.balances.bitcoin[0]).toMatchObject({
       asset: "BTC",
       balance: "0.5",
-      usdValue: null,
+      usdValue: 30000,
       status: "stale",
     })
     expect(serialized).not.toContain("speed")

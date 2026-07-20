@@ -35,59 +35,30 @@ describe("scheduleLightningSweepProcessing", () => {
     resetLightningSweepMaintenanceLeaseForTests()
   })
 
-  it("defers the actual processing via after() - never runs synchronously inline", () => {
+  it("does not schedule obsolete automatic sweep processing", () => {
     scheduleLightningSweepProcessing("webhook:speed")
     expect(mocks.processQueuedLightningSweeps).not.toHaveBeenCalled()
-    expect(mocks.afterCallbacks.length).toBe(1)
+    expect(mocks.afterCallbacks.length).toBe(0)
   })
 
-  it("processes a bounded batch once the deferred callback runs", async () => {
+  it("ignores requested batch limits without processing funds", async () => {
     scheduleLightningSweepProcessing("webhook:speed", { limit: 3 })
     await flushScheduled()
-    expect(mocks.processQueuedLightningSweeps).toHaveBeenCalledWith({ limit: 3 })
+    expect(mocks.processQueuedLightningSweeps).not.toHaveBeenCalled()
   })
 
-  it("defaults to a limit of 5 when none is given", async () => {
+  it("remains inert for wallet page-load triggers", async () => {
     scheduleLightningSweepProcessing("wallet_page_load")
     await flushScheduled()
-    expect(mocks.processQueuedLightningSweeps).toHaveBeenCalledWith({ limit: 5 })
+    expect(mocks.processQueuedLightningSweeps).not.toHaveBeenCalled()
   })
 
-  it("throttles overlapping ticks on a warm instance instead of running every call", async () => {
-    scheduleLightningSweepProcessing("webhook:speed")
-    await flushScheduled()
-    expect(mocks.processQueuedLightningSweeps).toHaveBeenCalledTimes(1)
-
-    // Immediately schedule again - within the throttle window.
-    scheduleLightningSweepProcessing("webhook:speed")
-    await flushScheduled()
-    expect(mocks.processQueuedLightningSweeps).toHaveBeenCalledTimes(1)
-  })
-
-  it("never throws or crashes the caller when processing fails", async () => {
-    mocks.processQueuedLightningSweeps.mockRejectedValue(new Error("db unavailable"))
-    scheduleLightningSweepProcessing("webhook:speed")
-    await expect(flushScheduled()).resolves.toBeUndefined()
-  })
-
-  it("releases the lease after success so a later (non-throttled) call can run again", async () => {
+  it("keeps reset compatibility without enabling processing", async () => {
     scheduleLightningSweepProcessing("webhook:speed")
     await flushScheduled()
     resetLightningSweepMaintenanceLeaseForTests()
     scheduleLightningSweepProcessing("webhook:speed")
     await flushScheduled()
-    expect(mocks.processQueuedLightningSweeps).toHaveBeenCalledTimes(2)
-  })
-
-  it("releases the lease after a failure too, not just after success", async () => {
-    mocks.processQueuedLightningSweeps.mockRejectedValueOnce(new Error("transient"))
-    scheduleLightningSweepProcessing("webhook:speed")
-    await flushScheduled()
-
-    resetLightningSweepMaintenanceLeaseForTests()
-    mocks.processQueuedLightningSweeps.mockResolvedValueOnce({ scanned: 0, processed: 0, outcomes: {} })
-    scheduleLightningSweepProcessing("webhook:speed")
-    await flushScheduled()
-    expect(mocks.processQueuedLightningSweeps).toHaveBeenCalledTimes(2)
+    expect(mocks.processQueuedLightningSweeps).not.toHaveBeenCalled()
   })
 })

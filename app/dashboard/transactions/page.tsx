@@ -418,7 +418,7 @@ export default function TransactionsPage() {
   }, [chartRange, loadChartData])
 
   const filterSelectClass =
-    "h-9 w-full min-w-0 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-gray-800 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+    "h-9 w-full min-w-0 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-gray-600 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -504,7 +504,7 @@ export default function TransactionsPage() {
         <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-3.5">
           <div className="grid min-w-0 grid-cols-2 gap-2 sm:max-w-[520px]">
             <label className="min-w-0">
-              <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.11em] text-gray-500">Network</span>
+              <span className="mb-1 block text-[10px] font-normal uppercase tracking-[0.11em] text-gray-700">Network</span>
               <div className="relative">
                 <select
                   aria-label="Network filter"
@@ -523,7 +523,7 @@ export default function TransactionsPage() {
               </div>
             </label>
             <label className="min-w-0">
-              <span className="mb-1 block text-[10px] font-medium uppercase tracking-[0.11em] text-gray-500">Time</span>
+              <span className="mb-1 block text-[10px] font-normal uppercase tracking-[0.11em] text-gray-700">Time</span>
               <div className="relative">
                 <select
                   aria-label="Time filter"
