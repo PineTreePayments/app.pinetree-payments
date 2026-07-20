@@ -6,6 +6,7 @@ import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import { ArrowLeft, ChevronLeft, ChevronRight, Copy, RefreshCw, Search, X } from "lucide-react"
+import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import {
   CompactMetricTile,
   DashboardSection,
@@ -370,7 +371,7 @@ function UnauthorizedScreen() {
       </p>
       <Link
         href="/dashboard"
-        className="mt-2 rounded-xl bg-[#0052FF] px-5 py-2 text-sm font-semibold text-white hover:bg-[#003FCC]"
+        className={`${primaryActionButtonClass} mt-2`}
       >
         Back to Dashboard
       </Link>
@@ -752,7 +753,7 @@ export default function AdminTransactionsPage() {
 
             <button
               onClick={applyFilters}
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#003FCC]"
+              className={primaryActionButtonClass}
             >
               Apply
             </button>

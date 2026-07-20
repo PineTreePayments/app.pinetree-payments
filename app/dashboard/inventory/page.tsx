@@ -27,6 +27,7 @@ import {
   dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
+import { PrimaryActionButton, primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 
 type InventoryItem = {
   id: string
@@ -483,15 +484,10 @@ export default function InventoryPage() {
         title="Item Catalog"
         titleTone="blue"
         action={
-          <button
-            type="button"
-            onClick={openCreate}
-            disabled={!available}
-            className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <PrimaryActionButton onClick={openCreate} disabled={!available}>
             <PackagePlus size={13} />
             Add Item
-          </button>
+          </PrimaryActionButton>
         }
       >
         <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
@@ -535,13 +531,8 @@ export default function InventoryPage() {
               <p className="mt-1 max-w-md text-sm leading-6 text-gray-500">
                 {items.length
                   ? "Adjust your search or inventory status filter."
-                  : "Build a manual PineTree catalog, or connect an existing POS inventory source below."}
+                  : "Build a manual PineTree catalog, or connect an existing POS inventory source."}
               </p>
-              {!items.length && available && (
-                <button type="button" onClick={openCreate} className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
-                  Add Item
-                </button>
-              )}
             </div>
           ) : (
             <div className="max-h-[34rem] overflow-auto overscroll-contain">
@@ -725,7 +716,7 @@ export default function InventoryPage() {
             </div>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button onClick={() => setFormOpen(false)} disabled={saving} className="min-h-10 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700">Cancel</button>
-              <button onClick={() => void saveItem()} disabled={saving} className="min-h-10 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{saving ? "Saving..." : editing ? "Save Changes" : "Add Item"}</button>
+              <PrimaryActionButton onClick={() => void saveItem()} disabled={saving}>{saving ? "Saving..." : editing ? "Save Changes" : "Add Item"}</PrimaryActionButton>
             </div>
           </div>
         </div>
@@ -899,9 +890,9 @@ function ItemDetailModal({
             <button type="button" onClick={onClose} className="min-h-10 rounded-xl border border-gray-200 px-4 text-sm font-semibold text-gray-700">
               Close
             </button>
-            <button type="button" onClick={onEdit} className="min-h-10 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">
+            <PrimaryActionButton onClick={onEdit}>
               Edit Item
-            </button>
+            </PrimaryActionButton>
           </div>
         </div>
       </div>
@@ -1043,7 +1034,7 @@ function ConnectorSetupModal({
               <FileSpreadsheet className="mx-auto text-blue-600" size={24} />
               <p className="mt-2 text-sm font-semibold text-gray-950">Import inventory from CSV</p>
               <p className="mt-1 text-xs leading-5 text-gray-500">Existing CSV validation and import rules will be applied.</p>
-              <label className="mt-4 inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white">
+              <label className={`mt-4 cursor-pointer ${primaryActionButtonClass}`}>
                 <Upload size={15} />
                 {importing ? "Uploading..." : "Choose CSV"}
                 <input
@@ -1084,7 +1075,7 @@ function ConnectorSetupModal({
               type="button"
               onClick={isShopify && !shopifyStatus?.connected ? onConnectShopify : onCheck}
               disabled={busy || (isShopify && !shopifyStatus?.connected && (!shopifyShop.trim() || shopifyStatus?.configured === false))}
-              className="min-h-10 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className={primaryActionButtonClass}
             >
               {busy
                 ? "Checking..."

@@ -5,8 +5,12 @@ import type { ReactNode } from "react"
 // PineTree standard segmented button (source of truth: Payment Providers page
 // "All | Card Providers | Crypto Rails" filter). Every segmented button group
 // across the app must reuse these exact classes — do not fork the styling.
-export function segmentedButtonClass(active: boolean) {
-  return `shrink-0 rounded-lg border px-3 py-1.5 text-sm transition ${
+// The "compact" size exists only for rows that must fit every option on one
+// line without scrolling (e.g. Help Center nav); it changes metrics, never
+// colors or states.
+export function segmentedButtonClass(active: boolean, size: "default" | "compact" = "default") {
+  const metrics = size === "compact" ? "px-2 py-2 text-xs" : "px-3 py-1.5 text-sm"
+  return `shrink-0 rounded-lg border ${metrics} transition ${
     active
       ? "border-blue-300 bg-blue-50 font-semibold text-blue-700 shadow-sm"
       : "border-gray-200 bg-white/70 font-medium text-gray-500 hover:border-blue-200 hover:text-blue-600"

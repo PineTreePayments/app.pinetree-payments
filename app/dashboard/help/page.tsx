@@ -36,6 +36,7 @@ import {
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
 import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/SegmentedButtons"
+import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -619,7 +620,7 @@ export default function HelpCenterPage() {
 
       {/* Mobile tab row — top, sticky */}
       <div className="sticky top-0 z-10 -mx-4 bg-white/95 px-4 pb-2 pt-1 backdrop-blur-sm md:hidden">
-        <div className="flex gap-1.5 overflow-x-auto">
+        <div className="grid grid-cols-4 gap-1.5">
           {(
             [
               { id: "ai" as const, label: "Ask AI", icon: Bot },
@@ -632,10 +633,10 @@ export default function HelpCenterPage() {
               key={id}
               type="button"
               onClick={() => setMobileSection(id)}
-              className={`flex items-center gap-1.5 ${segmentedButtonClass(mobileSection === id)}`}
+              className={`flex min-w-0 items-center justify-center gap-1 ${segmentedButtonClass(mobileSection === id, "compact")}`}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
-              {label}
+              <span className="truncate">{label}</span>
             </button>
           ))}
         </div>
@@ -876,7 +877,7 @@ export default function HelpCenterPage() {
                   type="button"
                   onClick={() => void submitTicket()}
                   disabled={submittingTicket}
-                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                  className={`${primaryActionButtonClass} w-full`}
                 >
                   <Send size={16} />
                   {submittingTicket ? "Opening..." : "Open Ticket"}
@@ -938,7 +939,7 @@ export default function HelpCenterPage() {
                       type="button"
                       onClick={() => void submitFeedback()}
                       disabled={submittingFeedback}
-                      className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                      className={`${primaryActionButtonClass} w-full`}
                     >
                       <CheckCircle2 size={16} />
                       {submittingFeedback ? "Sending..." : "Send Feedback"}
@@ -1235,7 +1236,7 @@ export default function HelpCenterPage() {
                   type="button"
                   onClick={() => void submitTicket()}
                   disabled={submittingTicket}
-                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
+                  className={`${primaryActionButtonClass} w-full sm:w-auto`}
                 >
                   <Send size={16} />
                   {submittingTicket ? "Opening..." : "Open Ticket"}
@@ -1445,7 +1446,7 @@ export default function HelpCenterPage() {
               type="button"
               onClick={() => void submitFeedback()}
               disabled={submittingFeedback}
-              className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
+              className={`${primaryActionButtonClass} w-full sm:w-auto`}
             >
               <CheckCircle2 size={16} />
               {submittingFeedback ? "Sending..." : "Send Feedback"}
@@ -1764,7 +1765,7 @@ function TicketDetailModal({
                 type="button"
                 onClick={() => void handleSend()}
                 disabled={submitting || !followUp.trim()}
-                className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                className={primaryActionButtonClass}
               >
                 <Send size={14} />
                 {submitting ? "Sending..." : "Send"}
@@ -1988,7 +1989,7 @@ function ArticleModal({
             <a
               href="#support-ticket"
               onClick={onClose}
-              className="inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:w-auto"
+              className={`${primaryActionButtonClass} w-full sm:w-auto`}
             >
               Open a ticket
             </a>

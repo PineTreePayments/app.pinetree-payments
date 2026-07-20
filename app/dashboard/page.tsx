@@ -24,6 +24,7 @@ import {
 
 import TransactionVolumeChart from "@/components/dashboard/TransactionVolumeChart"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
+import { PrimaryActionButton } from "@/components/ui/PrimaryActionButton"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import {
   ChartCard,
@@ -386,13 +387,9 @@ export default function DashboardPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {renderChartControls(false)}
-                <button
-                  type="button"
-                  onClick={() => setChartExpanded(false)}
-                  className="inline-flex h-8 items-center justify-center rounded-xl bg-[#0052FF] px-3 text-[11px] font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100"
-                >
+                <PrimaryActionButton onClick={() => setChartExpanded(false)}>
                   Close
-                </button>
+                </PrimaryActionButton>
               </div>
             </div>
             {renderVolumeChart("h-[320px] sm:h-[520px]", "overviewVolumeGradientExpanded")}

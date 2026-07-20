@@ -6,6 +6,7 @@ import { Eye, EyeOff } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import Button from "@/components/ui/Button"
+import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import Card from "@/components/ui/Card"
 import {
   DashboardHeroCard,
@@ -381,8 +382,7 @@ export default function POSPage() {
         action={
           <button
             onClick={startCreatingTerminal}
-            style={{ boxShadow: "0 10px 24px rgba(0,82,255,0.18)" }}
-            className="inline-flex h-10 shrink-0 self-end items-center gap-1.5 rounded-md bg-[#1652f0] px-4 text-sm font-semibold text-white transition hover:brightness-110 active:scale-[0.98]"
+            className={`${primaryActionButtonClass} self-end`}
           >
             + New Terminal
           </button>

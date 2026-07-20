@@ -80,7 +80,6 @@ describe("Overview tab - polished PineTree summary", () => {
     expect(walletPage).toContain("function WalletStatusPill")
     expect(walletPage).toContain("min-h-0 w-[6.75rem] justify-center px-3 py-1 text-center text-[11px] leading-none")
     expect(walletOverviewSrc()).toContain("WalletStatusPill")
-    expect(runtimeSrc()).toContain("WalletStatusPill")
   })
 
   it("Overview only renders Total Balance and Wallet Summary wallet sections", () => {
@@ -455,16 +454,15 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(walletPage).not.toContain('if (step === "profile_synced") return "Wallet ready"')
   })
 
-  it("wallet modal header badge also displays Connected instead of Ready", () => {
-    const labelUsages = [...walletPage.matchAll(/label=\{walletStatus\}/g)]
-    expect(labelUsages.length).toBeGreaterThanOrEqual(1)
+  it("wallet modal header shows only the title and close control", () => {
     const modalHeader = walletPage.slice(
       walletPage.indexOf('aria-labelledby="pinetree-wallet-modal-title"'),
       walletPage.indexOf("</header>", walletPage.indexOf('aria-labelledby="pinetree-wallet-modal-title"'))
     )
-    expect(modalHeader).toContain("label={walletStatus}")
     expect(modalHeader).toContain("PineTree Wallet")
     expect(modalHeader).toContain('aria-label="Close PineTree Wallet"')
+    expect(modalHeader).not.toContain("WalletStatusPill")
+    expect(modalHeader).not.toContain("label={walletStatus}")
     expect(modalHeader).not.toContain("One merchant wallet profile")
   })
 

@@ -13,6 +13,7 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import PaymentStatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
+import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -189,7 +190,7 @@ function UnauthorizedScreen() {
       </p>
       <Link
         href="/dashboard"
-        className="mt-2 rounded-xl bg-[#0052FF] px-5 py-2 text-sm font-semibold text-white hover:bg-[#003FCC]"
+        className={`${primaryActionButtonClass} mt-2`}
       >
         Back to Dashboard
       </Link>

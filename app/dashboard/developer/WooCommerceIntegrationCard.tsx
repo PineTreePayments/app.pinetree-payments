@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { ProviderStatusPill } from "@/components/dashboard/DashboardPrimitives"
+import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import { supabase } from "@/lib/supabaseClient"
 
 const WEBHOOK_FORMAT = "/?wc-api=pinetree_webhook"
@@ -82,7 +83,7 @@ export default function WooCommerceIntegrationCard() {
             type="button"
             onClick={() => void downloadPlugin()}
             disabled={downloading}
-            className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+            className={primaryActionButtonClass}
           >
             {downloading ? "Downloading..." : "Download plugin"}
           </button>

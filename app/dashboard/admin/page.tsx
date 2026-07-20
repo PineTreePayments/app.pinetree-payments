@@ -26,6 +26,7 @@ import {
 } from "@/components/dashboard/displayHelpers"
 import PaymentStatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/SegmentedButtons"
+import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 
 // ─── Overview types ────────────────────────────────────────────────────────────
 
@@ -342,7 +343,7 @@ function UnauthorizedScreen() {
       </p>
       <Link
         href="/dashboard"
-        className="mt-2 rounded-xl bg-[#0052FF] px-5 py-2 text-sm font-semibold text-white hover:bg-[#003FCC]"
+        className={`${primaryActionButtonClass} mt-2`}
       >
         Back to Dashboard
       </Link>
@@ -1756,7 +1757,7 @@ export default function AdminPage() {
                     <button
                       onClick={sendReply}
                       disabled={submitting || !replyText.trim()}
-                      className="inline-flex items-center gap-2 rounded-xl bg-[#0052FF] px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#003FCC] disabled:cursor-not-allowed disabled:opacity-50"
+                      className={primaryActionButtonClass}
                     >
                       <Send size={14} />
                       {submitting ? "Sending…" : "Send Reply"}

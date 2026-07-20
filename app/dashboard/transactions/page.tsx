@@ -16,6 +16,7 @@ import {
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
+import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import {
   buildNeutralInsight,
   countBy,
@@ -588,7 +589,7 @@ export default function TransactionsPage() {
           <div className="relative max-h-[90vh] w-full max-w-[900px] overflow-y-auto rounded-2xl bg-white shadow-xl">
             <button
               onClick={() => setShowChart(false)}
-              className="absolute right-3 top-3 z-10 inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:min-h-10 sm:px-4"
+              className={`${primaryActionButtonClass} absolute right-3 top-3 z-10`}
             >
               Close
             </button>

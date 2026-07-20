@@ -10,6 +10,7 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import Link from "next/link"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
+import { PrimaryActionButton } from "@/components/ui/PrimaryActionButton"
 import {
   BUSINESS_PROFILE_COUNTRIES,
   US_STATES
@@ -895,13 +896,9 @@ export default function SettingsPage() {
       </DashboardSection>
 
       <div className="sticky bottom-3 z-10 rounded-2xl border border-gray-200 bg-white/95 p-3 shadow-[0_16px_40px_rgba(15,23,42,0.12)] backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
-        <button
-          onClick={saveSettings}
-          disabled={saving || !schemaReady}
-          className="inline-flex min-h-10 w-fit items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60 sm:px-5"
-        >
+        <PrimaryActionButton onClick={saveSettings} disabled={saving || !schemaReady}>
           {saving ? "Saving..." : "Save Settings"}
-        </button>
+        </PrimaryActionButton>
       </div>
     </div>
   )

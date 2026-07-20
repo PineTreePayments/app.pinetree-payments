@@ -156,15 +156,17 @@ export function GroupedMetricSurface({
   title,
   children,
   titleTone = "default",
-  className = ""
+  className = "",
+  dense = false
 }: {
   title?: string
   children: ReactNode
   titleTone?: "default" | "blue"
   className?: string
+  dense?: boolean
 }) {
   return (
-    <div className={cx(surfaceClass, "rounded-2xl p-4 sm:p-5", className)}>
+    <div className={cx(surfaceClass, dense ? "rounded-xl px-3.5 py-2.5" : "rounded-2xl p-4 sm:p-5", className)}>
       {title && (
         <p
           className={cx(
@@ -186,19 +188,28 @@ export function InlineMetric({
   label,
   value,
   detail,
-  className = ""
+  className = "",
+  size = "default"
 }: {
   label: string
   value: ReactNode
   detail?: ReactNode
   className?: string
+  size?: "default" | "compact"
 }) {
   return (
     <div className={cx("min-w-0", className)}>
       <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">
         {label}
       </p>
-      <div className={cx("mt-1 min-w-0", dashboardMetricValueClass)}>
+      <div
+        className={cx(
+          "min-w-0",
+          size === "compact"
+            ? "mt-0.5 text-base font-semibold leading-tight text-gray-950 sm:text-lg"
+            : cx("mt-1", dashboardMetricValueClass)
+        )}
+      >
         {value}
       </div>
       {detail && <div className="mt-1 text-xs leading-5 text-gray-500">{detail}</div>}

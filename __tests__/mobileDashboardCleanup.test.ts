@@ -53,9 +53,7 @@ describe("mobile dashboard hero cleanup", () => {
     const pos = read("app/dashboard/pos/page.tsx")
     const action = pos.match(/<button[\s\S]*?onClick=\{startCreatingTerminal\}[\s\S]*?<\/button>/)?.[0] ?? ""
 
-    expect(action).toContain("rounded-md")
-    expect(action).toContain("h-10")
-    expect(action).toContain("px-4")
+    expect(action).toContain("primaryActionButtonClass")
     expect(action).toContain("self-end")
     expect(action).not.toContain("w-full")
   })

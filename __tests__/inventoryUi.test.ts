@@ -19,7 +19,7 @@ describe("Inventory UI polish", () => {
     expect(addItemAction).toContain("disabled={!available}")
     expect(addItemAction).toContain("<PackagePlus")
     expect(addItemAction).toContain("Add Item")
-    expect(addItemAction).toContain("inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-5 text-sm")
+    expect(addItemAction).toContain("<PrimaryActionButton")
     expect(addItemAction).not.toContain("rounded-full")
     expect(addItemAction).not.toContain("w-full")
   })

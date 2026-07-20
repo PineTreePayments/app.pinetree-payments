@@ -8452,16 +8452,7 @@ function PineTreeWalletRuntime() {
             className="flex max-h-[92dvh] w-full max-w-[42rem] flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(15,23,42,0.30)] backdrop-blur-xl"
           >
             <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-7 sm:py-6">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-3">
-                  <h2 id="pinetree-wallet-modal-title" className="text-lg font-semibold text-gray-950">PineTree Wallet</h2>
-                  <WalletStatusPill
-                    label={walletStatus}
-                    tone="blue"
-                    className="ml-auto"
-                  />
-                </div>
-              </div>
+              <h2 id="pinetree-wallet-modal-title" className="min-w-0 flex-1 text-lg font-semibold text-gray-950">PineTree Wallet</h2>
               <button
                 type="button"
                 onClick={() => setWalletOpen(false)}

@@ -1,4 +1,5 @@
 import { ProviderStatusPill } from "@/components/dashboard/DashboardPrimitives"
+import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 
 export type ShopifyStatus = {
   connected: boolean
@@ -111,7 +112,7 @@ export function ShopifyIntegrationCardView({
                 type="button"
                 onClick={onConnect}
                 disabled={working || !shop.trim() || unavailable}
-                className="inline-flex min-h-9 items-center justify-center rounded-xl bg-blue-600 px-3.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className={primaryActionButtonClass}
               >
                 {working ? "Connecting..." : "Connect Shopify"}
               </button>

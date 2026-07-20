@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
+import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import { toast } from "sonner"
 import { ChevronRight, X } from "lucide-react"
 import {
@@ -710,7 +711,7 @@ function EngineSettingStatus({
   }
 
   function primaryButtonClass() {
-    return "rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+    return primaryActionButtonClass
   }
 
   function secondaryButtonClass() {
@@ -1091,13 +1092,13 @@ function EngineSettingStatus({
                 openProvider(provider)
               }
             }}
-            className={`h-9 rounded-md px-3.5 text-sm font-semibold shadow-sm transition ${
+            className={
               connected && !isManagedCard
-                ? "border border-red-200 bg-white text-red-600 hover:bg-red-50"
+                ? "inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-600 shadow-sm transition hover:bg-red-50"
               : provider === "lightning" && status === "Provider unavailable"
-                  ? "cursor-not-allowed border border-gray-200 bg-gray-100 text-gray-500"
-                  : "border border-blue-600 bg-blue-600 text-white hover:bg-blue-700"
-            }`}
+                  ? "inline-flex h-10 shrink-0 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-100 px-4 text-sm font-semibold text-gray-500 shadow-sm"
+                  : primaryActionButtonClass
+            }
             disabled={provider === "lightning" && status === "Provider unavailable"}
           >
             {primaryActionLabel}
@@ -1557,7 +1558,7 @@ function EngineSettingStatus({
                   href="https://www.coinbase.com/business"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-block bg-blue-600 text-white text-sm px-4 py-2 rounded hover:bg-blue-700"
+                  className={primaryActionButtonClass}
                 >
                   Open Coinbase Business
                 </a>
@@ -1682,7 +1683,7 @@ function EngineSettingStatus({
               <button
                 onClick={() => saveProvider(activeProvider)}
                 disabled={loading}
-                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded w-full sm:w-auto"
+                className={`${primaryActionButtonClass} w-full sm:w-auto`}
               >
                 {loading ? "Saving..." : "Save"}
               </button>

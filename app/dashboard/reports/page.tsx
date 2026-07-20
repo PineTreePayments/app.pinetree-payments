@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import StatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
+import { PrimaryActionButton } from "@/components/ui/PrimaryActionButton"
 import {
   DashboardHeroCard,
   DashboardSection,
@@ -300,15 +301,26 @@ export default function ReportsPage() {
           <button onClick={() => void download("pdf")} disabled={!summary || loading || Boolean(exporting)} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50">
             {exporting === "pdf" ? "Exporting…" : "Download PDF"}
           </button>
-          <button onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading} className="rounded-xl bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          <PrimaryActionButton onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading}>
             Email report
-          </button>
+          </PrimaryActionButton>
         </div>
       </div>
+
+      {!loading && summary ? (
+        <DashboardHeroCard
+          eyebrow={`${PERIODS.find((option) => option.value === period)?.label || "Report"}${summary.isInProgress ? " · In progress" : ""}`}
+          title="Confirmed gross sales"
+          value={currency(summary.grossVolume)}
+          detail={`${summary.confirmedCount} confirmed of ${summary.transactionCount} tracked transactions.`}
+          secondary={<div className="grid min-w-[300px] grid-cols-2 divide-x divide-blue-200/80"><InlineMetric label="Merchant net" value={currency(summary.netSettlements)} className="pr-4" /><InlineMetric label="PineTree fees" value={currency(summary.pineTreeFees)} className="pl-4" /></div>}
+        />
+      ) : null}
 
       <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-sm">
         <SegmentedButtons
           ariaLabel="Report period"
+          className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           value={period}
           onChange={(value) => { setPeriod(value); setError(null) }}
           options={PERIODS.map((option) => ({ value: option.value, label: option.label }))}
@@ -317,7 +329,7 @@ export default function ReportsPage() {
           <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
             <label className="text-xs font-semibold text-gray-600">Start date<input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 px-3 text-sm font-normal text-gray-900" /></label>
             <label className="text-xs font-semibold text-gray-600">End date<input type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 px-3 text-sm font-normal text-gray-900" /></label>
-            <button type="button" onClick={applyCustomRange} className="mt-auto h-10 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white">Apply range</button>
+            <PrimaryActionButton onClick={applyCustomRange} className="mt-auto">Apply range</PrimaryActionButton>
           </div>
         ) : null}
       </div>
@@ -332,14 +344,6 @@ export default function ReportsPage() {
         <div className="rounded-2xl border border-gray-200 bg-white px-5 py-12 text-center text-sm text-gray-500">Loading report…</div>
       ) : summary ? (
         <>
-          <DashboardHeroCard
-            eyebrow={`${PERIODS.find((option) => option.value === period)?.label || "Report"}${summary.isInProgress ? " · In progress" : ""}`}
-            title="Confirmed gross sales"
-            value={currency(summary.grossVolume)}
-            detail={`${summary.confirmedCount} confirmed of ${summary.transactionCount} tracked transactions.`}
-            secondary={<div className="grid min-w-[300px] grid-cols-2 divide-x divide-blue-200/80"><InlineMetric label="Merchant net" value={currency(summary.netSettlements)} className="pr-4" /><InlineMetric label="PineTree fees" value={currency(summary.pineTreeFees)} className="pl-4" /></div>}
-          />
-
           {!reconciled ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
               Report totals need review. Provider, rail, or crypto asset totals differ by {currency(summary.reconciliation.variance)}.
@@ -349,15 +353,15 @@ export default function ReportsPage() {
           )}
 
           <DashboardSection title="Summary" titleTone="blue">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <GroupedMetricSurface><InlineMetric label="Average confirmed transaction" value={currency(summary.avgTransaction)} /></GroupedMetricSurface>
-              <GroupedMetricSurface><InlineMetric label="Card volume" value={currency(summary.cardVolume)} /></GroupedMetricSurface>
-              <GroupedMetricSurface><InlineMetric label="Crypto volume" value={currency(summary.cryptoVolume)} /></GroupedMetricSurface>
-              <GroupedMetricSurface><InlineMetric label="Cash volume" value={currency(summary.cashVolume)} /></GroupedMetricSurface>
-              <GroupedMetricSurface><InlineMetric label="Tax collected" value={currency(summary.taxesCollected)} /></GroupedMetricSurface>
-              <GroupedMetricSurface><InlineMetric label="Refunds" value={`${summary.refundedCount} · ${currency(summary.refundedAmount)}`} /></GroupedMetricSurface>
-              <GroupedMetricSurface><InlineMetric label="Pending / processing" value={`${summary.waitingCount} / ${summary.processingCount}`} /></GroupedMetricSurface>
-              <GroupedMetricSurface><InlineMetric label="Failed / incomplete" value={`${summary.failedCount} / ${summary.incompleteCount}`} /></GroupedMetricSurface>
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <GroupedMetricSurface dense><InlineMetric size="compact" label="Average confirmed transaction" value={currency(summary.avgTransaction)} /></GroupedMetricSurface>
+              <GroupedMetricSurface dense><InlineMetric size="compact" label="Card volume" value={currency(summary.cardVolume)} /></GroupedMetricSurface>
+              <GroupedMetricSurface dense><InlineMetric size="compact" label="Crypto volume" value={currency(summary.cryptoVolume)} /></GroupedMetricSurface>
+              <GroupedMetricSurface dense><InlineMetric size="compact" label="Cash volume" value={currency(summary.cashVolume)} /></GroupedMetricSurface>
+              <GroupedMetricSurface dense><InlineMetric size="compact" label="Tax collected" value={currency(summary.taxesCollected)} /></GroupedMetricSurface>
+              <GroupedMetricSurface dense><InlineMetric size="compact" label="Refunds" value={`${summary.refundedCount} · ${currency(summary.refundedAmount)}`} /></GroupedMetricSurface>
+              <GroupedMetricSurface dense><InlineMetric size="compact" label="Pending / processing" value={`${summary.waitingCount} / ${summary.processingCount}`} /></GroupedMetricSurface>
+              <GroupedMetricSurface dense><InlineMetric size="compact" label="Failed / incomplete" value={`${summary.failedCount} / ${summary.incompleteCount}`} /></GroupedMetricSurface>
             </div>
           </DashboardSection>
 
@@ -371,9 +375,9 @@ export default function ReportsPage() {
           </DashboardSection>
 
           <DashboardSection title="Status breakdown" titleTone="blue">
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
               {Object.entries(summary.statusCounts).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
-                <div key={status} className="rounded-xl border border-gray-200 bg-white px-4 py-3"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{status}</p><p className="mt-1 text-xl font-semibold text-gray-950">{count}</p></div>
+                <div key={status} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2.5"><p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">{status}</p><p className="mt-0.5 text-base font-semibold leading-tight text-gray-950 sm:text-lg">{count}</p></div>
               ))}
             </div>
           </DashboardSection>
