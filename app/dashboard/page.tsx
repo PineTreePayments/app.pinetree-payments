@@ -23,6 +23,7 @@ import {
 } from "@/lib/dashboardChartData"
 
 import TransactionVolumeChart from "@/components/dashboard/TransactionVolumeChart"
+import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import {
   ChartCard,
@@ -210,21 +211,17 @@ export default function DashboardPage() {
   const chartDisplayData = normalizedChart.points
 
   const renderChartControls = (showExpand = true) => (
-    <div className="flex flex-wrap items-center gap-2">
-      {(["24H", "7D", "30D", "90D", "ALL"] as ChartRange[]).map((range) => (
-        <button
-          key={range}
-          type="button"
-          onClick={() => setChartRange(range)}
-          className={`inline-flex h-8 items-center justify-center rounded-md border px-3 text-[11px] font-semibold transition focus:outline-none focus:ring-4 focus:ring-blue-100 ${
-            chartRange === range
-              ? "border-[#0052FF] bg-[#0052FF] text-white"
-              : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-          }`}
-        >
-          {range === "ALL" ? "All" : range}
-        </button>
-      ))}
+    <div className="flex flex-wrap items-center gap-1.5">
+      <SegmentedButtons
+        ariaLabel="Chart range"
+        className="flex flex-wrap items-center gap-1.5"
+        value={chartRange}
+        onChange={setChartRange}
+        options={(["24H", "7D", "30D", "90D", "ALL"] as ChartRange[]).map((range) => ({
+          value: range,
+          label: range === "ALL" ? "All" : range,
+        }))}
+      />
       {showExpand && (
         <button
           type="button"

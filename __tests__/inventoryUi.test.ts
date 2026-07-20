@@ -24,13 +24,14 @@ describe("Inventory UI polish", () => {
     expect(addItemAction).not.toContain("w-full")
   })
 
-  it("keeps inventory filter pills pill-shaped", () => {
+  it("uses the shared PineTree segmented button component for inventory filters", () => {
     const filterButtons = inventory.slice(
       inventory.indexOf("(["),
       inventory.indexOf("{loading ? (")
     )
 
-    expect(filterButtons).toContain("shrink-0 rounded-full border px-3 py-2 text-xs font-semibold")
+    expect(inventory).toContain('import { SegmentedButtons } from "@/components/ui/SegmentedButtons"')
+    expect(filterButtons).toContain("<SegmentedButtons")
     expect(filterButtons).toContain('["ALL", "All"]')
     expect(filterButtons).toContain('["ACTIVE", "Active"]')
   })

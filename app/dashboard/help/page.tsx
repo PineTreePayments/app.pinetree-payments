@@ -35,6 +35,7 @@ import {
   dashboardPageTitleClass,
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
+import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/SegmentedButtons"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -618,7 +619,7 @@ export default function HelpCenterPage() {
 
       {/* Mobile tab row — top, sticky */}
       <div className="sticky top-0 z-10 -mx-4 bg-white/95 px-4 pb-2 pt-1 backdrop-blur-sm md:hidden">
-        <div className="flex gap-2 overflow-x-auto">
+        <div className="flex gap-1.5 overflow-x-auto">
           {(
             [
               { id: "ai" as const, label: "Ask AI", icon: Bot },
@@ -631,11 +632,7 @@ export default function HelpCenterPage() {
               key={id}
               type="button"
               onClick={() => setMobileSection(id)}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                mobileSection === id
-                  ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
-                  : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
-              }`}
+              className={`flex items-center gap-1.5 ${segmentedButtonClass(mobileSection === id)}`}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
               {label}
@@ -734,28 +731,19 @@ export default function HelpCenterPage() {
                   className="min-h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-[#0052FF] focus:bg-white focus:ring-4 focus:ring-blue-100"
                 />
               </div>
-              <div className="mt-2.5 flex gap-2 overflow-x-auto pb-0.5">
-                {["All", ...helpCategories].map((category) => {
-                  const active = category === selectedCategory
-                  return (
-                    <button
-                      key={category}
-                      type="button"
-                      onClick={() => {
-                        setSelectedCategory(category)
-                        setArticlesExpanded(false)
-                      }}
-                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                        active
-                          ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
-                          : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
-                      }`}
-                    >
-                      {category}
-                    </button>
-                  )
-                })}
-              </div>
+              <SegmentedButtons
+                ariaLabel="Help article category"
+                className="mt-2.5 flex gap-1.5 overflow-x-auto pb-0.5"
+                value={selectedCategory}
+                onChange={(category) => {
+                  setSelectedCategory(category)
+                  setArticlesExpanded(false)
+                }}
+                options={["All", ...helpCategories].map((category) => ({
+                  value: category,
+                  label: category,
+                }))}
+              />
             </div>
 
             <div className="overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-sm">
@@ -976,25 +964,13 @@ export default function HelpCenterPage() {
               </button>
             </div>
 
-            <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
-              {TICKET_FILTERS.map((filter) => {
-                const active = filter === ticketFilter
-                return (
-                  <button
-                    key={filter}
-                    type="button"
-                    onClick={() => setTicketFilter(filter)}
-                    className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                      active
-                        ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
-                        : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
-                    }`}
-                  >
-                    {filter}
-                  </button>
-                )
-              })}
-            </div>
+            <SegmentedButtons
+              ariaLabel="Ticket status filter"
+              className="mb-3 flex gap-1.5 overflow-x-auto pb-1"
+              value={ticketFilter}
+              onChange={setTicketFilter}
+              options={TICKET_FILTERS.map((filter) => ({ value: filter, label: filter }))}
+            />
 
             {ticketsLoading && (
               <div className="space-y-2">
@@ -1339,25 +1315,13 @@ export default function HelpCenterPage() {
             </button>
           </div>
 
-          <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1">
-            {TICKET_FILTERS.map((filter) => {
-              const active = filter === ticketFilter
-              return (
-                <button
-                  key={filter}
-                  type="button"
-                  onClick={() => setTicketFilter(filter)}
-                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                    active
-                      ? "border-[#0052FF] bg-[#0052FF] text-white shadow-sm"
-                      : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:bg-blue-50"
-                  }`}
-                >
-                  {filter}
-                </button>
-              )
-            })}
-          </div>
+          <SegmentedButtons
+            ariaLabel="Ticket status filter"
+            className="mb-3 flex gap-1.5 overflow-x-auto pb-1"
+            value={ticketFilter}
+            onChange={setTicketFilter}
+            options={TICKET_FILTERS.map((filter) => ({ value: filter, label: filter }))}
+          />
 
           {ticketsLoading && (
             <div className="space-y-2">

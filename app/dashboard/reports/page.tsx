@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import StatusBadge from "@/components/ui/StatusBadge"
+import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import {
   DashboardHeroCard,
   DashboardSection,
@@ -306,18 +307,12 @@ export default function ReportsPage() {
       </div>
 
       <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-sm">
-        <div className="flex flex-wrap gap-2">
-          {PERIODS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => { setPeriod(option.value); setError(null) }}
-              className={`rounded-full px-3.5 py-2 text-sm font-semibold transition ${period === option.value ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedButtons
+          ariaLabel="Report period"
+          value={period}
+          onChange={(value) => { setPeriod(value); setError(null) }}
+          options={PERIODS.map((option) => ({ value: option.value, label: option.label }))}
+        />
         {period === "custom" ? (
           <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
             <label className="text-xs font-semibold text-gray-600">Start date<input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 px-3 text-sm font-normal text-gray-900" /></label>

@@ -75,9 +75,55 @@ body.pinetree-modal-open {
   transform-origin: center;
 }
 
+/* Soft circular PineTree-blue glow beneath the pulsing waiting clock.
+   Must stay perfectly circular: the halo is a fixed 1:1 pseudo-element
+   centered on the icon, never sized from the parent's width alone. */
+.pinetree-waiting-glow {
+  position: relative;
+  isolation: isolate;
+}
+
+.pinetree-waiting-glow::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: -1;
+  width: 118%;
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle,
+    rgba(0, 82, 255, 0.22) 0%,
+    rgba(0, 82, 255, 0.09) 45%,
+    rgba(0, 82, 255, 0) 72%
+  );
+  filter: blur(6px);
+  pointer-events: none;
+  animation: pinetreeWaitingGlow 1.4s ease-in-out infinite;
+}
+
+@keyframes pinetreeWaitingGlow {
+  0%, 100% {
+    opacity: 0.4;
+    transform: translate(-50%, -50%) scale(0.92);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.06);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pinetree-waiting-indicator {
     animation: none;
+  }
+
+  .pinetree-waiting-glow::before {
+    animation: none;
+    opacity: 0.4;
   }
 }
 

@@ -12,6 +12,7 @@ import {
   MetricGrid,
 } from "@/components/dashboard/DashboardPrimitives"
 import PaymentStatusBadge from "@/components/ui/StatusBadge"
+import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -404,37 +405,21 @@ export default function AdminReportsPage() {
 
       {/* ── Period tabs ──────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex gap-1 overflow-x-auto rounded-2xl border border-gray-200/80 bg-white/90 p-1 shadow-[0_2px_8px_rgba(15,23,42,0.06)] sm:w-fit [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {PERIODS.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => setPeriod(p.value)}
-              className={`shrink-0 whitespace-nowrap rounded-xl px-2.5 py-1.5 text-xs font-medium transition-all sm:px-4 sm:py-2 sm:text-sm ${
-                period === p.value
-                  ? "bg-[#0052FF] text-white shadow-sm"
-                  : "text-gray-500 hover:text-gray-800"
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedButtons
+          ariaLabel="Report period"
+          className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          value={period}
+          onChange={setPeriod}
+          options={PERIODS.map((p) => ({ value: p.value, label: p.label }))}
+        />
 
-        <div className="flex gap-1.5">
-          {MODES.map((m) => (
-            <button
-              key={m.value}
-              onClick={() => setMode(m.value)}
-              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === m.value
-                  ? "border-[#0052FF] bg-[#0052FF] text-white"
-                  : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedButtons
+          ariaLabel="Report mode"
+          className="flex gap-1.5"
+          value={mode}
+          onChange={setMode}
+          options={MODES.map((m) => ({ value: m.value, label: m.label }))}
+        />
       </div>
 
       {loading ? (
@@ -680,41 +665,32 @@ export default function AdminReportsPage() {
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mr-1">
                           Status:
                         </span>
-                        {["all", "WAITING", "PROCESSING"].map((s) => (
-                          <button
-                            key={s}
-                            onClick={() => setStaleStatusFilter(s)}
-                            className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                              staleStatusFilter === s
-                                ? "border-gray-700 bg-gray-800 text-white"
-                                : "border-gray-200 text-gray-500 hover:border-gray-300"
-                            }`}
-                          >
-                            {s === "all" ? "All" : s === "WAITING" ? "Waiting" : "Processing"}
-                          </button>
-                        ))}
+                        <SegmentedButtons
+                          ariaLabel="Stale payment status filter"
+                          className="flex flex-wrap gap-1.5"
+                          value={staleStatusFilter}
+                          onChange={setStaleStatusFilter}
+                          options={["all", "WAITING", "PROCESSING"].map((s) => ({
+                            value: s,
+                            label: s === "all" ? "All" : s === "WAITING" ? "Waiting" : "Processing",
+                          }))}
+                        />
                         <span className="mx-1 text-gray-200 select-none">|</span>
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mr-1">
                           Eligibility:
                         </span>
-                        {[
-                          { v: "all", l: "All" },
-                          { v: "eligible_for_incomplete", l: "Eligible" },
-                          { v: "review_required", l: "Review Reqd" },
-                          { v: "recent_payment_not_eligible", l: "Recent" },
-                        ].map(({ v, l }) => (
-                          <button
-                            key={v}
-                            onClick={() => setStaleEligibilityFilter(v)}
-                            className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                              staleEligibilityFilter === v
-                                ? "border-[#0052FF] bg-[#0052FF] text-white"
-                                : "border-gray-200 text-gray-500 hover:border-gray-300"
-                            }`}
-                          >
-                            {l}
-                          </button>
-                        ))}
+                        <SegmentedButtons
+                          ariaLabel="Stale payment eligibility filter"
+                          className="flex flex-wrap gap-1.5"
+                          value={staleEligibilityFilter}
+                          onChange={setStaleEligibilityFilter}
+                          options={[
+                            { v: "all", l: "All" },
+                            { v: "eligible_for_incomplete", l: "Eligible" },
+                            { v: "review_required", l: "Review Reqd" },
+                            { v: "recent_payment_not_eligible", l: "Recent" },
+                          ].map(({ v, l }) => ({ value: v, label: l }))}
+                        />
                       </div>
 
                       {/* Table */}

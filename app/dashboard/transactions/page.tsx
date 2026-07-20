@@ -15,6 +15,7 @@ import {
   dashboardPageTitleClass,
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
+import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import {
   buildNeutralInsight,
   countBy,
@@ -603,20 +604,19 @@ export default function TransactionsPage() {
               className="border-0 pt-14 shadow-none"
             >
 
-            <div className="flex flex-wrap gap-2 mb-6">
-              {transactionChartRanges.map((range) => (
-                <button
-                  key={range.value}
-                  onClick={() => {
-                    setChartRange(range.value)
-                    void loadChartData(range.value, chartMode)
-                  }}
-                  className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${chartRange === range.value ? "bg-[#0052FF] text-white border-[#0052FF]" : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"}`}
-                >
-                  {range.label}
-                </button>
-              ))}
-            </div>
+            <SegmentedButtons
+              ariaLabel="Chart range"
+              className="mb-6 flex flex-wrap gap-1.5"
+              value={chartRange}
+              onChange={(value) => {
+                setChartRange(value)
+                void loadChartData(value, chartMode)
+              }}
+              options={transactionChartRanges.map((range) => ({
+                value: range.value,
+                label: range.label,
+              }))}
+            />
 
             <TransactionVolumeChart
               data={chartData}

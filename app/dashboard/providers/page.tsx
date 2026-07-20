@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
+import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import { toast } from "sonner"
 import { ChevronRight, X } from "lucide-react"
 import {
@@ -1308,22 +1309,16 @@ function EngineSettingStatus({
           />
         ) : null}
         <p className={dashboardSectionLabelClass}>Payment Providers</p>
-        <div className="flex flex-wrap gap-1.5">
-          {(["all", "card", "crypto"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setProviderFilter(f)}
-              className={`rounded-lg border px-3 py-1.5 text-sm transition ${
-                providerFilter === f
-                  ? "border-blue-300 bg-blue-50 font-semibold text-blue-700 shadow-sm"
-                  : "border-gray-200 bg-white/70 font-medium text-gray-500 hover:border-blue-200 hover:text-blue-600"
-              }`}
-            >
-              {f === "all" ? "All" : f === "card" ? "Card Providers" : "Crypto Rails"}
-            </button>
-          ))}
-        </div>
+        <SegmentedButtons
+          ariaLabel="Payment provider category"
+          value={providerFilter}
+          onChange={setProviderFilter}
+          options={[
+            { value: "all", label: "All" },
+            { value: "card", label: "Card Providers" },
+            { value: "crypto", label: "Crypto Rails" },
+          ]}
+        />
       </div>
 
       {(providerFilter === "all" || providerFilter === "card") && (

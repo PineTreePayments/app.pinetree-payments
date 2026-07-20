@@ -26,6 +26,7 @@ import {
   ProviderStatusPill,
   dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
+import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 
 type InventoryItem = {
   id: string
@@ -505,27 +506,18 @@ export default function InventoryPage() {
                   className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
                 />
               </label>
-              <div className="flex gap-1 overflow-x-auto pb-1">
-                {([
+              <SegmentedButtons
+                ariaLabel="Inventory status filter"
+                className="flex gap-1.5 overflow-x-auto pb-1"
+                value={filter}
+                onChange={setFilter}
+                options={([
                   ["ALL", "All"],
                   ["ACTIVE", "Active"],
                   ["LOW", "Low stock"],
                   ["OUT", "Out of stock"]
-                ] as Array<[Filter, string]>).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setFilter(value)}
-                    className={`shrink-0 rounded-full border px-3 py-2 text-xs font-semibold ${
-                      filter === value
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+                ] as Array<[Filter, string]>).map(([value, label]) => ({ value, label }))}
+              />
             </div>
           </div>
           {loading ? (

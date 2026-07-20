@@ -12,6 +12,7 @@ import {
   dashboardPageTitleClass,
 } from "@/components/dashboard/DashboardPrimitives"
 import Button from "@/components/ui/Button"
+import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -1568,22 +1569,12 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
       {showNavigation && mode === "developer" && (
       <div className="w-full max-w-full">
-        <div className="grid max-w-full grid-cols-2 gap-1 rounded-2xl border border-gray-200/80 bg-white/90 p-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.06)] backdrop-blur-sm sm:inline-grid sm:w-auto sm:grid-cols-3">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`min-w-0 rounded-xl px-3 py-2 text-center text-sm font-semibold transition-all duration-200 ease-out sm:px-3.5 sm:py-2 ${
-                tab === t.id
-                  ? "bg-blue-50 text-[#0052FF] shadow-sm ring-1 ring-blue-200/80"
-                  : "text-slate-600 hover:bg-gray-50 hover:text-slate-900"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedButtons
+          ariaLabel="Checkout section"
+          value={tab}
+          onChange={setTab}
+          options={TABS.map((t) => ({ value: t.id, label: t.label }))}
+        />
       </div>
       )}
 
@@ -1651,18 +1642,15 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 </div>
                 <div className="space-y-1.5">
                   <label className={labelClass}>Link Expiration</label>
-                  <div className="flex flex-wrap gap-2">
-                    {(Object.keys(EXPIRATION_LABELS) as Expiration[]).map((opt) => (
-                      <button key={opt} type="button" onClick={() => setExpiration(opt)}
-                        className={`rounded-xl border px-3.5 py-2 text-xs font-semibold transition-all ${
-                          expiration === opt
-                            ? "border-[#0052FF]/30 bg-[#0052FF]/8 text-[#0052FF] shadow-sm shadow-[#0052FF]/10"
-                            : "border-gray-200 bg-white text-gray-600 hover:border-[#0052FF]/20 hover:text-[#0052FF]"
-                        }`}>
-                        {EXPIRATION_LABELS[opt]}
-                      </button>
-                    ))}
-                  </div>
+                  <SegmentedButtons
+                    ariaLabel="Link expiration"
+                    value={expiration}
+                    onChange={setExpiration}
+                    options={(Object.keys(EXPIRATION_LABELS) as Expiration[]).map((opt) => ({
+                      value: opt,
+                      label: EXPIRATION_LABELS[opt],
+                    }))}
+                  />
                 </div>
                 {formError && (
                   <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">{formError}</p>
@@ -1680,24 +1668,20 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
 
           <DashboardSection title="Payment Link Organization" titleTone="blue">
             <div className="space-y-3">
-              <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Payment link status">
-                {(["active", "disabled", "expired", "archived"] as LinkFilter[]).map((filter) => (
-                  <button
-                    key={filter}
-                    type="button"
-                    role="tab"
-                    aria-selected={linkFilter === filter}
-                    onClick={() => setLinkFilter(filter)}
-                    className={`shrink-0 rounded-xl border px-3.5 py-2 text-xs font-semibold capitalize transition ${
-                      linkFilter === filter
-                        ? "border-blue-200 bg-blue-50 text-[#0052FF]"
-                        : "border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:text-[#0052FF]"
-                    }`}
-                  >
-                    {filter} <span className="ml-1 text-[10px] opacity-70">{linkCounts[filter]}</span>
-                  </button>
-                ))}
-              </div>
+              <SegmentedButtons
+                ariaLabel="Payment link status"
+                className="flex gap-1.5 overflow-x-auto pb-1"
+                value={linkFilter}
+                onChange={setLinkFilter}
+                options={(["active", "disabled", "expired", "archived"] as LinkFilter[]).map((filter) => ({
+                  value: filter,
+                  label: (
+                    <span className="capitalize">
+                      {filter} <span className="ml-1 text-[10px] opacity-70">{linkCounts[filter]}</span>
+                    </span>
+                  ),
+                }))}
+              />
             {loading ? (
               <div className="rounded-2xl border border-gray-200/80 bg-white p-8 shadow-[0_10px_30px_rgba(15,23,42,0.05)] text-center">
                 <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />

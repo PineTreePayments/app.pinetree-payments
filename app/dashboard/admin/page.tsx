@@ -25,6 +25,7 @@ import {
   formatDashboardNetwork,
 } from "@/components/dashboard/displayHelpers"
 import PaymentStatusBadge from "@/components/ui/StatusBadge"
+import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/SegmentedButtons"
 
 // ─── Overview types ────────────────────────────────────────────────────────────
 
@@ -759,7 +760,7 @@ export default function AdminPage() {
       </div>
 
       {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 rounded-2xl border border-gray-200/80 bg-white/90 p-1 w-fit shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
+      <div className="flex flex-wrap gap-1.5">
         {(
           [
             { key: "overview" as AdminTab, label: "Overview" },
@@ -770,23 +771,20 @@ export default function AdminPage() {
         ).map((tab) => (
           <button
             key={tab.key}
+            type="button"
             onClick={() => {
               setActiveTab(tab.key)
               setSelectedTicketId(null)
               setDetail(null)
             }}
-            className={`flex items-center gap-1.5 rounded-xl px-5 py-2 text-sm font-medium transition-all ${
-              activeTab === tab.key
-                ? "bg-[#0052FF] text-white shadow-sm"
-                : "text-gray-500 hover:text-gray-800"
-            }`}
+            className={`flex items-center gap-1.5 ${segmentedButtonClass(activeTab === tab.key)}`}
           >
             {tab.label}
             {"badge" in tab && tab.badge !== null && tab.badge > 0 && (
               <span
                 className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${
                   activeTab === tab.key
-                    ? "bg-white/20 text-white"
+                    ? "bg-blue-100 text-blue-700"
                     : "bg-gray-100 text-gray-500"
                 }`}
               >
@@ -1242,21 +1240,12 @@ export default function AdminPage() {
 
           {/* Filters row */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="flex flex-wrap gap-1.5">
-              {STATUS_FILTERS.map((s) => (
-                <button
-                  key={s.value}
-                  onClick={() => setStatusFilter(s.value)}
-                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                    statusFilter === s.value
-                      ? "border-[#0052FF] bg-[#0052FF] text-white"
-                      : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
+            <SegmentedButtons
+              ariaLabel="Ticket status filter"
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={STATUS_FILTERS.map((s) => ({ value: s.value, label: s.label }))}
+            />
             <div className="flex flex-1 items-center gap-2 sm:ml-auto sm:max-w-sm">
               <select
                 value={priorityFilter}
@@ -1729,13 +1718,10 @@ export default function AdminPage() {
                     {ACTION_STATUSES.map((s) => (
                       <button
                         key={s.value}
+                        type="button"
                         onClick={() => updateStatus(detail.ticket.id, s.value)}
                         disabled={updatingStatus || detail.ticket.status === s.value}
-                        className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                          detail.ticket.status === s.value
-                            ? "border-[#0052FF] bg-[#0052FF] text-white"
-                            : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50"
-                        }`}
+                        className={`${segmentedButtonClass(detail.ticket.status === s.value)} disabled:cursor-not-allowed disabled:opacity-50`}
                       >
                         {s.label}
                       </button>
