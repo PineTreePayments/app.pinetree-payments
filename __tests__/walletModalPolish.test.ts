@@ -178,7 +178,7 @@ describe("Balances tab - compact selected asset detail", () => {
 
   it("BTC wallet address can exist while BTC balance indexing remains pending", () => {
     const src = balanceRowsSrc()
-    expect(walletPage).toContain("const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned")
+    expect(walletPage).toContain("railReadiness?.bitcoin_lightning.walletProvisioned ??")
     expect(walletPage).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(src).toContain("bitcoinPayoutEntries[0]?.address")
     expect(src).toContain("formatBalance(row.balance, row.asset)")
@@ -225,20 +225,6 @@ describe("Provider-branded wallet tab removed", () => {
     expect(walletPage).not.toContain("function WalletRows(")
     expect(walletPage).not.toContain("function ReceiveRow(")
     expect(walletPage).not.toContain("LightningSettlementPanel")
-  })
-
-  it("Bitcoin Lightning payout is compact and PineTree-facing in Withdraw only", () => {
-    const src = withdrawalFormSrc()
-    expect(walletOverviewSrc()).not.toContain("Bitcoin Lightning payout")
-    expect(src).toContain("Bitcoin Lightning payout")
-    expect(src).toContain("Destination: {lightningPayout.destinationLabel}")
-    expect(src).toContain('"PineTree BTC Wallet"')
-    expect(src).toContain('"Not set"')
-    expect(src).toContain("lightningPayout.connected ? \"Connected\" : \"Not connected\"")
-    expect(src).toContain('const showLightningPayoutSetup = rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected')
-    expect(src).toContain("Set Bitcoin payout destination")
-    expect(src).not.toContain("Speed")
-    expect(src).not.toContain("Auto-settlement")
   })
 
   it("does not mount a second Bitcoin Lightning wallet panel inside Activity", () => {
@@ -304,16 +290,6 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     const formScreen = src.slice(src.lastIndexOf('return (\n    <div className="space-y-4">'))
     expect(formScreen.indexOf("AssetSelectDropdown")).toBeGreaterThan(-1)
     expect(formScreen.indexOf(">Send<")).toBe(-1)
-  })
-
-  it("Bitcoin Lightning payout does not render for Base or Solana withdrawal assets", () => {
-    const src = withdrawalFormSrc()
-    const showLightningLine = src
-      .split("\n")
-      .find((line) => line.includes("const showLightningPayoutSetup")) || ""
-    expect(showLightningLine).toContain('rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected')
-    expect(showLightningLine).not.toContain('rail === "base"')
-    expect(showLightningLine).not.toContain('rail === "solana"')
   })
 
   it("withdraw auto-selects first wallet-backed asset and clears review state on change", () => {
@@ -399,6 +375,34 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(src).toContain("bg-blue-50")
     expect(src).toContain("border-gray-200")
     expect(src).toContain("bg-gray-50")
+  })
+
+  it("does not render the legacy Bitcoin Lightning payout card anywhere in the withdrawal form", () => {
+    const src = withdrawalFormSrc()
+    expect(src).not.toContain("Bitcoin Lightning payout")
+    expect(src).not.toContain("Set Bitcoin payout destination")
+    expect(src).not.toContain("showLightningPayoutSetup")
+    expect(src).not.toContain("lightningPayout")
+    // Confirms the removal is structural (the prop/type is gone), not just CSS-hidden.
+    expect(walletPage).not.toContain("lightningPayoutSummary")
+  })
+
+  it("Transfer type renders immediately after the asset selector, with Saved destination beneath it", () => {
+    const src = withdrawalFormSrc()
+    const assetSelectorIndex = src.indexOf("<AssetSelectDropdown")
+    const transferTypeIndex = src.indexOf('<p className="text-xs font-semibold uppercase text-gray-500">Transfer type</p>')
+    const savedDestinationIndex = src.indexOf("Saved destination</p>")
+    const sendToIndex = src.indexOf('<p className="text-xs font-semibold uppercase text-gray-500">Send to</p>')
+    expect(assetSelectorIndex).toBeGreaterThan(-1)
+    expect(transferTypeIndex).toBeGreaterThan(assetSelectorIndex)
+    expect(savedDestinationIndex).toBeGreaterThan(transferTypeIndex)
+    expect(sendToIndex).toBeGreaterThan(savedDestinationIndex)
+  })
+
+  it("saved destination selection is optional - no submission gate depends on it", () => {
+    const src = withdrawalFormSrc()
+    expect(src).not.toContain("missingDestination || missingAmount || amountParseError || invalidAmount || selectedBalanceZero || amountExceedsBalance || bitcoinBalanceUnavailable || !selectedDestinationId")
+    expect(src).toContain("const reviewBlockedByInput = reviewing || noWithdrawableAssets || missingDestination || missingAmount || amountParseError || invalidAmount || selectedBalanceZero || amountExceedsBalance || bitcoinBalanceUnavailable")
   })
 })
 

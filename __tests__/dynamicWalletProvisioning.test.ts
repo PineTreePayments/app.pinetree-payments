@@ -72,12 +72,12 @@ describe("Withdrawal review blocked when no runtime wallets", () => {
   })
 
   it("guard only fires when SDK is loaded and user is authenticated", () => {
-    expect(page).toContain("sdkHasLoaded && user && (dynamicWalletRuntimeCount === 0 || !reviewSigner)")
+    expect(page).toContain("sdkHasLoaded && user && (runtimeCountForReviewGate === 0 || !reviewSigner)")
   })
 
   it("guard fires before setReviewingWithdrawal so no row is created", () => {
-    const guardIdx = page.indexOf("sdkHasLoaded && user && (dynamicWalletRuntimeCount === 0 || !reviewSigner)")
-    const reviewIdx = page.indexOf("setReviewingWithdrawal(true)")
+    const guardIdx = page.lastIndexOf("if (sdkHasLoaded && user && (runtimeCountForReviewGate === 0 || !reviewSigner))")
+    const reviewIdx = page.lastIndexOf("setReviewingWithdrawal(true)")
     expect(guardIdx).toBeGreaterThan(0)
     expect(reviewIdx).toBeGreaterThan(guardIdx)
   })

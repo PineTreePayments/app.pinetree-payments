@@ -28,7 +28,6 @@ describe("PineTree-native Lightning settlement", () => {
 
   it("keeps Lightning separate from normal wallet withdrawals", () => {
     expect(walletPage).toContain('type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"')
-    expect(walletPage).toContain("Bitcoin Lightning payout")
     expect(walletPage).not.toContain("Powered by Speed")
     expect(walletPage).not.toContain("Managed by Speed")
     expect(walletPage).not.toContain("Lightning/Spark wallet")
@@ -46,8 +45,10 @@ describe("PineTree-native Lightning settlement", () => {
     )
     expect(walletPage).not.toContain("/api/wallets/lightning/settlement")
     expect(overviewSrc).not.toContain("Bitcoin Lightning payout")
-    expect(withdrawSrc).toContain("Destination: {lightningPayout.destinationLabel}")
-    expect(withdrawSrc).toContain('"PineTree BTC Wallet"')
+    // The withdrawal form's payout-destination card was removed (2026-07-21) -
+    // this is now a merchant-initiated withdrawal, not the separate automatic
+    // Lightning settlement system exercised below via the engine constants.
+    expect(withdrawSrc).not.toContain("lightningPayout")
     expect(engine).toContain('destinationType: "pinetree_btc_wallet"')
     expect(engine).toContain('destinationType: "external_btc_wallet"')
     expect(engine).toContain("ensureDefaultPineTreeBtcPayoutDestination")

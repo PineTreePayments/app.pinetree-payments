@@ -40,7 +40,13 @@ export const WITHDRAWAL_ERROR_MESSAGES: Record<WalletApiErrorCode, string> = {
   WITHDRAWAL_ALREADY_PROCESSING: "This withdrawal is already being processed.",
   UNSUPPORTED_NETWORK: "This network isn't supported for withdrawals yet.",
   UNSUPPORTED_ASSET: "This asset isn't supported for withdrawals on this network.",
+  UNSUPPORTED_RAIL: "This network isn't supported for withdrawals yet.",
   UNKNOWN_ERROR: "The withdrawal could not be completed. Review the details and try again.",
+  WALLET_NOT_CONNECTED: "PineTree Wallet is not connected in this browser session. Reconnect PineTree Wallet and try again.",
+  SIGNER_NOT_AVAILABLE: "PineTree Wallet's secure signer is not available yet. Reconnect PineTree Wallet and try again.",
+  AUTHORIZATION_REJECTED: "Withdrawal authorization was canceled. No funds were sent.",
+  STATUS_UNKNOWN: "We couldn't confirm the result of this withdrawal yet. Check Activity before trying again - do not resubmit.",
+  WITHDRAWAL_FAILED: "The withdrawal could not be completed. Review the details and try again.",
 }
 
 /**
@@ -66,14 +72,25 @@ export function classifyLegacyWithdrawalErrorMessage(rawMessage: string): Wallet
   if (/destination.*(required|invalid|not match|unsupported)|invalid.*(address|destination)|enter a valid bitcoin address|lightning address|lightning invoice/i.test(raw))
     return "INVALID_DESTINATION"
   if (/amount.*(greater than 0|valid|decimal places)|enter a valid withdrawal amount/i.test(raw)) return "INVALID_AMOUNT"
-  if (/already processing|pending review|still pending|not ready for wallet approval/i.test(raw))
+  if (/user rejected|user denied|rejected by user|approval rejected|request rejected|denied transaction/i.test(raw))
+    return "AUTHORIZATION_REJECTED"
+  if (/still pending/i.test(raw)) return "STATUS_UNKNOWN"
+  if (/already processing|pending review|not ready for wallet approval/i.test(raw))
     return "WITHDRAWAL_ALREADY_PROCESSING"
   if (/duplicate/i.test(raw)) return "DUPLICATE_WITHDRAWAL"
-  if (/unsupported.*(rail|network)|withdrawal rail/i.test(raw)) return "UNSUPPORTED_NETWORK"
+  // Asset-specific ("rail/asset combination") must be checked before the
+  // generic rail check below - both contain the substring "rail".
   if (/unsupported.*asset|rail\/asset combination/i.test(raw)) return "UNSUPPORTED_ASSET"
+  if (/unsupported.*rail|withdrawal rail/i.test(raw)) return "UNSUPPORTED_RAIL"
+  if (/unsupported.*network/i.test(raw)) return "UNSUPPORTED_NETWORK"
   if (/not configured|no .*profile|destination not configured/i.test(raw)) return "DESTINATION_NOT_CONFIGURED"
-  if (/not ready|not connected|profile not found|source address is not available|signer is not available/i.test(raw))
-    return "WALLET_PROVIDER_NOT_READY"
+  // Signer/session-specific: the merchant's own PineTree Wallet browser
+  // session or embedded-wallet signer, not the external provider.
+  if (/signer is not available|different pinetree wallet session|source address is not available/i.test(raw))
+    return "SIGNER_NOT_AVAILABLE"
+  if (/not active in this browser session|reconnect pinetree wallet|wallet is not connected/i.test(raw))
+    return "WALLET_NOT_CONNECTED"
+  if (/not ready|profile not found/i.test(raw)) return "WALLET_PROVIDER_NOT_READY"
   if (/timeout|timed out/i.test(raw)) return "WALLET_PROVIDER_TIMEOUT"
   if (/rate limit/i.test(raw)) return "WALLET_PROVIDER_RATE_LIMITED"
   if (/unauthorized|authentication/i.test(raw)) return "WALLET_PROVIDER_AUTHENTICATION_ERROR"
@@ -103,6 +120,8 @@ export function presentWithdrawalError(input: {
     "INVALID_AMOUNT",
     "WALLET_VALIDATION_ERROR",
     "WALLET_CAPABILITY_UNAVAILABLE",
+    "SIGNER_NOT_AVAILABLE",
+    "WALLET_NOT_CONNECTED",
   ]
   if (rawMessage && specificCodes.includes(code)) {
     return { code, message: rawMessage }

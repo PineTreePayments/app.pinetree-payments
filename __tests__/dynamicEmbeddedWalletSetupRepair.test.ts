@@ -39,14 +39,18 @@ describe("Dynamic embedded wallet setup repair", () => {
   })
 
   it("Review withdrawal is blocked when the runtime signer is missing", () => {
-    expect(page).toContain("const reviewSigner =")
+    expect(page).toContain("let reviewSigner =")
     expect(page).toContain("findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)")
-    expect(page).toContain("dynamicWalletRuntimeCount === 0 || !reviewSigner")
+    expect(page).toContain("runtimeCountForReviewGate === 0 || !reviewSigner")
     expect(page).toContain("Reconnect PineTree Wallet to verify secure signing access.")
-    const guardIdx = page.indexOf("dynamicWalletRuntimeCount === 0 || !reviewSigner")
-    const reviewIdx = page.indexOf("setReviewingWithdrawal(true)")
-    expect(guardIdx).toBeGreaterThan(0)
-    expect(reviewIdx).toBeGreaterThan(guardIdx)
+    // Base/Solana get one bounded hydration retry (refreshDynamicWalletRuntime) before the
+    // final blocking check - the guard itself still runs, and still gates the actual review
+    // network call, just after giving hydration a chance to catch up.
+    expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_review_before_signer_check", { requireApprovalWallet: true })')
+    const finalGuardIdx = page.lastIndexOf("if (sdkHasLoaded && user && (runtimeCountForReviewGate === 0 || !reviewSigner))")
+    const reviewIdx = page.lastIndexOf("setReviewingWithdrawal(true)")
+    expect(finalGuardIdx).toBeGreaterThan(0)
+    expect(reviewIdx).toBeGreaterThan(finalGuardIdx)
   })
 
   it("Finish setup provisions or restores embedded Base and Solana wallets before saving", () => {

@@ -126,11 +126,11 @@ describe("Balances tab wallet details", () => {
     )
     expect(walletPage).not.toContain("LightningSettlementPanel")
     expect(overviewSrc).not.toContain("Bitcoin Lightning payout")
-    expect(withdrawSrc).toContain("Bitcoin Lightning payout")
-    expect(withdrawSrc).toContain("Destination: {lightningPayout.destinationLabel}")
-    expect(withdrawSrc).toContain("PineTree BTC Wallet")
-    expect(withdrawSrc).toContain("Set Bitcoin payout destination")
-    expect(withdrawSrc).toContain('const showLightningPayoutSetup = rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected')
+    // The old default-payout-destination card was removed from the withdrawal
+    // form entirely (2026-07-21) - Address Book / manual destinations replaced it.
+    expect(withdrawSrc).not.toContain("Bitcoin Lightning payout")
+    expect(withdrawSrc).not.toContain("Set Bitcoin payout destination")
+    expect(withdrawSrc).not.toContain("lightningPayout")
     expect(walletPage).not.toContain("Last settlement")
     expect(walletPage).not.toContain("No settlements yet")
     expect(walletPage).not.toContain("Auto-settlement")

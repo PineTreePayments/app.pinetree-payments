@@ -37,7 +37,17 @@ export type WalletApiErrorCode =
   | "WITHDRAWAL_ALREADY_PROCESSING"
   | "UNSUPPORTED_NETWORK"
   | "UNSUPPORTED_ASSET"
+  | "UNSUPPORTED_RAIL"
   | "UNKNOWN_ERROR"
+  // Browser-signer-specific additions - these describe the merchant's own
+  // wallet/session/authorization state during Dynamic browser signing
+  // (Base/Solana), a concern the original provider-facing codes above never
+  // covered (they only describe the external provider's state).
+  | "WALLET_NOT_CONNECTED"
+  | "SIGNER_NOT_AVAILABLE"
+  | "AUTHORIZATION_REJECTED"
+  | "STATUS_UNKNOWN"
+  | "WITHDRAWAL_FAILED"
 
 export type WalletApiError = {
   ok: false
@@ -88,7 +98,13 @@ const CODE_HTTP_STATUS: Record<WalletApiErrorCode, number> = {
   WITHDRAWAL_ALREADY_PROCESSING: 409,
   UNSUPPORTED_NETWORK: 400,
   UNSUPPORTED_ASSET: 400,
+  UNSUPPORTED_RAIL: 400,
   UNKNOWN_ERROR: 500,
+  WALLET_NOT_CONNECTED: 409,
+  SIGNER_NOT_AVAILABLE: 409,
+  AUTHORIZATION_REJECTED: 409,
+  STATUS_UNKNOWN: 202,
+  WITHDRAWAL_FAILED: 500,
 }
 
 export function walletErrorHttpStatus(code: WalletApiErrorCode): number {

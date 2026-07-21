@@ -1028,7 +1028,7 @@ function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined, c
   if (raw === withdrawalSignerRailMismatchMessage) return raw
   if (raw === solanaWithdrawalReconnectMessage) return raw
   if (/user rejected|user denied|rejected by user|approval rejected|request rejected|denied transaction/i.test(raw)) {
-    return "Withdrawal approval was rejected. No funds were moved."
+    return "Withdrawal authorization was canceled. No funds were sent."
   }
   if (raw === "Withdrawal approval is still pending. Check your wallet activity before trying again.") return raw
   const hiddenSignerPhrases = [
@@ -1932,7 +1932,6 @@ function WithdrawalFormShell({
   rail,
   asset,
   assetOptions,
-  lightningPayout,
   bitcoinTransferType,
   onBitcoinTransferTypeChange,
   destinationAddress,
@@ -1967,10 +1966,6 @@ function WithdrawalFormShell({
   rail: WithdrawalRail
   asset: WithdrawalAsset
   assetOptions: WithdrawalAssetOption[]
-  lightningPayout: {
-    connected: boolean
-    destinationLabel: "PineTree BTC Wallet" | "Not set"
-  }
   bitcoinTransferType: BitcoinTransferType
   onBitcoinTransferTypeChange: (value: BitcoinTransferType) => void
   destinationAddress: string
@@ -2089,7 +2084,6 @@ function WithdrawalFormShell({
   const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
-  const showLightningPayoutSetup = rail === "bitcoin" && asset === "BTC" && !lightningPayout.connected
   const reviewActionLabel = review?.review.approvalMethod === "dynamic_browser" ? "Approve withdrawal" : "Submit withdrawal request"
   const blockingMessage =
     error ||
@@ -2312,32 +2306,6 @@ function WithdrawalFormShell({
           Withdrawals are being finalized. Receiving funds is available now.
         </div>
       )}
-
-      {showLightningPayoutSetup ? (
-        <div className="rounded-2xl border border-blue-100/70 bg-white px-4 py-3 shadow-sm">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-950">Bitcoin Lightning payout</p>
-              <p className="mt-1 text-xs leading-5 text-gray-500">
-                Destination: {lightningPayout.destinationLabel}
-              </p>
-            </div>
-            <WalletStatusPill
-              label={lightningPayout.connected ? "Connected" : "Not connected"}
-              tone={lightningPayout.connected ? "blue" : "default"}
-            />
-          </div>
-          {!lightningPayout.connected ? (
-            <button
-              type="button"
-              disabled
-              className="mt-3 inline-flex h-8 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-400"
-            >
-              Set Bitcoin payout destination
-            </button>
-          ) : null}
-        </div>
-      ) : null}
 
       {rail === "bitcoin" ? (
         <div className="space-y-2">
@@ -6518,7 +6486,6 @@ function PineTreeWalletRuntime() {
   // Derived state - Lightning (PineTree-managed backend, NOT Dynamic Spark)
   // ---------------------------------------------------------------------------
 
-  const btcPayoutReady = railReadiness?.bitcoin_lightning.withdrawalReady ?? Boolean(profile?.btc_address && profile.btc_payout_enabled)
   const bitcoinPayoutEntries: AddressEntry[] = profile?.btc_address
     ? [{
         id: "btc-payout",
@@ -6526,7 +6493,18 @@ function PineTreeWalletRuntime() {
       }]
     : []
 
-  const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned ?? btcPayoutReady
+  // Bitcoin withdrawal availability must never depend on the merchant's old
+  // opt-in default-payout-destination preference - that model predates
+  // Address Book / manual-destination withdrawals. When server-computed
+  // readiness is available, walletProvisioned already reflects only Speed
+  // account readiness. The fallback (readiness fetch not yet completed this
+  // session) must mirror that same signal - the Lightning profile actually
+  // being ready - rather than the old preference or bare address presence
+  // (an address can be a placeholder auto-provisioned before Speed is
+  // actually set up - see the placeholder reason code in pinetreeRailReadiness.ts).
+  const bitcoinReady =
+    railReadiness?.bitcoin_lightning.walletProvisioned ??
+    (lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready")
   const coreWalletProfileReady = profile?.status === "ready" && baseReady && solanaReady
   const dynamicProfileReady = coreWalletProfileReady && baseSignerReady && solanaSignerReady
   const dynamicEmbeddedSignersReady = baseSignerReady && solanaSignerReady
@@ -6836,17 +6814,6 @@ function PineTreeWalletRuntime() {
       fallbackReason: getWithdrawalFallbackReason(baseDiagnostics),
     }
   }, [lightningProfileState, primaryWallet, profile, walletRailRows, wallets, withdrawalAsset, withdrawalRail, withdrawalReview])
-
-  const lightningPayoutSummary = useMemo(() => {
-    const connected =
-      btcPayoutReady &&
-      lightningProfileState.kind === "loaded" &&
-      lightningProfileState.profile.status === "ready"
-    return {
-      connected,
-      destinationLabel: btcPayoutReady ? "PineTree BTC Wallet" as const : "Not set" as const,
-    }
-  }, [btcPayoutReady, lightningProfileState])
 
   useEffect(() => {
     if (!withdrawalReview) return
@@ -8094,24 +8061,37 @@ function PineTreeWalletRuntime() {
       return
     }
     const reviewSourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
-    const reviewSigner =
-      withdrawalRail === "base" || withdrawalRail === "solana"
-        ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)
-        : true
+    const usesDynamicSignerForReview = withdrawalRail === "base" || withdrawalRail === "solana"
+    let reviewSigner = usesDynamicSignerForReview
+      ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)
+      : true
+    let runtimeCountForReviewGate = dynamicWalletRuntimeCount
+    // Base/Solana only: the Dynamic wallet runtime may simply still be hydrating
+    // (fresh page load, recent reconnect) rather than genuinely disconnected -
+    // give it one bounded retry before treating this as a real failure. Bitcoin
+    // never reaches this gate (it returns above, before this point) so this
+    // never blocks Speed-executed withdrawals.
+    if (usesDynamicSignerForReview && sdkHasLoaded && user && (runtimeCountForReviewGate === 0 || !reviewSigner)) {
+      setReviewingWithdrawal(true)
+      await refreshDynamicWalletRuntime("withdrawal_review_before_signer_check", { requireApprovalWallet: true })
+      runtimeCountForReviewGate = dynamicWalletRuntimeCountRef.current
+      reviewSigner = findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)
+    }
     // Block review when the Dynamic wallet runtime has no usable signer - creating a withdrawal request
     // row now would result in pending spam that can never be signed in this session.
-    if (sdkHasLoaded && user && (dynamicWalletRuntimeCount === 0 || !reviewSigner)) {
+    if (sdkHasLoaded && user && (runtimeCountForReviewGate === 0 || !reviewSigner)) {
       if (walletCreationDebugEnabled) {
         console.info("[pinetree-wallets] withdrawal_review_blocked_no_runtime_wallets", {
           dynamicUserId: user.userId,
           sdkHasLoaded,
-          dynamicWalletRuntimeCount,
+          dynamicWalletRuntimeCount: runtimeCountForReviewGate,
           withdrawalRail,
           withdrawalAsset,
           sourceAddressPresent: Boolean(reviewSourceAddress),
           matchingDynamicWallet: Boolean(reviewSigner),
         })
       }
+      setReviewingWithdrawal(false)
       setWithdrawalError(pineTreeSignerReconnectMessage)
       return
     }
@@ -8995,11 +8975,19 @@ function PineTreeWalletRuntime() {
                   rail={withdrawalRail}
                   asset={withdrawalAsset}
                   assetOptions={withdrawableAssetOptions}
-                  lightningPayout={lightningPayoutSummary}
                   bitcoinTransferType={withdrawalBitcoinTransferType}
                   onBitcoinTransferTypeChange={(value) => {
                     setWithdrawalBitcoinTransferType(value)
+                    // A saved destination or validation error from the previous transfer
+                    // type is never compatible with the new one - clear both, but never
+                    // touch Address Book (this only clears local form state).
                     setWithdrawalSelectedDestinationId(null)
+                    setWithdrawalScreen("form")
+                    setWithdrawalReview(null)
+                    setWithdrawalSubmitResult(null)
+                    setWithdrawalError("")
+                    setWithdrawalApprovalError("")
+                    setInstantSendIdempotencyKey(null)
                   }}
                   destinationAddress={withdrawalDestination}
                   selectedDestinationId={withdrawalSelectedDestinationId}

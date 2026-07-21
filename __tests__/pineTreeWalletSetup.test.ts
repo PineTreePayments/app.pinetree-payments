@@ -663,7 +663,8 @@ describe("PineTree embedded wallet setup", () => {
     const ctaStart = page.indexOf(") : hasWallet ? (")
     const ctaBlock = page.slice(ctaStart, ctaStart + 1400)
 
-    expect(derivedState).toContain("const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned ?? btcPayoutReady")
+    expect(derivedState).toContain("railReadiness?.bitcoin_lightning.walletProvisioned ??")
+    expect(derivedState).toContain('lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready"')
     expect(derivedState).toContain("const hasWallet = profileState.kind === \"loaded\" && (baseReady || solanaReady)")
     expect(derivedState).not.toContain("baseReady || solanaReady || btcPayoutReady || bitcoinReady")
     expect(resolverBody).toContain('if (profileState.kind === "none" || !profileHasDynamicAddresses) return "create_wallet"')
@@ -1001,9 +1002,10 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("const solanaSignerReady = Boolean(")
     expect(page).toContain('findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "base", profile.base_address)')
     expect(page).toContain('findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, "solana", profile.solana_address)')
-    // BTC payout readiness is separate from Lightning wallet provisioning.
-    expect(page).toContain("const btcPayoutReady = railReadiness?.bitcoin_lightning.withdrawalReady")
-    expect(page).toContain("const bitcoinReady = railReadiness?.bitcoin_lightning.walletProvisioned")
+    // Bitcoin withdrawal availability is driven by Speed account readiness only -
+    // never by the legacy default-payout-destination flag.
+    expect(page).toContain("railReadiness?.bitcoin_lightning.walletProvisioned ??")
+    expect(page).not.toContain("btcPayoutReady")
     expect(page).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(page).toContain('const coreWalletProfileReady = profile?.status === "ready" && baseReady && solanaReady')
     expect(page).toContain('const dynamicProfileReady = coreWalletProfileReady && baseSignerReady && solanaSignerReady')
@@ -2103,7 +2105,6 @@ describe("PineTree embedded wallet setup", () => {
   it("Bitcoin display readiness is not derived from a Dynamic Spark address", () => {
     // Readiness is driven by the DB record, not any Spark address returned by Dynamic
     expect(page).toContain("railReadiness?.bitcoin_lightning.walletProvisioned")
-    expect(page).toContain("railReadiness?.bitcoin_lightning.withdrawalReady")
     expect(page).toContain("function WalletOverviewSummary")
     // No old pattern that checked Spark address length
     expect(page).not.toContain("profileAddresses.lightning.length > 0")
@@ -2414,8 +2415,43 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("merchant rejection gets explicit no-funds-moved withdrawal copy", () => {
-    expect(page).toContain("Withdrawal approval was rejected. No funds were moved.")
+    expect(page).toContain("Withdrawal authorization was canceled. No funds were sent.")
     expect(page).toContain("user rejected|user denied|rejected by user|approval rejected|request rejected|denied transaction")
+  })
+
+  it("Bitcoin withdrawal availability never falls back to the legacy default-payout-destination flag", () => {
+    const bitcoinReadyDecl = page.slice(
+      page.indexOf("const bitcoinReady ="),
+      page.indexOf("const coreWalletProfileReady =")
+    )
+    expect(bitcoinReadyDecl).not.toContain("btc_payout_enabled")
+    expect(bitcoinReadyDecl).not.toContain("btcPayoutReady")
+    expect(bitcoinReadyDecl).toContain("railReadiness?.bitcoin_lightning.walletProvisioned")
+    expect(page).not.toContain("btcPayoutReady")
+  })
+
+  it("review signer gate gives Base/Solana one bounded hydration retry before failing, and never applies to Bitcoin", () => {
+    const reviewHandler = page.slice(
+      page.indexOf("async function handleReviewWithdrawal()"),
+      page.indexOf("function handleMaxWithdrawalAmount()")
+    )
+    expect(reviewHandler).toContain("usesDynamicSignerForReview")
+    expect(reviewHandler).toContain('await refreshDynamicWalletRuntime("withdrawal_review_before_signer_check", { requireApprovalWallet: true })')
+    // The retry must be gated on usesDynamicSignerForReview (base/solana only) - Bitcoin
+    // returns above (client-side synthetic review) well before this gate is ever reached.
+    const retryIndex = reviewHandler.indexOf("await refreshDynamicWalletRuntime(\"withdrawal_review_before_signer_check\"")
+    const bitcoinReturnIndex = reviewHandler.indexOf('if (withdrawalRail === "bitcoin") {')
+    expect(bitcoinReturnIndex).toBeGreaterThan(-1)
+    expect(bitcoinReturnIndex).toBeLessThan(retryIndex)
+  })
+
+  it("withdrawal error taxonomy includes signer/session/authorization-specific codes", () => {
+    const errorsFile = read("engine/wallet/walletErrors.ts")
+    const presentationFile = read("engine/withdrawals/withdrawalErrorPresentation.ts")
+    for (const code of ["WALLET_NOT_CONNECTED", "SIGNER_NOT_AVAILABLE", "AUTHORIZATION_REJECTED", "STATUS_UNKNOWN", "WITHDRAWAL_FAILED", "UNSUPPORTED_RAIL"]) {
+      expect(errorsFile).toContain(`"${code}"`)
+      expect(presentationFile).toContain(`${code}:`)
+    }
   })
 
   it("missing Dynamic signer fails instead of creating a manual review request", () => {

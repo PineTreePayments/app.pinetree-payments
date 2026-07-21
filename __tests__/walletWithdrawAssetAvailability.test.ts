@@ -36,7 +36,7 @@ function withdrawableAssetOptionsSrc() {
 
 function bitcoinReadinessSrc() {
   return walletPage.slice(
-    walletPage.indexOf("const btcPayoutReady"),
+    walletPage.indexOf("const bitcoinPayoutEntries"),
     walletPage.indexOf("const dynamicEmbeddedSignersReady")
   )
 }
@@ -97,17 +97,28 @@ describe("Withdraw asset dropdown source of truth", () => {
 // ---------------------------------------------------------------------------
 
 describe("Bitcoin withdrawal availability", () => {
-  it("bitcoinReady is derived from normalized Lightning wallet provisioning, not just address presence", () => {
+  it("bitcoinReady is derived from normalized Speed wallet provisioning, not just address presence", () => {
     const src = bitcoinReadinessSrc()
     expect(src).toContain("railReadiness?.bitcoin_lightning.walletProvisioned")
     expect(walletPage).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
   })
 
-  it("btcPayoutReady requires both btc_address and btc_payout_enabled", () => {
+  it("bitcoinReady never depends on the legacy default-payout-destination flag", () => {
+    // 2026-07-21 fix: btc_payout_enabled predates Address Book / manual-destination
+    // withdrawals and must never gate Bitcoin's presence in the withdrawal dropdown.
     const src = bitcoinReadinessSrc()
-    expect(src).toContain("btc_address")
-    expect(src).toContain("btc_payout_enabled")
-    expect(src).toContain("btcPayoutReady")
+    expect(src).not.toContain("btc_payout_enabled")
+    expect(src).not.toContain("btcPayoutReady")
+    expect(walletPage).not.toContain("btcPayoutReady")
+  })
+
+  it("bitcoinReady falls back to real Lightning profile readiness, not bare btc_address presence", () => {
+    // btc_address can be a placeholder auto-provisioned before Speed is actually
+    // set up (pinetreeRailReadiness.ts's btc_placeholder_only reason code) - the
+    // fallback (used before railReadiness has loaded this session) must still
+    // require the Lightning profile to be genuinely "ready".
+    const src = bitcoinReadinessSrc()
+    expect(src).toContain('lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready"')
   })
 
   it("Bitcoin remains in the withdrawal dropdown when the Speed account is ready", () => {
@@ -116,9 +127,8 @@ describe("Bitcoin withdrawal availability", () => {
   })
 
   it("auto-provisioned btc_address alone does not make Bitcoin withdrawable", () => {
-    // Previously bitcoinReady = bitcoinPayoutEntries.length > 0 (address-only check).
-    // After fix: requires btc_payout_enabled too.
     expect(walletPage).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
+    expect(walletPage).not.toContain("const bitcoinReady = Boolean(profile?.btc_address)")
   })
 })
 
