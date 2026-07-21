@@ -7,6 +7,8 @@ import {
   cancelStaleUnsignedWithdrawalReviews,
   listRecentWalletWithdrawalsForActivity,
 } from "@/database/walletWithdrawalRequests"
+import { listRecentWalletOperationsForActivity } from "@/database/merchantWalletOperations"
+import { listSweepJobsForMerchant } from "@/database/walletSweepJobs"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import {
   getConnectedAccountBalances,
@@ -61,6 +63,7 @@ export type PineTreeWalletSyncResult = {
     rail: "base" | "solana" | "bitcoin"
     status: string
     createdAt: string
+    source?: "manual" | "saved_address" | "automatic_sweep"
   }>
 }
 
@@ -337,11 +340,16 @@ export async function getPineTreeWalletBalanceSnapshot(
   speedBitcoinSyncState: SpeedBitcoinSyncState = "cached"
 ): Promise<PineTreeWalletSyncResult> {
   await cancelStaleUnsignedWithdrawalReviews(merchantId).catch(() => ({ canceled: 0 }))
-  const [profile, rows, prices, recentWithdrawals, providers, lightningProfile] = await Promise.all([
+  const [profile, rows, prices, recentWithdrawals, recentOperations, recentSweepJobs, providers, lightningProfile] = await Promise.all([
     getPineTreeWalletProfile(merchantId),
     getWalletBalances(merchantId),
     getMarketPricesUSD(),
     listRecentWalletWithdrawalsForActivity(merchantId, 10).catch(() => []),
+    // Bitcoin withdrawals live in merchant_wallet_operations, not
+    // wallet_withdrawal_requests - without this they would never appear in
+    // Activity at all.
+    listRecentWalletOperationsForActivity(merchantId, 10).catch(() => []),
+    listSweepJobsForMerchant(merchantId, 10).catch(() => []),
     import("@/database/merchants").then((mod) => mod.getMerchantProviders(merchantId)).catch(() => []),
     import("@/database/merchantLightningProfiles").then((mod) => mod.getMerchantLightningProfile(merchantId)).catch(() => null),
   ])
@@ -419,7 +427,7 @@ export async function getPineTreeWalletBalanceSnapshot(
     ? synced.reduce((sum, item) => sum + Number(item.usdValue || 0), 0)
     : null
 
-  const recentActivity = recentWithdrawals.map((wd) => {
+  const withdrawalActivity = recentWithdrawals.map((wd) => {
     // "processing" only ever gets set alongside a tx_hash (the transaction was signed
     // and submitted) - display that as "sent" rather than a raw internal status name,
     // since PineTree has not independently reconciled final on-chain confirmation yet.
@@ -432,12 +440,64 @@ export async function getPineTreeWalletBalanceSnapshot(
       : "pending"
     return {
       id: wd.id,
-      label: `Sent ${wd.amount_decimal} ${wd.asset}`,
+      label: `${wd.source === "automatic_sweep" ? "Auto-swept" : "Sent"} ${wd.amount_decimal} ${wd.asset}`,
       rail: wd.rail,
       status,
       createdAt: wd.created_at,
+      source: wd.source,
     }
   })
+
+  // Bitcoin/Speed withdrawals - a separate ledger table (merchant_wallet_operations)
+  // from Base/Solana's wallet_withdrawal_requests, so they need their own mapping.
+  const operationStatusMap: Record<string, string> = {
+    COMPLETED: "confirmed",
+    FAILED: "failed",
+    CANCELED: "canceled",
+    EXPIRED: "failed",
+    PROCESSING: "sent",
+    PENDING: "pending",
+    CREATED: "pending",
+    REQUIRES_ACTION: "pending",
+  }
+  const operationActivity = recentOperations.map((op) => ({
+    id: op.id,
+    label: `${op.source === "automatic_sweep" ? "Auto-swept" : "Sent"} ${satsToBtcDecimal(op.amount_base_units) ?? "0"} BTC`,
+    rail: "bitcoin" as const,
+    status: operationStatusMap[op.status] || "pending",
+    createdAt: op.created_at,
+    source: op.source,
+  }))
+
+  // Automatic-sweep jobs not yet reflected as a withdrawal (still QUEUED/
+  // AWAITING_GAS/PROCESSING/BLOCKED, or FAILED before any withdrawal record
+  // was created) - once a job produces a withdrawal, that withdrawal's own
+  // activity row (above) takes over, so terminal jobs already linked to one
+  // are skipped here to avoid a duplicate entry.
+  const sweepJobStatusMap: Record<string, string> = {
+    QUEUED: "pending",
+    AWAITING_FINALITY: "pending",
+    AWAITING_GAS: "pending",
+    PROCESSING: "sent",
+    CONFIRMED: "confirmed",
+    FAILED: "failed",
+    CANCELLED: "canceled",
+    BLOCKED: "blocked",
+  }
+  const sweepJobActivity = recentSweepJobs
+    .filter((job) => !job.withdrawal_id)
+    .map((job) => ({
+      id: job.id,
+      label: `Automatic sweep - ${job.amount_decimal} ${job.asset}`,
+      rail: job.rail,
+      status: sweepJobStatusMap[job.status] || "pending",
+      createdAt: job.created_at,
+      source: "automatic_sweep" as const,
+    }))
+
+  const recentActivity = [...withdrawalActivity, ...operationActivity, ...sweepJobActivity]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 15)
 
   const baseReady = railReadiness.base.walletProvisioned
   const solanaReady = railReadiness.solana.walletProvisioned

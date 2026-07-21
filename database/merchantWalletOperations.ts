@@ -47,6 +47,7 @@ export type WalletOperationStatus =
   | "REQUIRES_ACTION"
 
 export type WalletOperationDirection = "credit" | "debit"
+export type WalletOperationSource = "manual" | "saved_address" | "automatic_sweep"
 
 export type MerchantWalletOperation = {
   id: string
@@ -72,6 +73,9 @@ export type MerchantWalletOperation = {
   failure_code: string | null
   failure_reason: string | null
   idempotency_key: string
+  source?: WalletOperationSource
+  destination_id?: string | null
+  destination_snapshot?: Record<string, unknown> | null
   created_at: string
   updated_at: string
   completed_at: string | null
@@ -254,6 +258,91 @@ export async function updateWalletOperation(
     throw new Error(`Failed to update wallet operation: ${error?.message ?? "not found"}`)
   }
   return data as MerchantWalletOperation
+}
+
+/**
+ * Stamps source/destination_id/destination_snapshot onto an existing
+ * operation without going through updateWalletOperation's established
+ * input contract - kept separate so the hot Speed-adapter update path never
+ * needs to widen for this. Gracefully no-ops the new columns (rather than
+ * throwing) if the 20260721_add_canonical_withdrawal_columns.sql migration
+ * hasn't been applied yet in a given environment, matching this file's
+ * existing isMissingOperationColumn compatibility pattern.
+ */
+export async function updateWalletOperationCanonicalFields(
+  merchantId: string,
+  operationId: string,
+  input: {
+    source: WalletOperationSource
+    destinationId?: string | null
+    destinationSnapshot?: Record<string, unknown> | null
+  }
+): Promise<MerchantWalletOperation> {
+  const patch: Record<string, unknown> = { source: input.source }
+  if (input.destinationId !== undefined) patch.destination_id = input.destinationId
+  if (input.destinationSnapshot !== undefined) patch.destination_snapshot = input.destinationSnapshot
+
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update(patch)
+    .eq("merchant_id", merchantId)
+    .eq("id", operationId)
+    .select()
+    .single()
+
+  if (isMissingOperationColumn(error)) {
+    const existing = await getWalletOperationForMerchant(merchantId, operationId)
+    if (!existing) throw new Error("Failed to stamp canonical wallet operation fields: not found")
+    return existing
+  }
+
+  if (error || !data) {
+    throw new Error(`Failed to stamp canonical wallet operation fields: ${error?.message ?? "not found"}`)
+  }
+  return data as MerchantWalletOperation
+}
+
+/**
+ * Sums amount_base_units for non-terminal WITHDRAWAL operations of a given
+ * asset - used by the Max-withdrawal calculation so an in-flight Bitcoin
+ * withdrawal's amount is never double-counted as still-spendable.
+ */
+export async function sumPendingWithdrawalOperationBaseUnits(
+  merchantId: string,
+  asset: string
+): Promise<bigint> {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("amount_base_units")
+    .eq("merchant_id", merchantId)
+    .eq("asset", asset)
+    .eq("operation_type", "WITHDRAWAL")
+    .in("status", ["CREATED", "PENDING", "PROCESSING"])
+
+  if (error) throw new Error(`Failed to sum pending wallet operations: ${error.message}`)
+  return (data || []).reduce((total, row) => total + BigInt(row.amount_base_units || "0"), BigInt(0))
+}
+
+/**
+ * Recent WITHDRAWAL operations (Bitcoin/Speed) for the Wallet Activity tab -
+ * mirrors listRecentWalletWithdrawalsForActivity's shape/purpose in
+ * database/walletWithdrawalRequests.ts, since Bitcoin withdrawals live in
+ * this separate table and would otherwise never appear in Activity.
+ */
+export async function listRecentWalletOperationsForActivity(
+  merchantId: string,
+  limit: number
+): Promise<MerchantWalletOperation[]> {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .eq("operation_type", "WITHDRAWAL")
+    .order("created_at", { ascending: false })
+    .limit(limit)
+
+  if (error) throw new Error(`Failed to list wallet operations for activity: ${error.message}`)
+  return (data || []) as MerchantWalletOperation[]
 }
 
 export type ListWalletOperationsInput = {

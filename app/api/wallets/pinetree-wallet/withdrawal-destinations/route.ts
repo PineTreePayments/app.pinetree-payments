@@ -22,6 +22,8 @@ export async function GET(req: NextRequest) {
     const destinations = await listMerchantWithdrawalDestinations(merchantId, {
       rail: parseRailFilter(req.nextUrl.searchParams.get("rail")),
       method: parseMethodFilter(req.nextUrl.searchParams.get("method")),
+      includeArchived: req.nextUrl.searchParams.get("include_archived") === "true",
+      includeDisabled: req.nextUrl.searchParams.get("include_disabled") === "true",
     })
     return NextResponse.json({ destinations })
   } catch (error) {
@@ -40,6 +42,8 @@ export async function POST(req: NextRequest) {
       destinationAddress: String(body.destination_address || body.destinationAddress || ""),
       label: body.label !== undefined ? String(body.label) : undefined,
       isDefault: Boolean(body.is_default ?? body.isDefault),
+      providerName: body.provider_name !== undefined ? String(body.provider_name) : undefined,
+      memoOrTag: body.memo_or_tag !== undefined ? String(body.memo_or_tag) : undefined,
     })
     return NextResponse.json({ destination })
   } catch (error) {

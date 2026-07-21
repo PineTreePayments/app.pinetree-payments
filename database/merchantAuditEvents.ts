@@ -14,12 +14,30 @@ export type WithdrawalAuditEventType =
   | "withdrawal.failed"
   | "withdrawal.canceled"
 
+export type AddressBookAuditEventType =
+  | "address_book.entry_added"
+  | "address_book.entry_updated"
+  | "address_book.entry_confirmed"
+  | "address_book.entry_archived"
+  | "address_book.entry_deleted"
+
+export type SweepAuditEventType =
+  | "sweep_rule.created"
+  | "sweep_rule.enabled"
+  | "sweep_rule.disabled"
+  | "sweep_rule.updated"
+  | "sweep.queued"
+  | "sweep.executed"
+  | "sweep.failed"
+
 export type MerchantAuditEventType =
   | "webhook.secret_regenerated"
   | "lightning.speed_credential_revealed"
   | "lightning.sweep_retried"
   | "lightning.sweep_canceled"
   | WithdrawalAuditEventType
+  | AddressBookAuditEventType
+  | SweepAuditEventType
 
 export type MerchantAuditEvent = {
   id: string

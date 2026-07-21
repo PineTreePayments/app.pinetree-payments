@@ -15,6 +15,8 @@ export type WalletWithdrawalStatus =
   | "failed"
   | "canceled"
 
+export type WalletWithdrawalSource = "manual" | "saved_address" | "automatic_sweep"
+
 export type WalletWithdrawalRequestRecord = {
   id: string
   merchant_id: string
@@ -35,6 +37,13 @@ export type WalletWithdrawalRequestRecord = {
   token_mint: string | null
   review_payload: Record<string, unknown>
   error_message: string | null
+  source: WalletWithdrawalSource
+  destination_id: string | null
+  destination_snapshot: Record<string, unknown> | null
+  idempotency_key: string | null
+  fee_amount_decimal: string | null
+  native_fee_asset: string | null
+  error_code: string | null
   created_at: string
   updated_at: string
 }
@@ -87,6 +96,7 @@ function normalize(row: Record<string, unknown>): WalletWithdrawalRequestRecord 
   const reviewPayload = row.review_payload
   const unsignedPayload = row.unsigned_transaction_payload
   const signedPayload = row.signed_payload
+  const destinationSnapshot = row.destination_snapshot
   return {
     id: String(row.id || ""),
     merchant_id: String(row.merchant_id || ""),
@@ -116,6 +126,16 @@ function normalize(row: Record<string, unknown>): WalletWithdrawalRequestRecord 
         ? reviewPayload as Record<string, unknown>
         : {},
     error_message: row.error_message != null ? String(row.error_message) : null,
+    source: (row.source === "saved_address" || row.source === "automatic_sweep" ? row.source : "manual") as WalletWithdrawalSource,
+    destination_id: row.destination_id != null ? String(row.destination_id) : null,
+    destination_snapshot:
+      typeof destinationSnapshot === "object" && destinationSnapshot !== null && !Array.isArray(destinationSnapshot)
+        ? destinationSnapshot as Record<string, unknown>
+        : null,
+    idempotency_key: row.idempotency_key != null ? String(row.idempotency_key) : null,
+    fee_amount_decimal: row.fee_amount_decimal != null ? String(row.fee_amount_decimal) : null,
+    native_fee_asset: row.native_fee_asset != null ? String(row.native_fee_asset) : null,
+    error_code: row.error_code != null ? String(row.error_code) : null,
     created_at: String(row.created_at || ""),
     updated_at: String(row.updated_at || ""),
   }
@@ -353,4 +373,85 @@ export async function findInFlightOrCompletedWithdrawalForDestination(
   if (error) throw new Error(`Failed to check destination reuse: ${error.message}`)
   const row = data?.[0]
   return row ? normalize(row as Record<string, unknown>) : null
+}
+
+/**
+ * Stamps the canonical-dispatcher fields (source/destination_id/snapshot/
+ * idempotency/fee) onto an existing review row without going through
+ * updateWalletWithdrawalRequest's UpdateWalletWithdrawalRequestInput shape -
+ * kept as a separate, narrow function so the hot prepare/submit path's
+ * existing input contract never needs to widen for this.
+ */
+export async function updateWalletWithdrawalRequestCanonicalFields(
+  merchantId: string,
+  id: string,
+  input: {
+    source: WalletWithdrawalSource
+    destinationId?: string | null
+    destinationSnapshot?: Record<string, unknown> | null
+    idempotencyKey?: string | null
+    feeAmountDecimal?: string | null
+    nativeFeeAsset?: string | null
+  }
+): Promise<WalletWithdrawalRequestRecord> {
+  const update: Record<string, unknown> = {
+    source: input.source,
+    updated_at: new Date().toISOString(),
+  }
+  if (input.destinationId !== undefined) update.destination_id = input.destinationId
+  if (input.destinationSnapshot !== undefined) update.destination_snapshot = input.destinationSnapshot
+  if (input.idempotencyKey !== undefined) update.idempotency_key = input.idempotencyKey
+  if (input.feeAmountDecimal !== undefined) update.fee_amount_decimal = input.feeAmountDecimal
+  if (input.nativeFeeAsset !== undefined) update.native_fee_asset = input.nativeFeeAsset
+
+  const { data, error } = await db
+    .from(TABLE)
+    .update(update)
+    .eq("merchant_id", merchantId)
+    .eq("id", id)
+    .select("*")
+    .single()
+
+  if (error || !data) {
+    throw new Error(`Failed to stamp canonical withdrawal fields: ${error?.message || "Not found"}`)
+  }
+  return normalize(data as Record<string, unknown>)
+}
+
+/**
+ * Sums amount_decimal for withdrawals not yet in a terminal state (pending
+ * or processing) for a given rail/asset - used by the Max-withdrawal
+ * calculation so an in-flight withdrawal's amount is never double-counted as
+ * still-spendable.
+ */
+export async function sumPendingWalletWithdrawalAmount(
+  merchantId: string,
+  rail: WalletWithdrawalRail,
+  asset: WalletWithdrawalAsset
+): Promise<number> {
+  const { data, error } = await db
+    .from(TABLE)
+    .select("amount_decimal")
+    .eq("merchant_id", merchantId)
+    .eq("rail", rail)
+    .eq("asset", asset)
+    .in("status", ["pending", "processing"])
+
+  if (error) throw new Error(`Failed to sum pending wallet withdrawals: ${error.message}`)
+  return (data || []).reduce((total, row) => total + (Number(row.amount_decimal) || 0), 0)
+}
+
+export async function findWalletWithdrawalRequestByIdempotencyKey(
+  merchantId: string,
+  idempotencyKey: string
+): Promise<WalletWithdrawalRequestRecord | null> {
+  const { data, error } = await db
+    .from(TABLE)
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle()
+
+  if (error) throw new Error(`Failed to look up wallet withdrawal by idempotency key: ${error.message}`)
+  return data ? normalize(data as Record<string, unknown>) : null
 }

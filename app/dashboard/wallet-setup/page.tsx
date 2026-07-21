@@ -36,6 +36,8 @@ import {
   ProviderStatusPill,
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
+import AddressBookTab from "@/components/dashboard/AddressBookTab"
+import AutomaticSettlementTab from "@/components/dashboard/AutomaticSettlementTab"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import StatusBadge from "@/components/ui/StatusBadge"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
@@ -74,11 +76,22 @@ import { runWithBoundedTimeout, type BoundedProviderCallSettlement } from "@/lib
 // Types
 // ---------------------------------------------------------------------------
 
-type WalletTab = "overview" | "balances" | "withdraw" | "activity"
+type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "address-book" | "automatic-settlement"
 type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
 type WithdrawalScreen = "form" | "review" | "approving" | "submitted" | "failed"
+
+// Base/Solana automatic-sweep jobs a merchant's active session can complete
+// - see components/dashboard/AutomaticSettlementTab.tsx and
+// handleReviewSweepJob below.
+type PendingSweepJob = {
+  id: string
+  rail: "base" | "solana"
+  asset: "ETH" | "USDC" | "SOL"
+  amount_decimal: string
+  status: string
+}
 
 type WithdrawalReviewResponse = {
   request: {
@@ -180,6 +193,7 @@ type PineTreeWalletSyncResponse = {
     rail: "base" | "solana" | "bitcoin"
     status: string
     createdAt: string
+    source?: "manual" | "saved_address" | "automatic_sweep"
   }>
 }
 
@@ -487,6 +501,8 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "balances", label: "Balances" },
   { id: "withdraw", label: "Withdraw" },
   { id: "activity", label: "Activity" },
+  { id: "address-book", label: "Address Book" },
+  { id: "automatic-settlement", label: "Automatic Settlement" },
 ]
 
 const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
@@ -1938,6 +1954,8 @@ function WithdrawalFormShell({
   diagnostics,
   debugEnabled,
   accessToken,
+  maxEstimating,
+  maxWarning,
   onAssetSelect,
   onDestinationChange,
   onAmountChange,
@@ -1969,6 +1987,8 @@ function WithdrawalFormShell({
   diagnostics: WithdrawalDiagnostics
   debugEnabled?: boolean
   accessToken: string | null
+  maxEstimating?: boolean
+  maxWarning?: string
   onAssetSelect: (rail: WithdrawalRail, asset: WithdrawalAsset) => void
   onDestinationChange: (value: string) => void
   onAmountChange: (value: string) => void
@@ -1990,6 +2010,13 @@ function WithdrawalFormShell({
   const [savingDestination, setSavingDestination] = useState(false)
   const [saveDestinationError, setSaveDestinationError] = useState("")
   const [removingDestinationId, setRemovingDestinationId] = useState<string | null>(null)
+  const [irreversibleAckChecked, setIrreversibleAckChecked] = useState(false)
+
+  // Reset the irreversibility acknowledgment whenever a new review appears -
+  // it must be re-confirmed per withdrawal, never carried over.
+  useEffect(() => {
+    setIrreversibleAckChecked(false)
+  }, [review?.request.id])
 
   const savedDestinationsMethod = rail === "bitcoin" ? bitcoinTransferType : undefined
 
@@ -2147,11 +2174,22 @@ function WithdrawalFormShell({
             </div>
           </div>
         ) : null}
+        <label className="flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50/50 px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={irreversibleAckChecked}
+            onChange={(event) => setIrreversibleAckChecked(event.target.checked)}
+            className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300"
+          />
+          <span className="text-xs leading-5 text-blue-900">
+            I verified that this destination supports the selected asset and network. Cryptocurrency transfers are irreversible, and PineTree cannot recover funds sent to an incorrect or unsupported destination.
+          </span>
+        </label>
         <div className="flex flex-col gap-2 sm:flex-row">
           <button
             type="button"
             onClick={onSubmit}
-            disabled={submitting || !review.canSubmit}
+            disabled={submitting || !review.canSubmit || !irreversibleAckChecked}
             className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-2"
           >
             {reviewActionLabel}
@@ -2415,10 +2453,10 @@ function WithdrawalFormShell({
           <button
             type="button"
             onClick={onMaxAmount}
-            disabled={maxDisabled}
+            disabled={maxDisabled || maxEstimating}
             className="inline-flex h-11 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none"
           >
-            Max
+            {maxEstimating ? "..." : "Max"}
           </button>
         </div>
         <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
@@ -2432,6 +2470,21 @@ function WithdrawalFormShell({
           </span>
           {!selectedBalanceKnown ? <span>Balance will be verified before processing.</span> : nativeMaxNote ? <span>Network fee may apply.</span> : null}
         </div>
+        {maxWarning ? (
+          <p className="text-xs leading-5 text-blue-700">{maxWarning}</p>
+        ) : (
+          <p className="text-[11px] leading-4 text-gray-500">
+            {rail === "bitcoin"
+              ? bitcoinTransferType === "lightning"
+                ? "Lightning sends settle instantly - the exact routing fee is set at send time."
+                : "PineTree leaves a small buffer for the Bitcoin network fee, set at send time."
+              : asset === "USDC" && rail === "base"
+                ? "USDC transfers on Base require a small amount of ETH on Base for network fees."
+                : asset === "USDC" && rail === "solana"
+                  ? "USDC transfers on Solana require a small amount of SOL for network fees."
+                  : "PineTree may reserve a small amount of the network's native asset to cover future transaction fees. Your maximum withdrawal may be slightly lower than your total balance."}
+          </p>
+        )}
       </div>
 
       {blockingMessage ? (
@@ -2882,7 +2935,14 @@ function ActivityTab({
               <div key={item.id} className="px-4 py-3.5 sm:px-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-gray-900">{item.label}</p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="truncate text-sm font-semibold text-gray-900">{item.label}</p>
+                      {item.source === "automatic_sweep" ? (
+                        <span className="inline-flex shrink-0 items-center rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                          Automatic
+                        </span>
+                      ) : null}
+                    </div>
                     <p className="mt-0.5 text-xs text-gray-500">
                       {railDisplayName(item.rail)} - {formatActivityTimestamp(item.createdAt) ?? item.createdAt}
                     </p>
@@ -2908,6 +2968,11 @@ function PineTreeWalletRuntime() {
   const [businessProfileReadiness, setBusinessProfileReadiness] = useState<BusinessProfileReadinessState>({ kind: "loading" })
   const [lightningProfileState, setLightningProfileState] = useState<LightningProfileState>({ kind: "loading" })
   const accessTokenRef = useRef<string | null>(null)
+  // Set only while the active withdrawal review originated from an
+  // automatic-sweep job (see handleReviewSweepJob) - lets the existing
+  // dynamic-browser submit path report the outcome back to that job without
+  // any other change to the withdrawal submission logic itself.
+  const activeSweepJobIdRef = useRef<string | null>(null)
 
   // --- Dynamic SDK ---
   const { user, sdkHasLoaded, showAuthFlow, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
@@ -3036,6 +3101,8 @@ function PineTreeWalletRuntime() {
   const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
   const [withdrawalAuthorizationRecoveryOpen, setWithdrawalAuthorizationRecoveryOpen] = useState(false)
   const [withdrawalReconnectPending, setWithdrawalReconnectPending] = useState(false)
+  const [maxEstimating, setMaxEstimating] = useState(false)
+  const [maxWarning, setMaxWarning] = useState("")
   const withdrawalReconnectSourceRef = useRef<string | null>(null)
   const dynamicHydrationAttemptRef = useRef<string | null>(null)
   const dynamicWalletRuntimeCountRef = useRef(0)
@@ -7823,6 +7890,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalError("")
     setWithdrawalApprovalError("")
     setInstantSendIdempotencyKey(null)
+    setMaxWarning("")
   }
 
   const handleOverviewRailSelect = useCallback((rail: WithdrawalRail) => {
@@ -7990,15 +8058,117 @@ function PineTreeWalletRuntime() {
     }
   }
 
-  function handleMaxWithdrawalAmount() {
+  /**
+   * Continues a queued Base/Solana automatic-sweep job: pre-fills the rail/
+   * asset from the job and creates its review via the sweep_job_id-aware
+   * branch of POST /api/wallets/pinetree-wallet/withdrawals, then switches
+   * to the Withdraw tab's existing review screen so the merchant completes
+   * it with the same one-click Approve flow as any other withdrawal - no
+   * signing/submission logic is duplicated. See engine/withdrawals/walletSweepExecution.ts's
+   * header comment for why Base/Solana sweeps require this client step at
+   * all (no server-side signing capability exists for the embedded wallet).
+   */
+  async function handleReviewSweepJob(job: PendingSweepJob) {
+    const token = accessTokenRef.current
+    if (!token) {
+      setWithdrawalError("Wallet session is not available. Refresh the page and try again.")
+      return
+    }
+    setWithdrawalRail(job.rail)
+    setWithdrawalAsset(job.asset)
+    setWithdrawalReview(null)
+    setWithdrawalSubmitResult(null)
+    setWithdrawalScreen("form")
+    setWithdrawalError("")
+    setWithdrawalApprovalError("")
+    setReviewingWithdrawal(true)
+    activeSweepJobIdRef.current = job.id
+    try {
+      const res = await fetch("/api/wallets/pinetree-wallet/withdrawals", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ sweep_job_id: job.id }),
+      })
+      const json = (await res.json()) as WithdrawalReviewResponse | { error?: string }
+      if (!res.ok) {
+        activeSweepJobIdRef.current = null
+        setWithdrawalError(sanitizeWithdrawalErrorForMerchant("error" in json ? json.error : undefined))
+        return
+      }
+      setWithdrawalReview(json as WithdrawalReviewResponse)
+      setWithdrawalScreen("review")
+      setActiveTab("withdraw")
+    } catch {
+      activeSweepJobIdRef.current = null
+      setWithdrawalError("We couldn't prepare this automatic sweep. Please try again.")
+    } finally {
+      setReviewingWithdrawal(false)
+    }
+  }
+
+  /**
+   * Reports a Base/Solana withdrawal's terminal outcome back to the
+   * automatic-sweep job it originated from (if any) - see
+   * handleReviewSweepJob and activeSweepJobIdRef above. Best-effort: never
+   * blocks or alters the withdrawal flow itself.
+   */
+  function reportSweepJobOutcomeIfActive(status: "CONFIRMED" | "FAILED", resultingWithdrawalId: string) {
+    const jobId = activeSweepJobIdRef.current
+    if (!jobId) return
+    activeSweepJobIdRef.current = null
+    const token = accessTokenRef.current
+    if (!token) return
+    const outcomeBody = { status, withdrawal_id: resultingWithdrawalId }
+    void fetch(`/api/wallets/pinetree-wallet/sweep-jobs/${encodeURIComponent(jobId)}/continue`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(outcomeBody),
+    }).catch(() => {})
+  }
+
+  /**
+   * The true spendable amount, not just the displayed balance: accounts for
+   * confirmed balance, pending outgoing amounts, provider/RPC-estimated
+   * network fees, and a configured native-gas reserve (see
+   * engine/withdrawals/withdrawalFeeEstimate.ts). For token withdrawals
+   * (USDC), never subtracts gas from the token balance itself - blocks with
+   * a clear message instead if the native asset can't cover the fee.
+   */
+  async function handleMaxWithdrawalAmount() {
+    const token = accessTokenRef.current
     if (
+      !token ||
       selectedWithdrawalBalance?.status !== "synced" ||
       selectedWithdrawalBalance.balance === null ||
       Number(selectedWithdrawalBalance.balance) <= 0
     ) {
       return
     }
-    setWithdrawalAmount(String(selectedWithdrawalBalance.balance))
+    setMaxWarning("")
+    setMaxEstimating(true)
+    try {
+      const res = await fetch("/api/wallets/pinetree-wallet/withdrawals/max-estimate", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ rail: withdrawalRail, asset: withdrawalAsset }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json?.estimate) {
+        // Fall back to the raw displayed balance rather than blocking Max
+        // entirely on an estimate-endpoint hiccup.
+        setWithdrawalAmount(String(selectedWithdrawalBalance.balance))
+      } else if (json.estimate.blocked) {
+        setMaxWarning(json.estimate.warning || "This withdrawal is currently blocked.")
+        setWithdrawalAmount("0")
+      } else {
+        setWithdrawalAmount(json.estimate.maxDecimal)
+        if (json.estimate.warning) setMaxWarning(json.estimate.warning)
+      }
+    } catch {
+      setWithdrawalAmount(String(selectedWithdrawalBalance.balance))
+    } finally {
+      setMaxEstimating(false)
+    }
     setWithdrawalScreen("form")
     setWithdrawalReview(null)
     setWithdrawalSubmitResult(null)
@@ -8221,10 +8391,12 @@ function PineTreeWalletRuntime() {
           setWithdrawalReview(null)
           setWithdrawalApprovalError(sanitizeWithdrawalSubmitErrorForMerchant("error" in submitted ? submitted.error : undefined))
           setWithdrawalScreen("failed")
+          reportSweepJobOutcomeIfActive("FAILED", withdrawalId)
           return
         }
         setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)
         setWithdrawalScreen("submitted")
+        reportSweepJobOutcomeIfActive("CONFIRMED", withdrawalId)
         // Refresh Activity immediately so it reflects the just-submitted transaction
         // (tx hash present) instead of the stale pre-submission "pending" snapshot.
         void syncPineTreeWallet()
@@ -8242,6 +8414,7 @@ function PineTreeWalletRuntime() {
         setWithdrawalAuthorizationRecoveryOpen(true)
       }
       setWithdrawalScreen("failed")
+      reportSweepJobOutcomeIfActive("FAILED", withdrawalId)
     } finally {
       setSubmittingWithdrawal(false)
     }
@@ -8644,7 +8817,7 @@ function PineTreeWalletRuntime() {
             </header>
 
             <nav
-              className="grid shrink-0 grid-cols-4 gap-1.5 border-b border-gray-100 px-3 py-3 sm:px-6"
+              className="grid shrink-0 grid-cols-3 gap-1.5 border-b border-gray-100 px-3 py-3 sm:grid-cols-6 sm:px-6"
               aria-label="PineTree Wallet sections"
             >
               {walletTabs.map((tab) => (
@@ -8711,6 +8884,8 @@ function PineTreeWalletRuntime() {
                   diagnostics={withdrawalDiagnostics}
                   debugEnabled={walletSyncDebugQueryEnabled}
                   accessToken={accessTokenRef.current}
+                  maxEstimating={maxEstimating}
+                  maxWarning={maxWarning}
                   onAssetSelect={handleWithdrawalAssetSelect}
                   onDestinationChange={(value) => {
                     setWithdrawalDestination(value)
@@ -8742,6 +8917,17 @@ function PineTreeWalletRuntime() {
 
               {activeTab === "activity" ? (
                 <ActivityTab sync={walletSync} syncing={walletSyncing} />
+              ) : null}
+
+              {activeTab === "address-book" ? (
+                <AddressBookTab accessToken={accessTokenRef.current} />
+              ) : null}
+
+              {activeTab === "automatic-settlement" ? (
+                <AutomaticSettlementTab
+                  accessToken={accessTokenRef.current}
+                  onContinuePendingJob={(job) => void handleReviewSweepJob(job)}
+                />
               ) : null}
 
             </div>
