@@ -200,20 +200,22 @@ describe("Balances tab - compact selected asset detail", () => {
 })
 
 describe("Provider-branded wallet tab removed", () => {
-  it("modal tabs include exactly Overview, Balances, Withdraw, Activity, Address Book, and Automatic Settlement", () => {
+  it("modal tabs include exactly Overview, Balances, Withdraw, and Activity", () => {
     expect(walletPage).toContain(
-      'type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "address-book" | "automatic-settlement"'
+      'type WalletTab = "overview" | "balances" | "withdraw" | "activity"'
     )
     expect(walletPage).toContain('{ id: "overview", label: "Overview" }')
     expect(walletPage).toContain('{ id: "balances", label: "Balances" }')
     expect(walletPage).toContain('{ id: "withdraw", label: "Withdraw" }')
     expect(walletPage).toContain('{ id: "activity", label: "Activity" }')
-    expect(walletPage).toContain('{ id: "address-book", label: "Address Book" }')
-    expect(walletPage).toContain('{ id: "automatic-settlement", label: "Automatic Settlement" }')
     expect(walletPage).not.toContain('{ id: "speed"')
     expect(walletPage).not.toContain("Speed Wallet")
-    expect(walletPage).toContain("sm:grid-cols-6")
+    expect(walletPage).not.toContain('{ id: "address-book"')
+    expect(walletPage).not.toContain('{ id: "automatic-settlement"')
+    expect(walletPage).toContain("grid-cols-4")
     expect(walletPage).toContain("whitespace-nowrap")
+    expect(walletPage).not.toContain("grid-cols-5")
+    expect(walletPage).not.toContain("grid-cols-6")
     expect(walletPage).not.toContain('label: "Wallets"')
     expect(walletPage).not.toContain('activeTab === "wallets"')
     expect(walletPage).not.toContain('activeTab === "speed"')

@@ -222,8 +222,8 @@ export default function AddressBookTab({ accessToken }: { accessToken: string | 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs leading-5 text-gray-500">
-          Saved destinations are scoped to an exact asset and network - a Base USDC address is never offered for a Solana withdrawal.
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
+          Saved withdrawal destinations
         </p>
         <button
           type="button"
@@ -326,7 +326,7 @@ export default function AddressBookTab({ accessToken }: { accessToken: string | 
       {destinations === null ? (
         <p className="py-6 text-center text-sm text-gray-500">Loading saved destinations...</p>
       ) : grouped.length === 0 ? (
-        <p className="py-6 text-center text-sm text-gray-500">No saved destinations yet.</p>
+        <p className="py-6 text-center text-sm text-gray-500">No saved addresses yet.</p>
       ) : (
         <ul className="space-y-2">
           {grouped.map((destination) => (

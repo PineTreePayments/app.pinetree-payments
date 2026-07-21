@@ -16,7 +16,6 @@ export type WalletSecurityNotificationKind =
   | "destination_updated"
   | "destination_archived"
   | "withdrawal_submitted"
-  | "sweep_rule_enabled"
 
 export type WalletSecurityNotificationInput = {
   merchantEmail: string | null
@@ -30,12 +29,11 @@ const TITLES: Record<WalletSecurityNotificationKind, string> = {
   destination_updated: "A withdrawal destination was updated",
   destination_archived: "A withdrawal destination was archived",
   withdrawal_submitted: "A withdrawal was submitted",
-  sweep_rule_enabled: "Automatic sweeps were enabled",
 }
 
 /**
  * Best-effort security notification for wallet-affecting actions (address
- * book changes, withdrawal submissions, enabling automatic sweeps). Mirrors
+ * book changes, withdrawal submissions). Mirrors
  * lib/email/sendAdminReplyNotification.ts's pattern exactly: direct Resend
  * instantiation, inline HTML, graceful no-op (never throws) if email isn't
  * configured or the merchant has no email on file - this is a notification,

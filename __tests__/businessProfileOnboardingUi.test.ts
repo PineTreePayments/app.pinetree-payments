@@ -246,7 +246,7 @@ describe("Business Profile onboarding UI", () => {
     expect(sharedBanner).toContain("/dashboard/settings?section=business-profile&return=${returnDestination}")
     expect(wallet).toContain('returnDestination="wallet"')
     expect(wallet).toContain(">PineTree Wallet</h2>")
-    expect(wallet).toContain('<DashboardSection title="MERCHANT WALLET" titleTone="blue">')
+    expect(wallet).toContain("<h1 className={dashboardPageTitleClass}>Merchant Wallet</h1>")
     expect(wallet).not.toContain("Create and open your merchant wallet.")
     expect(wallet).not.toContain("One merchant wallet for receiving funds and managing payments.")
     expect(wallet).toContain("<EnabledRailChips rows={walletRailRows} />")

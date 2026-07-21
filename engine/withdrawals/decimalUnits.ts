@@ -1,11 +1,10 @@
 /**
- * Decimal-safe base-unit helpers for wallet/sweep asset amounts (ETH 18dp,
+ * Decimal-safe base-unit helpers for wallet asset amounts (ETH 18dp,
  * SOL 9dp/lamports, USDC 6dp, BTC 8dp). Same algorithm as
  * engine/wallet/walletMoney.ts and engine/withdrawals/walletWithdrawals.ts's
  * parseSolanaUnits, extended to cover the additional assets those modules
- * don't. Shared by withdrawalFeeEstimate.ts, walletSweepEvaluation.ts, and
- * walletSweepExecution.ts so decimal-string arithmetic (Max calculations,
- * threshold comparisons, queued-sweep amounts) never touches floating point.
+ * don't. Used by withdrawalFeeEstimate.ts so Max-button decimal-string
+ * arithmetic never touches floating point.
  */
 
 export const ASSET_DECIMALS: Record<string, number> = { ETH: 18, USDC: 6, SOL: 9, BTC: 8 }

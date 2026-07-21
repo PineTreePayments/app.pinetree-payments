@@ -8,7 +8,6 @@ import {
   listRecentWalletWithdrawalsForActivity,
 } from "@/database/walletWithdrawalRequests"
 import { listRecentWalletOperationsForActivity } from "@/database/merchantWalletOperations"
-import { listSweepJobsForMerchant } from "@/database/walletSweepJobs"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import {
   getConnectedAccountBalances,
@@ -340,7 +339,7 @@ export async function getPineTreeWalletBalanceSnapshot(
   speedBitcoinSyncState: SpeedBitcoinSyncState = "cached"
 ): Promise<PineTreeWalletSyncResult> {
   await cancelStaleUnsignedWithdrawalReviews(merchantId).catch(() => ({ canceled: 0 }))
-  const [profile, rows, prices, recentWithdrawals, recentOperations, recentSweepJobs, providers, lightningProfile] = await Promise.all([
+  const [profile, rows, prices, recentWithdrawals, recentOperations, providers, lightningProfile] = await Promise.all([
     getPineTreeWalletProfile(merchantId),
     getWalletBalances(merchantId),
     getMarketPricesUSD(),
@@ -349,7 +348,6 @@ export async function getPineTreeWalletBalanceSnapshot(
     // wallet_withdrawal_requests - without this they would never appear in
     // Activity at all.
     listRecentWalletOperationsForActivity(merchantId, 10).catch(() => []),
-    listSweepJobsForMerchant(merchantId, 10).catch(() => []),
     import("@/database/merchants").then((mod) => mod.getMerchantProviders(merchantId)).catch(() => []),
     import("@/database/merchantLightningProfiles").then((mod) => mod.getMerchantLightningProfile(merchantId)).catch(() => null),
   ])
@@ -469,33 +467,7 @@ export async function getPineTreeWalletBalanceSnapshot(
     source: op.source,
   }))
 
-  // Automatic-sweep jobs not yet reflected as a withdrawal (still QUEUED/
-  // AWAITING_GAS/PROCESSING/BLOCKED, or FAILED before any withdrawal record
-  // was created) - once a job produces a withdrawal, that withdrawal's own
-  // activity row (above) takes over, so terminal jobs already linked to one
-  // are skipped here to avoid a duplicate entry.
-  const sweepJobStatusMap: Record<string, string> = {
-    QUEUED: "pending",
-    AWAITING_FINALITY: "pending",
-    AWAITING_GAS: "pending",
-    PROCESSING: "sent",
-    CONFIRMED: "confirmed",
-    FAILED: "failed",
-    CANCELLED: "canceled",
-    BLOCKED: "blocked",
-  }
-  const sweepJobActivity = recentSweepJobs
-    .filter((job) => !job.withdrawal_id)
-    .map((job) => ({
-      id: job.id,
-      label: `Automatic sweep - ${job.amount_decimal} ${job.asset}`,
-      rail: job.rail,
-      status: sweepJobStatusMap[job.status] || "pending",
-      createdAt: job.created_at,
-      source: "automatic_sweep" as const,
-    }))
-
-  const recentActivity = [...withdrawalActivity, ...operationActivity, ...sweepJobActivity]
+  const recentActivity = [...withdrawalActivity, ...operationActivity]
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 15)
 

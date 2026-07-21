@@ -32,12 +32,11 @@ import {
   type DynamicWalletLike,
 } from "@/lib/wallets/dynamicSignerLookup"
 import {
-  DashboardSection,
   ProviderStatusPill,
+  dashboardPageTitleClass,
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import AddressBookTab from "@/components/dashboard/AddressBookTab"
-import AutomaticSettlementTab from "@/components/dashboard/AutomaticSettlementTab"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import StatusBadge from "@/components/ui/StatusBadge"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
@@ -76,22 +75,11 @@ import { runWithBoundedTimeout, type BoundedProviderCallSettlement } from "@/lib
 // Types
 // ---------------------------------------------------------------------------
 
-type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "address-book" | "automatic-settlement"
+type WalletTab = "overview" | "balances" | "withdraw" | "activity"
 type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
 type WithdrawalScreen = "form" | "review" | "approving" | "submitted" | "failed"
-
-// Base/Solana automatic-sweep jobs a merchant's active session can complete
-// - see components/dashboard/AutomaticSettlementTab.tsx and
-// handleReviewSweepJob below.
-type PendingSweepJob = {
-  id: string
-  rail: "base" | "solana"
-  asset: "ETH" | "USDC" | "SOL"
-  amount_decimal: string
-  status: string
-}
 
 type WithdrawalReviewResponse = {
   request: {
@@ -501,8 +489,6 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "balances", label: "Balances" },
   { id: "withdraw", label: "Withdraw" },
   { id: "activity", label: "Activity" },
-  { id: "address-book", label: "Address Book" },
-  { id: "automatic-settlement", label: "Automatic Settlement" },
 ]
 
 const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
@@ -2968,11 +2954,6 @@ function PineTreeWalletRuntime() {
   const [businessProfileReadiness, setBusinessProfileReadiness] = useState<BusinessProfileReadinessState>({ kind: "loading" })
   const [lightningProfileState, setLightningProfileState] = useState<LightningProfileState>({ kind: "loading" })
   const accessTokenRef = useRef<string | null>(null)
-  // Set only while the active withdrawal review originated from an
-  // automatic-sweep job (see handleReviewSweepJob) - lets the existing
-  // dynamic-browser submit path report the outcome back to that job without
-  // any other change to the withdrawal submission logic itself.
-  const activeSweepJobIdRef = useRef<string | null>(null)
 
   // --- Dynamic SDK ---
   const { user, sdkHasLoaded, showAuthFlow, setShowAuthFlow, setShowDynamicUserProfile, handleLogOut, primaryWallet } = useDynamicContext()
@@ -3009,6 +2990,7 @@ function PineTreeWalletRuntime() {
   // --- UI state ---
   const [sdkTimedOut, setSdkTimedOut] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
+  const [addressBookOpen, setAddressBookOpen] = useState(false)
   const [walletOpening, setWalletOpening] = useState(false)
   const [walletSetupOpeningAfterCreate, setWalletSetupOpeningAfterCreate] = useState(false)
   const [openWalletReconnectNeeded, setOpenWalletReconnectNeeded] = useState(false)
@@ -8059,74 +8041,6 @@ function PineTreeWalletRuntime() {
   }
 
   /**
-   * Continues a queued Base/Solana automatic-sweep job: pre-fills the rail/
-   * asset from the job and creates its review via the sweep_job_id-aware
-   * branch of POST /api/wallets/pinetree-wallet/withdrawals, then switches
-   * to the Withdraw tab's existing review screen so the merchant completes
-   * it with the same one-click Approve flow as any other withdrawal - no
-   * signing/submission logic is duplicated. See engine/withdrawals/walletSweepExecution.ts's
-   * header comment for why Base/Solana sweeps require this client step at
-   * all (no server-side signing capability exists for the embedded wallet).
-   */
-  async function handleReviewSweepJob(job: PendingSweepJob) {
-    const token = accessTokenRef.current
-    if (!token) {
-      setWithdrawalError("Wallet session is not available. Refresh the page and try again.")
-      return
-    }
-    setWithdrawalRail(job.rail)
-    setWithdrawalAsset(job.asset)
-    setWithdrawalReview(null)
-    setWithdrawalSubmitResult(null)
-    setWithdrawalScreen("form")
-    setWithdrawalError("")
-    setWithdrawalApprovalError("")
-    setReviewingWithdrawal(true)
-    activeSweepJobIdRef.current = job.id
-    try {
-      const res = await fetch("/api/wallets/pinetree-wallet/withdrawals", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ sweep_job_id: job.id }),
-      })
-      const json = (await res.json()) as WithdrawalReviewResponse | { error?: string }
-      if (!res.ok) {
-        activeSweepJobIdRef.current = null
-        setWithdrawalError(sanitizeWithdrawalErrorForMerchant("error" in json ? json.error : undefined))
-        return
-      }
-      setWithdrawalReview(json as WithdrawalReviewResponse)
-      setWithdrawalScreen("review")
-      setActiveTab("withdraw")
-    } catch {
-      activeSweepJobIdRef.current = null
-      setWithdrawalError("We couldn't prepare this automatic sweep. Please try again.")
-    } finally {
-      setReviewingWithdrawal(false)
-    }
-  }
-
-  /**
-   * Reports a Base/Solana withdrawal's terminal outcome back to the
-   * automatic-sweep job it originated from (if any) - see
-   * handleReviewSweepJob and activeSweepJobIdRef above. Best-effort: never
-   * blocks or alters the withdrawal flow itself.
-   */
-  function reportSweepJobOutcomeIfActive(status: "CONFIRMED" | "FAILED", resultingWithdrawalId: string) {
-    const jobId = activeSweepJobIdRef.current
-    if (!jobId) return
-    activeSweepJobIdRef.current = null
-    const token = accessTokenRef.current
-    if (!token) return
-    const outcomeBody = { status, withdrawal_id: resultingWithdrawalId }
-    void fetch(`/api/wallets/pinetree-wallet/sweep-jobs/${encodeURIComponent(jobId)}/continue`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(outcomeBody),
-    }).catch(() => {})
-  }
-
-  /**
    * The true spendable amount, not just the displayed balance: accounts for
    * confirmed balance, pending outgoing amounts, provider/RPC-estimated
    * network fees, and a configured native-gas reserve (see
@@ -8391,12 +8305,10 @@ function PineTreeWalletRuntime() {
           setWithdrawalReview(null)
           setWithdrawalApprovalError(sanitizeWithdrawalSubmitErrorForMerchant("error" in submitted ? submitted.error : undefined))
           setWithdrawalScreen("failed")
-          reportSweepJobOutcomeIfActive("FAILED", withdrawalId)
           return
         }
         setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)
         setWithdrawalScreen("submitted")
-        reportSweepJobOutcomeIfActive("CONFIRMED", withdrawalId)
         // Refresh Activity immediately so it reflects the just-submitted transaction
         // (tx hash present) instead of the stale pre-submission "pending" snapshot.
         void syncPineTreeWallet()
@@ -8414,7 +8326,6 @@ function PineTreeWalletRuntime() {
         setWithdrawalAuthorizationRecoveryOpen(true)
       }
       setWithdrawalScreen("failed")
-      reportSweepJobOutcomeIfActive("FAILED", withdrawalId)
     } finally {
       setSubmittingWithdrawal(false)
     }
@@ -8734,6 +8645,54 @@ function PineTreeWalletRuntime() {
         </div>
       </article>
 
+      <article className="mt-5 max-w-2xl rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-7">
+        <h2 className="min-w-0 text-base font-semibold text-gray-950">Address Book</h2>
+        <p className="mt-2 max-w-md text-sm leading-6 text-gray-600">
+          Save trusted withdrawal destinations for faster payouts.
+        </p>
+        <div className="mt-5 flex justify-start">
+          <button
+            type="button"
+            onClick={() => setAddressBookOpen(true)}
+            className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+          >
+            Open Address Book
+          </button>
+        </div>
+      </article>
+
+      {addressBookOpen ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setAddressBookOpen(false)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="address-book-modal-title"
+            className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(15,23,42,0.30)] backdrop-blur-xl"
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-7 sm:py-6">
+              <h2 id="address-book-modal-title" className="min-w-0 flex-1 text-lg font-semibold text-gray-950">Address Book</h2>
+              <button
+                type="button"
+                onClick={() => setAddressBookOpen(false)}
+                aria-label="Close Address Book"
+                className={modalCloseButtonClass}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
+              <AddressBookTab accessToken={accessTokenRef.current} />
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {process.env.NODE_ENV !== "production" ? (
         <WalletDiagnosticsPanel wallets={wallets} sdkNetworkGroups={dynamicNetworkAddresses} />
       ) : null}
@@ -8817,7 +8776,7 @@ function PineTreeWalletRuntime() {
             </header>
 
             <nav
-              className="grid shrink-0 grid-cols-3 gap-1.5 border-b border-gray-100 px-3 py-3 sm:grid-cols-6 sm:px-6"
+              className="grid shrink-0 grid-cols-4 gap-1.5 border-b border-gray-100 px-3 py-3 sm:px-6"
               aria-label="PineTree Wallet sections"
             >
               {walletTabs.map((tab) => (
@@ -8919,17 +8878,6 @@ function PineTreeWalletRuntime() {
                 <ActivityTab sync={walletSync} syncing={walletSyncing} />
               ) : null}
 
-              {activeTab === "address-book" ? (
-                <AddressBookTab accessToken={accessTokenRef.current} />
-              ) : null}
-
-              {activeTab === "automatic-settlement" ? (
-                <AutomaticSettlementTab
-                  accessToken={accessTokenRef.current}
-                  onContinuePendingJob={(job) => void handleReviewSweepJob(job)}
-                />
-              ) : null}
-
             </div>
           </section>
         </div>
@@ -8947,15 +8895,14 @@ export default function PineTreeWalletPage() {
 
   return (
     <div className="space-y-5">
-      <DashboardSection title="MERCHANT WALLET" titleTone="blue">
-        {!infrastructure.configured ? (
-          <WalletSetupUnavailable kind="missing-env" />
-        ) : infrastructure.sdkUnavailable ? (
-          <WalletSetupUnavailable kind="sdk" />
-        ) : (
-          <PineTreeWalletRuntime />
-        )}
-      </DashboardSection>
+      <h1 className={dashboardPageTitleClass}>Merchant Wallet</h1>
+      {!infrastructure.configured ? (
+        <WalletSetupUnavailable kind="missing-env" />
+      ) : infrastructure.sdkUnavailable ? (
+        <WalletSetupUnavailable kind="sdk" />
+      ) : (
+        <PineTreeWalletRuntime />
+      )}
     </div>
   )
 }

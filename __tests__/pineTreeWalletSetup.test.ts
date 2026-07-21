@@ -123,7 +123,8 @@ describe("PineTree embedded wallet setup", () => {
   // -------------------------------------------------------------------------
 
   it("presents one merchant PineTree Wallet profile", () => {
-    expect(page).toContain('<DashboardSection title="MERCHANT WALLET" titleTone="blue">')
+    expect(page).toContain("<h1 className={dashboardPageTitleClass}>Merchant Wallet</h1>")
+    expect(page).not.toContain('title="MERCHANT WALLET"')
     expect(page).not.toContain(">PineTree Wallet</h1>")
     expect(page).toContain(">PineTree Wallet</h2>")
     expect(page).not.toContain("One merchant wallet profile")
@@ -1557,7 +1558,7 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("uses a clean merchant wallet hierarchy without redundant descriptive copy", () => {
-    expect(page).toContain('<DashboardSection title="MERCHANT WALLET" titleTone="blue">')
+    expect(page).toContain("<h1 className={dashboardPageTitleClass}>Merchant Wallet</h1>")
     expect(page).toContain(">PineTree Wallet</h2>")
     expect(page).not.toContain(">PineTree Wallet</h1>")
     expect(page).not.toContain("Create and open your merchant wallet.")

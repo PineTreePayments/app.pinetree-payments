@@ -20,7 +20,6 @@ import { syncTransactionProgressForPayment } from "./transactionProgress"
 import { getMerchantStripeAccountId } from "./stripeConnect"
 import { releaseTerminalReaderClaim } from "@/database/merchantTerminalReaders"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
-import { evaluatePerPaymentSweepForConfirmedPayment } from "@/engine/withdrawals/walletSweepEvaluation"
 
 export type WebhookInput = {
   provider: string
@@ -432,17 +431,9 @@ export async function processWebhook({
         status: "CONFIRMED"
       })
 
-      // Connected-account BTC remains at Speed; merchant withdrawals are
-      // still user-triggered Instant Send operations by default. The only
-      // automatic fund movement is opt-in per-payment sweep rules a merchant
-      // explicitly configured (Automatic Settlement) - fire-and-forget so a
-      // slow/failed evaluation never blocks payment finalization. Safe to
-      // call from both this webhook path and the watcher path below (see
-      // engine/withdrawals/walletSweepEvaluation.ts's idempotency-keyed job
-      // creation) since either can be the one that actually flips CONFIRMED.
-      void evaluatePerPaymentSweepForConfirmedPayment(payment.merchant_id, paymentId).catch((error) =>
-        console.warn("[eventProcessor] sweep evaluation failed (webhook path)", { paymentId, error })
-      )
+      // Connected-account BTC remains at Speed. Merchant withdrawals are
+      // user-triggered Instant Send operations; no automatic settlement,
+      // treasury sweep, AutoSwap, or AutoPayout runs during payment webhooks.
     }
 
 
@@ -722,9 +713,6 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
           direction: "INBOUND",
           status: "CONFIRMED"
         })
-        void evaluatePerPaymentSweepForConfirmedPayment(confirmedPayment.merchant_id, paymentId).catch((error) =>
-          console.warn("[eventProcessor] sweep evaluation failed (watcher path)", { paymentId, error })
-        )
       }
     }
 
