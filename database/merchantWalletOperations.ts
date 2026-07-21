@@ -324,6 +324,32 @@ export async function sumPendingWithdrawalOperationBaseUnits(
 }
 
 /**
+ * PROCESSING withdrawal operations with a provider reference already
+ * recorded - the set the reconciliation cron must poll so a Bitcoin/Speed
+ * withdrawal submitted through this table (the actual live execution path,
+ * see engine/wallet/walletOperations.ts) is never stuck at PROCESSING
+ * forever. Distinct from database/walletWithdrawalRequests.ts's own
+ * listProcessingBitcoinWithdrawalsForReconciliation, which queries a
+ * different table (wallet_withdrawal_requests) that Bitcoin withdrawals
+ * never actually write to.
+ */
+export async function listProcessingWalletOperationsForReconciliation(
+  limit: number
+): Promise<MerchantWalletOperation[]> {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("*")
+    .eq("status", "PROCESSING")
+    .eq("operation_type", "WITHDRAWAL")
+    .not("provider_reference", "is", null)
+    .order("created_at", { ascending: true })
+    .limit(limit)
+
+  if (error) throw new Error(`Failed to list processing wallet operations for reconciliation: ${error.message}`)
+  return (data || []) as MerchantWalletOperation[]
+}
+
+/**
  * Recent WITHDRAWAL operations (Bitcoin/Speed) for the Wallet Activity tab -
  * mirrors listRecentWalletWithdrawalsForActivity's shape/purpose in
  * database/walletWithdrawalRequests.ts, since Bitcoin withdrawals live in

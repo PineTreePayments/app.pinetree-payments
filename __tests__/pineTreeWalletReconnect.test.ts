@@ -84,7 +84,11 @@ describe("PineTree Wallet reconnect flow", () => {
 
   it("approve withdrawal refreshes Dynamic before signer lookup/signing", () => {
     expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
-    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet, {")
+    // Signs with walletsRef.current/primaryWalletRef.current, not the
+    // closed-over wallets/primaryWallet - the refresh above may have just
+    // hydrated the SDK's wallet list mid-execution of this same handler,
+    // which a plain closure variable never observes.
+    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, walletsRef.current, primaryWalletRef.current, {")
   })
 
   it("blocks selected signer and asset rail mismatches before Dynamic approval opens", () => {

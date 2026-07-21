@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   insertWithdrawalAuditEvent: vi.fn(),
   getMerchantLightningProfile: vi.fn(),
   getConnectedAccountSendStatus: vi.fn(),
+  listProcessingWalletOperationsForReconciliation: vi.fn(),
+  getWalletWithdrawal: vi.fn(),
   fetch: vi.fn(),
 }))
 
@@ -26,6 +28,14 @@ vi.mock("@/database/merchantLightningProfiles", () => ({
 
 vi.mock("@/providers/lightning/speedWalletManagement", () => ({
   getConnectedAccountSendStatus: mocks.getConnectedAccountSendStatus,
+}))
+
+vi.mock("@/database/merchantWalletOperations", () => ({
+  listProcessingWalletOperationsForReconciliation: mocks.listProcessingWalletOperationsForReconciliation,
+}))
+
+vi.mock("@/engine/wallet/walletOperations", () => ({
+  getWalletWithdrawal: mocks.getWalletWithdrawal,
 }))
 
 vi.stubGlobal("fetch", mocks.fetch)
@@ -107,6 +117,7 @@ describe("reconcileProcessingWithdrawals", () => {
     mocks.insertWithdrawalAuditEvent.mockResolvedValue(undefined)
     mocks.listProcessingWithdrawalsForReconciliation.mockResolvedValue([])
     mocks.listProcessingBitcoinWithdrawalsForReconciliation.mockResolvedValue([])
+    mocks.listProcessingWalletOperationsForReconciliation.mockResolvedValue([])
     // Clear any env vars that would affect Base RPC
     process.env.BASE_RPC_URL = "https://base-rpc.example.com"
     process.env.RPC_URL_SOLANA = "https://solana-rpc.example.com"
@@ -314,6 +325,7 @@ describe("reconcileProcessingWithdrawals", () => {
 
     expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(10)
     expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(10)
+    expect(mocks.listProcessingWalletOperationsForReconciliation).toHaveBeenCalledWith(10)
   })
 
   it("defaults limit to 50 when not provided", async () => {
@@ -321,5 +333,73 @@ describe("reconcileProcessingWithdrawals", () => {
 
     expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(50)
     expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(50)
+    expect(mocks.listProcessingWalletOperationsForReconciliation).toHaveBeenCalledWith(50)
+  })
+
+  // Bitcoin withdrawals actually submitted through the live UI write to
+  // merchant_wallet_operations (engine/wallet/walletOperations.ts), not
+  // wallet_withdrawal_requests - listProcessingBitcoinWithdrawalsForReconciliation
+  // above only ever covers the separate, unreachable-from-the-UI legacy
+  // engine. Without this second path, a real Bitcoin/Speed withdrawal had no
+  // reconciliation at all and stayed "Processing" forever.
+  describe("merchant_wallet_operations (the real live Bitcoin/Speed execution path)", () => {
+    function makeOperation(overrides: Record<string, unknown> = {}) {
+      return {
+        id: "op-001",
+        merchant_id: "merch-btc",
+        provider: "speed",
+        status: "PROCESSING",
+        operation_type: "WITHDRAWAL",
+        asset: "BTC",
+        provider_reference: "is_999",
+        ...overrides,
+      }
+    }
+
+    it("marks a wallet operation confirmed when the adapter reports COMPLETED", async () => {
+      mocks.listProcessingWalletOperationsForReconciliation.mockResolvedValue([makeOperation()])
+      mocks.getWalletWithdrawal.mockResolvedValue({ id: "op-001", status: "COMPLETED" })
+
+      const result = await reconcileProcessingWithdrawals({})
+
+      expect(mocks.getWalletWithdrawal).toHaveBeenCalledWith("merch-btc", "op-001")
+      expect(result.confirmed).toBe(1)
+      expect(result.checked).toBe(1)
+    })
+
+    it("marks a wallet operation failed when the adapter reports FAILED", async () => {
+      mocks.listProcessingWalletOperationsForReconciliation.mockResolvedValue([makeOperation({ id: "op-002" })])
+      mocks.getWalletWithdrawal.mockResolvedValue({ id: "op-002", status: "FAILED" })
+
+      const result = await reconcileProcessingWithdrawals({})
+
+      expect(result.failed).toBe(1)
+    })
+
+    it("leaves a wallet operation still_processing on an ambiguous status", async () => {
+      mocks.listProcessingWalletOperationsForReconciliation.mockResolvedValue([makeOperation({ id: "op-003" })])
+      mocks.getWalletWithdrawal.mockResolvedValue({ id: "op-003", status: "PROCESSING" })
+
+      const result = await reconcileProcessingWithdrawals({})
+
+      expect(result.still_processing).toBe(1)
+    })
+
+    it("skips one merchant's failed provider/account resolution without blocking the batch", async () => {
+      mocks.listProcessingWalletOperationsForReconciliation.mockResolvedValue([
+        makeOperation({ id: "op-broken", merchant_id: "merch-disconnected" }),
+        makeOperation({ id: "op-ok", merchant_id: "merch-btc" }),
+      ])
+      mocks.getWalletWithdrawal.mockImplementation(async (merchantId: string) => {
+        if (merchantId === "merch-disconnected") throw new Error("No Speed Custom Connect profile exists")
+        return { id: "op-ok", status: "COMPLETED" }
+      })
+
+      const result = await reconcileProcessingWithdrawals({})
+
+      expect(result.skipped).toBe(1)
+      expect(result.confirmed).toBe(1)
+      expect(result.checked).toBe(2)
+    })
   })
 })

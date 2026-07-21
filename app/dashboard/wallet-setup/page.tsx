@@ -2972,6 +2972,17 @@ function PineTreeWalletRuntime() {
     userHasEmbeddedWallet,
   } = useEmbeddedWallet()
   const wallets = useUserWallets()
+  // Synchronously mirrors the latest render's wallets/primaryWallet so an
+  // already-running async withdrawal handler can read the freshly hydrated
+  // Dynamic wallet list right after `await refreshDynamicWalletRuntime(...)`
+  // instead of the stale array captured when its closure was created. A
+  // plain render-body assignment (not a useEffect) is required here - it
+  // must be current before this same render's event handlers ever run, with
+  // no effect-commit lag.
+  const walletsRef = useRef<unknown[]>(wallets as unknown[])
+  walletsRef.current = wallets as unknown[]
+  const primaryWalletRef = useRef<unknown>(primaryWallet)
+  primaryWalletRef.current = primaryWallet
 
   // --- UI state ---
   const [sdkTimedOut, setSdkTimedOut] = useState(false)
@@ -8075,7 +8086,11 @@ function PineTreeWalletRuntime() {
       setReviewingWithdrawal(true)
       await refreshDynamicWalletRuntime("withdrawal_review_before_signer_check", { requireApprovalWallet: true })
       runtimeCountForReviewGate = dynamicWalletRuntimeCountRef.current
-      reviewSigner = findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)
+      // Read via the refs, not the closed-over `wallets`/`primaryWallet` - the
+      // refresh above may have just hydrated the SDK's wallet list, but this
+      // function's own `wallets` binding was fixed when its closure was
+      // created and never updates mid-execution (see walletsRef comment).
+      reviewSigner = findDynamicApprovalWalletForSource(walletsRef.current, primaryWalletRef.current, withdrawalRail, reviewSourceAddress)
     }
     // Block review when the Dynamic wallet runtime has no usable signer - creating a withdrawal request
     // row now would result in pending spam that can never be signed in this session.
@@ -8295,8 +8310,12 @@ function PineTreeWalletRuntime() {
       await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })
     }
     const _debugSourceAddress = _debugRail ? getWithdrawalSourceAddress(profile, _debugRail) : null
+    // Read via the refs (not the closed-over `wallets`/`primaryWallet`) - the
+    // refreshDynamicWalletRuntime call above may have just hydrated the SDK's
+    // wallet list mid-execution of this same handler, which this function's
+    // own `wallets`/`primaryWallet` bindings never observe (see walletsRef).
     const _debugMatchingWallet = _debugRail && _debugRailUsesDynamicSigner
-      ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, _debugRail, _debugSourceAddress)
+      ? findDynamicApprovalWalletForSource(walletsRef.current, primaryWalletRef.current, _debugRail, _debugSourceAddress)
       : null
     if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet) {
       setWithdrawalApprovalError(
@@ -8375,12 +8394,17 @@ function PineTreeWalletRuntime() {
           return
         }
 
-        const dynamicSubmission = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, wallets as unknown[], primaryWallet, {
+        // Same staleness hazard as the pre-flight checks above, but for the
+        // actual signing call: refreshDynamicWalletRuntime (called just above,
+        // before this prepare/submit block) may have hydrated the wallet list
+        // mid-execution of this handler, which this closure's own
+        // `wallets`/`primaryWallet` bindings never observe. Read the refs.
+        const dynamicSubmission = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, walletsRef.current, primaryWalletRef.current, {
           selectedRail: withdrawalRail,
           selectedAsset: withdrawalAsset,
           destinationAddress: withdrawalReview?.review.destinationAddress ?? withdrawalDestination,
           pineTreeProfileSolanaAddress: profile?.solana_address ?? null,
-          primaryWallet,
+          primaryWallet: primaryWalletRef.current,
           switchDynamicWallet,
         })
         const submitRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit`, {

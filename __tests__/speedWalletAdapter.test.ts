@@ -93,6 +93,25 @@ describe("Speed wallet adapter normalization", () => {
       .toThrow(expect.objectContaining({ code: "INVALID_DESTINATION" }))
   })
 
+  it("rejects an on-chain Bitcoin amount below Speed's documented 1,000 sat minimum", async () => {
+    const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
+    const onchainAddress = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+    expect(() => speedWalletAdapter.validateWithdrawal!({
+      asset: "SATS", amountBaseUnits: BigInt(999), destination: onchainAddress, idempotencyKey: "k",
+    })).toThrow(expect.objectContaining({ code: "MINIMUM_AMOUNT" }))
+  })
+
+  it("accepts a Lightning amount at the 1 sat minimum but rejects an on-chain amount there", async () => {
+    const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
+    expect(() => speedWalletAdapter.validateWithdrawal!({
+      asset: "SATS", amountBaseUnits: BigInt(1), destination: "merchant@speed.app", idempotencyKey: "k",
+    })).not.toThrow()
+    const onchainAddress = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+    expect(() => speedWalletAdapter.validateWithdrawal!({
+      asset: "SATS", amountBaseUnits: BigInt(1), destination: onchainAddress, idempotencyKey: "k",
+    })).toThrow(expect.objectContaining({ code: "MINIMUM_AMOUNT" }))
+  })
+
   it("accepts a Bitcoin Network on-chain address - this used to be rejected outright by a Lightning-only regex", async () => {
     const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
     const onchainAddress = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"

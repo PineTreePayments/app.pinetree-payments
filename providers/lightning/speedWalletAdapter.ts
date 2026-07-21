@@ -215,10 +215,27 @@ export const speedWalletAdapter: WalletProviderAdapter = {
     // Bitcoin is one asset with two destination methods (Bitcoin Network
     // on-chain address, or Lightning via BOLT11/Lightning Address) - this
     // must accept both, never just Lightning-shaped destinations.
-    if (!classifyBitcoinWithdrawalDestination(input.destination).valid) {
+    const classified = classifyBitcoinWithdrawalDestination(input.destination)
+    if (!classified.valid) {
       throw new WalletApiRouteError(
         "INVALID_DESTINATION",
         "Enter a valid Bitcoin address, Lightning Address, or Lightning invoice."
+      )
+    }
+    // Speed's documented POST /send minimums (apidocs.tryspeed.com/reference/
+    // create-a-instant-send): on-chain Bitcoin sends require at least 1000
+    // SATS, Lightning sends at least 1 SAT. Enforced here so a below-minimum
+    // amount returns the specific MINIMUM_AMOUNT code instead of depending on
+    // Speed's raw validation error text being classified correctly after the
+    // fact (translateSpeedWalletError's generic /amount/i check would
+    // otherwise catch it as the less specific INVALID_AMOUNT).
+    const minimumSats = classified.method === "onchain" ? BigInt(1000) : BigInt(1)
+    if (input.amountBaseUnits < minimumSats) {
+      throw new WalletApiRouteError(
+        "MINIMUM_AMOUNT",
+        classified.method === "onchain"
+          ? "Bitcoin Network withdrawals require at least 1,000 sats."
+          : "Lightning withdrawals require at least 1 sat."
       )
     }
   },

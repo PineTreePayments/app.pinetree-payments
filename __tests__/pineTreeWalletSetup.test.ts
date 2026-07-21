@@ -1812,7 +1812,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(reviewHandler.indexOf("if (!amount)")).toBeLessThan(reviewHandler.indexOf("findDynamicApprovalWalletForSource"))
     expect(reviewHandler.indexOf("No available balance for this asset.")).toBeLessThan(reviewHandler.indexOf("findDynamicApprovalWalletForSource"))
     expect(submitHandler).toContain('await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
-    expect(submitHandler).toContain("findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, _debugRail, _debugSourceAddress)")
+    // Reads via walletsRef/primaryWalletRef, not the closed-over
+    // wallets/primaryWallet bindings - refreshDynamicWalletRuntime above may
+    // have just hydrated the SDK's wallet list mid-execution of this same
+    // handler, which a plain closure variable never observes (see the
+    // walletsRef declaration comment near useUserWallets()).
+    expect(submitHandler).toContain("findDynamicApprovalWalletForSource(walletsRef.current, primaryWalletRef.current, _debugRail, _debugSourceAddress)")
   })
 
   it("maps raw schema/cache withdrawal errors to merchant-safe copy via the shared presentation module", () => {

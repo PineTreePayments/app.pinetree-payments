@@ -4,9 +4,11 @@ import {
   updateWalletWithdrawalRequest,
   type WalletWithdrawalRequestRecord,
 } from "@/database/walletWithdrawalRequests"
+import { listProcessingWalletOperationsForReconciliation } from "@/database/merchantWalletOperations"
 import { insertWithdrawalAuditEvent } from "@/database/merchantAuditEvents"
 import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
 import { getConnectedAccountSendStatus } from "@/providers/lightning/speedWalletManagement"
+import { getWalletWithdrawal } from "@/engine/wallet/walletOperations"
 
 export type ReconciliationResult = {
   checked: number
@@ -172,22 +174,71 @@ async function reconcileOne(
   return onChainStatus
 }
 
+/**
+ * Reconciles Bitcoin/Speed withdrawals submitted through
+ * engine/wallet/walletOperations.ts (merchant_wallet_operations) - the
+ * table the live UI actually writes to for Bitcoin. Without this, those
+ * rows had no reconciliation path at all: the cron above only ever queried
+ * wallet_withdrawal_requests (a table Bitcoin withdrawals never write to),
+ * and the webhook-based update path
+ * (engine/wallet/speedWalletWebhookNormalizer.ts) only fires if Speed's
+ * connected-account webhook happens to be subscribed to withdraw.* events,
+ * which cannot be assumed. getWalletWithdrawal already resolves the exact
+ * same merchant->Speed-account context used to create the withdrawal and
+ * persists the result - this just needs to be called on a schedule.
+ */
+async function reconcileProcessingWalletOperations(limit: number): Promise<{
+  checked: number
+  confirmed: number
+  failed: number
+  still_processing: number
+  skipped: number
+}> {
+  const operations = await listProcessingWalletOperationsForReconciliation(limit)
+  const result = { checked: operations.length, confirmed: 0, failed: 0, still_processing: 0, skipped: 0 }
+
+  for (const operation of operations) {
+    try {
+      const updated = await getWalletWithdrawal(operation.merchant_id, operation.id)
+      if (updated.status === "COMPLETED") result.confirmed++
+      else if (updated.status === "FAILED") result.failed++
+      else result.still_processing++
+      console.log(
+        `[reconcile-withdrawals] wallet_operation ${operation.id} -> ${updated.status} (speed/BTC ref=${operation.provider_reference})`
+      )
+    } catch (error) {
+      // A single merchant's provider/context failure (e.g. Speed account was
+      // disconnected after the withdrawal was submitted) must never block
+      // reconciliation of every other row in this batch.
+      console.warn("[reconcile-withdrawals] wallet_operation reconciliation failed", {
+        operationId: operation.id,
+        merchantId: operation.merchant_id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      result.skipped++
+    }
+  }
+
+  return result
+}
+
 export async function reconcileProcessingWithdrawals(options: {
   limit?: number
 }): Promise<ReconciliationResult> {
   const limit = options.limit ?? 50
-  const [onChainWithdrawals, bitcoinWithdrawals] = await Promise.all([
+  const [onChainWithdrawals, bitcoinWithdrawals, walletOperations] = await Promise.all([
     listProcessingWithdrawalsForReconciliation(limit),
     listProcessingBitcoinWithdrawalsForReconciliation(limit),
+    reconcileProcessingWalletOperations(limit),
   ])
   const withdrawals = [...onChainWithdrawals, ...bitcoinWithdrawals]
 
   const result: ReconciliationResult = {
-    checked: withdrawals.length,
-    confirmed: 0,
-    failed: 0,
-    still_processing: 0,
-    skipped: 0,
+    checked: withdrawals.length + walletOperations.checked,
+    confirmed: walletOperations.confirmed,
+    failed: walletOperations.failed,
+    still_processing: walletOperations.still_processing,
+    skipped: walletOperations.skipped,
   }
 
   for (const withdrawal of withdrawals) {
