@@ -36,6 +36,8 @@ import {
   dashboardPageTitleClass,
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
+import { presentWithdrawalError as presentWithdrawalErrorClient } from "@/engine/withdrawals/withdrawalErrorPresentation"
+import type { WalletApiErrorCode } from "@/engine/wallet/walletErrors"
 import AddressBookTab from "@/components/dashboard/AddressBookTab"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import StatusBadge from "@/components/ui/StatusBadge"
@@ -118,7 +120,7 @@ type WalletWithdrawalResponse = {
       txHash?: string | null
     }
   }
-  error?: { message?: string }
+  error?: { message?: string; code?: string }
 }
 
 type WithdrawalPrepareResponse = {
@@ -1002,21 +1004,23 @@ function getWithdrawalFallbackReason(input: WithdrawalDiagnostics) {
   return null
 }
 
-function sanitizeWithdrawalErrorForMerchant(message: string | undefined) {
+// code is the server's normalized error_code (engine/withdrawals/withdrawalErrorPresentation.ts)
+// when present - used as the fallback for anything not already covered by a
+// known, specific, tested message below, rather than the old generic string.
+function sanitizeWithdrawalErrorForMerchant(message: string | undefined, code?: string) {
   const raw = String(message || "").trim()
-  if (!raw) return "We couldn't create this withdrawal request. Please try again."
   if (
-    /schema cache|column|wallet_withdrawal_requests|amount_decimal|failed to create wallet withdrawal request/i.test(raw)
+    raw &&
+    !/schema cache|column|wallet_withdrawal_requests|amount_decimal|failed to create wallet withdrawal request/i.test(raw)
   ) {
-    console.error("[pinetree-wallets] withdrawal request error", raw)
-    return "We couldn't create this withdrawal request. Please try again."
+    return raw
   }
-  return raw
+  if (raw) console.error("[pinetree-wallets] withdrawal request error", raw)
+  return presentWithdrawalErrorClient({ code: code as WalletApiErrorCode | undefined, rawMessage: raw }).message
 }
 
-function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
+function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined, code?: string) {
   const raw = String(message || "").trim()
-  if (!raw) return "We couldn't submit this withdrawal request. Please try again."
   // Pass through session-specific reconnect errors so merchants get actionable guidance.
   if (raw.includes("PineTree Wallet is not active in this browser session")) return pineTreeSignerReconnectMessage
   if (raw.includes("different PineTree Wallet session")) return raw
@@ -1032,14 +1036,12 @@ function sanitizeWithdrawalSubmitErrorForMerchant(message: string | undefined) {
     ["cannot", "sign"].join(" "),
     ["signing", "not enabled"].join(" "),
   ]
-  if (
+  const leaksInternals =
     /schema cache|column|wallet_withdrawal_requests|amount_decimal|private key|secret|api key|token|signer/i.test(raw) ||
     hiddenSignerPhrases.some((phrase) => raw.toLowerCase().includes(phrase))
-  ) {
-    console.error("[pinetree-wallets] withdrawal submit error", raw)
-    return "We couldn't submit this withdrawal request. Please try again."
-  }
-  return raw
+  if (raw && !leaksInternals) return raw
+  if (leaksInternals) console.error("[pinetree-wallets] withdrawal submit error", raw)
+  return presentWithdrawalErrorClient({ code: code as WalletApiErrorCode | undefined, rawMessage: raw }).message
 }
 // Explicit fallback for createWalletAccount when Dynamic's needsAutoCreateWalletChains
 // comes back empty for a brand new user (SDK hasn't caught up yet) but no wallet or
@@ -1086,6 +1088,10 @@ const walletCreationDebugEnabled =
 const withdrawalSignerRailMismatchMessage = "Selected wallet network does not match this withdrawal asset."
 const solanaWithdrawalReconnectMessage = "Reconnect your Solana wallet session before approving this withdrawal."
 const pineTreeSignerReconnectMessage = "Reconnect PineTree Wallet to verify secure signing access."
+// The provider's outcome is unknown (e.g. a submit request timed out mid-flight) - this is
+// distinct from a real failure: the withdrawal must never be treated as abandonable or
+// resubmittable from scratch while this is showing.
+const withdrawalStatusUnknownMessage = "Withdrawal approval is still pending. Check your wallet activity before trying again."
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -1927,7 +1933,10 @@ function WithdrawalFormShell({
   asset,
   assetOptions,
   lightningPayout,
+  bitcoinTransferType,
+  onBitcoinTransferTypeChange,
   destinationAddress,
+  selectedDestinationId,
   amountDecimal,
   screen,
   review,
@@ -1944,10 +1953,12 @@ function WithdrawalFormShell({
   maxWarning,
   onAssetSelect,
   onDestinationChange,
+  onSelectDestination,
   onAmountChange,
   onMaxAmount,
   onEdit,
   onDone,
+  onCancel,
   onReview,
   onSubmit,
   onOpenWallet,
@@ -1960,7 +1971,10 @@ function WithdrawalFormShell({
     connected: boolean
     destinationLabel: "PineTree BTC Wallet" | "Not set"
   }
+  bitcoinTransferType: BitcoinTransferType
+  onBitcoinTransferTypeChange: (value: BitcoinTransferType) => void
   destinationAddress: string
+  selectedDestinationId: string | null
   amountDecimal: string
   screen: WithdrawalScreen
   review: WithdrawalReviewResponse | null
@@ -1977,25 +1991,22 @@ function WithdrawalFormShell({
   maxWarning?: string
   onAssetSelect: (rail: WithdrawalRail, asset: WithdrawalAsset) => void
   onDestinationChange: (value: string) => void
+  onSelectDestination: (destination: SavedWithdrawalDestination | null) => void
   onAmountChange: (value: string) => void
   onMaxAmount: () => void
   onEdit: () => void
   onDone: () => void
+  onCancel: () => void
   onReview: () => void
   onSubmit: () => void
   onOpenWallet?: () => void
   onFinishSetup?: () => void
 }) {
-  // Bitcoin is one asset with two destination methods. This toggle is a UI
-  // filter/hint only - the merchant-entered destination is what's actually
-  // validated and classified server-side (providers/wallets/bitcoinWithdrawalDestination.ts).
-  const [bitcoinTransferType, setBitcoinTransferType] = useState<BitcoinTransferType>("onchain")
   const [savedDestinations, setSavedDestinations] = useState<SavedWithdrawalDestination[]>([])
   const [saveThisDestination, setSaveThisDestination] = useState(false)
   const [saveDestinationLabel, setSaveDestinationLabel] = useState("")
   const [savingDestination, setSavingDestination] = useState(false)
   const [saveDestinationError, setSaveDestinationError] = useState("")
-  const [removingDestinationId, setRemovingDestinationId] = useState<string | null>(null)
   const [irreversibleAckChecked, setIrreversibleAckChecked] = useState(false)
 
   // Reset the irreversibility acknowledgment whenever a new review appears -
@@ -2008,7 +2019,7 @@ function WithdrawalFormShell({
 
   const fetchSavedDestinations = useCallback(async () => {
     if (!accessToken) return
-    const params = new URLSearchParams({ rail })
+    const params = new URLSearchParams({ rail, asset })
     if (savedDestinationsMethod) params.set("method", savedDestinationsMethod)
     try {
       const res = await fetch(`/api/wallets/pinetree-wallet/withdrawal-destinations?${params}`, {
@@ -2023,7 +2034,7 @@ function WithdrawalFormShell({
       // Saved destinations are a convenience layer - a fetch failure just
       // means the quick-pick list is empty; manual entry always still works.
     }
-  }, [accessToken, rail, savedDestinationsMethod])
+  }, [accessToken, rail, asset, savedDestinationsMethod])
 
   useEffect(() => {
     void fetchSavedDestinations()
@@ -2060,19 +2071,6 @@ function WithdrawalFormShell({
     }
   }
 
-  async function handleRemoveDestination(id: string) {
-    if (!accessToken) return
-    setRemovingDestinationId(id)
-    try {
-      const res = await fetch(`/api/wallets/pinetree-wallet/withdrawal-destinations/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      })
-      if (res.ok) void fetchSavedDestinations()
-    } finally {
-      setRemovingDestinationId(null)
-    }
-  }
   const amountTrimmed = amountDecimal.trim()
   const selectedBalanceAmount = selectedBalance?.balance ?? null
   const selectedBalanceKnown = selectedBalanceAmount !== null && selectedBalance?.status === "synced"
@@ -2176,7 +2174,7 @@ function WithdrawalFormShell({
             type="button"
             onClick={onSubmit}
             disabled={submitting || !review.canSubmit || !irreversibleAckChecked}
-            className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-2"
+            className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-3"
           >
             {reviewActionLabel}
           </button>
@@ -2186,6 +2184,14 @@ function WithdrawalFormShell({
             className="inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-blue-200 hover:text-blue-700 sm:order-1"
           >
             Back
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-red-200 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 sm:order-2"
+          >
+            Cancel
           </button>
         </div>
       </div>
@@ -2256,7 +2262,7 @@ function WithdrawalFormShell({
               disabled={submitting}
               className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
             >
-              Try approval again
+              {review.review.approvalMethod === "dynamic_browser" ? "Try approval again" : "Try Again"}
             </button>
           ) : null}
           <button
@@ -2266,6 +2272,15 @@ function WithdrawalFormShell({
           >
             Edit withdrawal
           </button>
+          {approvalError !== withdrawalStatusUnknownMessage ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-red-200 hover:text-red-600"
+            >
+              Cancel
+            </button>
+          ) : null}
         </div>
       </div>
     )
@@ -2330,7 +2345,7 @@ function WithdrawalFormShell({
           <SegmentedButtons
             ariaLabel="Bitcoin transfer type"
             value={bitcoinTransferType}
-            onChange={setBitcoinTransferType}
+            onChange={onBitcoinTransferTypeChange}
             options={[
               { value: "onchain", label: "Bitcoin Network" },
               { value: "lightning", label: "Lightning" },
@@ -2341,32 +2356,25 @@ function WithdrawalFormShell({
 
       {savedDestinations.length > 0 ? (
         <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase text-gray-500">Saved destinations</p>
-          <div className="flex flex-wrap gap-1.5">
-            {savedDestinations.map((saved) => (
-              <div
-                key={saved.id}
-                className="flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-white/70 px-2 py-1.5 text-xs"
-              >
-                <button
-                  type="button"
-                  onClick={() => onDestinationChange(saved.destination_address)}
-                  className="font-medium text-gray-600 hover:text-blue-600"
-                  title={saved.destination_address}
-                >
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">Saved destination</p>
+          <div className="relative">
+            <select
+              aria-label="Saved destination"
+              value={selectedDestinationId || ""}
+              onChange={(event) => {
+                const id = event.target.value
+                onSelectDestination(id ? savedDestinations.find((d) => d.id === id) || null : null)
+              }}
+              className="h-10 w-full appearance-none rounded-lg border border-gray-200 bg-white pl-3 pr-8 text-sm text-gray-800 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+            >
+              <option value="">Select a saved destination</option>
+              {savedDestinations.map((saved) => (
+                <option key={saved.id} value={saved.id}>
                   {saved.label || `${saved.destination_address.slice(0, 6)}...${saved.destination_address.slice(-4)}`}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleRemoveDestination(saved.id)}
-                  disabled={removingDestinationId === saved.id}
-                  aria-label={`Remove saved destination ${saved.label || saved.destination_address}`}
-                  className="text-gray-400 hover:text-red-500 disabled:opacity-50"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
           </div>
         </div>
       ) : null}
@@ -2488,6 +2496,16 @@ function WithdrawalFormShell({
         >
           {reviewing ? "Reviewing..." : "Review withdrawal"}
         </button>
+        {destinationAddress.trim() || amountTrimmed || selectedDestinationId ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={reviewing}
+            className="inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-6 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-red-200 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        ) : null}
       </div>
 
       {process.env.NODE_ENV !== "production" ? (
@@ -3071,7 +3089,9 @@ function PineTreeWalletRuntime() {
   const [coreSetupNeedsUserAuth, setCoreSetupNeedsUserAuth] = useState(false)
   const [withdrawalRail, setWithdrawalRail] = useState<WithdrawalRail>("base")
   const [withdrawalAsset, setWithdrawalAsset] = useState<WithdrawalAsset>("ETH")
+  const [withdrawalBitcoinTransferType, setWithdrawalBitcoinTransferType] = useState<BitcoinTransferType>("onchain")
   const [withdrawalDestination, setWithdrawalDestination] = useState("")
+  const [withdrawalSelectedDestinationId, setWithdrawalSelectedDestinationId] = useState<string | null>(null)
   const [withdrawalAmount, setWithdrawalAmount] = useState("")
   const [withdrawalScreen, setWithdrawalScreen] = useState<WithdrawalScreen>("form")
   const [withdrawalReview, setWithdrawalReview] = useState<WithdrawalReviewResponse | null>(null)
@@ -3082,6 +3102,7 @@ function PineTreeWalletRuntime() {
   const [reviewingWithdrawal, setReviewingWithdrawal] = useState(false)
   const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
   const [withdrawalAuthorizationRecoveryOpen, setWithdrawalAuthorizationRecoveryOpen] = useState(false)
+  const [withdrawalDiscardConfirmOpen, setWithdrawalDiscardConfirmOpen] = useState(false)
   const [withdrawalReconnectPending, setWithdrawalReconnectPending] = useState(false)
   const [maxEstimating, setMaxEstimating] = useState(false)
   const [maxWarning, setMaxWarning] = useState("")
@@ -3360,7 +3381,7 @@ function PineTreeWalletRuntime() {
   useEffect(() => {
     if (!walletOpen) return
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setWalletOpen(false)
+      if (event.key === "Escape") handleRequestCloseWallet()
     }
     window.addEventListener("keydown", closeOnEscape)
     return () => window.removeEventListener("keydown", closeOnEscape)
@@ -7333,7 +7354,10 @@ function PineTreeWalletRuntime() {
   async function handleOpenWallet() {
     setWalletSetupAttemptId(createWalletSetupAttemptId())
     setWalletSetupFailureReason(null)
-    setActiveTab("overview")
+    // An active or outcome-uncertain withdrawal must be resumed on reopen,
+    // never buried back under "overview" - the merchant would otherwise have
+    // no way to see whether it succeeded without hunting through tabs.
+    setActiveTab(isWithdrawalActivelyProcessing() ? "withdraw" : "overview")
     setWalletOpening(true)
     setOpenWalletReconnectNeeded(false)
     console.info("[pinetree-wallets] open_wallet_sync_requested", {
@@ -7892,14 +7916,96 @@ function PineTreeWalletRuntime() {
     setWithdrawalError("")
   }
 
-  function handleDoneWithdrawal() {
+  // A withdrawal request row already exists server-side and its outcome
+  // isn't known yet - this must never be silently discardable (Cancel,
+  // backdrop click, X) or resubmittable as a fresh withdrawal. Covers: an
+  // in-flight review/submit network call, the Dynamic approval sheet, an
+  // already-submitted result, and the "still pending" status-unknown case
+  // surfaced on the failed screen after a submit timeout.
+  function isWithdrawalActivelyProcessing() {
+    if (reviewingWithdrawal || submittingWithdrawal) return true
+    if (withdrawalScreen === "approving" || withdrawalScreen === "submitted") return true
+    if (withdrawalScreen === "failed" && withdrawalApprovalError === withdrawalStatusUnknownMessage) return true
+    return false
+  }
+
+  function hasWithdrawalDraftInput() {
+    return Boolean(
+      withdrawalDestination.trim() || withdrawalAmount.trim() || withdrawalSelectedDestinationId
+    )
+  }
+
+  // Clears only client-side draft/UI state - never touches a withdrawal
+  // request row that already exists server-side (that row keeps its own
+  // lifecycle regardless of what the merchant does in the UI afterward).
+  function resetWithdrawalDraft() {
+    setWithdrawalDestination("")
+    setWithdrawalSelectedDestinationId(null)
+    setWithdrawalAmount("")
     setWithdrawalScreen("form")
     setWithdrawalReview(null)
     setWithdrawalSubmitResult(null)
-    setWithdrawalApprovalError("")
     setWithdrawalError("")
+    setWithdrawalApprovalError("")
     setInstantSendIdempotencyKey(null)
+    setMaxWarning("")
+  }
+
+  function handleCancelWithdrawal() {
+    if (isWithdrawalActivelyProcessing()) return
+    resetWithdrawalDraft()
+  }
+
+  function handleDoneWithdrawal() {
+    resetWithdrawalDraft()
     setWalletOpen(false)
+  }
+
+  // Shared close path for both the header X button and a backdrop click.
+  // An active/outcome-uncertain withdrawal is always preserved (reopening
+  // the wallet resumes it - see handleOpenWallet); an untouched form closes
+  // immediately; anything in between asks for confirmation before discarding.
+  function handleRequestCloseWallet() {
+    if (isWithdrawalActivelyProcessing()) {
+      setWalletOpen(false)
+      return
+    }
+    if (activeTab === "withdraw" && withdrawalScreen !== "submitted" && hasWithdrawalDraftInput()) {
+      setWithdrawalDiscardConfirmOpen(true)
+      return
+    }
+    setWalletOpen(false)
+  }
+
+  function handleConfirmDiscardWithdrawal() {
+    setWithdrawalDiscardConfirmOpen(false)
+    resetWithdrawalDraft()
+    setWalletOpen(false)
+  }
+
+  // Address Book "Withdraw" shortcut: the merchant should never need to
+  // reselect anything after picking a saved destination there. Destination
+  // ownership was already validated server-side by the authenticated fetch
+  // that populated the Address Book list; submitting still re-validates
+  // ownership/rail/asset match via destination_id server-side (canonicalWithdrawal.ts).
+  function handleWithdrawShortcut(destination: {
+    id: string
+    rail: "base" | "solana" | "bitcoin"
+    asset: "ETH" | "USDC" | "SOL" | "BTC"
+    method: "onchain" | "lightning" | null
+    destination_address: string
+  }) {
+    setAddressBookOpen(false)
+    resetWithdrawalDraft()
+    setWithdrawalRail(destination.rail)
+    setWithdrawalAsset(destination.asset)
+    if (destination.rail === "bitcoin" && destination.method) {
+      setWithdrawalBitcoinTransferType(destination.method)
+    }
+    setWithdrawalDestination(destination.destination_address)
+    setWithdrawalSelectedDestinationId(destination.id)
+    setActiveTab("withdraw")
+    setWalletOpen(true)
   }
 
   async function handleReviewWithdrawal() {
@@ -8024,11 +8130,17 @@ function PineTreeWalletRuntime() {
           asset: withdrawalAsset,
           destination_address: destination,
           amount_decimal: amount,
+          destination_id: withdrawalSelectedDestinationId || undefined,
         }),
       })
-      const json = (await res.json()) as WithdrawalReviewResponse | { error?: string }
+      const json = (await res.json()) as WithdrawalReviewResponse | { error?: string; error_code?: string }
       if (!res.ok) {
-        setWithdrawalError(sanitizeWithdrawalErrorForMerchant("error" in json ? json.error : undefined))
+        setWithdrawalError(
+          sanitizeWithdrawalErrorForMerchant(
+            "error" in json ? json.error : undefined,
+            "error_code" in json ? json.error_code : undefined
+          )
+        )
         return
       }
       setWithdrawalReview(json as WithdrawalReviewResponse)
@@ -8155,12 +8267,16 @@ function PineTreeWalletRuntime() {
             asset: "SATS",
             amount_decimal: amountSats,
             destination: withdrawalReview.review.destinationAddress,
+            destination_id: withdrawalSelectedDestinationId || undefined,
           }),
         })
         const result = (await response.json()) as WalletWithdrawalResponse
         if (!response.ok || !result.ok || !result.data?.operation) {
           setWithdrawalApprovalError(
-            result.error?.message || "We couldn't submit this Bitcoin Lightning withdrawal. Please try again."
+            presentWithdrawalErrorClient({
+              code: result.error?.code as WalletApiErrorCode | undefined,
+              rawMessage: result.error?.message,
+            }).message
           )
           setWithdrawalScreen("failed")
           return
@@ -8263,13 +8379,18 @@ function PineTreeWalletRuntime() {
             "Content-Type": "application/json",
           },
         })
-        const prepared = (await prepareRes.json()) as WithdrawalPrepareResponse | { error?: string }
+        const prepared = (await prepareRes.json()) as WithdrawalPrepareResponse | { error?: string; error_code?: string }
         if (!prepareRes.ok) {
           // Clear the stale review so the button reverts to "Review withdrawal". The
           // underlying request status may have changed (e.g. already "pending"), and
           // prepare will keep rejecting it. The merchant must re-review to start fresh.
           setWithdrawalReview(null)
-          setWithdrawalApprovalError(sanitizeWithdrawalSubmitErrorForMerchant("error" in prepared ? prepared.error : undefined))
+          setWithdrawalApprovalError(
+            sanitizeWithdrawalSubmitErrorForMerchant(
+              "error" in prepared ? prepared.error : undefined,
+              "error_code" in prepared ? prepared.error_code : undefined
+            )
+          )
           setWithdrawalScreen("failed")
           return
         }
@@ -8298,12 +8419,17 @@ function PineTreeWalletRuntime() {
             },
           }),
         })
-        const submitted = (await submitRes.json()) as WithdrawalSubmitResponse | { error?: string }
+        const submitted = (await submitRes.json()) as WithdrawalSubmitResponse | { error?: string; error_code?: string }
         if (!submitRes.ok) {
           // Clear stale review: status is no longer "review_required" after prepare
           // succeeded, so a retry would fail at prepare with "not ready".
           setWithdrawalReview(null)
-          setWithdrawalApprovalError(sanitizeWithdrawalSubmitErrorForMerchant("error" in submitted ? submitted.error : undefined))
+          setWithdrawalApprovalError(
+            sanitizeWithdrawalSubmitErrorForMerchant(
+              "error" in submitted ? submitted.error : undefined,
+              "error_code" in submitted ? submitted.error_code : undefined
+            )
+          )
           setWithdrawalScreen("failed")
           return
         }
@@ -8687,7 +8813,7 @@ function PineTreeWalletRuntime() {
               </button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
-              <AddressBookTab accessToken={accessTokenRef.current} />
+              <AddressBookTab accessToken={accessTokenRef.current} onWithdraw={handleWithdrawShortcut} />
             </div>
           </section>
         </div>
@@ -8695,6 +8821,46 @@ function PineTreeWalletRuntime() {
 
       {process.env.NODE_ENV !== "production" ? (
         <WalletDiagnosticsPanel wallets={wallets} sdkNetworkGroups={dynamicNetworkAddresses} />
+      ) : null}
+
+      {withdrawalDiscardConfirmOpen ? (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) setWithdrawalDiscardConfirmOpen(false)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pinetree-withdrawal-discard-title"
+            className="w-full max-w-[26rem] rounded-[1.25rem] border border-white/70 bg-white px-5 py-5 shadow-[0_28px_80px_rgba(15,23,42,0.28)]"
+          >
+            <h2 id="pinetree-withdrawal-discard-title" className="text-base font-semibold text-gray-950">
+              Discard this withdrawal?
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              The amount and destination you entered will be cleared.
+            </p>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setWithdrawalDiscardConfirmOpen(false)}
+                className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 sm:order-1"
+              >
+                Continue Editing
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDiscardWithdrawal}
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:order-2"
+              >
+                Cancel
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       {withdrawalAuthorizationRecoveryOpen ? (
@@ -8754,7 +8920,7 @@ function PineTreeWalletRuntime() {
           className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.currentTarget === event.target) setWalletOpen(false)
+            if (event.currentTarget === event.target) handleRequestCloseWallet()
           }}
         >
           <section
@@ -8767,7 +8933,7 @@ function PineTreeWalletRuntime() {
               <h2 id="pinetree-wallet-modal-title" className="min-w-0 flex-1 text-lg font-semibold text-gray-950">PineTree Wallet</h2>
               <button
                 type="button"
-                onClick={() => setWalletOpen(false)}
+                onClick={handleRequestCloseWallet}
                 aria-label="Close PineTree Wallet"
                 className={modalCloseButtonClass}
               >
@@ -8830,7 +8996,13 @@ function PineTreeWalletRuntime() {
                   asset={withdrawalAsset}
                   assetOptions={withdrawableAssetOptions}
                   lightningPayout={lightningPayoutSummary}
+                  bitcoinTransferType={withdrawalBitcoinTransferType}
+                  onBitcoinTransferTypeChange={(value) => {
+                    setWithdrawalBitcoinTransferType(value)
+                    setWithdrawalSelectedDestinationId(null)
+                  }}
                   destinationAddress={withdrawalDestination}
+                  selectedDestinationId={withdrawalSelectedDestinationId}
                   amountDecimal={withdrawalAmount}
                   screen={withdrawalScreen}
                   review={withdrawalReview}
@@ -8848,6 +9020,27 @@ function PineTreeWalletRuntime() {
                   onAssetSelect={handleWithdrawalAssetSelect}
                   onDestinationChange={(value) => {
                     setWithdrawalDestination(value)
+                    // A manual edit only clears which saved destination is
+                    // considered "selected" - it must never delete or modify
+                    // the saved destination itself.
+                    setWithdrawalSelectedDestinationId(null)
+                    setWithdrawalScreen("form")
+                    setWithdrawalReview(null)
+                    setWithdrawalSubmitResult(null)
+                    setWithdrawalError("")
+                    setWithdrawalApprovalError("")
+                    setInstantSendIdempotencyKey(null)
+                  }}
+                  onSelectDestination={(destination) => {
+                    if (!destination) {
+                      setWithdrawalSelectedDestinationId(null)
+                      return
+                    }
+                    setWithdrawalDestination(destination.destination_address)
+                    setWithdrawalSelectedDestinationId(destination.id)
+                    if (withdrawalRail === "bitcoin" && destination.method) {
+                      setWithdrawalBitcoinTransferType(destination.method)
+                    }
                     setWithdrawalScreen("form")
                     setWithdrawalReview(null)
                     setWithdrawalSubmitResult(null)
@@ -8867,6 +9060,7 @@ function PineTreeWalletRuntime() {
                   onMaxAmount={handleMaxWithdrawalAmount}
                   onEdit={handleEditWithdrawal}
                   onDone={handleDoneWithdrawal}
+                  onCancel={handleCancelWithdrawal}
                   onReview={() => void handleReviewWithdrawal()}
                   onSubmit={() => void handleSubmitWithdrawal()}
                   onOpenWallet={handleWithdrawalReconnect}

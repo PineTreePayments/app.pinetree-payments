@@ -1,3 +1,4 @@
+import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import {
   createWalletWithdrawalRequest,
@@ -512,9 +513,13 @@ export async function submitWalletWithdrawalRequest(
       message: "Withdrawal submitted.",
     }
   } catch (error) {
+    const presented = presentWithdrawalError({
+      rawMessage: error instanceof Error ? error.message : undefined,
+    })
     const failed = await updateWalletWithdrawalRequest(merchantId, request.id, {
       status: "failed",
-      errorMessage: getMerchantSafeWithdrawalError(error),
+      errorMessage: presented.message,
+      errorCode: presented.code,
     })
     void insertWithdrawalAuditEvent({
       merchantId,
@@ -666,10 +671,34 @@ export async function completeDynamicWalletWithdrawal(
     if (!signedPsbtBase64) {
       throw Object.assign(new Error("Signed Bitcoin PSBT is required."), { status: 400 })
     }
-    const broadcast = await finalizeAndBroadcastBitcoinPsbt({
-      signedPsbtBase64,
-      preparedPayload: request.unsigned_transaction_payload,
-    })
+    let broadcast: Awaited<ReturnType<typeof finalizeAndBroadcastBitcoinPsbt>>
+    try {
+      broadcast = await finalizeAndBroadcastBitcoinPsbt({
+        signedPsbtBase64,
+        preparedPayload: request.unsigned_transaction_payload,
+      })
+    } catch (error) {
+      // A broadcast failure here means the request never left "pending" -
+      // without this, the row would sit stuck forever with no error surfaced
+      // (the exact "withdrawal gets stuck" symptom this pass fixes).
+      const presented = presentWithdrawalError({
+        rawMessage: error instanceof Error ? error.message : undefined,
+      })
+      const failed = await updateWalletWithdrawalRequest(merchantId, request.id, {
+        status: "failed",
+        errorMessage: presented.message,
+        errorCode: presented.code,
+      })
+      void insertWithdrawalAuditEvent({
+        merchantId,
+        eventType: "withdrawal.failed",
+        withdrawalId: request.id,
+        rail: request.rail,
+        asset: request.asset,
+        status: "failed",
+      })
+      return { request: failed, merchantStatus: "Withdrawal failed", message: "Withdrawal failed." }
+    }
     const updated = await updateWalletWithdrawalRequest(merchantId, request.id, {
       status: "processing",
       provider: "dynamic",
@@ -991,10 +1020,4 @@ function assertPreparedPayloadUsesSavedSource(payload: Record<string, unknown>, 
   if (!preparedSource || preparedSource.toLowerCase() !== sourceAddress.toLowerCase()) {
     throw Object.assign(new Error("Prepared withdrawal source does not match the PineTree Wallet profile."), { status: 400 })
   }
-}
-
-function getMerchantSafeWithdrawalError(error: unknown) {
-  const raw = error instanceof Error ? error.message : ""
-  if (!raw.trim()) return "The withdrawal could not be processed."
-  return raw.replace(/private key|secret|api key|token|signer/gi, "provider")
 }

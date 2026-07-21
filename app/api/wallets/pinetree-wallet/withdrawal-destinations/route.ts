@@ -4,10 +4,15 @@ import {
   saveWithdrawalDestination,
 } from "@/engine/withdrawals/withdrawalDestinations"
 import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
-import type { WithdrawalDestinationMethod, WithdrawalDestinationRail } from "@/database/merchantWithdrawalDestinations"
+import type { WithdrawalDestinationAsset, WithdrawalDestinationMethod, WithdrawalDestinationRail } from "@/database/merchantWithdrawalDestinations"
 
 function parseRailFilter(value: string | null): WithdrawalDestinationRail | undefined {
   if (value === "base" || value === "solana" || value === "bitcoin") return value
+  return undefined
+}
+
+function parseAssetFilter(value: string | null): WithdrawalDestinationAsset | undefined {
+  if (value === "ETH" || value === "USDC" || value === "SOL" || value === "BTC") return value
   return undefined
 }
 
@@ -21,6 +26,7 @@ export async function GET(req: NextRequest) {
     const merchantId = await requireMerchantIdFromRequest(req)
     const destinations = await listMerchantWithdrawalDestinations(merchantId, {
       rail: parseRailFilter(req.nextUrl.searchParams.get("rail")),
+      asset: parseAssetFilter(req.nextUrl.searchParams.get("asset")),
       method: parseMethodFilter(req.nextUrl.searchParams.get("method")),
       includeArchived: req.nextUrl.searchParams.get("include_archived") === "true",
       includeDisabled: req.nextUrl.searchParams.get("include_disabled") === "true",

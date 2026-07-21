@@ -24,6 +24,20 @@ export type WalletApiErrorCode =
   | "IDEMPOTENCY_KEY_CONFLICT"
   | "INSUFFICIENT_BALANCE"
   | "INTERNAL_ERROR"
+  // Withdrawal-specific additions (engine/withdrawals/*) - kept in this same
+  // taxonomy rather than a parallel one, so every wallet-surface route still
+  // returns exactly one error shape.
+  | "INVALID_DESTINATION"
+  | "INVALID_AMOUNT"
+  | "MINIMUM_AMOUNT"
+  | "MAXIMUM_AMOUNT"
+  | "NETWORK_FEE_TOO_HIGH"
+  | "DESTINATION_NOT_CONFIGURED"
+  | "DUPLICATE_WITHDRAWAL"
+  | "WITHDRAWAL_ALREADY_PROCESSING"
+  | "UNSUPPORTED_NETWORK"
+  | "UNSUPPORTED_ASSET"
+  | "UNKNOWN_ERROR"
 
 export type WalletApiError = {
   ok: false
@@ -64,6 +78,17 @@ const CODE_HTTP_STATUS: Record<WalletApiErrorCode, number> = {
   IDEMPOTENCY_KEY_CONFLICT: 409,
   INSUFFICIENT_BALANCE: 422,
   INTERNAL_ERROR: 500,
+  INVALID_DESTINATION: 400,
+  INVALID_AMOUNT: 400,
+  MINIMUM_AMOUNT: 422,
+  MAXIMUM_AMOUNT: 422,
+  NETWORK_FEE_TOO_HIGH: 422,
+  DESTINATION_NOT_CONFIGURED: 409,
+  DUPLICATE_WITHDRAWAL: 409,
+  WITHDRAWAL_ALREADY_PROCESSING: 409,
+  UNSUPPORTED_NETWORK: 400,
+  UNSUPPORTED_ASSET: 400,
+  UNKNOWN_ERROR: 500,
 }
 
 export function walletErrorHttpStatus(code: WalletApiErrorCode): number {

@@ -85,10 +85,12 @@ describe("Speed wallet adapter normalization", () => {
 
   it("rejects non-Lightning assets and malformed destinations before provider submission", async () => {
     const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
+    // Sharpened from the generic WALLET_VALIDATION_ERROR to specific, normalized
+    // withdrawal error codes (engine/withdrawals/withdrawalErrorPresentation.ts).
     expect(() => speedWalletAdapter.validateWithdrawal!({ asset: "USDC", amountBaseUnits: BigInt(1), destination: "lnbc1validinvoice000000000", idempotencyKey: "k" }))
-      .toThrow(expect.objectContaining({ code: "WALLET_VALIDATION_ERROR" }))
+      .toThrow(expect.objectContaining({ code: "UNSUPPORTED_ASSET" }))
     expect(() => speedWalletAdapter.validateWithdrawal!({ asset: "SATS", amountBaseUnits: BigInt(1), destination: "not-a-lightning-destination", idempotencyKey: "k" }))
-      .toThrow(expect.objectContaining({ code: "WALLET_VALIDATION_ERROR" }))
+      .toThrow(expect.objectContaining({ code: "INVALID_DESTINATION" }))
   })
 
   it("accepts a Bitcoin Network on-chain address - this used to be rejected outright by a Lightning-only regex", async () => {

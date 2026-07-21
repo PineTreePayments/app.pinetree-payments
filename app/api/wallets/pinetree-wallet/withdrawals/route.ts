@@ -7,15 +7,7 @@ import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/mer
 import { updateWalletWithdrawalRequestCanonicalFields } from "@/database/walletWithdrawalRequests"
 import { submitCanonicalWithdrawal } from "@/engine/withdrawals/canonicalWithdrawal"
 import { normalizeWithdrawalRail, normalizeWithdrawalAsset } from "@/engine/withdrawals/walletWithdrawals"
-
-function getMerchantSafeWithdrawalRouteError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Failed to prepare withdrawal review"
-  if (/schema cache|column|wallet_withdrawal_requests|amount_decimal|failed to create wallet withdrawal request/i.test(message)) {
-    console.error("[pinetree-wallet-withdrawals] internal withdrawal request error", error)
-    return "We couldn't create this withdrawal request. Please try again."
-  }
-  return message
-}
+import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
 
 export async function POST(req: NextRequest) {
   try {
@@ -91,9 +83,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ...result, request })
   } catch (error) {
-    const message = getMerchantSafeWithdrawalRouteError(error)
+    const presented = presentWithdrawalError({
+      rawMessage: error instanceof Error ? error.message : "Failed to prepare withdrawal review",
+    })
     return NextResponse.json(
-      { error: message },
+      { error: presented.message, error_code: presented.code },
       { status: getRouteErrorStatus(error) }
     )
   }

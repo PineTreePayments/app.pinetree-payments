@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { completeDynamicWalletWithdrawal } from "@/engine/withdrawals/walletWithdrawals"
+import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import { scheduleWalletWithdrawalMaintenance } from "@/lib/api/walletWithdrawalMaintenance"
 
@@ -27,9 +28,11 @@ export async function POST(
     scheduleWalletWithdrawalMaintenance("wallet-withdrawal.submit")
     return NextResponse.json(result)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to submit wallet approval"
+    const presented = presentWithdrawalError({
+      rawMessage: error instanceof Error ? error.message : "Failed to submit wallet approval",
+    })
     return NextResponse.json(
-      { error: message },
+      { error: presented.message, error_code: presented.code },
       { status: getRouteErrorStatus(error) }
     )
   }

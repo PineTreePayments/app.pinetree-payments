@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { prepareDynamicWalletWithdrawal } from "@/engine/withdrawals/walletWithdrawals"
+import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 
 export async function POST(
@@ -12,9 +13,11 @@ export async function POST(
     const result = await prepareDynamicWalletWithdrawal(merchantId, id)
     return NextResponse.json(result)
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to prepare wallet approval"
+    const presented = presentWithdrawalError({
+      rawMessage: error instanceof Error ? error.message : "Failed to prepare wallet approval",
+    })
     return NextResponse.json(
-      { error: message },
+      { error: presented.message, error_code: presented.code },
       { status: getRouteErrorStatus(error) }
     )
   }

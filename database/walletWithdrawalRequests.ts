@@ -82,6 +82,7 @@ export type UpdateWalletWithdrawalRequestInput = {
   tokenMint?: string | null
   reviewPayload?: Record<string, unknown>
   errorMessage?: string | null
+  errorCode?: string | null
 }
 
 export type FindOpenUnsignedWalletWithdrawalInput = {
@@ -199,6 +200,7 @@ export async function updateWalletWithdrawalRequest(
   if (input.tokenMint !== undefined) update.token_mint = input.tokenMint
   if (input.reviewPayload !== undefined) update.review_payload = input.reviewPayload
   if (input.errorMessage !== undefined) update.error_message = input.errorMessage
+  if (input.errorCode !== undefined) update.error_code = input.errorCode
 
   const { data, error } = await db
     .from(TABLE)

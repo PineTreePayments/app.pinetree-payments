@@ -83,6 +83,7 @@ export async function listWithdrawalDestinations(
   merchantId: string,
   filter: {
     rail?: WithdrawalDestinationRail
+    asset?: WithdrawalDestinationAsset
     method?: WithdrawalDestinationMethod
     includeArchived?: boolean
     includeDisabled?: boolean
@@ -96,6 +97,7 @@ export async function listWithdrawalDestinations(
     .order("created_at", { ascending: false })
 
   if (filter.rail) query = query.eq("rail", filter.rail)
+  if (filter.asset) query = query.eq("asset", filter.asset)
   if (filter.method) query = query.eq("method", filter.method)
   if (!filter.includeArchived) query = query.is("archived_at", null)
   if (!filter.includeDisabled) query = query.eq("is_enabled", true)

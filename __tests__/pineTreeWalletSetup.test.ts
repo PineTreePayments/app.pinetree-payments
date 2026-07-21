@@ -1813,15 +1813,15 @@ describe("PineTree embedded wallet setup", () => {
     expect(submitHandler).toContain("findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, _debugRail, _debugSourceAddress)")
   })
 
-  it("maps raw schema/cache withdrawal errors to merchant-safe copy", () => {
+  it("maps raw schema/cache withdrawal errors to merchant-safe copy via the shared presentation module", () => {
+    const errorPresentation = read("engine/withdrawals/withdrawalErrorPresentation.ts")
     expect(page).toContain("sanitizeWithdrawalErrorForMerchant")
     expect(page).toContain("sanitizeWithdrawalSubmitErrorForMerchant")
-    expect(page).toContain("We couldn't create this withdrawal request. Please try again.")
-    expect(page).toContain("We couldn't submit this withdrawal request. Please try again.")
-    expect(withdrawalApiRoute).toContain("getMerchantSafeWithdrawalRouteError")
-    expect(withdrawalApiRoute).toContain("console.error")
-    expect(withdrawalApiRoute).toContain("schema cache")
-    expect(withdrawalApiRoute).toContain("amount_decimal")
+    expect(page).toContain("presentWithdrawalErrorClient")
+    expect(errorPresentation).toContain("schema cache")
+    expect(errorPresentation).toContain("amount_decimal")
+    expect(errorPresentation).toContain("INTERNAL_LEAK_PATTERN")
+    expect(withdrawalApiRoute).toContain("presentWithdrawalError")
   })
 
   it("withdrawal request DB scaffold exists with review fields and safe statuses", () => {

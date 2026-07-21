@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Archive, Check, ChevronDown, Copy, Plus, Star } from "lucide-react"
+import { AlertTriangle, Archive, ArrowUpRight, Check, ChevronDown, Copy, Plus, Star } from "lucide-react"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 
 type Rail = "base" | "solana" | "bitcoin"
@@ -66,7 +66,13 @@ function assetNetworkLabel(destination: Destination): string {
 const CONFIRM_ACK_TEXT =
   "I verified that this destination supports the selected asset and network. Cryptocurrency transfers are irreversible, and PineTree cannot recover funds sent to an incorrect or unsupported destination."
 
-export default function AddressBookTab({ accessToken }: { accessToken: string | null }) {
+export default function AddressBookTab({
+  accessToken,
+  onWithdraw,
+}: {
+  accessToken: string | null
+  onWithdraw?: (destination: Destination) => void
+}) {
   const [destinations, setDestinations] = useState<Destination[] | null>(null)
   const [loadError, setLoadError] = useState("")
   const [showAddForm, setShowAddForm] = useState(false)
@@ -448,6 +454,18 @@ export default function AddressBookTab({ accessToken }: { accessToken: string | 
                     Confirm this destination
                   </button>
                 )
+              ) : null}
+
+              {destination.is_enabled && onWithdraw ? (
+                <div className="mt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => onWithdraw(destination)}
+                    className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-100"
+                  >
+                    <ArrowUpRight size={12} /> Withdraw
+                  </button>
+                </div>
               ) : null}
             </li>
           ))}

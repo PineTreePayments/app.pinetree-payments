@@ -10,6 +10,7 @@ import {
   MAX_DESTINATIONS_PER_MERCHANT_RAIL,
   type MerchantWithdrawalDestination,
   type WithdrawalDestinationRail,
+  type WithdrawalDestinationAsset,
   type WithdrawalDestinationMethod,
 } from "@/database/merchantWithdrawalDestinations"
 import { normalizeWithdrawalRail, normalizeWithdrawalAsset } from "@/engine/withdrawals/walletWithdrawals"
@@ -139,6 +140,7 @@ export async function listMerchantWithdrawalDestinations(
   merchantId: string,
   filter: {
     rail?: WithdrawalDestinationRail
+    asset?: WithdrawalDestinationAsset
     method?: WithdrawalDestinationMethod
     includeArchived?: boolean
     includeDisabled?: boolean

@@ -32,6 +32,7 @@ import {
   type SpeedSwapObject,
 } from "./speedWalletManagement"
 import { WalletApiRouteError, type WalletApiErrorCode } from "@/engine/wallet/walletErrors"
+import { WITHDRAWAL_ERROR_MESSAGES } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import type {
   WalletAdapterBalance,
   WalletAdapterContext,
@@ -66,11 +67,23 @@ function translateSpeedWalletError(error: unknown): never {
       unsupported_capability: "WALLET_CAPABILITY_UNAVAILABLE",
       unknown: "WALLET_PROVIDER_UNAVAILABLE",
     }
+    // Speed's own message text is the only signal for *which* validation
+    // failed - sharpen the generic "validation" category into a specific
+    // code when the message clearly indicates destination/amount/balance,
+    // rather than always surfacing the generic fallback copy.
+    let code = error.providerCode === "timeout"
+      ? "WALLET_PROVIDER_TIMEOUT"
+      : codeByCategory[error.category] ?? "WALLET_PROVIDER_UNAVAILABLE"
+    if (error.category === "validation") {
+      if (/insufficient|balance/i.test(error.message)) code = "INSUFFICIENT_BALANCE"
+      else if (/destination|address|invoice/i.test(error.message)) code = "INVALID_DESTINATION"
+      else if (/amount/i.test(error.message)) code = "INVALID_AMOUNT"
+    }
     throw new WalletApiRouteError(
-      error.providerCode === "timeout"
-        ? "WALLET_PROVIDER_TIMEOUT"
-        : codeByCategory[error.category] ?? "WALLET_PROVIDER_UNAVAILABLE",
-      "Your wallet provider could not complete this request. Please try again.",
+      code,
+      code === "WALLET_VALIDATION_ERROR"
+        ? "Your wallet provider could not complete this request. Please try again."
+        : WITHDRAWAL_ERROR_MESSAGES[code],
       error.retryable
     )
   }
@@ -194,17 +207,17 @@ export const speedWalletAdapter: WalletProviderAdapter = {
 
   validateWithdrawal(input) {
     if (input.asset !== "SATS") {
-      throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Bitcoin withdrawals must be denominated in SATS.")
+      throw new WalletApiRouteError("UNSUPPORTED_ASSET", "Bitcoin withdrawals must be denominated in SATS.")
     }
     if (input.amountBaseUnits > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Withdrawal amount is too large.")
+      throw new WalletApiRouteError("MAXIMUM_AMOUNT", "Withdrawal amount is too large.")
     }
     // Bitcoin is one asset with two destination methods (Bitcoin Network
     // on-chain address, or Lightning via BOLT11/Lightning Address) - this
     // must accept both, never just Lightning-shaped destinations.
     if (!classifyBitcoinWithdrawalDestination(input.destination).valid) {
       throw new WalletApiRouteError(
-        "WALLET_VALIDATION_ERROR",
+        "INVALID_DESTINATION",
         "Enter a valid Bitcoin address, Lightning Address, or Lightning invoice."
       )
     }
@@ -273,7 +286,7 @@ export const speedWalletAdapter: WalletProviderAdapter = {
       const classified = classifyBitcoinWithdrawalDestination(input.destination)
       if (!classified.valid) {
         throw new WalletApiRouteError(
-          "WALLET_VALIDATION_ERROR",
+          "INVALID_DESTINATION",
           "Enter a valid Bitcoin address, Lightning Address, or Lightning invoice."
         )
       }

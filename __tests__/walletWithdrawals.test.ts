@@ -191,6 +191,7 @@ describe("PineTree Wallet withdrawals", () => {
       ...("tokenContract" in input ? { token_contract: input.tokenContract } : {}),
       ...("tokenMint" in input ? { token_mint: input.tokenMint } : {}),
       ...("errorMessage" in input ? { error_message: input.errorMessage } : {}),
+      ...("errorCode" in input ? { error_code: input.errorCode } : {}),
       ...("reviewPayload" in input ? { review_payload: input.reviewPayload } : {}),
     }))
     vi.unstubAllEnvs()
@@ -443,7 +444,15 @@ describe("PineTree Wallet withdrawals", () => {
 
     expect(result.merchantStatus).toBe("Withdrawal failed")
     expect(result.request.status).toBe("failed")
-    expect(result.request.error_message).toBe("provider provider rejected request")
+    // Previously this did a word-level redaction ("private key" -> "provider"),
+    // which still leaked the rest of the raw message. It now collapses to the
+    // shared, fully generic fallback whenever the raw message trips the
+    // internal-leak pattern (engine/withdrawals/withdrawalErrorPresentation.ts) -
+    // never exposing any fragment of the original provider error.
+    expect(result.request.error_message).toBe(
+      "The withdrawal could not be completed. Review the details and try again."
+    )
+    expect(result.request.error_code).toBe("UNKNOWN_ERROR")
   })
 
   it("merchant cannot submit another merchant's withdrawal", async () => {
