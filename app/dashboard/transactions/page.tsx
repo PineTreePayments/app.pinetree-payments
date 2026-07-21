@@ -486,7 +486,7 @@ export default function TransactionsPage() {
               <ExpandIconButton
                 onClick={() => showChannelTransactions("pos")}
                 ariaLabel="Expand POS transactions chart"
-                className="absolute bottom-2 right-2"
+                className="absolute bottom-2 right-2 !h-7 !w-7 [&>svg]:!h-3 [&>svg]:!w-3"
               />
             </div>
             <div className="relative min-w-0 overflow-hidden rounded-r-xl">
@@ -500,7 +500,7 @@ export default function TransactionsPage() {
               <ExpandIconButton
                 onClick={() => showChannelTransactions("online")}
                 ariaLabel="Expand online payments chart"
-                className="absolute bottom-2 right-2"
+                className="absolute bottom-2 right-2 !h-7 !w-7 [&>svg]:!h-3 [&>svg]:!w-3"
               />
             </div>
           </div>
