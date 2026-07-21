@@ -10,10 +10,18 @@ import { normalizeWithdrawalRail, normalizeWithdrawalAsset } from "@/engine/with
 import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
 
 export async function POST(req: NextRequest) {
+  const correlationId = req.headers?.get("x-pinetree-withdrawal-correlation") || null
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const body = (await req.json()) as Record<string, unknown>
     const action = String(body.action || "review").trim().toLowerCase()
+    console.info("[pinetree-withdrawals] REVIEW_RECEIVED", {
+      correlationId,
+      merchantId,
+      action,
+      rail: body.rail ?? null,
+      asset: body.asset ?? null,
+    })
 
     if (action === "submit") {
       const withdrawalId = String(body.withdrawal_id || body.withdrawalId || "").trim()
@@ -58,6 +66,10 @@ export async function POST(req: NextRequest) {
         destinationId,
       })
       if (canonical.kind === "review_required") {
+        console.info("[pinetree-withdrawals] REVIEW_RETURNED", {
+          correlationId, merchantId, requestId: canonical.request.id,
+          approvalMethod: canonical.review.approvalMethod ?? null, canSubmit: canonical.canSubmit,
+        })
         return NextResponse.json({
           request: canonical.request,
           review: canonical.review,
@@ -81,11 +93,16 @@ export async function POST(req: NextRequest) {
       source: "manual",
     }).catch(() => result.request)
 
+    console.info("[pinetree-withdrawals] REVIEW_RETURNED", {
+      correlationId, merchantId, requestId: request.id,
+      approvalMethod: result.review.approvalMethod ?? null, canSubmit: result.canSubmit,
+    })
     return NextResponse.json({ ...result, request })
   } catch (error) {
     const presented = presentWithdrawalError({
       rawMessage: error instanceof Error ? error.message : "Failed to prepare withdrawal review",
     })
+    console.warn("[pinetree-withdrawals] REVIEW_FAILED", { correlationId, code: presented.code })
     return NextResponse.json(
       { error: presented.message, error_code: presented.code },
       { status: getRouteErrorStatus(error) }

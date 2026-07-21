@@ -5,10 +5,14 @@ import { updateWalletOperationCanonicalFields } from "@/database/merchantWalletO
 import { submitCanonicalWithdrawal } from "@/engine/withdrawals/canonicalWithdrawal"
 
 export async function POST(req: NextRequest) {
+  const correlationId = req.headers?.get("x-pinetree-withdrawal-correlation") || null
   return withWalletMerchant(req, async (merchantId) => {
     const idempotencyKey = requireIdempotencyKey(req)
     const body = await readWalletJsonBody(req)
     const destinationId = body.destination_id !== undefined ? String(body.destination_id) : undefined
+    console.info("[pinetree-withdrawals] SPEED_SUBMIT_RECEIVED", {
+      correlationId, merchantId, asset: body.asset ?? "SATS", hasDestinationId: Boolean(destinationId),
+    })
 
     // A saved destination was picked - route through the canonical
     // dispatcher (same entrypoint automatic sweeps use) so this withdrawal
@@ -24,7 +28,12 @@ export async function POST(req: NextRequest) {
         idempotencyKey,
         destinationId,
       })
-      return canonical.kind === "executed" ? canonical.write : canonical
+      const write = canonical.kind === "executed" ? canonical.write : canonical
+      console.info("[pinetree-withdrawals] SPEED_SUBMIT_RETURNED", {
+        correlationId, merchantId,
+        status: canonical.kind === "executed" ? canonical.write.operation.status : null,
+      })
+      return write
     }
 
     const result = await createWalletWithdrawal(merchantId, {
@@ -42,6 +51,9 @@ export async function POST(req: NextRequest) {
     // this generic, provider-agnostic route's contract stays unchanged.
     void updateWalletOperationCanonicalFields(merchantId, result.operation.id, { source: "manual" }).catch(() => {})
 
+    console.info("[pinetree-withdrawals] SPEED_SUBMIT_RETURNED", {
+      correlationId, merchantId, status: result.operation.status,
+    })
     return result
   })
 }

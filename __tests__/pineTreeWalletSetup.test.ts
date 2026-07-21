@@ -1820,6 +1820,69 @@ describe("PineTree embedded wallet setup", () => {
     expect(submitHandler).toContain("findDynamicApprovalWalletForSource(walletsRef.current, primaryWalletRef.current, _debugRail, _debugSourceAddress)")
   })
 
+  // 2026-07-21 production incident: a Solana review POST returned 200
+  // (signerCanSign/canSubmit true, approvalMethod dynamic_browser) but
+  // prepare/submit were never called, and no error was ever recorded -
+  // proving handleSubmitWithdrawal (or its pre-flight signer lookup) threw
+  // or returned silently in the browser before any fetch ever fired.
+  it("never silently returns or throws uncaught before prepare/submit - every blocking branch is visible and diagnosed", () => {
+    const submitHandler = page.slice(
+      page.indexOf("async function handleSubmitWithdrawal()"),
+      page.indexOf("// ---------------------------------------------------------------------------\n  // Early returns")
+    )
+    const reviewHandler = page.slice(
+      page.indexOf("async function handleReviewWithdrawal()"),
+      page.indexOf("function handleMaxWithdrawalAmount()")
+    )
+
+    // The top-of-function token/request-id guard used to be a bare `return`
+    // - completely silent, no error, no log, no network request ever sent.
+    expect(submitHandler).not.toMatch(/if \(!token \|\| !withdrawalId\) return\b/)
+    expect(submitHandler).toContain('emitWalletSetupDebugEvent("wallet_withdrawal_submit_blocked", { correlationId, reason })')
+    expect(submitHandler).toContain("CLIENT_ACCESS_TOKEN_MISSING")
+    expect(submitHandler).toContain("CLIENT_REQUEST_ID_MISSING")
+
+    // The pre-flight Dynamic signer lookup (getWithdrawalSourceAddress,
+    // findDynamicApprovalWalletForSource, assertDynamicWalletChain) used to
+    // run entirely outside any try/catch, between the bitcoin-rail branch
+    // and the fetch calls - an uncaught throw there left the merchant on an
+    // unresponsive review screen with zero visible feedback and zero server
+    // requests. It must now be inside the same try block whose catch clears
+    // loading state and shows a visible error.
+    const preflightIndex = submitHandler.indexOf("const _debugRail = withdrawalReview?.review.rail")
+    const tryBeforePreflight = submitHandler.lastIndexOf("try {", preflightIndex)
+    const catchAfterPreflight = submitHandler.indexOf("} catch (error) {", preflightIndex)
+    expect(tryBeforePreflight).toBeGreaterThan(-1)
+    expect(tryBeforePreflight).toBeLessThan(preflightIndex)
+    expect(catchAfterPreflight).toBeGreaterThan(preflightIndex)
+    expect(submitHandler).toContain('emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", { correlationId, stage: "dynamic_submit" })')
+
+    // handleReviewWithdrawal's own Dynamic-signer pre-check + fetch must
+    // likewise be wrapped so an uncaught throw shows a visible error instead
+    // of leaving the merchant stuck on the form with no feedback.
+    expect(reviewHandler).toContain('emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", {')
+    expect(reviewHandler).toContain('stage: "review"')
+
+    // Correlation ID threading + stage beacons, so the next live attempt is
+    // traceable end-to-end (browser click -> review -> prepare -> sign -> submit)
+    // purely from server-side Vercel logs.
+    expect(submitHandler).toContain('"X-PineTree-Withdrawal-Correlation": correlationId')
+    expect(submitHandler).toContain("wallet_withdrawal_approve_clicked")
+    expect(submitHandler).toContain("wallet_withdrawal_prepare_requested")
+    expect(submitHandler).toContain("wallet_withdrawal_prepare_returned")
+    expect(submitHandler).toContain("wallet_withdrawal_signature_started")
+    expect(submitHandler).toContain("wallet_withdrawal_signature_returned")
+    expect(submitHandler).toContain("wallet_withdrawal_submit_requested")
+    expect(submitHandler).toContain("wallet_withdrawal_submit_returned")
+    expect(submitHandler).toContain("wallet_withdrawal_speed_submit_requested")
+    expect(submitHandler).toContain("wallet_withdrawal_speed_submit_returned")
+  })
+
+  it("the review screen explains why the primary action button is disabled instead of leaving it silently greyed out", () => {
+    expect(page).toContain("Check the box above to enable")
+    expect(page).toContain("This withdrawal can&apos;t be approved right now")
+  })
+
   it("maps raw schema/cache withdrawal errors to merchant-safe copy via the shared presentation module", () => {
     const errorPresentation = read("engine/withdrawals/withdrawalErrorPresentation.ts")
     expect(page).toContain("sanitizeWithdrawalErrorForMerchant")

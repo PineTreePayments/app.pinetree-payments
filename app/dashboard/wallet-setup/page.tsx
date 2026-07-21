@@ -2163,6 +2163,16 @@ function WithdrawalFormShell({
             I verified that this destination supports the selected asset and network. Cryptocurrency transfers are irreversible, and PineTree cannot recover funds sent to an incorrect or unsupported destination.
           </span>
         </label>
+        {!submitting && review.canSubmit && !irreversibleAckChecked ? (
+          <p className="text-xs font-medium text-blue-700">
+            Check the box above to enable {reviewActionLabel.toLowerCase()}.
+          </p>
+        ) : null}
+        {!submitting && !review.canSubmit ? (
+          <p className="text-xs font-medium text-red-700">
+            This withdrawal can&apos;t be approved right now. Go back and review it again.
+          </p>
+        ) : null}
         <div className="flex flex-col gap-2 sm:flex-row">
           <button
             type="button"
@@ -3078,6 +3088,11 @@ function PineTreeWalletRuntime() {
   const [withdrawalError, setWithdrawalError] = useState("")
   const [withdrawalApprovalError, setWithdrawalApprovalError] = useState("")
   const [instantSendIdempotencyKey, setInstantSendIdempotencyKey] = useState<string | null>(null)
+  // One correlation ID per withdrawal attempt, generated when review starts and
+  // carried through prepare/sign/submit diagnostics (emitWalletSetupDebugEvent)
+  // so a single attempt's stages can be joined together in server logs - not a
+  // secret, never sent to a provider, only used for log correlation.
+  const withdrawalCorrelationIdRef = useRef<string | null>(null)
   const [reviewingWithdrawal, setReviewingWithdrawal] = useState(false)
   const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
   const [withdrawalAuthorizationRecoveryOpen, setWithdrawalAuthorizationRecoveryOpen] = useState(false)
@@ -7998,6 +8013,13 @@ function PineTreeWalletRuntime() {
     setWithdrawalSubmitResult(null)
     setWithdrawalScreen("form")
     setWithdrawalApprovalError("")
+    const correlationId = crypto.randomUUID().slice(0, 8)
+    withdrawalCorrelationIdRef.current = correlationId
+    emitWalletSetupDebugEvent("wallet_withdrawal_review_requested", {
+      correlationId,
+      rail: withdrawalRail,
+      asset: withdrawalAsset,
+    })
     if (!token) {
       setWithdrawalError("Wallet session is not available. Refresh the page and try again.")
       return
@@ -8069,80 +8091,144 @@ function PineTreeWalletRuntime() {
       })
       setWithdrawalError("")
       setWithdrawalScreen("review")
-      return
-    }
-    const reviewSourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
-    const usesDynamicSignerForReview = withdrawalRail === "base" || withdrawalRail === "solana"
-    let reviewSigner = usesDynamicSignerForReview
-      ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)
-      : true
-    let runtimeCountForReviewGate = dynamicWalletRuntimeCount
-    // Base/Solana only: the Dynamic wallet runtime may simply still be hydrating
-    // (fresh page load, recent reconnect) rather than genuinely disconnected -
-    // give it one bounded retry before treating this as a real failure. Bitcoin
-    // never reaches this gate (it returns above, before this point) so this
-    // never blocks Speed-executed withdrawals.
-    if (usesDynamicSignerForReview && sdkHasLoaded && user && (runtimeCountForReviewGate === 0 || !reviewSigner)) {
-      setReviewingWithdrawal(true)
-      await refreshDynamicWalletRuntime("withdrawal_review_before_signer_check", { requireApprovalWallet: true })
-      runtimeCountForReviewGate = dynamicWalletRuntimeCountRef.current
-      // Read via the refs, not the closed-over `wallets`/`primaryWallet` - the
-      // refresh above may have just hydrated the SDK's wallet list, but this
-      // function's own `wallets` binding was fixed when its closure was
-      // created and never updates mid-execution (see walletsRef comment).
-      reviewSigner = findDynamicApprovalWalletForSource(walletsRef.current, primaryWalletRef.current, withdrawalRail, reviewSourceAddress)
-    }
-    // Block review when the Dynamic wallet runtime has no usable signer - creating a withdrawal request
-    // row now would result in pending spam that can never be signed in this session.
-    if (sdkHasLoaded && user && (runtimeCountForReviewGate === 0 || !reviewSigner)) {
-      if (walletCreationDebugEnabled) {
-        console.info("[pinetree-wallets] withdrawal_review_blocked_no_runtime_wallets", {
-          dynamicUserId: user.userId,
-          sdkHasLoaded,
-          dynamicWalletRuntimeCount: runtimeCountForReviewGate,
-          withdrawalRail,
-          withdrawalAsset,
-          sourceAddressPresent: Boolean(reviewSourceAddress),
-          matchingDynamicWallet: Boolean(reviewSigner),
-        })
-      }
-      setReviewingWithdrawal(false)
-      setWithdrawalError(pineTreeSignerReconnectMessage)
-      return
-    }
-
-    setReviewingWithdrawal(true)
-    setWithdrawalError("")
-    try {
-      const res = await fetch("/api/wallets/pinetree-wallet/withdrawals", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          rail: withdrawalRail,
-          asset: withdrawalAsset,
-          destination_address: destination,
-          amount_decimal: amount,
-          destination_id: withdrawalSelectedDestinationId || undefined,
-        }),
+      emitWalletSetupDebugEvent("wallet_withdrawal_review_screen_shown", {
+        correlationId,
+        rail: "bitcoin",
+        approvalMethod: "manual_review",
       })
-      const json = (await res.json()) as WithdrawalReviewResponse | { error?: string; error_code?: string }
-      if (!res.ok) {
-        setWithdrawalError(
-          sanitizeWithdrawalErrorForMerchant(
-            "error" in json ? json.error : undefined,
-            "error_code" in json ? json.error_code : undefined
-          )
-        )
+      return
+    }
+    // Everything below can call into the Dynamic SDK and does real async work -
+    // wrapped in a top-level try/catch so an uncaught throw here (SDK exception,
+    // malformed wallet object, etc.) always clears loading state and shows a
+    // visible error instead of silently leaving the merchant on the form with
+    // no feedback and no server request ever sent (CLIENT_REVIEW_UNHANDLED_ERROR).
+    try {
+      const reviewSourceAddress = getWithdrawalSourceAddress(profile, withdrawalRail)
+      const usesDynamicSignerForReview = withdrawalRail === "base" || withdrawalRail === "solana"
+      let reviewSigner = usesDynamicSignerForReview
+        ? findDynamicApprovalWalletForSource(wallets as unknown[], primaryWallet, withdrawalRail, reviewSourceAddress)
+        : true
+      let runtimeCountForReviewGate = dynamicWalletRuntimeCount
+      // Base/Solana only: the Dynamic wallet runtime may simply still be hydrating
+      // (fresh page load, recent reconnect) rather than genuinely disconnected -
+      // give it one bounded retry before treating this as a real failure. Bitcoin
+      // never reaches this gate (it returns above, before this point) so this
+      // never blocks Speed-executed withdrawals.
+      if (usesDynamicSignerForReview && sdkHasLoaded && user && (runtimeCountForReviewGate === 0 || !reviewSigner)) {
+        setReviewingWithdrawal(true)
+        await refreshDynamicWalletRuntime("withdrawal_review_before_signer_check", { requireApprovalWallet: true })
+        runtimeCountForReviewGate = dynamicWalletRuntimeCountRef.current
+        // Read via the refs, not the closed-over `wallets`/`primaryWallet` - the
+        // refresh above may have just hydrated the SDK's wallet list, but this
+        // function's own `wallets` binding was fixed when its closure was
+        // created and never updates mid-execution (see walletsRef comment).
+        reviewSigner = findDynamicApprovalWalletForSource(walletsRef.current, primaryWalletRef.current, withdrawalRail, reviewSourceAddress)
+      }
+      // Block review when the Dynamic wallet runtime has no usable signer - creating a withdrawal request
+      // row now would result in pending spam that can never be signed in this session.
+      if (sdkHasLoaded && user && (runtimeCountForReviewGate === 0 || !reviewSigner)) {
+        if (walletCreationDebugEnabled) {
+          console.info("[pinetree-wallets] withdrawal_review_blocked_no_runtime_wallets", {
+            dynamicUserId: user.userId,
+            sdkHasLoaded,
+            dynamicWalletRuntimeCount: runtimeCountForReviewGate,
+            withdrawalRail,
+            withdrawalAsset,
+            sourceAddressPresent: Boolean(reviewSourceAddress),
+            matchingDynamicWallet: Boolean(reviewSigner),
+          })
+        }
+        emitWalletSetupDebugEvent("wallet_withdrawal_review_blocked", {
+          correlationId,
+          rail: withdrawalRail,
+          reason: "no_matching_dynamic_wallet",
+        })
+        setReviewingWithdrawal(false)
+        setWithdrawalError(pineTreeSignerReconnectMessage)
         return
       }
-      setWithdrawalReview(json as WithdrawalReviewResponse)
-      setWithdrawalScreen("review")
-    } catch {
-      setWithdrawalError("We couldn't create this withdrawal request. Please try again.")
-    } finally {
+
+      setReviewingWithdrawal(true)
+      setWithdrawalError("")
+      try {
+        const res = await fetch("/api/wallets/pinetree-wallet/withdrawals", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "X-PineTree-Withdrawal-Correlation": correlationId,
+          },
+          body: JSON.stringify({
+            rail: withdrawalRail,
+            asset: withdrawalAsset,
+            destination_address: destination,
+            amount_decimal: amount,
+            destination_id: withdrawalSelectedDestinationId || undefined,
+          }),
+        })
+        const json = (await res.json()) as WithdrawalReviewResponse | { error?: string; error_code?: string }
+        if (!res.ok) {
+          emitWalletSetupDebugEvent("wallet_withdrawal_review_blocked", {
+            correlationId,
+            rail: withdrawalRail,
+            reason: "server_rejected",
+            httpStatus: res.status,
+          })
+          setWithdrawalError(
+            sanitizeWithdrawalErrorForMerchant(
+              "error" in json ? json.error : undefined,
+              "error_code" in json ? json.error_code : undefined
+            )
+          )
+          return
+        }
+        const typedJson = json as WithdrawalReviewResponse
+        if (!typedJson?.request?.id || !typedJson.review) {
+          // The route's real response shape didn't match what this client
+          // expects - fail loud with a specific, visible error instead of
+          // storing a malformed review that silently disables every action
+          // on the review screen (canSubmit undefined -> button permanently
+          // disabled with no explanation).
+          emitWalletSetupDebugEvent("wallet_withdrawal_review_blocked", {
+            correlationId,
+            rail: withdrawalRail,
+            reason: "malformed_response_shape",
+          })
+          setWithdrawalError("We couldn't read this withdrawal review. Please try again.")
+          return
+        }
+        setWithdrawalReview(typedJson)
+        setWithdrawalScreen("review")
+        emitWalletSetupDebugEvent("wallet_withdrawal_review_received", {
+          correlationId,
+          rail: typedJson.review.rail,
+          approvalMethod: typedJson.review.approvalMethod ?? "unknown",
+          canSubmit: typedJson.canSubmit,
+          requestId: typedJson.request.id,
+        })
+        emitWalletSetupDebugEvent("wallet_withdrawal_review_screen_shown", {
+          correlationId,
+          rail: typedJson.review.rail,
+          approvalMethod: typedJson.review.approvalMethod ?? "unknown",
+        })
+      } catch {
+        setWithdrawalError("We couldn't create this withdrawal request. Please try again.")
+      } finally {
+        setReviewingWithdrawal(false)
+      }
+    } catch (error) {
+      console.warn("[pinetree-withdrawals] handleReviewWithdrawal_unhandled_error", {
+        rail: withdrawalRail,
+        asset: withdrawalAsset,
+        error: error instanceof Error ? error.message : "unknown",
+      })
+      emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", {
+        correlationId,
+        stage: "review",
+        rail: withdrawalRail,
+      })
+      setWithdrawalError("We couldn't prepare this withdrawal for review. Please try again.")
       setReviewingWithdrawal(false)
     }
   }
@@ -8236,11 +8322,41 @@ function PineTreeWalletRuntime() {
   async function handleSubmitWithdrawal() {
     const token = accessTokenRef.current
     const withdrawalId = withdrawalReview?.request.id
-    if (!token || !withdrawalId) return
+    const correlationId = withdrawalCorrelationIdRef.current ?? "none"
+    // Fires the instant this handler is entered (i.e. the button was
+    // actually clicked and dispatched), before any early return, so the
+    // click itself is always visible in server logs even when everything
+    // after it fails silently.
+    emitWalletSetupDebugEvent("wallet_withdrawal_approve_clicked", {
+      correlationId,
+      requestId: withdrawalId ?? "none",
+      hasToken: Boolean(token),
+    })
+    if (!token || !withdrawalId) {
+      // Previously a bare `return` here - completely silent: no error, no
+      // screen change, no log, no network request. From the merchant's side
+      // this looks identical to a successful review that never lets you
+      // submit. Diagnostic codes: CLIENT_ACCESS_TOKEN_MISSING /
+      // CLIENT_REQUEST_ID_MISSING.
+      const reason = !token ? "CLIENT_ACCESS_TOKEN_MISSING" : "CLIENT_REQUEST_ID_MISSING"
+      console.warn("[pinetree-withdrawals] handleSubmitWithdrawal_blocked", { reason })
+      emitWalletSetupDebugEvent("wallet_withdrawal_submit_blocked", { correlationId, reason })
+      setWithdrawalApprovalError(
+        !token
+          ? "Wallet session is not available. Refresh the page and try again."
+          : "This withdrawal review has expired. Go back and review it again."
+      )
+      setWithdrawalScreen("failed")
+      return
+    }
 
     if (withdrawalReview.review.rail === "bitcoin") {
       const amountSats = btcDecimalToSats(withdrawalReview.review.amountDecimal)
       if (!amountSats || !instantSendIdempotencyKey) {
+        emitWalletSetupDebugEvent("wallet_withdrawal_submit_blocked", {
+          correlationId,
+          reason: "CLIENT_BITCOIN_AMOUNT_OR_KEY_MISSING",
+        })
         setWithdrawalApprovalError("Review this withdrawal again before submitting.")
         setWithdrawalScreen("failed")
         return
@@ -8251,12 +8367,14 @@ function PineTreeWalletRuntime() {
       setWithdrawalSubmitResult(null)
       setWithdrawalScreen("approving")
       try {
+        emitWalletSetupDebugEvent("wallet_withdrawal_speed_submit_requested", { correlationId })
         const response = await fetch("/api/wallets/withdrawals", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
             "Idempotency-Key": instantSendIdempotencyKey,
+            "X-PineTree-Withdrawal-Correlation": correlationId,
           },
           body: JSON.stringify({
             asset: "SATS",
@@ -8266,6 +8384,11 @@ function PineTreeWalletRuntime() {
           }),
         })
         const result = (await response.json()) as WalletWithdrawalResponse
+        emitWalletSetupDebugEvent("wallet_withdrawal_speed_submit_returned", {
+          correlationId,
+          httpStatus: response.status,
+          ok: Boolean(result.ok),
+        })
         if (!response.ok || !result.ok || !result.data?.operation) {
           setWithdrawalApprovalError(
             presentWithdrawalErrorClient({
@@ -8289,7 +8412,11 @@ function PineTreeWalletRuntime() {
         })
         setWithdrawalScreen("submitted")
         void syncPineTreeWallet()
-      } catch {
+      } catch (error) {
+        console.warn("[pinetree-withdrawals] speed_submit_unhandled_error", {
+          error: error instanceof Error ? error.message : "unknown",
+        })
+        emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", { correlationId, stage: "speed_submit" })
         setWithdrawalApprovalError("We couldn't submit this Bitcoin Lightning withdrawal. Please try again.")
         setWithdrawalScreen("failed")
       } finally {
@@ -8298,87 +8425,110 @@ function PineTreeWalletRuntime() {
       return
     }
 
-    const _debugRail = withdrawalReview?.review.rail
-    const _debugApprovalMethod = withdrawalReview?.review.approvalMethod
-    const _debugRailUsesDynamicSigner = Boolean(_debugRail && dynamicSignerWithdrawalRails.includes(_debugRail))
-    if (_debugApprovalMethod === "dynamic_browser" && _debugRailUsesDynamicSigner) {
-      logProviderSheetOpenRequested("withdrawal_submit_before_signing", {
-        selectedRail: _debugRail ?? null,
-        explicitUserAction: true,
-        signatureRequired: true,
-      })
-      await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })
-    }
-    const _debugSourceAddress = _debugRail ? getWithdrawalSourceAddress(profile, _debugRail) : null
-    // Read via the refs (not the closed-over `wallets`/`primaryWallet`) - the
-    // refreshDynamicWalletRuntime call above may have just hydrated the SDK's
-    // wallet list mid-execution of this same handler, which this function's
-    // own `wallets`/`primaryWallet` bindings never observe (see walletsRef).
-    const _debugMatchingWallet = _debugRail && _debugRailUsesDynamicSigner
-      ? findDynamicApprovalWalletForSource(walletsRef.current, primaryWalletRef.current, _debugRail, _debugSourceAddress)
-      : null
-    if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet) {
-      setWithdrawalApprovalError(
-        _debugRail === "solana"
-          ? solanaWithdrawalReconnectMessage
-          : pineTreeSignerReconnectMessage
-      )
-      if (_debugRail === "base" || _debugRail === "solana") {
-        setWithdrawalAuthorizationRecoveryOpen(true)
-      }
-      setWithdrawalScreen("failed")
-      return
-    }
-    if (_debugApprovalMethod === "dynamic_browser" && _debugMatchingWallet && _debugRail) {
-      try {
-        assertDynamicWalletChain(_debugMatchingWallet as DynamicWalletLike, _debugRail)
-        if (!dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, _debugRail)) {
-          throw new Error("Dynamic signer method mismatch.")
-        }
-      } catch (error) {
-        console.warn("[pinetree-withdrawals] selected_signer_asset_rail_mismatch", {
-          requestedRail: _debugRail,
-          requestedAsset: withdrawalReview?.review.asset,
-          requestId: withdrawalId,
-          selectedWalletChainClassification: classifyDynamicWalletChain(_debugMatchingWallet as DynamicWalletLike),
-          sourceAddressPresent: Boolean(_debugSourceAddress),
-          error: error instanceof Error ? error.message : "unknown",
-        })
-        setWithdrawalApprovalError(withdrawalSignerRailMismatchMessage)
-        setWithdrawalScreen("failed")
-        return
-      }
-    }
-    console.info("[pinetree-withdrawals] approval_state", {
-      rail: _debugRail,
-      asset: withdrawalReview?.review.asset,
-      requestId: withdrawalId,
-      approvalMethod: _debugApprovalMethod,
-      approvalReady: Boolean(withdrawalReview?.canSubmit && _debugApprovalMethod === "dynamic_browser"),
-      hasMatchingDynamicWallet: Boolean(_debugMatchingWallet),
-      hasSolanaSigner: Boolean(_debugMatchingWallet && dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, "solana")),
-      hasEvmSigner: Boolean(_debugMatchingWallet && dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, "base")),
-      primaryActionLabel: _debugApprovalMethod === "dynamic_browser" ? "Approve withdrawal" : "Submit withdrawal request",
-    })
-
     setSubmittingWithdrawal(true)
     setWithdrawalError("")
     setWithdrawalApprovalError("")
     setWithdrawalSubmitResult(null)
-    setWithdrawalScreen("approving")
+    // Everything below performs real Dynamic SDK and network work - wrapped
+    // top-to-bottom (not just the fetch calls) so an uncaught throw from the
+    // pre-flight signer lookup, the SDK's own signing call, or anything else
+    // in between always clears loading state and shows a visible error,
+    // rather than leaving the merchant on an unresponsive review screen with
+    // no request ever reaching prepare/submit and nothing in server logs.
     try {
+      const _debugRail = withdrawalReview?.review.rail
+      const _debugApprovalMethod = withdrawalReview?.review.approvalMethod
+      const _debugRailUsesDynamicSigner = Boolean(_debugRail && dynamicSignerWithdrawalRails.includes(_debugRail))
+      if (_debugApprovalMethod === "dynamic_browser" && _debugRailUsesDynamicSigner) {
+        logProviderSheetOpenRequested("withdrawal_submit_before_signing", {
+          selectedRail: _debugRail ?? null,
+          explicitUserAction: true,
+          signatureRequired: true,
+        })
+        await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })
+      }
+      const _debugSourceAddress = _debugRail ? getWithdrawalSourceAddress(profile, _debugRail) : null
+      // Read via the refs (not the closed-over `wallets`/`primaryWallet`) - the
+      // refreshDynamicWalletRuntime call above may have just hydrated the SDK's
+      // wallet list mid-execution of this same handler, which this function's
+      // own `wallets`/`primaryWallet` bindings never observe (see walletsRef).
+      const _debugMatchingWallet = _debugRail && _debugRailUsesDynamicSigner
+        ? findDynamicApprovalWalletForSource(walletsRef.current, primaryWalletRef.current, _debugRail, _debugSourceAddress)
+        : null
+      if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet) {
+        emitWalletSetupDebugEvent("wallet_withdrawal_submit_blocked", {
+          correlationId,
+          reason: "CLIENT_SIGNER_LOOKUP_FAILED",
+          rail: _debugRail ?? "unknown",
+        })
+        setWithdrawalApprovalError(
+          _debugRail === "solana"
+            ? solanaWithdrawalReconnectMessage
+            : pineTreeSignerReconnectMessage
+        )
+        if (_debugRail === "base" || _debugRail === "solana") {
+          setWithdrawalAuthorizationRecoveryOpen(true)
+        }
+        setWithdrawalScreen("failed")
+        return
+      }
+      if (_debugApprovalMethod === "dynamic_browser" && _debugMatchingWallet && _debugRail) {
+        try {
+          assertDynamicWalletChain(_debugMatchingWallet as DynamicWalletLike, _debugRail)
+          if (!dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, _debugRail)) {
+            throw new Error("Dynamic signer method mismatch.")
+          }
+        } catch (error) {
+          console.warn("[pinetree-withdrawals] selected_signer_asset_rail_mismatch", {
+            requestedRail: _debugRail,
+            requestedAsset: withdrawalReview?.review.asset,
+            requestId: withdrawalId,
+            selectedWalletChainClassification: classifyDynamicWalletChain(_debugMatchingWallet as DynamicWalletLike),
+            sourceAddressPresent: Boolean(_debugSourceAddress),
+            error: error instanceof Error ? error.message : "unknown",
+          })
+          emitWalletSetupDebugEvent("wallet_withdrawal_submit_blocked", {
+            correlationId,
+            reason: "CLIENT_SIGNER_RAIL_MISMATCH",
+            rail: _debugRail,
+          })
+          setWithdrawalApprovalError(withdrawalSignerRailMismatchMessage)
+          setWithdrawalScreen("failed")
+          return
+        }
+      }
+      console.info("[pinetree-withdrawals] approval_state", {
+        rail: _debugRail,
+        asset: withdrawalReview?.review.asset,
+        requestId: withdrawalId,
+        approvalMethod: _debugApprovalMethod,
+        approvalReady: Boolean(withdrawalReview?.canSubmit && _debugApprovalMethod === "dynamic_browser"),
+        hasMatchingDynamicWallet: Boolean(_debugMatchingWallet),
+        hasSolanaSigner: Boolean(_debugMatchingWallet && dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, "solana")),
+        hasEvmSigner: Boolean(_debugMatchingWallet && dynamicWalletSupportsRail(_debugMatchingWallet as DynamicWalletLike, "base")),
+        primaryActionLabel: _debugApprovalMethod === "dynamic_browser" ? "Approve withdrawal" : "Submit withdrawal request",
+      })
+
+      setWithdrawalScreen("approving")
       // Route by the server's approvalMethod decision, not by client wallet-lookup state.
       // When the server says dynamic_browser, always use prepareâ†’signâ†’complete. If the
       // Dynamic wallet is not found at signing time, the user gets a clear error to retry.
       if (withdrawalReview?.review.approvalMethod === "dynamic_browser") {
+        emitWalletSetupDebugEvent("wallet_withdrawal_prepare_requested", { correlationId, requestId: withdrawalId })
         const prepareRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
+            "X-PineTree-Withdrawal-Correlation": correlationId,
           },
         })
         const prepared = (await prepareRes.json()) as WithdrawalPrepareResponse | { error?: string; error_code?: string }
+        emitWalletSetupDebugEvent("wallet_withdrawal_prepare_returned", {
+          correlationId,
+          httpStatus: prepareRes.status,
+          ok: prepareRes.ok,
+        })
         if (!prepareRes.ok) {
           // Clear the stale review so the button reverts to "Review withdrawal". The
           // underlying request status may have changed (e.g. already "pending"), and
@@ -8393,12 +8543,25 @@ function PineTreeWalletRuntime() {
           setWithdrawalScreen("failed")
           return
         }
+        if (!("payload" in prepared) || !prepared.sourceAddress) {
+          // The prepare route's real response shape didn't match what this
+          // client expects - fail loud instead of handing a malformed
+          // payload to the Dynamic signer.
+          emitWalletSetupDebugEvent("wallet_withdrawal_submit_blocked", {
+            correlationId,
+            reason: "CLIENT_PREPARE_MALFORMED_RESPONSE",
+          })
+          setWithdrawalApprovalError("We couldn't prepare this withdrawal for signing. Please try again.")
+          setWithdrawalScreen("failed")
+          return
+        }
 
         // Same staleness hazard as the pre-flight checks above, but for the
         // actual signing call: refreshDynamicWalletRuntime (called just above,
         // before this prepare/submit block) may have hydrated the wallet list
         // mid-execution of this handler, which this closure's own
         // `wallets`/`primaryWallet` bindings never observe. Read the refs.
+        emitWalletSetupDebugEvent("wallet_withdrawal_signature_started", { correlationId, requestId: withdrawalId })
         const dynamicSubmission = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, walletsRef.current, primaryWalletRef.current, {
           selectedRail: withdrawalRail,
           selectedAsset: withdrawalAsset,
@@ -8407,11 +8570,17 @@ function PineTreeWalletRuntime() {
           primaryWallet: primaryWalletRef.current,
           switchDynamicWallet,
         })
+        emitWalletSetupDebugEvent("wallet_withdrawal_signature_returned", {
+          correlationId,
+          hasTxHash: Boolean(dynamicSubmission.txHash),
+          hasSignedPsbt: Boolean(dynamicSubmission.signedPsbtBase64),
+        })
         const submitRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
+            "X-PineTree-Withdrawal-Correlation": correlationId,
           },
           body: JSON.stringify({
             tx_hash: dynamicSubmission.txHash || "",
@@ -8423,7 +8592,13 @@ function PineTreeWalletRuntime() {
             },
           }),
         })
+        emitWalletSetupDebugEvent("wallet_withdrawal_submit_requested", { correlationId, requestId: withdrawalId })
         const submitted = (await submitRes.json()) as WithdrawalSubmitResponse | { error?: string; error_code?: string }
+        emitWalletSetupDebugEvent("wallet_withdrawal_submit_returned", {
+          correlationId,
+          httpStatus: submitRes.status,
+          ok: submitRes.ok,
+        })
         if (!submitRes.ok) {
           // Clear stale review: status is no longer "review_required" after prepare
           // succeeded, so a retry would fail at prepare with "not ready".
@@ -8451,6 +8626,11 @@ function PineTreeWalletRuntime() {
       return
     } catch (error) {
       const safeMessage = sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined)
+      console.warn("[pinetree-withdrawals] handleSubmitWithdrawal_unhandled_error", {
+        rail: withdrawalReview?.review.rail,
+        error: error instanceof Error ? error.message : "unknown",
+      })
+      emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", { correlationId, stage: "dynamic_submit" })
       setWithdrawalApprovalError(safeMessage)
       if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana")) {
         setWithdrawalAuthorizationRecoveryOpen(true)

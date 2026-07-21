@@ -120,6 +120,26 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_setup_cancelled_from_dynamic",
   "wallet_lightning_auto_provision_client_started",
   "wallet_lightning_auto_provision_client_timeout",
+  // Withdrawal review->prepare->sign->submit client-side trace. Frontend
+  // console.info never reaches Vercel logs from a mobile browser, and the
+  // 2026-07-21 production incident (review succeeded, prepare/submit never
+  // called) was only diagnosable server-side via these - see
+  // handleReviewWithdrawal/handleSubmitWithdrawal in wallet-setup/page.tsx.
+  "wallet_withdrawal_review_requested",
+  "wallet_withdrawal_review_received",
+  "wallet_withdrawal_review_screen_shown",
+  "wallet_withdrawal_review_blocked",
+  "wallet_withdrawal_approve_clicked",
+  "wallet_withdrawal_submit_blocked",
+  "wallet_withdrawal_submit_unhandled_error",
+  "wallet_withdrawal_prepare_requested",
+  "wallet_withdrawal_prepare_returned",
+  "wallet_withdrawal_signature_started",
+  "wallet_withdrawal_signature_returned",
+  "wallet_withdrawal_submit_requested",
+  "wallet_withdrawal_submit_returned",
+  "wallet_withdrawal_speed_submit_requested",
+  "wallet_withdrawal_speed_submit_returned",
 ])
 
 const MAX_DETAIL_KEYS = 12

@@ -8,10 +8,16 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const correlationId = req.headers?.get("x-pinetree-withdrawal-correlation") || null
+  const { id } = await params
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
-    const { id } = await params
     const body = (await req.json()) as Record<string, unknown>
+    console.info("[pinetree-withdrawals] SUBMIT_RECEIVED", {
+      correlationId, merchantId, requestId: id,
+      hasTxHash: Boolean(body.tx_hash || body.txHash),
+      hasSignedPsbt: Boolean(body.signed_psbt || body.signedPsbt),
+    })
     const result = await completeDynamicWalletWithdrawal(merchantId, id, {
       txHash: String(body.tx_hash || body.txHash || "").trim(),
       providerReference: body.provider_reference != null || body.providerReference != null
@@ -25,12 +31,16 @@ export async function POST(
           ? body.signed_payload as Record<string, unknown>
           : null,
     })
+    console.info("[pinetree-withdrawals] SUBMIT_RETURNED", {
+      correlationId, merchantId, requestId: id, merchantStatus: result.merchantStatus,
+    })
     scheduleWalletWithdrawalMaintenance("wallet-withdrawal.submit")
     return NextResponse.json(result)
   } catch (error) {
     const presented = presentWithdrawalError({
       rawMessage: error instanceof Error ? error.message : "Failed to submit wallet approval",
     })
+    console.warn("[pinetree-withdrawals] SUBMIT_FAILED", { correlationId, requestId: id, code: presented.code })
     return NextResponse.json(
       { error: presented.message, error_code: presented.code },
       { status: getRouteErrorStatus(error) }
