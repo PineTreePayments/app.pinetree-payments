@@ -1,9 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Archive, Check, Copy, Plus, Star } from "lucide-react"
+import { AlertTriangle, Archive, Check, ChevronDown, Copy, Plus, Star } from "lucide-react"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
-import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 
 type Rail = "base" | "solana" | "bitcoin"
 type Asset = "ETH" | "USDC" | "SOL" | "BTC"
@@ -34,6 +33,22 @@ const RAIL_ASSETS: Record<Rail, Asset[]> = {
 }
 
 const RAIL_LABELS: Record<Rail, string> = { base: "Base", solana: "Solana", bitcoin: "Bitcoin" }
+
+// Same compact dropdown treatment already used for the Network/Time filters
+// on the Transactions page (light blue background, blue border, chevron
+// overlay) - reused here rather than inventing a new select style.
+const compactSelectClass =
+  "h-9 w-full min-w-0 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-gray-600 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+
+const ADDRESS_PLACEHOLDER: Record<Rail, string> = {
+  base: "0x...",
+  solana: "Enter a Solana address",
+  bitcoin: "Enter a Bitcoin address",
+}
+
+function labelPlaceholder(rail: Rail, asset: Asset): string {
+  return rail === "bitcoin" ? "e.g. Bitcoin Wallet" : `e.g. ${RAIL_LABELS[rail]} ${asset}`
+}
 
 function shortAddress(address: string): string {
   if (address.length <= 14) return address
@@ -246,29 +261,39 @@ export default function AddressBookTab({ accessToken }: { accessToken: string | 
           <div className="grid grid-cols-2 gap-2">
             <label className="min-w-0">
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.11em] text-gray-600">Network</span>
-              <SegmentedButtons
-                ariaLabel="Network"
-                value={formRail}
-                onChange={(value) => {
-                  const rail = value as Rail
-                  setFormRail(rail)
-                  setFormAsset(RAIL_ASSETS[rail][0])
-                }}
-                options={[
-                  { value: "base", label: "Base" },
-                  { value: "solana", label: "Solana" },
-                  { value: "bitcoin", label: "Bitcoin" },
-                ]}
-              />
+              <div className="relative">
+                <select
+                  aria-label="Network"
+                  value={formRail}
+                  onChange={(event) => {
+                    const rail = event.target.value as Rail
+                    setFormRail(rail)
+                    setFormAsset(RAIL_ASSETS[rail][0])
+                  }}
+                  className={compactSelectClass}
+                >
+                  <option value="base">Base</option>
+                  <option value="solana">Solana</option>
+                  <option value="bitcoin">Bitcoin</option>
+                </select>
+                <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-blue-300" />
+              </div>
             </label>
             <label className="min-w-0">
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.11em] text-gray-600">Asset</span>
-              <SegmentedButtons
-                ariaLabel="Asset"
-                value={formAsset}
-                onChange={(value) => setFormAsset(value as Asset)}
-                options={RAIL_ASSETS[formRail].map((asset) => ({ value: asset, label: asset }))}
-              />
+              <div className="relative">
+                <select
+                  aria-label="Asset"
+                  value={formAsset}
+                  onChange={(event) => setFormAsset(event.target.value as Asset)}
+                  className={compactSelectClass}
+                >
+                  {RAIL_ASSETS[formRail].map((asset) => (
+                    <option key={asset} value={asset}>{asset}</option>
+                  ))}
+                </select>
+                <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-blue-300" />
+              </div>
             </label>
           </div>
           <label className="block">
@@ -278,7 +303,7 @@ export default function AddressBookTab({ accessToken }: { accessToken: string | 
             <input
               value={formAddress}
               onChange={(event) => setFormAddress(event.target.value)}
-              placeholder={formRail === "bitcoin" ? "bc1... or name@domain" : "0x... or a Solana address"}
+              placeholder={ADDRESS_PLACEHOLDER[formRail]}
               className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
             />
           </label>
@@ -288,7 +313,7 @@ export default function AddressBookTab({ accessToken }: { accessToken: string | 
               <input
                 value={formLabel}
                 onChange={(event) => setFormLabel(event.target.value)}
-                placeholder="e.g. Coinbase"
+                placeholder={labelPlaceholder(formRail, formAsset)}
                 className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
               />
             </label>
@@ -297,7 +322,7 @@ export default function AddressBookTab({ accessToken }: { accessToken: string | 
               <input
                 value={formProvider}
                 onChange={(event) => setFormProvider(event.target.value)}
-                placeholder="Coinbase, Kraken, ..."
+                placeholder="e.g. Coinbase"
                 className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
               />
             </label>

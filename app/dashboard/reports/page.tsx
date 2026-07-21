@@ -329,7 +329,7 @@ export default function ReportsPage() {
               Report totals need review. Provider, rail, or crypto asset totals differ by {currency(summary.reconciliation.variance)}.
             </div>
           ) : (
-            <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800">Provider and rail totals reconcile to confirmed gross sales, and crypto assets reconcile to crypto volume.</div>
+            <div className="rounded-2xl border border-blue-200/80 bg-blue-50/80 px-4 py-3 text-sm font-medium text-blue-800 shadow-[0_8px_24px_rgba(37,99,235,0.07)]">Provider and rail totals reconcile to confirmed gross sales, and crypto assets reconcile to crypto volume.</div>
           )}
 
           <DashboardSection title="Summary" titleTone="blue">
