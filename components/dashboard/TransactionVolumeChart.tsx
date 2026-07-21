@@ -85,7 +85,7 @@ export default function TransactionVolumeChart({
     return (
       <div className={className}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 16 }}>
+          <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 16 }} barCategoryGap="8%">
             <CartesianGrid stroke="#f1f5f9" strokeDasharray="2 8" vertical={false} />
             <XAxis
               dataKey={xKey}
@@ -112,7 +112,7 @@ export default function TransactionVolumeChart({
                 name={item.label}
                 stackId="volume"
                 fill={item.color}
-                maxBarSize={56}
+                maxBarSize={72}
                 radius={index === series.length - 1 ? [4, 4, 0, 0] : 0}
               />
             ))}

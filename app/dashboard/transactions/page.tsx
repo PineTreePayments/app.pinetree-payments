@@ -18,6 +18,7 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
+import { ExpandIconButton } from "@/components/ui/ExpandIconButton"
 import {
   buildNeutralInsight,
   countBy,
@@ -420,6 +421,9 @@ export default function TransactionsPage() {
   const filterSelectClass =
     "h-9 w-full min-w-0 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-gray-600 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
 
+  const pageSizeSelectClass =
+    "h-9 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-gray-600 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+
   return (
     <div className="space-y-5 md:space-y-7">
       <div>
@@ -471,20 +475,34 @@ export default function TransactionsPage() {
 
         <GroupedMetricSurface title="Channel Mix" titleTone="blue" className="lg:col-span-2">
           <div className="grid grid-cols-2 divide-x divide-gray-100">
-            <button
-              type="button"
-              onClick={() => showChannelTransactions("pos")}
-              className="min-w-0 rounded-l-xl p-3 text-left transition hover:bg-gray-50 focus:outline-none focus:ring-4 focus:ring-blue-100"
-            >
-              <InlineMetric label="POS Transactions" value={posTransactions.toString()} />
-            </button>
-            <button
-              type="button"
-              onClick={() => showChannelTransactions("online")}
-              className="min-w-0 rounded-r-xl p-3 text-left transition hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-100"
-            >
-              <InlineMetric label="Online Payments" value={onlineTransactions.toString()} />
-            </button>
+            <div className="relative min-w-0 overflow-hidden rounded-l-xl">
+              <button
+                type="button"
+                onClick={() => showChannelTransactions("pos")}
+                className="h-full w-full p-3 pb-9 text-left transition hover:bg-gray-50 focus:outline-none focus:ring-4 focus:ring-blue-100"
+              >
+                <InlineMetric label="POS Transactions" value={posTransactions.toString()} />
+              </button>
+              <ExpandIconButton
+                onClick={() => showChannelTransactions("pos")}
+                ariaLabel="Expand POS transactions chart"
+                className="absolute bottom-2 right-2"
+              />
+            </div>
+            <div className="relative min-w-0 overflow-hidden rounded-r-xl">
+              <button
+                type="button"
+                onClick={() => showChannelTransactions("online")}
+                className="h-full w-full p-3 pb-9 text-left transition hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-100"
+              >
+                <InlineMetric label="Online Payments" value={onlineTransactions.toString()} />
+              </button>
+              <ExpandIconButton
+                onClick={() => showChannelTransactions("online")}
+                ariaLabel="Expand online payments chart"
+                className="absolute bottom-2 right-2"
+              />
+            </div>
           </div>
         </GroupedMetricSurface>
       </div>
@@ -558,17 +576,20 @@ export default function TransactionsPage() {
           <span>{totalTransactions} transactions</span>
           <div className="flex flex-wrap items-center gap-2">
             <label className="sr-only" htmlFor="transactions-page-size">Page size</label>
-            <select
-              id="transactions-page-size"
-              aria-label="Page size"
-              className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-sm font-medium text-gray-700"
-              value={pageSize}
-              onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }}
-            >
-              <option value={25}>25 per page</option>
-              <option value={50}>50 per page</option>
-              <option value={100}>100 per page</option>
-            </select>
+            <div className="relative">
+              <select
+                id="transactions-page-size"
+                aria-label="Page size"
+                className={pageSizeSelectClass}
+                value={pageSize}
+                onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }}
+              >
+                <option value={25}>25 per page</option>
+                <option value={50}>50 per page</option>
+                <option value={100}>100 per page</option>
+              </select>
+              <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-blue-300" />
+            </div>
             <button
               type="button"
               disabled={page <= 1}
