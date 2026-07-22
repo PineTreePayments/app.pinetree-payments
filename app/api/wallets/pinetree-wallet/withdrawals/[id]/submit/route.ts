@@ -33,6 +33,16 @@ export async function POST(
           ? body.signed_payload as Record<string, unknown>
           : null,
     })
+    console.info("[pinetree-withdrawals] DYNAMIC_SUBMIT_ACCEPTED", {
+      correlationId,
+      merchantId,
+      requestId: id,
+      buildId,
+      routeStage: "dynamic_submit_accepted",
+      status: result.request.status,
+      txHashPresent: Boolean(result.request.tx_hash),
+      providerReferencePresent: Boolean(result.request.provider_reference),
+    })
     console.info("[pinetree-withdrawals] SUBMIT_RETURNED", {
       correlationId, merchantId, requestId: id, buildId, routeStage: "submit_returned", merchantStatus: result.merchantStatus,
     })

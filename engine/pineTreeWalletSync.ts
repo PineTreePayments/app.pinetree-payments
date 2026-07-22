@@ -192,6 +192,13 @@ async function persistSyncedBalances(
   if (balances.length === 0) return null
   const timestamp = new Date().toISOString()
   await upsertMerchantAssetBalances(merchantId, balances, timestamp)
+  console.info("[pinetree-withdrawals] CANONICAL_BALANCE_CACHE_UPDATED", {
+    merchantId,
+    assetCount: balances.length,
+    assets: balances.map((balance) => balance.asset),
+    fetchedAt: timestamp,
+    routeStage: "canonical_balance_cache_updated",
+  })
   return timestamp
 }
 
@@ -327,7 +334,16 @@ export async function syncPineTreeWalletBalances(merchantId: string): Promise<Pi
 
   await persistSyncedBalances(merchantId, updates)
   const speedBitcoinSyncState = await syncSpeedBitcoinBalance(merchantId)
-  return getPineTreeWalletBalanceSnapshot(merchantId, speedBitcoinSyncState)
+  const snapshot = await getPineTreeWalletBalanceSnapshot(merchantId, speedBitcoinSyncState)
+  console.info("[pinetree-withdrawals] WALLET_BALANCE_REFRESH_COMPLETED", {
+    merchantId,
+    baseAssetCount: snapshot.balances.base.length,
+    solanaAssetCount: snapshot.balances.solana.length,
+    bitcoinAssetCount: snapshot.balances.bitcoin.length,
+    lastSyncedAt: snapshot.lastSyncedAt,
+    routeStage: "wallet_balance_refresh_completed",
+  })
+  return snapshot
 }
 
 function isBaseRpcConfigured(): boolean {
@@ -420,6 +436,19 @@ export async function getPineTreeWalletBalanceSnapshot(
   }
 
   const all = BALANCE_DEFS.map(toBalance)
+  for (const balance of all) {
+    console.info("[pinetree-withdrawals] CANONICAL_BALANCE_RESOLVED", {
+      merchantId,
+      rail: balance.rail,
+      asset: balance.asset,
+      key: balance.key,
+      status: balance.status,
+      balancePresent: balance.balance !== null,
+      lastSyncedAt: balance.lastSyncedAt,
+      stale: balance.status === "stale",
+      routeStage: "canonical_balance_resolved",
+    })
+  }
   const synced = all.filter((item) => item.status === "synced" && item.usdValue !== null)
   const totalUsd = synced.length > 0
     ? synced.reduce((sum, item) => sum + Number(item.usdValue || 0), 0)

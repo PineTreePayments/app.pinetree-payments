@@ -20,6 +20,16 @@ export type ReconciliationResult = {
 
 type OnChainStatus = "confirmed" | "failed" | "pending"
 
+function maskReference(value: string | null | undefined) {
+  const normalized = String(value || "").trim()
+  if (!normalized) return null
+  return normalized.length <= 16 ? normalized : `${normalized.slice(0, 8)}...${normalized.slice(-6)}`
+}
+
+function reconcileLog(event: string, details: Record<string, unknown>) {
+  console.info(`[pinetree-withdrawals] ${event}`, details)
+}
+
 function getSolanaRpcUrls(): string[] {
   return [
     process.env.RPC_URL_SOLANA,
@@ -141,23 +151,62 @@ async function reconcileOne(
   const { id, merchant_id, rail, asset, tx_hash, provider_reference } = withdrawal
 
   let onChainStatus: OnChainStatus
+  const reference = String(tx_hash || provider_reference || "").trim()
+  const details = {
+    table: "wallet_withdrawal_requests",
+    merchantId: merchant_id,
+    withdrawalId: id,
+    rail,
+    asset,
+    provider: withdrawal.provider,
+    txHash: maskReference(tx_hash),
+    providerReference: maskReference(provider_reference),
+  }
 
-  if (rail === "solana" && tx_hash) {
-    onChainStatus = await checkSolanaTransaction(tx_hash)
-  } else if (rail === "base" && tx_hash) {
-    onChainStatus = await checkBaseTransaction(tx_hash)
+  if (rail === "solana" && reference) {
+    reconcileLog("WITHDRAWAL_RECONCILE_PROVIDER_LOOKUP_STARTED", {
+      ...details,
+      providerLookup: "solana_signature",
+    })
+    onChainStatus = await checkSolanaTransaction(reference)
+  } else if (rail === "base" && reference) {
+    reconcileLog("WITHDRAWAL_RECONCILE_PROVIDER_LOOKUP_STARTED", {
+      ...details,
+      providerLookup: "base_receipt",
+    })
+    onChainStatus = await checkBaseTransaction(reference)
   } else if (rail === "bitcoin" && provider_reference) {
+    reconcileLog("WITHDRAWAL_RECONCILE_PROVIDER_LOOKUP_STARTED", {
+      ...details,
+      providerLookup: "speed_instant_send",
+    })
     onChainStatus = await checkSpeedInstantSend(merchant_id, provider_reference)
   } else {
+    reconcileLog("WITHDRAWAL_RECONCILE_SKIPPED", {
+      ...details,
+      reason: "missing_provider_reference",
+    })
     return "skipped"
   }
 
-  if (onChainStatus === "pending") return "pending"
+  if (onChainStatus === "pending") {
+    reconcileLog("WITHDRAWAL_RECONCILE_STILL_PROCESSING", {
+      ...details,
+      reason: "provider_pending",
+    })
+    return "pending"
+  }
 
   const newStatus = onChainStatus === "confirmed" ? "confirmed" : "failed"
   const eventType = onChainStatus === "confirmed" ? "withdrawal.confirmed" : "withdrawal.failed"
+  const now = new Date().toISOString()
 
-  await updateWalletWithdrawalRequest(merchant_id, id, { status: newStatus })
+  await updateWalletWithdrawalRequest(merchant_id, id, {
+    status: newStatus,
+    ...(newStatus === "confirmed"
+      ? { confirmedAt: now, errorMessage: null, errorCode: null }
+      : { failedAt: now, errorMessage: "Withdrawal failed on-chain.", errorCode: "CHAIN_TRANSACTION_FAILED" }),
+  })
 
   await insertWithdrawalAuditEvent({
     merchantId: merchant_id,
@@ -166,11 +215,15 @@ async function reconcileOne(
     rail,
     asset,
     status: newStatus,
-    metadata: { tx_hash, provider_reference },
+    metadata: { tx_hash, provider_reference, reconciled_at: now },
   })
 
   console.log(`[reconcile-withdrawals] ${id} → ${newStatus} (${rail}/${asset} tx=${tx_hash || provider_reference})`)
 
+  reconcileLog(onChainStatus === "confirmed" ? "WITHDRAWAL_RECONCILE_CONFIRMED" : "WITHDRAWAL_RECONCILE_FAILED", {
+    ...details,
+    status: newStatus,
+  })
   return onChainStatus
 }
 
@@ -196,13 +249,48 @@ async function reconcileProcessingWalletOperations(limit: number): Promise<{
 }> {
   const operations = await listProcessingWalletOperationsForReconciliation(limit)
   const result = { checked: operations.length, confirmed: 0, failed: 0, still_processing: 0, skipped: 0 }
+  reconcileLog("WITHDRAWAL_RECONCILE_SELECTED", {
+    table: "merchant_wallet_operations",
+    count: operations.length,
+    limit,
+  })
 
   for (const operation of operations) {
     try {
+      reconcileLog("WITHDRAWAL_RECONCILE_PROVIDER_LOOKUP_STARTED", {
+        table: "merchant_wallet_operations",
+        merchantId: operation.merchant_id,
+        operationId: operation.id,
+        provider: operation.provider,
+        providerReference: maskReference(operation.provider_reference),
+      })
       const updated = await getWalletWithdrawal(operation.merchant_id, operation.id)
-      if (updated.status === "COMPLETED") result.confirmed++
-      else if (updated.status === "FAILED") result.failed++
-      else result.still_processing++
+      if (updated.status === "COMPLETED") {
+        result.confirmed++
+        reconcileLog("WITHDRAWAL_RECONCILE_CONFIRMED", {
+          table: "merchant_wallet_operations",
+          merchantId: operation.merchant_id,
+          operationId: operation.id,
+          provider: operation.provider,
+        })
+      } else if (updated.status === "FAILED") {
+        result.failed++
+        reconcileLog("WITHDRAWAL_RECONCILE_FAILED", {
+          table: "merchant_wallet_operations",
+          merchantId: operation.merchant_id,
+          operationId: operation.id,
+          provider: operation.provider,
+        })
+      } else {
+        result.still_processing++
+        reconcileLog("WITHDRAWAL_RECONCILE_STILL_PROCESSING", {
+          table: "merchant_wallet_operations",
+          merchantId: operation.merchant_id,
+          operationId: operation.id,
+          provider: operation.provider,
+          status: updated.status,
+        })
+      }
       console.log(
         `[reconcile-withdrawals] wallet_operation ${operation.id} -> ${updated.status} (speed/BTC ref=${operation.provider_reference})`
       )
@@ -214,6 +302,12 @@ async function reconcileProcessingWalletOperations(limit: number): Promise<{
         operationId: operation.id,
         merchantId: operation.merchant_id,
         error: error instanceof Error ? error.message : String(error),
+      })
+      reconcileLog("WITHDRAWAL_RECONCILE_SKIPPED", {
+        table: "merchant_wallet_operations",
+        merchantId: operation.merchant_id,
+        operationId: operation.id,
+        reason: "provider_lookup_failed",
       })
       result.skipped++
     }
@@ -232,6 +326,13 @@ export async function reconcileProcessingWithdrawals(options: {
     reconcileProcessingWalletOperations(limit),
   ])
   const withdrawals = [...onChainWithdrawals, ...bitcoinWithdrawals]
+  reconcileLog("WITHDRAWAL_RECONCILE_SELECTED", {
+    table: "wallet_withdrawal_requests",
+    dynamicCount: onChainWithdrawals.length,
+    bitcoinCount: bitcoinWithdrawals.length,
+    total: withdrawals.length,
+    limit,
+  })
 
   const result: ReconciliationResult = {
     checked: withdrawals.length + walletOperations.checked,

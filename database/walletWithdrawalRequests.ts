@@ -3,6 +3,16 @@ import { supabase, supabaseAdmin } from "./supabase"
 const db = supabaseAdmin || supabase
 const TABLE = "wallet_withdrawal_requests"
 
+function isMissingWithdrawalLifecycleColumn(error: { code?: string; message?: string } | null): boolean {
+  return Boolean(
+    error &&
+      (
+        error.code === "PGRST204" ||
+        /submitted_at|confirmed_at|failed_at|provider_request_id/i.test(error.message || "")
+      )
+  )
+}
+
 export type WalletWithdrawalRail = "base" | "solana" | "bitcoin"
 export type WalletWithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
 export type WalletWithdrawalStatus =
@@ -44,6 +54,10 @@ export type WalletWithdrawalRequestRecord = {
   fee_amount_decimal: string | null
   native_fee_asset: string | null
   error_code: string | null
+  provider_request_id: string | null
+  submitted_at: string | null
+  confirmed_at: string | null
+  failed_at: string | null
   created_at: string
   updated_at: string
 }
@@ -83,6 +97,10 @@ export type UpdateWalletWithdrawalRequestInput = {
   reviewPayload?: Record<string, unknown>
   errorMessage?: string | null
   errorCode?: string | null
+  providerRequestId?: string | null
+  submittedAt?: string | null
+  confirmedAt?: string | null
+  failedAt?: string | null
 }
 
 export type FindOpenUnsignedWalletWithdrawalInput = {
@@ -137,6 +155,10 @@ function normalize(row: Record<string, unknown>): WalletWithdrawalRequestRecord 
     fee_amount_decimal: row.fee_amount_decimal != null ? String(row.fee_amount_decimal) : null,
     native_fee_asset: row.native_fee_asset != null ? String(row.native_fee_asset) : null,
     error_code: row.error_code != null ? String(row.error_code) : null,
+    provider_request_id: row.provider_request_id != null ? String(row.provider_request_id) : null,
+    submitted_at: row.submitted_at != null ? String(row.submitted_at) : null,
+    confirmed_at: row.confirmed_at != null ? String(row.confirmed_at) : null,
+    failed_at: row.failed_at != null ? String(row.failed_at) : null,
     created_at: String(row.created_at || ""),
     updated_at: String(row.updated_at || ""),
   }
@@ -201,14 +223,33 @@ export async function updateWalletWithdrawalRequest(
   if (input.reviewPayload !== undefined) update.review_payload = input.reviewPayload
   if (input.errorMessage !== undefined) update.error_message = input.errorMessage
   if (input.errorCode !== undefined) update.error_code = input.errorCode
+  if (input.providerRequestId !== undefined) update.provider_request_id = input.providerRequestId
+  if (input.submittedAt !== undefined) update.submitted_at = input.submittedAt
+  if (input.confirmedAt !== undefined) update.confirmed_at = input.confirmedAt
+  if (input.failedAt !== undefined) update.failed_at = input.failedAt
 
-  const { data, error } = await db
+  let { data, error } = await db
     .from(TABLE)
     .update(update)
     .eq("merchant_id", merchantId)
     .eq("id", id)
     .select("*")
     .single()
+
+  if (isMissingWithdrawalLifecycleColumn(error)) {
+    const fallback = { ...update }
+    delete fallback.provider_request_id
+    delete fallback.submitted_at
+    delete fallback.confirmed_at
+    delete fallback.failed_at
+    ;({ data, error } = await db
+      .from(TABLE)
+      .update(fallback)
+      .eq("merchant_id", merchantId)
+      .eq("id", id)
+      .select("*")
+      .single())
+  }
 
   if (error || !data) {
     throw new Error(`Failed to update wallet withdrawal request: ${error?.message || "Not found"}`)
@@ -318,7 +359,8 @@ export async function listProcessingWithdrawalsForReconciliation(
     .from(TABLE)
     .select("*")
     .eq("status", "processing")
-    .not("tx_hash", "is", null)
+    .in("rail", ["base", "solana"])
+    .or("tx_hash.not.is.null,provider_reference.not.is.null")
     .order("created_at", { ascending: true })
     .limit(limit)
 

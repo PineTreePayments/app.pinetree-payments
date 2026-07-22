@@ -1801,8 +1801,11 @@ const PRODUCTION_WALLET_WITHDRAWAL_DEBUG_EVENTS = new Set([
   "DYNAMIC_SIGNATURE_NORMALIZED",
   "DYNAMIC_SIGNATURE_RECEIVED",
   "DYNAMIC_SUBMIT_REQUESTED",
+  "DYNAMIC_SUBMIT_ACCEPTED",
   "DYNAMIC_SUBMIT_COMPLETED",
+  "DYNAMIC_UI_REFRESH_COMPLETED",
   "DYNAMIC_POST_PREPARE_FAILED",
+  "WALLET_BALANCE_REFRESH_COMPLETED",
   "DYNAMIC_AUTH_CHECK_STARTED",
   "DYNAMIC_AUTH_RESTORED",
   "DYNAMIC_USER_RESOLVED",
@@ -3699,6 +3702,16 @@ function PineTreeWalletRuntime() {
           bitcoin: json.balances?.bitcoin?.length ? json.balances.bitcoin : defaultWalletSyncState.balances.bitcoin,
         },
         recentActivity: json.recentActivity || [],
+      })
+      emitWalletSetupDebugEvent("WALLET_BALANCE_REFRESH_COMPLETED", {
+        baseAssetCount: json.balances?.base?.length ?? 0,
+        solanaAssetCount: json.balances?.solana?.length ?? 0,
+        bitcoinAssetCount: json.balances?.bitcoin?.length ?? 0,
+        lastSyncedAt: json.lastSyncedAt ?? null,
+      })
+      emitWalletSetupDebugEvent("DYNAMIC_UI_REFRESH_COMPLETED", {
+        recentActivityCount: json.recentActivity?.length ?? 0,
+        lastSyncedAt: json.lastSyncedAt ?? null,
       })
     } finally {
       setWalletSyncing(false)
@@ -8642,6 +8655,36 @@ function PineTreeWalletRuntime() {
       return
     }
     if (withdrawalRail === "bitcoin") {
+      try {
+        const maxRes = await fetch("/api/wallets/pinetree-wallet/withdrawals/max-estimate", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ rail: "bitcoin", asset: "BTC" }),
+        })
+        const maxJson = await maxRes.json()
+        const maxDecimal = maxJson?.estimate?.maxDecimal != null ? String(maxJson.estimate.maxDecimal) : ""
+        const maxSats = maxDecimal ? btcDecimalToSats(maxDecimal) : null
+        if (!maxRes.ok || maxSats === null) {
+          setWithdrawalError("Available-to-withdraw could not be verified. Refresh before withdrawing.")
+          return
+        }
+        if (amountSats && BigInt(amountSats) > BigInt(maxSats)) {
+          const warning = maxJson?.estimate?.warning || "This Max leaves room for Speed provider/network fees."
+          setMaxWarning(warning)
+          setWithdrawalError(`Amount exceeds available to withdraw after estimated fees. Max is ${maxDecimal} BTC.`)
+          emitWalletSetupDebugEvent("SPEED_MAX_CALCULATED", {
+            correlationId,
+            rail: "bitcoin",
+            asset: "BTC",
+            requestedSats: amountSats,
+            maxSats,
+          })
+          return
+        }
+      } catch {
+        setWithdrawalError("Available-to-withdraw could not be verified. Refresh before withdrawing.")
+        return
+      }
       setInstantSendIdempotencyKey((current) => current ?? crypto.randomUUID())
       setWithdrawalReview({
         request: {
@@ -9003,13 +9046,14 @@ function PineTreeWalletRuntime() {
           ok: Boolean(result.ok),
         })
         if (!response.ok || !result.ok || !result.data?.operation) {
+          const presented = presentWithdrawalErrorClient({
+            code: result.error?.code as WalletApiErrorCode | undefined,
+            rawMessage: result.error?.message,
+          })
           setWithdrawalApprovalError(
-            presentWithdrawalErrorClient({
-              code: result.error?.code as WalletApiErrorCode | undefined,
-              rawMessage: result.error?.message,
-            }).message
+            presented.message
           )
-          setWithdrawalScreen("failed")
+          setWithdrawalScreen(presented.code === "INSUFFICIENT_BALANCE" ? "review" : "failed")
           return
         }
         setWithdrawalSubmitResult({
@@ -9213,6 +9257,14 @@ function PineTreeWalletRuntime() {
           setWithdrawalScreen("failed")
           return
         }
+        emitWalletSetupDebugEvent("DYNAMIC_SUBMIT_ACCEPTED", {
+          correlationId,
+          requestId: withdrawalId,
+          rail: review.review.rail,
+          asset: review.review.asset,
+          stage: "DYNAMIC_SUBMIT_ACCEPTED",
+          httpStatus: submitRes.status,
+        })
         emitWalletSetupDebugEvent("DYNAMIC_SUBMIT_COMPLETED", {
           correlationId,
           requestId: withdrawalId,

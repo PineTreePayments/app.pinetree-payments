@@ -50,6 +50,7 @@ vi.mock("@solana/spl-token", () => ({
 }))
 
 import { estimateMaxWithdrawalAmount } from "@/engine/withdrawals/withdrawalFeeEstimate"
+import { calculateSpeedMaximumSendableSats } from "@/engine/withdrawals/speedWithdrawalQuote"
 
 const BASE_ETH_GAS_PRICE_WEI = "0x3b9aca00" // 1 gwei
 const BASE_ETH_GAS_ESTIMATE = "0x5208" // 21000
@@ -77,12 +78,16 @@ describe("estimateMaxWithdrawalAmount", () => {
     })
     mocks.sumPendingWalletWithdrawalAmount.mockResolvedValue(0)
     mocks.sumPendingWithdrawalOperationBaseUnits.mockResolvedValue(BigInt(0))
+    delete process.env.BTC_MAX_WITHDRAWAL_FEE_BUFFER_SATS
+    delete process.env.SPEED_WITHDRAWAL_FEE_BUFFER_SATS
+    delete process.env.SPEED_LIGHTNING_WITHDRAWAL_FEE_BUFFER_SATS
+    delete process.env.SPEED_ONCHAIN_WITHDRAWAL_FEE_BUFFER_SATS
   })
 
   it("Bitcoin: max = confirmed sats - pending - configured fee buffer", async () => {
     mocks.getWalletBalance.mockResolvedValue({ balance: "0.001" }) // 100,000 sats
     mocks.sumPendingWithdrawalOperationBaseUnits.mockResolvedValue(BigInt(10000))
-    process.env.BTC_MAX_WITHDRAWAL_FEE_BUFFER_SATS = "500"
+    process.env.SPEED_LIGHTNING_WITHDRAWAL_FEE_BUFFER_SATS = "500"
 
     const estimate = await estimateMaxWithdrawalAmount("merchant_1", "bitcoin", "BTC")
 
@@ -90,6 +95,19 @@ describe("estimateMaxWithdrawalAmount", () => {
     expect(estimate.maxDecimal).toBe("0.000895")
     expect(estimate.feeAsset).toBe("BTC")
     expect(estimate.blocked).toBeUndefined()
+  })
+
+  it("Speed Bitcoin quote math leaves integer sats for provider/network fees", () => {
+    process.env.SPEED_LIGHTNING_WITHDRAWAL_FEE_BUFFER_SATS = "500"
+
+    const quote = calculateSpeedMaximumSendableSats({
+      providerAvailableSats: BigInt(2969),
+      pendingSats: BigInt(0),
+      method: "lightning",
+    })
+
+    expect(quote.estimatedFeeSats).toBe(BigInt(500))
+    expect(quote.maximumSendableSats).toBe(BigInt(2469))
   })
 
   it("Base ETH (native): subtracts pending, RPC fee estimate, and configured reserve", async () => {

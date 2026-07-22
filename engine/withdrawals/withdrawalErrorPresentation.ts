@@ -120,6 +120,7 @@ export function presentWithdrawalError(input: {
     "INVALID_AMOUNT",
     "WALLET_VALIDATION_ERROR",
     "WALLET_CAPABILITY_UNAVAILABLE",
+    "INSUFFICIENT_BALANCE",
     "SIGNER_NOT_AVAILABLE",
     "WALLET_NOT_CONNECTED",
   ]

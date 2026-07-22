@@ -649,6 +649,35 @@ export async function completeDynamicWalletWithdrawal(
   if (request.approval_method !== "dynamic_browser" || request.provider !== "dynamic") {
     throw Object.assign(new Error("Withdrawal request is pending review."), { status: 409 })
   }
+  const submittedTxHash = String(input.txHash || "").trim()
+  const persistedTxHash = String(request.tx_hash || "").trim()
+  const persistedProviderReference = String(request.provider_reference || "").trim()
+  const hasPersistedBroadcastEvidence = Boolean(persistedTxHash || persistedProviderReference)
+  if (hasPersistedBroadcastEvidence && ["processing", "confirmed", "failed"].includes(request.status)) {
+    const submittedReference = String(input.providerReference || "").trim()
+    const submittedMatchesExisting =
+      !submittedTxHash ||
+      submittedTxHash === persistedTxHash ||
+      submittedTxHash === persistedProviderReference ||
+      (submittedReference && (submittedReference === persistedTxHash || submittedReference === persistedProviderReference))
+    if (!submittedMatchesExisting) {
+      throw Object.assign(new Error("This withdrawal already has different provider transaction evidence."), { status: 409 })
+    }
+    console.info("[wallet-withdrawal] dynamic_submit_idempotent_replay", {
+      merchantId,
+      withdrawalId: request.id,
+      rail: request.rail,
+      asset: request.asset,
+      status: request.status,
+      txHashPresent: Boolean(persistedTxHash),
+      providerReferencePresent: Boolean(persistedProviderReference),
+    })
+    return {
+      request,
+      merchantStatus: request.status === "failed" ? "Withdrawal failed" : "Processing",
+      message: request.status === "failed" ? "Withdrawal failed." : "Withdrawal submitted.",
+    }
+  }
   if (!request.unsigned_transaction_payload) {
     throw Object.assign(new Error("Withdrawal request has not been prepared for wallet approval."), { status: 409 })
   }
@@ -699,6 +728,7 @@ export async function completeDynamicWalletWithdrawal(
       })
       return { request: failed, merchantStatus: "Withdrawal failed", message: "Withdrawal failed." }
     }
+    const submittedAt = new Date().toISOString()
     const updated = await updateWalletWithdrawalRequest(merchantId, request.id, {
       status: "processing",
       provider: "dynamic",
@@ -709,6 +739,8 @@ export async function completeDynamicWalletWithdrawal(
         rawTxHex: broadcast.rawTxHex,
       },
       errorMessage: null,
+      errorCode: null,
+      submittedAt,
     })
     void insertWithdrawalAuditEvent({
       merchantId,
@@ -717,7 +749,7 @@ export async function completeDynamicWalletWithdrawal(
       rail: request.rail,
       asset: request.asset,
       status: "processing",
-      metadata: { tx_hash: broadcast.txid, provider: "dynamic" },
+      metadata: { tx_hash: broadcast.txid, provider: "dynamic", submitted_at: submittedAt },
     })
     return {
       request: updated,
@@ -726,11 +758,12 @@ export async function completeDynamicWalletWithdrawal(
     }
   }
 
-  const txHash = input.txHash.trim()
+  const txHash = submittedTxHash
   if (!isValidTransactionHash(request.rail, txHash)) {
     throw Object.assign(new Error("Transaction reference is invalid for the selected rail."), { status: 400 })
   }
 
+  const submittedAt = new Date().toISOString()
   const updated = await updateWalletWithdrawalRequest(merchantId, request.id, {
     status: "processing",
     provider: "dynamic",
@@ -738,6 +771,8 @@ export async function completeDynamicWalletWithdrawal(
     txHash,
     signedPayload: input.signedPayload || null,
     errorMessage: null,
+    errorCode: null,
+    submittedAt,
   })
 
   void insertWithdrawalAuditEvent({
@@ -747,7 +782,7 @@ export async function completeDynamicWalletWithdrawal(
     rail: request.rail,
     asset: request.asset,
     status: "processing",
-    metadata: { tx_hash: txHash, provider: "dynamic" },
+    metadata: { tx_hash: txHash, provider: "dynamic", submitted_at: submittedAt },
   })
 
   return {

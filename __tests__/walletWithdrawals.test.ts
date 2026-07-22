@@ -1038,6 +1038,31 @@ describe("PineTree Wallet withdrawals", () => {
     )
   })
 
+  it("returns an existing Dynamic processing withdrawal idempotently when the same tx hash is submitted again", async () => {
+    const existing = makeWithdrawal({
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      status: "processing",
+      provider_reference: "dynamic_ref_1",
+      tx_hash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      unsigned_transaction_payload: {
+        kind: "evm_transaction",
+        from: "0x9999999999999999999999999999999999999999",
+      },
+    })
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(existing)
+
+    const result = await completeDynamicWalletWithdrawal("merchant_1", "withdrawal_1", {
+      txHash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      providerReference: "dynamic_ref_1",
+      signedPayload: { dynamic_wallet_address: "0x9999999999999999999999999999999999999999" },
+    })
+
+    expect(result.merchantStatus).toBe("Processing")
+    expect(result.request).toBe(existing)
+    expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
+  })
+
   it("does not confirm a Dynamic withdrawal without a valid tx hash", async () => {
     mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
       approval_method: "dynamic_browser",

@@ -38,6 +38,8 @@ import {
   type WalletOperationType,
 } from "@/database/merchantWalletOperations"
 import { listWalletBalanceSnapshots, upsertWalletBalanceSnapshot } from "@/database/merchantWalletBalanceSnapshots"
+import { classifyBitcoinWithdrawalDestination } from "@/providers/wallets/bitcoinWithdrawalDestination"
+import { speedAmountFitsAvailable } from "@/engine/withdrawals/speedWithdrawalQuote"
 
 export const STALE_BALANCE_THRESHOLD_MS = 15 * 60 * 1000
 
@@ -470,6 +472,12 @@ async function createWalletWrite(
         providerAccountSuffix: resolution.context.providerAccountId.slice(-6),
         routeStage: "balance_confirmed",
       })
+      console.info("[pinetree-withdrawals] SPEED_BALANCE_RESOLVED", {
+        correlationId: input.correlationId || null,
+        merchantId,
+        providerAccountSuffix: resolution.context.providerAccountId.slice(-6),
+        routeStage: "speed_balance_resolved",
+      })
     } catch (error) {
       await updateWalletOperation(merchantId, operation.id, {
         status: "FAILED",
@@ -483,14 +491,54 @@ async function createWalletWrite(
     const available = balances.find((balance) =>
       canonicalWalletBalanceIdentity(balance.asset, balance.network).asset === requestedBalanceAsset
     )?.availableBaseUnits
-    if (available == null || available < input.amountBaseUnits) {
+    const speedQuote = resolution.provider === "speed" && input.asset === "SATS" && available != null
+      ? (() => {
+          const classified = classifyBitcoinWithdrawalDestination(input.destination)
+          const method = classified.valid && classified.method === "onchain" ? "onchain" : "lightning"
+          return speedAmountFitsAvailable({
+            amountSats: input.amountBaseUnits,
+            providerAvailableSats: available,
+            method,
+          })
+        })()
+      : null
+    if (speedQuote) {
+      console.info("[pinetree-withdrawals] SPEED_WITHDRAWAL_QUOTE_RESOLVED", {
+        correlationId: input.correlationId || null,
+        merchantId,
+        providerAccountSuffix: resolution.context.providerAccountId.slice(-6),
+        totalAvailableSats: speedQuote.totalAvailableSats.toString(),
+        estimatedFeeSats: speedQuote.estimatedFeeSats.toString(),
+        maximumSendableSats: speedQuote.maximumSendableSats.toString(),
+        routeStage: "speed_withdrawal_quote_resolved",
+      })
+    }
+    const balanceFits = speedQuote
+      ? speedQuote.fits
+      : available != null && available >= input.amountBaseUnits
+    if (!balanceFits) {
       await updateWalletOperation(merchantId, operation.id, {
         status: "FAILED",
         failureCode: "INSUFFICIENT_BALANCE",
-        failureReason: "The available balance is insufficient for this withdrawal.",
+        failureReason: speedQuote
+          ? "The available balance is insufficient for this withdrawal and estimated provider/network fee."
+          : "The available balance is insufficient for this withdrawal.",
       })
-      throw new WalletApiRouteError("INSUFFICIENT_BALANCE", "The available balance is insufficient for this withdrawal.")
+      throw new WalletApiRouteError(
+        "INSUFFICIENT_BALANCE",
+        speedQuote
+          ? "The available balance is insufficient for this withdrawal and estimated provider/network fee."
+          : "The available balance is insufficient for this withdrawal."
+      )
     }
+    console.info("[pinetree-withdrawals] SPEED_PRE_SUBMIT_VALIDATED", {
+      correlationId: input.correlationId || null,
+      merchantId,
+      providerAccountSuffix: resolution.context.providerAccountId.slice(-6),
+      amountSats: input.amountBaseUnits.toString(),
+      estimatedFeeSats: speedQuote?.estimatedFeeSats.toString() ?? null,
+      routeStage: "speed_pre_submit_validated",
+    })
     console.info("[pinetree-withdrawals] SPEED_AMOUNT_VALIDATED", {
       correlationId: input.correlationId || null,
       merchantId,

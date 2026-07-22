@@ -52,6 +52,9 @@ const fakeContext = { merchantId: "merchant-1", providerAccountId: "acct_fake_1"
 describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
   beforeEach(() => {
     vi.resetModules()
+    delete process.env.SPEED_WITHDRAWAL_FEE_BUFFER_SATS
+    delete process.env.SPEED_LIGHTNING_WITHDRAWAL_FEE_BUFFER_SATS
+    delete process.env.SPEED_ONCHAIN_WITHDRAWAL_FEE_BUFFER_SATS
     vi.doMock("@/database/merchantWalletBalanceSnapshots", () => ({
       listWalletBalanceSnapshots: vi.fn().mockResolvedValue([]),
       upsertWalletBalanceSnapshot: vi.fn(),
@@ -204,6 +207,69 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     )
     expect(result.capabilityAvailable).toBe(true)
     expect(result.operation.status).toBe("PROCESSING")
+  })
+
+  it("rejects a Speed withdrawal before /send when amount plus fee reserve exceeds live available sats", async () => {
+    process.env.SPEED_LIGHTNING_WITHDRAWAL_FEE_BUFFER_SATS = "500"
+    const createWithdrawal = vi.fn()
+    const adapter = fakeAdapter({
+      provider: "speed",
+      providerDisplayName: "Speed",
+      requiresFreshBalanceForWithdrawal: true,
+      getCapabilities: vi.fn().mockResolvedValue({
+        balances: true,
+        withdrawals: true,
+        payouts: false,
+        swaps: false,
+        automaticPayouts: false,
+        automaticConversion: false,
+      }),
+      getBalances: vi.fn().mockResolvedValue([{
+        asset: "BTC",
+        network: "bitcoin_lightning",
+        availableBaseUnits: BigInt(2969),
+        pendingBaseUnits: BigInt(0),
+        totalBaseUnits: BigInt(2969),
+      }]),
+      createWithdrawal,
+    })
+    const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({
+      provider: "speed",
+      adapter,
+      context: { merchantId: "merchant-1", providerAccountId: "acct_speed_1" },
+    })
+    const created = operationRow({ amount_base_units: "2969" })
+    const failed = operationRow({ status: "FAILED", failure_code: "INSUFFICIENT_BALANCE" })
+    const createWalletOperation = vi.fn().mockResolvedValue({ operation: created, created: true })
+    const updateWalletOperation = vi.fn().mockResolvedValue(failed)
+    vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
+    vi.doMock("@/database/merchantWalletOperations", () => ({
+      createWalletOperation,
+      updateWalletOperation,
+      getWalletOperationForMerchant: vi.fn(),
+      listWalletOperations: vi.fn(),
+    }))
+
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+    await expect(
+      createWalletWithdrawal("merchant-1", {
+        asset: "SATS",
+        amountDecimal: "2969",
+        destination: "merchant@example.com",
+        idempotencyKey: "key-1",
+      })
+    ).rejects.toMatchObject({ code: "INSUFFICIENT_BALANCE", retryable: false })
+
+    expect(updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "FAILED",
+        failureCode: "INSUFFICIENT_BALANCE",
+        failureReason: expect.stringContaining("estimated provider/network fee"),
+      })
+    )
+    expect(createWithdrawal).not.toHaveBeenCalled()
   })
 
   it("returns the existing operation unchanged on a duplicate idempotency key without calling the adapter again", async () => {

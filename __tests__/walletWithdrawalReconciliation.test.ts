@@ -73,6 +73,10 @@ function makeRecord(
     fee_amount_decimal: null,
     native_fee_asset: null,
     error_code: null,
+    provider_request_id: null,
+    submitted_at: null,
+    confirmed_at: null,
+    failed_at: null,
     created_at: "2026-06-28T00:00:00Z",
     updated_at: "2026-06-28T00:00:00Z",
     ...overrides,
@@ -151,7 +155,7 @@ describe("reconcileProcessingWithdrawals", () => {
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
       "merch-001",
       "wd-001",
-      { status: "confirmed" }
+      expect.objectContaining({ status: "confirmed", confirmedAt: expect.any(String) })
     )
     expect(mocks.insertWithdrawalAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "withdrawal.confirmed", withdrawalId: "wd-001" })
@@ -169,7 +173,33 @@ describe("reconcileProcessingWithdrawals", () => {
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
       "merch-001",
       "wd-001",
-      { status: "confirmed" }
+      expect.objectContaining({ status: "confirmed", confirmedAt: expect.any(String) })
+    )
+  })
+
+  it("reconciles a Dynamic Solana withdrawal when the signature is only in provider_reference", async () => {
+    const record = makeRecord({
+      rail: "solana",
+      asset: "SOL",
+      tx_hash: null,
+      provider_reference: "sol-provider-reference-only",
+    })
+    mocks.listProcessingWithdrawalsForReconciliation.mockResolvedValue([record])
+    mocks.fetch.mockResolvedValue(makeSolanaRpcResponse("confirmed", null))
+
+    const result = await reconcileProcessingWithdrawals({})
+
+    expect(result.confirmed).toBe(1)
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      "https://solana-rpc.example.com",
+      expect.objectContaining({
+        body: expect.stringContaining("sol-provider-reference-only"),
+      })
+    )
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merch-001",
+      "wd-001",
+      expect.objectContaining({ status: "confirmed", confirmedAt: expect.any(String) })
     )
   })
 
@@ -185,7 +215,7 @@ describe("reconcileProcessingWithdrawals", () => {
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
       "merch-001",
       "wd-001",
-      { status: "failed" }
+      expect.objectContaining({ status: "failed", failedAt: expect.any(String), errorCode: "CHAIN_TRANSACTION_FAILED" })
     )
     expect(mocks.insertWithdrawalAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "withdrawal.failed" })
@@ -216,7 +246,7 @@ describe("reconcileProcessingWithdrawals", () => {
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
       "merch-001",
       "wd-001",
-      { status: "confirmed" }
+      expect.objectContaining({ status: "confirmed", confirmedAt: expect.any(String) })
     )
     expect(mocks.insertWithdrawalAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "withdrawal.confirmed" })
@@ -234,7 +264,7 @@ describe("reconcileProcessingWithdrawals", () => {
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
       "merch-001",
       "wd-001",
-      { status: "failed" }
+      expect.objectContaining({ status: "failed", failedAt: expect.any(String), errorCode: "CHAIN_TRANSACTION_FAILED" })
     )
     expect(mocks.insertWithdrawalAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "withdrawal.failed" })
@@ -282,7 +312,11 @@ describe("reconcileProcessingWithdrawals", () => {
       speedAccountId: "acct_btc",
       providerSendId: "is_123",
     })
-    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith("merch-btc", "wd-001", { status: "confirmed" })
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merch-btc",
+      "wd-001",
+      expect.objectContaining({ status: "confirmed", confirmedAt: expect.any(String) })
+    )
     expect(mocks.insertWithdrawalAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "withdrawal.confirmed", withdrawalId: "wd-001" })
     )
@@ -302,7 +336,11 @@ describe("reconcileProcessingWithdrawals", () => {
     const result = await reconcileProcessingWithdrawals({})
 
     expect(result.failed).toBe(1)
-    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith("merch-btc", "wd-001", { status: "failed" })
+    expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
+      "merch-btc",
+      "wd-001",
+      expect.objectContaining({ status: "failed", failedAt: expect.any(String), errorCode: "CHAIN_TRANSACTION_FAILED" })
+    )
   })
 
   it("leaves a Bitcoin/Lightning withdrawal still_processing on an ambiguous Speed status", async () => {

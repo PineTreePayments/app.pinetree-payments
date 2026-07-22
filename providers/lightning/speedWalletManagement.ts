@@ -102,6 +102,7 @@ function providerError(error: unknown): never {
     })
   }
   if (error instanceof SpeedApiError) {
+    const providerMessage = error.providerMessage || error.message
     const category: SpeedWalletErrorCategory = error.status === 401
       ? "authentication"
       : error.status === 403
@@ -111,7 +112,7 @@ function providerError(error: unknown): never {
           : error.status >= 500
             ? "provider_unavailable"
             : "validation"
-    throw new SpeedWalletProviderError("Speed could not complete the wallet request.", {
+    throw new SpeedWalletProviderError(providerMessage || "Speed could not complete the wallet request.", {
       category,
       httpStatus: error.status,
       retryable: error.retryable,
@@ -456,6 +457,18 @@ export async function createConnectedAccountWithdrawal(
       speedRequestId: response.requestId,
       routeStage: "send_succeeded",
     })
+    console.info("[pinetree-withdrawals] SPEED_SEND_ACCEPTED", {
+      correlationId: input.correlationId || null,
+      merchantId: input.merchantId,
+      providerAccountSuffix: accountSuffix(input.speedAccountId),
+      endpointPath: "/send",
+      destinationMethod: input.withdrawMethod === "onchain" ? "onchain" : "lightning",
+      amountSats: input.amount,
+      status: validated.status,
+      providerReferencePresent: Boolean(validated.id),
+      speedRequestId: response.requestId,
+      routeStage: "speed_send_accepted",
+    })
     return validated
   } catch (error) {
     const diagnostic = speedProviderFailureDiagnostic(error)
@@ -495,6 +508,19 @@ export async function createConnectedAccountWithdrawal(
       providerErrorCategory: diagnostic.category,
       retryable: diagnostic.retryable,
       routeStage: "send_failed",
+    })
+    console.warn("[pinetree-withdrawals] SPEED_SEND_REJECTED", {
+      correlationId: input.correlationId || null,
+      merchantId: input.merchantId,
+      providerAccountSuffix: accountSuffix(input.speedAccountId),
+      destinationMethod: input.withdrawMethod === "onchain" ? "onchain" : "lightning",
+      amountSats: input.amount,
+      httpStatus: diagnostic.httpStatus,
+      speedRequestId: diagnostic.speedRequestId,
+      normalizedErrorCode: diagnostic.normalizedErrorCode,
+      providerErrorCategory: diagnostic.category,
+      retryable: diagnostic.retryable,
+      routeStage: "speed_send_rejected",
     })
     providerError(error)
   }

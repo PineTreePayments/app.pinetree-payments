@@ -35,6 +35,7 @@ import { getWalletBalance } from "@/database/walletBalances"
 import { sumPendingWalletWithdrawalAmount, type WalletWithdrawalRail, type WalletWithdrawalAsset } from "@/database/walletWithdrawalRequests"
 import { sumPendingWithdrawalOperationBaseUnits } from "@/database/merchantWalletOperations"
 import { toBaseUnits, fromBaseUnits, clampNonNegative } from "@/engine/withdrawals/decimalUnits"
+import { calculateSpeedMaximumSendableSats } from "@/engine/withdrawals/speedWithdrawalQuote"
 
 // ── Feature-local configuration (mirrors engine/lightningSweep.ts's pattern
 // for narrow, feature-specific tunables rather than the cross-cutting
@@ -53,11 +54,6 @@ function getSolanaSolMinReserve(): number {
 function getWithdrawalFeeSafetyMultiplier(): number {
   const configured = Number(process.env.WITHDRAWAL_FEE_SAFETY_MULTIPLIER || "")
   return Number.isFinite(configured) && configured >= 1 ? configured : 1.3
-}
-
-function getBtcMaxWithdrawalFeeBufferSats(): number {
-  const configured = Number(process.env.BTC_MAX_WITHDRAWAL_FEE_BUFFER_SATS || "")
-  return Number.isFinite(configured) && configured >= 0 ? Math.round(configured) : 500
 }
 
 export type MaxWithdrawalEstimate = {
@@ -188,11 +184,22 @@ export async function estimateMaxWithdrawalAmount(
     const btc = await getWalletBalance(merchantId, "BTC")
     const confirmedSats = toBaseUnits(btc?.balance ?? "0", "BTC")
     const pendingBaseUnits = await sumPendingWithdrawalOperationBaseUnits(merchantId, "SATS")
-    const bufferSats = BigInt(getBtcMaxWithdrawalFeeBufferSats())
-    const maxSats = clampNonNegative(confirmedSats - pendingBaseUnits - bufferSats)
+    const quote = calculateSpeedMaximumSendableSats({
+      providerAvailableSats: confirmedSats,
+      pendingSats: pendingBaseUnits,
+      method: "lightning",
+    })
+    console.info("[pinetree-withdrawals] SPEED_MAX_CALCULATED", {
+      merchantId,
+      totalAvailableSats: quote.totalAvailableSats.toString(),
+      pendingSats: quote.pendingSats.toString(),
+      estimatedFeeSats: quote.estimatedFeeSats.toString(),
+      maximumSendableSats: quote.maximumSendableSats.toString(),
+      routeStage: "speed_max_calculated",
+    })
     return {
-      maxDecimal: fromBaseUnits(maxSats, "BTC"),
-      feeEstimateDecimal: fromBaseUnits(bufferSats, "BTC"),
+      maxDecimal: fromBaseUnits(quote.maximumSendableSats, "BTC"),
+      feeEstimateDecimal: fromBaseUnits(quote.estimatedFeeSats, "BTC"),
       feeAsset: "BTC",
       warning: "Bitcoin's exact network fee is set at send time - this Max leaves a small buffer as an estimate.",
     }
