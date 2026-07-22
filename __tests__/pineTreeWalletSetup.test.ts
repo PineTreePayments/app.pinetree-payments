@@ -1692,10 +1692,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("formatUsd(selectedBalance.usdValue)")
   })
 
-  it("shows a Max button that fills the selected asset balance", () => {
+  it("shows a Max button that fills a verified canonical max amount", () => {
     expect(page).toContain("Max")
     expect(page).toContain("function handleMaxWithdrawalAmount()")
-    expect(page).toContain("setWithdrawalAmount(String(selectedWithdrawalBalance.balance))")
+    expect(page).toContain("selectedWithdrawalBalance?.availableToWithdraw")
+    expect(page).toContain("Available-to-withdraw could not be verified. Refresh before withdrawing.")
     expect(page).toContain("onMaxAmount={handleMaxWithdrawalAmount}")
   })
 

@@ -9,6 +9,7 @@ import { insertWithdrawalAuditEvent } from "@/database/merchantAuditEvents"
 import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
 import { getConnectedAccountSendStatus } from "@/providers/lightning/speedWalletManagement"
 import { getWalletWithdrawal } from "@/engine/wallet/walletOperations"
+import { syncPineTreeWalletBalances } from "@/engine/pineTreeWalletSync"
 
 export type ReconciliationResult = {
   checked: number
@@ -28,6 +29,27 @@ function maskReference(value: string | null | undefined) {
 
 function reconcileLog(event: string, details: Record<string, unknown>) {
   console.info(`[pinetree-withdrawals] ${event}`, details)
+}
+
+async function refreshBalancesAfterLifecycleChange(input: {
+  merchantId: string
+  rail: string
+  asset: string
+  status: string
+  table: string
+  id: string
+}) {
+  await syncPineTreeWalletBalances(input.merchantId).catch((error) => {
+    console.warn("[pinetree-balances] withdrawal_reconcile_balance_sync_failed", {
+      merchantId: input.merchantId,
+      rail: input.rail,
+      asset: input.asset,
+      status: input.status,
+      table: input.table,
+      id: input.id,
+      error: error instanceof Error ? error.message : "unknown_error",
+    })
+  })
 }
 
 function getSolanaRpcUrls(): string[] {
@@ -224,6 +246,14 @@ async function reconcileOne(
     ...details,
     status: newStatus,
   })
+  await refreshBalancesAfterLifecycleChange({
+    merchantId: merchant_id,
+    rail,
+    asset,
+    status: newStatus,
+    table: "wallet_withdrawal_requests",
+    id,
+  })
   return onChainStatus
 }
 
@@ -273,6 +303,14 @@ async function reconcileProcessingWalletOperations(limit: number): Promise<{
           operationId: operation.id,
           provider: operation.provider,
         })
+        await refreshBalancesAfterLifecycleChange({
+          merchantId: operation.merchant_id,
+          rail: "bitcoin",
+          asset: "BTC",
+          status: "confirmed",
+          table: "merchant_wallet_operations",
+          id: operation.id,
+        })
       } else if (updated.status === "FAILED") {
         result.failed++
         reconcileLog("WITHDRAWAL_RECONCILE_FAILED", {
@@ -280,6 +318,14 @@ async function reconcileProcessingWalletOperations(limit: number): Promise<{
           merchantId: operation.merchant_id,
           operationId: operation.id,
           provider: operation.provider,
+        })
+        await refreshBalancesAfterLifecycleChange({
+          merchantId: operation.merchant_id,
+          rail: "bitcoin",
+          asset: "BTC",
+          status: "failed",
+          table: "merchant_wallet_operations",
+          id: operation.id,
         })
       } else {
         result.still_processing++

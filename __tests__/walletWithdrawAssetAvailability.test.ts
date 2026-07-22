@@ -239,6 +239,13 @@ describe("Balance status does not gate asset options in dropdown", () => {
     expect(walletPage).toContain('balance?.status === "unavailable"')
   })
 
+  it("withdrawal availability reads canonical availableToWithdraw from wallet sync", () => {
+    expect(walletPage).toContain("availableToWithdraw")
+    expect(walletPage).toContain("const selectedBalanceAmount = selectedBalance?.availableToWithdraw")
+    expect(walletPage).toContain("const selectedAvailableToWithdraw = selectedWithdrawalBalance?.availableToWithdraw")
+    expect(walletPage).not.toContain("json.balances?.base?.length ? json.balances.base : defaultWalletSyncState.balances.base")
+  })
+
   it("pending or config_missing balance still results in asset appearing in dropdown", () => {
     // The configured gate only cares about address + provider enabled.
     // Balance status is cosmetic (shown as label) but never gates inclusion.

@@ -150,8 +150,8 @@ describe("Balances tab - compact selected asset detail", () => {
   })
 
   it("Base and Solana USDC remain distinct balance options", () => {
-    expect(walletPage).toContain('{ key: "BASE_USDC", rail: "base", asset: "USDC"')
-    expect(walletPage).toContain('{ key: "SOLANA_USDC", rail: "solana", asset: "USDC"')
+    expect(walletPage).toContain('pendingBalance("BASE_USDC", "base", "USDC", "base", "dynamic", 6)')
+    expect(walletPage).toContain('pendingBalance("SOLANA_USDC", "solana", "USDC", "solana", "dynamic", 6)')
     const src = balanceRowsSrc()
     expect(src).toContain("key: row.key")
     expect(src).toContain("railLabel: assetRailLabel(row.rail)")
@@ -159,7 +159,7 @@ describe("Balances tab - compact selected asset detail", () => {
 
   it("BTC is included for a ready connected account without requiring a payout address", () => {
     const src = balanceRowsSrc()
-    expect(walletPage).toContain('{ key: "BTC", rail: "bitcoin", asset: "BTC"')
+    expect(walletPage).toContain('pendingBalance("BTC", "bitcoin", "BTC", "bitcoin_lightning", "speed", 8)')
     expect(src).toContain('if (profileAddresses.base.length > 0) rows.push(...(sync?.balances.base ?? []))')
     expect(src).toContain('if (profileAddresses.solana.length > 0) rows.push(...(sync?.balances.solana ?? []))')
     expect(src).toContain('if (bitcoinReady) rows.push(...(sync?.balances.bitcoin ?? []))')
@@ -182,7 +182,7 @@ describe("Balances tab - compact selected asset detail", () => {
     expect(walletPage).not.toContain("const bitcoinReady = bitcoinPayoutEntries.length > 0")
     expect(src).toContain("bitcoinPayoutEntries[0]?.address")
     expect(src).toContain("formatBalance(row.balance, row.asset)")
-    expect(walletPage).toContain('{ key: "BTC", rail: "bitcoin", asset: "BTC", balance: null')
+    expect(walletPage).toContain('pendingBalance("BTC", "bitcoin", "BTC", "bitcoin_lightning", "speed", 8)')
     expect(src).toContain('if (row.rail === "bitcoin") return bitcoinReady')
     expect(src).not.toContain("Speed")
   })
@@ -253,7 +253,7 @@ describe("Provider-branded wallet tab removed", () => {
 
   it("Bitcoin appears in Overview, Balances, Withdraw, and Activity as a unified PineTree rail", () => {
     expect(walletPage).toContain('label: "Bitcoin" as const')
-    expect(walletPage).toContain('{ key: "BTC", rail: "bitcoin", asset: "BTC"')
+    expect(walletPage).toContain('pendingBalance("BTC", "bitcoin", "BTC", "bitcoin_lightning", "speed", 8)')
     expect(walletPage).toContain('bitcoin: ["BTC"]')
     expect(walletPage).toContain('railDisplayName(item.rail)')
     expect(walletPage).toContain('return "Bitcoin"')

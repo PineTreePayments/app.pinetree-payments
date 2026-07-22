@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getConnectedAccountSendStatus: vi.fn(),
   listProcessingWalletOperationsForReconciliation: vi.fn(),
   getWalletWithdrawal: vi.fn(),
+  syncPineTreeWalletBalances: vi.fn(),
   fetch: vi.fn(),
 }))
 
@@ -36,6 +37,10 @@ vi.mock("@/database/merchantWalletOperations", () => ({
 
 vi.mock("@/engine/wallet/walletOperations", () => ({
   getWalletWithdrawal: mocks.getWalletWithdrawal,
+}))
+
+vi.mock("@/engine/pineTreeWalletSync", () => ({
+  syncPineTreeWalletBalances: mocks.syncPineTreeWalletBalances,
 }))
 
 vi.stubGlobal("fetch", mocks.fetch)
@@ -122,6 +127,7 @@ describe("reconcileProcessingWithdrawals", () => {
     mocks.listProcessingWithdrawalsForReconciliation.mockResolvedValue([])
     mocks.listProcessingBitcoinWithdrawalsForReconciliation.mockResolvedValue([])
     mocks.listProcessingWalletOperationsForReconciliation.mockResolvedValue([])
+    mocks.syncPineTreeWalletBalances.mockResolvedValue({})
     // Clear any env vars that would affect Base RPC
     process.env.BASE_RPC_URL = "https://base-rpc.example.com"
     process.env.RPC_URL_SOLANA = "https://solana-rpc.example.com"
@@ -157,6 +163,7 @@ describe("reconcileProcessingWithdrawals", () => {
       "wd-001",
       expect.objectContaining({ status: "confirmed", confirmedAt: expect.any(String) })
     )
+    expect(mocks.syncPineTreeWalletBalances).toHaveBeenCalledWith("merch-001")
     expect(mocks.insertWithdrawalAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "withdrawal.confirmed", withdrawalId: "wd-001" })
     )
@@ -401,6 +408,7 @@ describe("reconcileProcessingWithdrawals", () => {
       const result = await reconcileProcessingWithdrawals({})
 
       expect(mocks.getWalletWithdrawal).toHaveBeenCalledWith("merch-btc", "op-001")
+      expect(mocks.syncPineTreeWalletBalances).toHaveBeenCalledWith("merch-btc")
       expect(result.confirmed).toBe(1)
       expect(result.checked).toBe(1)
     })

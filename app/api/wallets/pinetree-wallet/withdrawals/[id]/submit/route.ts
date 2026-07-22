@@ -4,6 +4,7 @@ import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPres
 import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import { scheduleWalletWithdrawalMaintenance } from "@/lib/api/walletWithdrawalMaintenance"
 import { getDeploymentBuildId } from "@/lib/deploymentInfo"
+import { syncPineTreeWalletBalances } from "@/engine/pineTreeWalletSync"
 
 export async function POST(
   req: NextRequest,
@@ -46,8 +47,19 @@ export async function POST(
     console.info("[pinetree-withdrawals] SUBMIT_RETURNED", {
       correlationId, merchantId, requestId: id, buildId, routeStage: "submit_returned", merchantStatus: result.merchantStatus,
     })
+    await syncPineTreeWalletBalances(merchantId).catch((syncError) => {
+      console.warn("[pinetree-balances] withdrawal_submit_balance_sync_failed", {
+        merchantId,
+        requestId: id,
+        rail: result.request.rail,
+        asset: result.request.asset,
+        error: syncError instanceof Error ? syncError.message : "unknown_error",
+      })
+    })
     scheduleWalletWithdrawalMaintenance("wallet-withdrawal.submit")
-    return NextResponse.json(result)
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "private, no-store, max-age=0" },
+    })
   } catch (error) {
     const presented = presentWithdrawalError({
       rawMessage: error instanceof Error ? error.message : "Failed to submit wallet approval",

@@ -14,6 +14,7 @@ import {
   SpeedWalletProviderError,
   type SpeedBalanceEntry,
 } from "@/providers/lightning/speedWalletManagement"
+import { getSpeedWithdrawalFeeReserveSats } from "@/engine/withdrawals/speedWithdrawalQuote"
 import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
 import { PINETREE_INTERNAL_RAIL_PROVIDER, type PineTreeWalletRail } from "@/lib/pinetreeRailProviderMapping"
 
@@ -21,6 +22,13 @@ export type PineTreeBalanceAsset = {
   key: "BASE_ETH" | "BASE_USDC" | "SOLANA_SOL" | "SOLANA_USDC" | "BTC"
   rail: "base" | "solana" | "bitcoin"
   asset: "ETH" | "USDC" | "SOL" | "BTC"
+  network: "base" | "solana" | "bitcoin_lightning"
+  provider: "dynamic" | "speed"
+  totalBalance: string | null
+  availableToWithdraw: string | null
+  reservedFee: string
+  decimals: number
+  source: "chain_rpc" | "speed_balances" | "database_snapshot" | "none"
   balance: number | string | null
   usdValue: number | null
   lastSyncedAt: string | null
@@ -51,6 +59,7 @@ export type PineTreeWalletSyncResult = {
     solana: PineTreeBalanceAsset[]
     bitcoin: PineTreeBalanceAsset[]
   }
+  canonicalBalances: PineTreeBalanceAsset[]
   status: "missing" | "pending" | "ready" | "needs_attention"
   total_balance_usd: string | null
   rails: PineTreeNormalizedRail[]
@@ -67,11 +76,11 @@ export type PineTreeWalletSyncResult = {
 }
 
 const BALANCE_DEFS = [
-  { key: "BASE_ETH", rail: "base", asset: "ETH" },
-  { key: "BASE_USDC", rail: "base", asset: "USDC" },
-  { key: "SOLANA_SOL", rail: "solana", asset: "SOL" },
-  { key: "SOLANA_USDC", rail: "solana", asset: "USDC" },
-  { key: "BTC", rail: "bitcoin", asset: "BTC" },
+  { key: "BASE_ETH", rail: "base", asset: "ETH", network: "base", provider: "dynamic", decimals: 18 },
+  { key: "BASE_USDC", rail: "base", asset: "USDC", network: "base", provider: "dynamic", decimals: 6 },
+  { key: "SOLANA_SOL", rail: "solana", asset: "SOL", network: "solana", provider: "dynamic", decimals: 9 },
+  { key: "SOLANA_USDC", rail: "solana", asset: "USDC", network: "solana", provider: "dynamic", decimals: 6 },
+  { key: "BTC", rail: "bitcoin", asset: "BTC", network: "bitcoin_lightning", provider: "speed", decimals: 8 },
 ] as const
 
 function balanceKey(rail: string, asset: string) {
@@ -95,6 +104,40 @@ function formatDecimal(value: number | string | null): string | null {
   if (typeof value === "string") return value
   if (value === null || !Number.isFinite(value)) return null
   return String(value)
+}
+
+function decimalString(value: number | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null
+  if (typeof value === "string") return value
+  return Number.isFinite(value) ? String(value) : null
+}
+
+function subtractDecimalStrings(value: string | null, subtract: string, decimals: number): string | null {
+  if (value === null) return null
+  const normalizedValue = value.trim()
+  const normalizedSubtract = subtract.trim()
+  if (!/^\d+(?:\.\d+)?$/.test(normalizedValue) || !/^\d+(?:\.\d+)?$/.test(normalizedSubtract)) return value
+  const toUnits = (raw: string) => {
+    const [whole, fraction = ""] = raw.split(".")
+    return BigInt(whole || "0") * (BigInt(10) ** BigInt(decimals)) + BigInt(fraction.padEnd(decimals, "0").slice(0, decimals) || "0")
+  }
+  const fromUnits = (units: bigint) => {
+    if (units <= BigInt(0)) return "0"
+    const divisor = BigInt(10) ** BigInt(decimals)
+    const whole = units / divisor
+    const fraction = (units % divisor).toString().padStart(decimals, "0").replace(/0+$/, "")
+    return fraction ? `${whole}.${fraction}` : whole.toString()
+  }
+  return fromUnits(toUnits(normalizedValue) - toUnits(normalizedSubtract))
+}
+
+function formatReserveDecimal(asset: string, baseUnits: bigint): string {
+  if (asset === "BTC") {
+    const whole = baseUnits / BigInt(100_000_000)
+    const fraction = (baseUnits % BigInt(100_000_000)).toString().padStart(8, "0").replace(/0+$/, "")
+    return fraction ? `${whole}.${fraction}` : whole.toString()
+  }
+  return "0"
 }
 
 function formatUsd(value: number | null): string | null {
@@ -191,7 +234,22 @@ async function persistSyncedBalances(
 ) {
   if (balances.length === 0) return null
   const timestamp = new Date().toISOString()
+  const previousRows = await getWalletBalances(merchantId).catch(() => [])
+  const previousByAsset = new Map(previousRows.map((row) => [String(row.asset || "").toUpperCase(), row]))
   await upsertMerchantAssetBalances(merchantId, balances, timestamp)
+  for (const balance of balances) {
+    const previous = previousByAsset.get(String(balance.asset || "").toUpperCase())
+    console.info("[pinetree-balances] BALANCE_SNAPSHOT_UPDATED", {
+      merchantId,
+      asset: balance.asset,
+      network: balance.asset === "BTC" ? "bitcoin_lightning" : String(balance.asset).startsWith("BASE_") ? "base" : "solana",
+      provider: balance.asset === "BTC" ? "speed" : "dynamic",
+      previousBalance: previous?.balance != null ? String(previous.balance) : null,
+      newBalance: String(balance.balance),
+      lastSyncedAt: timestamp,
+      routeStage: "balance_snapshot_updated",
+    })
+  }
   console.info("[pinetree-withdrawals] CANONICAL_BALANCE_CACHE_UPDATED", {
     merchantId,
     assetCount: balances.length,
@@ -305,6 +363,12 @@ async function syncSpeedBitcoinBalance(merchantId: string): Promise<SpeedBitcoin
 export async function syncPineTreeWalletBalances(merchantId: string): Promise<PineTreeWalletSyncResult> {
   const profile = await getPineTreeWalletProfile(merchantId)
   const updates: Array<{ asset: string; balance: number | string }> = []
+  const liveSyncedAssetKeys = new Set<string>()
+
+  console.info("[pinetree-balances] BALANCE_SYNC_STARTED", {
+    merchantId,
+    routeStage: "balance_sync_started",
+  })
 
   if (profile?.solana_address) {
     try {
@@ -314,6 +378,28 @@ export async function syncPineTreeWalletBalances(merchantId: string): Promise<Pi
       ])
       updates.push({ asset: "SOLANA_SOL", balance: sol })
       updates.push({ asset: "SOLANA_USDC", balance: usdc })
+      liveSyncedAssetKeys.add("SOLANA_SOL")
+      liveSyncedAssetKeys.add("SOLANA_USDC")
+      console.info("[pinetree-balances] BALANCE_SOURCE_RESOLVED", {
+        merchantId,
+        asset: "SOL",
+        network: "solana",
+        provider: "dynamic",
+        previousBalance: null,
+        newBalance: String(sol),
+        lastSyncedAt: new Date().toISOString(),
+        routeStage: "balance_source_resolved",
+      })
+      console.info("[pinetree-balances] BALANCE_SOURCE_RESOLVED", {
+        merchantId,
+        asset: "USDC",
+        network: "solana",
+        provider: "dynamic",
+        previousBalance: null,
+        newBalance: String(usdc),
+        lastSyncedAt: new Date().toISOString(),
+        routeStage: "balance_source_resolved",
+      })
     } catch {
       // Keep any previously persisted Solana balances; unsynced assets remain pending.
     }
@@ -325,8 +411,34 @@ export async function syncPineTreeWalletBalances(merchantId: string): Promise<Pi
         fetchBaseEthBalance(profile.base_address),
         safeFetchBaseUsdcBalance(profile.base_address),
       ])
-      if (eth !== null) updates.push({ asset: "BASE_ETH", balance: eth })
-      if (usdc !== null) updates.push({ asset: "BASE_USDC", balance: usdc })
+      if (eth !== null) {
+        updates.push({ asset: "BASE_ETH", balance: eth })
+        liveSyncedAssetKeys.add("BASE_ETH")
+        console.info("[pinetree-balances] BALANCE_SOURCE_RESOLVED", {
+          merchantId,
+          asset: "ETH",
+          network: "base",
+          provider: "dynamic",
+          previousBalance: null,
+          newBalance: String(eth),
+          lastSyncedAt: new Date().toISOString(),
+          routeStage: "balance_source_resolved",
+        })
+      }
+      if (usdc !== null) {
+        updates.push({ asset: "BASE_USDC", balance: usdc })
+        liveSyncedAssetKeys.add("BASE_USDC")
+        console.info("[pinetree-balances] BALANCE_SOURCE_RESOLVED", {
+          merchantId,
+          asset: "USDC",
+          network: "base",
+          provider: "dynamic",
+          previousBalance: null,
+          newBalance: String(usdc),
+          lastSyncedAt: new Date().toISOString(),
+          routeStage: "balance_source_resolved",
+        })
+      }
     } catch {
       // Base stays pending if the configured RPC cannot return balances.
     }
@@ -334,7 +446,8 @@ export async function syncPineTreeWalletBalances(merchantId: string): Promise<Pi
 
   await persistSyncedBalances(merchantId, updates)
   const speedBitcoinSyncState = await syncSpeedBitcoinBalance(merchantId)
-  const snapshot = await getPineTreeWalletBalanceSnapshot(merchantId, speedBitcoinSyncState)
+  if (speedBitcoinSyncState === "live") liveSyncedAssetKeys.add("BTC")
+  const snapshot = await getPineTreeWalletBalanceSnapshot(merchantId, speedBitcoinSyncState, { liveSyncedAssetKeys })
   console.info("[pinetree-withdrawals] WALLET_BALANCE_REFRESH_COMPLETED", {
     merchantId,
     baseAssetCount: snapshot.balances.base.length,
@@ -352,7 +465,8 @@ function isBaseRpcConfigured(): boolean {
 
 export async function getPineTreeWalletBalanceSnapshot(
   merchantId: string,
-  speedBitcoinSyncState: SpeedBitcoinSyncState = "cached"
+  speedBitcoinSyncState: SpeedBitcoinSyncState = "cached",
+  options?: { liveSyncedAssetKeys?: Set<string> }
 ): Promise<PineTreeWalletSyncResult> {
   await cancelStaleUnsignedWithdrawalReviews(merchantId).catch(() => ({ canceled: 0 }))
   const [profile, rows, prices, recentWithdrawals, recentOperations, providers, lightningProfile] = await Promise.all([
@@ -404,9 +518,10 @@ export async function getPineTreeWalletBalanceSnapshot(
     const price = def.asset === "USDC" ? 1 : def.asset === "SOL" ? prices.SOL : def.asset === "ETH" ? prices.ETH : prices.BTC
 
     let status: PineTreeBalanceAsset["status"]
+    const updatedAtMs = row?.last_updated ? new Date(row.last_updated).getTime() : Number.NaN
+    const stale = !Number.isFinite(updatedAtMs) || Date.now() - updatedAtMs > BTC_STALE_AFTER_MS
+    const wasLiveSynced = options?.liveSyncedAssetKeys?.has(key) === true
     if (def.rail === "bitcoin") {
-      const updatedAtMs = row?.last_updated ? new Date(row.last_updated).getTime() : Number.NaN
-      const stale = !Number.isFinite(updatedAtMs) || Date.now() - updatedAtMs > BTC_STALE_AFTER_MS
       status = !speedAccountReady
         ? "pending_sync"
         : speedBitcoinSyncState === "live" && row
@@ -415,17 +530,35 @@ export async function getPineTreeWalletBalanceSnapshot(
             ? stale ? "stale" : "cached"
             : "unavailable"
     } else if (row) {
-      status = "synced"
+      status = wasLiveSynced ? "synced" : stale ? "stale" : "cached"
     } else if (def.rail === "base" && hasBaseAddress && !baseConfigured) {
       status = "config_missing"
     } else {
       status = "pending_sync"
     }
+    const totalBalance = decimalString(balance)
+    const reservedFee = def.asset === "BTC" ? formatReserveDecimal("BTC", getSpeedWithdrawalFeeReserveSats("lightning")) : "0"
+    const availableToWithdraw = status === "synced" || status === "cached" || status === "stale"
+      ? subtractDecimalStrings(totalBalance, reservedFee, def.decimals)
+      : null
+    const source: PineTreeBalanceAsset["source"] =
+      status === "synced"
+        ? def.rail === "bitcoin" ? "speed_balances" : "chain_rpc"
+        : row
+          ? "database_snapshot"
+          : "none"
 
     return {
       key,
       rail: def.rail,
       asset: def.asset,
+      network: def.network,
+      provider: def.provider,
+      totalBalance,
+      availableToWithdraw,
+      reservedFee,
+      decimals: def.decimals,
+      source,
       balance,
       usdValue: balance === null
         ? null
@@ -447,6 +580,17 @@ export async function getPineTreeWalletBalanceSnapshot(
       lastSyncedAt: balance.lastSyncedAt,
       stale: balance.status === "stale",
       routeStage: "canonical_balance_resolved",
+    })
+    console.info("[pinetree-balances] BALANCE_SOURCE_RESOLVED", {
+      merchantId,
+      asset: balance.asset,
+      network: balance.network,
+      provider: balance.provider,
+      previousBalance: null,
+      newBalance: balance.totalBalance,
+      lastSyncedAt: balance.lastSyncedAt,
+      source: balance.source,
+      routeStage: "balance_source_resolved",
     })
   }
   const synced = all.filter((item) => item.status === "synced" && item.usdValue !== null)
@@ -568,6 +712,7 @@ export async function getPineTreeWalletBalanceSnapshot(
       solana: all.filter((item) => item.rail === "solana"),
       bitcoin: all.filter((item) => item.rail === "bitcoin"),
     },
+    canonicalBalances: all,
     totalUsd,
     lastSyncedAt: latestTimestamp(all.map((item) => item.lastSyncedAt)),
     recentActivity,

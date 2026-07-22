@@ -112,7 +112,7 @@ type WithdrawalReviewResponse = {
 
 type WithdrawalSubmitResponse = {
   request: WithdrawalReviewResponse["request"]
-  merchantStatus: "Processing" | "Withdrawal failed"
+  merchantStatus: "Processing" | "Confirmed" | "Withdrawal failed"
   message: string
 }
 
@@ -164,6 +164,13 @@ type SyncedBalanceAsset = {
   key: string
   rail: "base" | "solana" | "bitcoin"
   asset: "ETH" | "USDC" | "SOL" | "BTC"
+  network: "base" | "solana" | "bitcoin_lightning"
+  provider: "dynamic" | "speed"
+  totalBalance: string | null
+  availableToWithdraw: string | null
+  reservedFee: string
+  decimals: number
+  source: "chain_rpc" | "speed_balances" | "database_snapshot" | "none"
   balance: number | string | null
   usdValue: number | null
   lastSyncedAt: string | null
@@ -181,6 +188,7 @@ type PineTreeWalletSyncResponse = {
     solana: SyncedBalanceAsset[]
     bitcoin: SyncedBalanceAsset[]
   }
+  canonicalBalances: SyncedBalanceAsset[]
   totalUsd: number | null
   lastSyncedAt: string | null
   recentActivity: Array<{
@@ -500,21 +508,45 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
 ]
 
 const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
+const pendingBalance = (
+  key: SyncedBalanceAsset["key"],
+  rail: SyncedBalanceAsset["rail"],
+  asset: SyncedBalanceAsset["asset"],
+  network: SyncedBalanceAsset["network"],
+  provider: SyncedBalanceAsset["provider"],
+  decimals: number
+): SyncedBalanceAsset => ({
+  key,
+  rail,
+  asset,
+  network,
+  provider,
+  totalBalance: null,
+  availableToWithdraw: null,
+  reservedFee: "0",
+  decimals,
+  source: "none",
+  balance: null,
+  usdValue: null,
+  lastSyncedAt: null,
+  status: "pending_sync",
+})
 const defaultWalletSyncState: PineTreeWalletSyncResponse = {
   readiness: { base: false, solana: false, bitcoin: false },
   balances: {
     base: [
-      { key: "BASE_ETH", rail: "base", asset: "ETH", balance: null, usdValue: null, lastSyncedAt: null, status: "pending_sync" },
-      { key: "BASE_USDC", rail: "base", asset: "USDC", balance: null, usdValue: null, lastSyncedAt: null, status: "pending_sync" },
+      pendingBalance("BASE_ETH", "base", "ETH", "base", "dynamic", 18),
+      pendingBalance("BASE_USDC", "base", "USDC", "base", "dynamic", 6),
     ],
     solana: [
-      { key: "SOLANA_SOL", rail: "solana", asset: "SOL", balance: null, usdValue: null, lastSyncedAt: null, status: "pending_sync" },
-      { key: "SOLANA_USDC", rail: "solana", asset: "USDC", balance: null, usdValue: null, lastSyncedAt: null, status: "pending_sync" },
+      pendingBalance("SOLANA_SOL", "solana", "SOL", "solana", "dynamic", 9),
+      pendingBalance("SOLANA_USDC", "solana", "USDC", "solana", "dynamic", 6),
     ],
     bitcoin: [
-      { key: "BTC", rail: "bitcoin", asset: "BTC", balance: null, usdValue: null, lastSyncedAt: null, status: "pending_sync" },
+      pendingBalance("BTC", "bitcoin", "BTC", "bitcoin_lightning", "speed", 8),
     ],
   },
+  canonicalBalances: [],
   totalUsd: null,
   lastSyncedAt: null,
   recentActivity: [],
@@ -1231,11 +1263,12 @@ function assetOptionKey(option: Pick<WithdrawalAssetOption, "rail" | "asset">) {
 }
 
 function formatBalanceLabel(balance: SyncedBalanceAsset | null, asset: WithdrawalAsset) {
-  if (!balance || balance.balance === null) {
+  const available = balance?.availableToWithdraw ?? (balance?.balance != null ? String(balance.balance) : null)
+  if (!balance || available === null) {
     return balance?.status === "unavailable" ? "Balance temporarily unavailable" : "Balance indexing pending"
   }
   const suffix = balance.status === "stale" ? " (stale)" : balance.status === "cached" ? " (cached)" : ""
-  return `${formatCryptoAmount(balance.balance, asset)} ${asset}${suffix}`
+  return `${formatCryptoAmount(available, asset)} ${asset}${suffix}`
 }
 
 function formatUsdEstimate(balance: SyncedBalanceAsset | null) {
@@ -1806,6 +1839,7 @@ const PRODUCTION_WALLET_WITHDRAWAL_DEBUG_EVENTS = new Set([
   "DYNAMIC_UI_REFRESH_COMPLETED",
   "DYNAMIC_POST_PREPARE_FAILED",
   "WALLET_BALANCE_REFRESH_COMPLETED",
+  "BALANCE_UI_REFRESH_COMPLETED",
   "DYNAMIC_AUTH_CHECK_STARTED",
   "DYNAMIC_AUTH_RESTORED",
   "DYNAMIC_USER_RESOLVED",
@@ -2364,7 +2398,7 @@ function WithdrawalFormShell({
   }
 
   const amountTrimmed = amountDecimal.trim()
-  const selectedBalanceAmount = selectedBalance?.balance ?? null
+  const selectedBalanceAmount = selectedBalance?.availableToWithdraw ?? (selectedBalance?.balance != null ? String(selectedBalance.balance) : null)
   const selectedBalanceKnown = selectedBalanceAmount !== null && selectedBalance?.status === "synced"
   const selectedBalanceNumeric = selectedBalanceAmount === null ? null : Number(selectedBalanceAmount)
   const selectedBalanceZero = selectedBalanceKnown && selectedBalanceNumeric !== null && selectedBalanceNumeric <= 0
@@ -3697,16 +3731,25 @@ function PineTreeWalletRuntime() {
         ...defaultWalletSyncState,
         ...json,
         balances: {
-          base: json.balances?.base?.length ? json.balances.base : defaultWalletSyncState.balances.base,
-          solana: json.balances?.solana?.length ? json.balances.solana : defaultWalletSyncState.balances.solana,
-          bitcoin: json.balances?.bitcoin?.length ? json.balances.bitcoin : defaultWalletSyncState.balances.bitcoin,
+          base: json.balances?.base ?? [],
+          solana: json.balances?.solana ?? [],
+          bitcoin: json.balances?.bitcoin ?? [],
         },
+        canonicalBalances: json.canonicalBalances ?? [
+          ...(json.balances?.base ?? []),
+          ...(json.balances?.solana ?? []),
+          ...(json.balances?.bitcoin ?? []),
+        ],
         recentActivity: json.recentActivity || [],
       })
       emitWalletSetupDebugEvent("WALLET_BALANCE_REFRESH_COMPLETED", {
         baseAssetCount: json.balances?.base?.length ?? 0,
         solanaAssetCount: json.balances?.solana?.length ?? 0,
         bitcoinAssetCount: json.balances?.bitcoin?.length ?? 0,
+        lastSyncedAt: json.lastSyncedAt ?? null,
+      })
+      emitWalletSetupDebugEvent("BALANCE_UI_REFRESH_COMPLETED", {
+        assetCount: json.canonicalBalances?.length ?? 0,
         lastSyncedAt: json.lastSyncedAt ?? null,
       })
       emitWalletSetupDebugEvent("DYNAMIC_UI_REFRESH_COMPLETED", {
@@ -8624,11 +8667,14 @@ function PineTreeWalletRuntime() {
       setWithdrawalError("Enter an amount greater than 0.")
       return
     }
-    if (selectedWithdrawalBalance?.status === "synced" && selectedWithdrawalBalance.balance !== null) {
+    const selectedAvailableToWithdraw = selectedWithdrawalBalance?.availableToWithdraw ?? (
+      selectedWithdrawalBalance?.balance != null ? String(selectedWithdrawalBalance.balance) : null
+    )
+    if (selectedWithdrawalBalance?.status === "synced" && selectedAvailableToWithdraw !== null) {
       const availableSats = withdrawalRail === "bitcoin"
-        ? btcDecimalToSats(String(selectedWithdrawalBalance.balance))
+        ? btcDecimalToSats(selectedAvailableToWithdraw)
         : null
-      const availableBalance = Number(selectedWithdrawalBalance.balance)
+      const availableBalance = Number(selectedAvailableToWithdraw)
       if (withdrawalRail === "bitcoin" ? !availableSats || BigInt(availableSats) <= BigInt(0) : availableBalance <= 0) {
         setWithdrawalError("No available balance for this asset.")
         return
@@ -8859,11 +8905,14 @@ function PineTreeWalletRuntime() {
    */
   async function handleMaxWithdrawalAmount() {
     const token = accessTokenRef.current
+    const selectedAvailableToWithdraw = selectedWithdrawalBalance?.availableToWithdraw ?? (
+      selectedWithdrawalBalance?.balance != null ? String(selectedWithdrawalBalance.balance) : null
+    )
     if (
       !token ||
       selectedWithdrawalBalance?.status !== "synced" ||
-      selectedWithdrawalBalance.balance === null ||
-      Number(selectedWithdrawalBalance.balance) <= 0
+      selectedAvailableToWithdraw === null ||
+      Number(selectedAvailableToWithdraw) <= 0
     ) {
       return
     }
@@ -8877,9 +8926,8 @@ function PineTreeWalletRuntime() {
       })
       const json = await res.json()
       if (!res.ok || !json?.estimate) {
-        // Fall back to the raw displayed balance rather than blocking Max
-        // entirely on an estimate-endpoint hiccup.
-        setWithdrawalAmount(String(selectedWithdrawalBalance.balance))
+        setWithdrawalError("Available-to-withdraw could not be verified. Refresh before withdrawing.")
+        return
       } else if (json.estimate.blocked) {
         setMaxWarning(json.estimate.warning || "This withdrawal is currently blocked.")
         setWithdrawalAmount("0")
@@ -8888,7 +8936,8 @@ function PineTreeWalletRuntime() {
         if (json.estimate.warning) setMaxWarning(json.estimate.warning)
       }
     } catch {
-      setWithdrawalAmount(String(selectedWithdrawalBalance.balance))
+      setWithdrawalError("Available-to-withdraw could not be verified. Refresh before withdrawing.")
+      return
     } finally {
       setMaxEstimating(false)
     }
@@ -8914,7 +8963,9 @@ function PineTreeWalletRuntime() {
         const json = (await res.json()) as { request?: WithdrawalReviewResponse["request"] }
         if (!json.request) continue
         const nextStatus =
-          json.request.status === "processing"
+          json.request.status === "confirmed"
+            ? "Confirmed"
+            : json.request.status === "processing"
             ? "Processing"
             : json.request.status === "failed"
               ? "Withdrawal failed"
@@ -8925,7 +8976,7 @@ function PineTreeWalletRuntime() {
           merchantStatus: nextStatus,
         })
         if (nextStatus === "Withdrawal failed") setWithdrawalScreen("failed")
-        if (json.request.status === "processing" || json.request.status === "failed") {
+        if (json.request.status === "processing" || json.request.status === "confirmed" || json.request.status === "failed") {
           void syncPineTreeWallet()
           return
         }
@@ -9054,6 +9105,7 @@ function PineTreeWalletRuntime() {
             presented.message
           )
           setWithdrawalScreen(presented.code === "INSUFFICIENT_BALANCE" ? "review" : "failed")
+          void syncPineTreeWallet()
           return
         }
         setWithdrawalSubmitResult({
@@ -9255,6 +9307,7 @@ function PineTreeWalletRuntime() {
             )
           )
           setWithdrawalScreen("failed")
+          void syncPineTreeWallet()
           return
         }
         emitWalletSetupDebugEvent("DYNAMIC_SUBMIT_ACCEPTED", {
@@ -9302,6 +9355,7 @@ function PineTreeWalletRuntime() {
         errorMessage: safeDynamicErrorMessage(error),
       })
       setWithdrawalApprovalError(safeMessage)
+      void syncPineTreeWallet()
       if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana")) {
         setWithdrawalAuthorizationRecoveryOpen(true)
       }

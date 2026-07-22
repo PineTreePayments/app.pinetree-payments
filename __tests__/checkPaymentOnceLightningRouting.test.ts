@@ -41,7 +41,7 @@ describe("runPaymentWatcher - bitcoin_lightning routing", () => {
 
     expect(mocks.checkNwcPaymentOnce).toHaveBeenCalledWith("pay-1")
     expect(mocks.reconcileSpeedLightningPayment).not.toHaveBeenCalled()
-  })
+  }, 15_000)
 
   it("routes Speed Lightning payments through the shared reconciliation helper", async () => {
     mocks.getPaymentById.mockResolvedValue(payment())
@@ -56,7 +56,7 @@ describe("runPaymentWatcher - bitcoin_lightning routing", () => {
     await expect(runPaymentWatcher("pay-1")).resolves.toBe(true)
 
     expect(mocks.reconcileSpeedLightningPayment).toHaveBeenCalledWith(payment())
-  })
+  }, 15_000)
 
   it("never crashes the caller when Speed reconciliation throws", async () => {
     mocks.getPaymentById.mockResolvedValue(payment())

@@ -122,10 +122,33 @@ describe("PineTree Wallet balance sync", () => {
     )
     expect(result.balances.solana).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ asset: "SOL", balance: 2, status: "synced" }),
-        expect.objectContaining({ asset: "USDC", balance: 1.25, status: "synced" }),
+        expect.objectContaining({
+          asset: "SOL",
+          network: "solana",
+          provider: "dynamic",
+          totalBalance: "2",
+          availableToWithdraw: "2",
+          reservedFee: "0",
+          decimals: 9,
+          source: "chain_rpc",
+          balance: 2,
+          status: "synced",
+        }),
+        expect.objectContaining({
+          asset: "USDC",
+          network: "solana",
+          provider: "dynamic",
+          totalBalance: "1.25",
+          availableToWithdraw: "1.25",
+          reservedFee: "0",
+          decimals: 6,
+          source: "chain_rpc",
+          balance: 1.25,
+          status: "synced",
+        }),
       ])
     )
+    expect(result.canonicalBalances).toHaveLength(5)
     expect(result.totalUsd).toBe(201.25)
     expect(result.lastSyncedAt).toEqual(expect.any(String))
   })
@@ -345,8 +368,8 @@ describe("PineTree Wallet balance sync", () => {
     const serialized = JSON.stringify(result.rails)
 
     expect(result.status).toBe("ready")
-    expect(result.totalUsd).toBe(10)
-    expect(result.total_balance_usd).toBe("10.00")
+    expect(result.totalUsd).toBeNull()
+    expect(result.total_balance_usd).toBeNull()
     expect(result.rails).toEqual(expect.arrayContaining([
       expect.objectContaining({
         rail: "bitcoin",
@@ -400,9 +423,20 @@ describe("PineTree Wallet balance sync", () => {
     )
     expect(result.balances.bitcoin[0]).toMatchObject({
       asset: "BTC",
+      network: "bitcoin_lightning",
+      provider: "speed",
+      totalBalance: "0.02217713",
+      availableToWithdraw: "0.02217213",
+      reservedFee: "0.000005",
+      decimals: 8,
+      source: "speed_balances",
       balance: "0.02217713",
       usdValue: 0.02217713 * 60000,
       status: "synced",
+    })
+    expect(result.canonicalBalances.find((balance) => balance.key === "BTC")).toMatchObject({
+      totalBalance: "0.02217713",
+      availableToWithdraw: "0.02217213",
     })
     const bitcoinRail = result.rails.find((r) => r.rail === "bitcoin")
     expect(bitcoinRail?.balance).toMatchObject({ asset: "BTC", amount: "0.02217713", status: "synced" })

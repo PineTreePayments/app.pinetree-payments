@@ -7,6 +7,7 @@ import { submitCanonicalWithdrawal } from "@/engine/withdrawals/canonicalWithdra
 import { getDeploymentBuildId } from "@/lib/deploymentInfo"
 import { WalletApiRouteError, walletError, walletErrorHttpStatus, walletOk } from "@/engine/wallet/walletErrors"
 import { classifyBitcoinWithdrawalDestination } from "@/providers/wallets/bitcoinWithdrawalDestination"
+import { syncPineTreeWalletBalances } from "@/engine/pineTreeWalletSync"
 
 function safeErrorName(error: unknown) {
   const name = error && typeof error === "object" && "name" in error ? String((error as { name?: unknown }).name || "") : ""
@@ -55,6 +56,17 @@ function withCorrelation<T extends { ok: boolean }>(body: T, correlationId?: str
 function accountSuffix(accountId: string | null) {
   const normalized = String(accountId || "").trim()
   return normalized ? normalized.slice(-6) : null
+}
+
+async function refreshBalancesAfterWithdrawal(merchantId: string | null, details: Record<string, unknown>) {
+  if (!merchantId) return
+  await syncPineTreeWalletBalances(merchantId).catch((syncError) => {
+    console.warn("[pinetree-balances] withdrawal_route_balance_sync_failed", {
+      merchantId,
+      ...details,
+      error: syncError instanceof Error ? syncError.message : "unknown_error",
+    })
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -115,13 +127,19 @@ export async function POST(req: NextRequest) {
         diagnostics,
       })
       const write = canonical.kind === "executed" ? canonical.write : canonical
+      const status = canonical.kind === "executed" ? canonical.write.operation.status : canonical.request.status
       console.info("[pinetree-withdrawals] SPEED_SUBMIT_RETURNED", {
         correlationId,
         merchantId,
         buildId,
         routeStage: "submit_returned",
         callGraph: "route->canonicalWithdrawal->provider",
-        status: canonical.kind === "executed" ? canonical.write.operation.status : null,
+        status,
+      })
+      await refreshBalancesAfterWithdrawal(merchantId, {
+        rail: "bitcoin",
+        asset: "BTC",
+        status,
       })
       return NextResponse.json(withCorrelation(walletOk(write), correlationId), {
         headers: { "Cache-Control": "private, no-store, max-age=0" },
@@ -161,11 +179,22 @@ export async function POST(req: NextRequest) {
       callGraph: "route->createWalletWithdrawal->walletOperations->speedWalletAdapter->speedWalletManagement->speedRequest(/send)",
       status: result.operation.status,
     })
+    await refreshBalancesAfterWithdrawal(merchantId, {
+      rail: "bitcoin",
+      asset: "BTC",
+      status: result.operation.status,
+    })
     return NextResponse.json(withCorrelation(walletOk(result), correlationId), {
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     })
   } catch (error) {
     const failure = routeFailure(error)
+    await refreshBalancesAfterWithdrawal(merchantId, {
+      rail: "bitcoin",
+      asset: "BTC",
+      status: "failed",
+      normalizedErrorCode: failure.code,
+    })
     console.warn("[pinetree-withdrawals] SPEED_ROUTE_FAILED", {
       correlationId,
       merchantId,
