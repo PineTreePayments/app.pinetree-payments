@@ -207,6 +207,63 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     )
     expect(result.capabilityAvailable).toBe(true)
     expect(result.operation.status).toBe("PROCESSING")
+    // submittedAt must be stamped the moment the operation moves to
+    // PROCESSING, independent of whether/when it's later reconciled -
+    // otherwise merchant_wallet_operations has no lifecycle timestamp parity
+    // with wallet_withdrawal_requests (which already tracks submitted_at).
+    expect(updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      created.id,
+      expect.objectContaining({ status: "PROCESSING", submittedAt: expect.any(String) })
+    )
+  })
+
+  it("stamps confirmedAt (and completedAt) when the adapter reports COMPLETED, and failedAt when it reports FAILED", async () => {
+    const confirmedResult = {
+      providerReference: "fake_ref_2",
+      providerStatus: "paid",
+      status: "COMPLETED" as const,
+    }
+    const adapter = fakeAdapter({
+      getCapabilities: vi.fn().mockResolvedValue({
+        balances: false,
+        withdrawals: true,
+        payouts: false,
+        swaps: false,
+        automaticPayouts: false,
+        automaticConversion: false,
+      }),
+      createWithdrawal: vi.fn().mockResolvedValue(confirmedResult),
+    })
+    const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "fake-provider", adapter, context: fakeContext })
+    const created = operationRow()
+    const updateWalletOperation = vi.fn().mockResolvedValue(operationRow({ status: "COMPLETED" }))
+    vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
+    vi.doMock("@/database/merchantWalletOperations", () => ({
+      createWalletOperation: vi.fn().mockResolvedValue({ operation: created, created: true }),
+      updateWalletOperation,
+      getWalletOperationForMerchant: vi.fn(),
+      listWalletOperations: vi.fn(),
+    }))
+
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+    await createWalletWithdrawal("merchant-1", {
+      asset: "SATS",
+      amountDecimal: "1000",
+      destination: "lnbc1qqqqqqqqqqqqqqqqqqqq",
+      idempotencyKey: "key-2",
+    })
+
+    expect(updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      created.id,
+      expect.objectContaining({
+        status: "COMPLETED",
+        completedAt: expect.any(String),
+        confirmedAt: expect.any(String),
+        failedAt: undefined,
+      })
+    )
   })
 
   it("rejects a Speed withdrawal before /send when amount plus fee reserve exceeds live available sats", async () => {

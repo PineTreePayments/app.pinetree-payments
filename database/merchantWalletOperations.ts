@@ -79,6 +79,9 @@ export type MerchantWalletOperation = {
   created_at: string
   updated_at: string
   completed_at: string | null
+  submitted_at?: string | null
+  confirmed_at?: string | null
+  failed_at?: string | null
 }
 
 export type CreateWalletOperationInput = {
@@ -117,6 +120,9 @@ export type UpdateWalletOperationInput = {
   failureCode?: string | null
   failureReason?: string | null
   completedAt?: string | null
+  submittedAt?: string | null
+  confirmedAt?: string | null
+  failedAt?: string | null
 }
 
 const TERMINAL_STATUSES: WalletOperationStatus[] = ["COMPLETED", "FAILED", "CANCELED", "EXPIRED"]
@@ -228,6 +234,9 @@ export async function updateWalletOperation(
   if (input.failureCode !== undefined) patch.failure_code = input.failureCode
   if (input.failureReason !== undefined) patch.failure_reason = input.failureReason
   if (input.completedAt !== undefined) patch.completed_at = input.completedAt
+  if (input.submittedAt !== undefined) patch.submitted_at = input.submittedAt
+  if (input.confirmedAt !== undefined) patch.confirmed_at = input.confirmedAt
+  if (input.failedAt !== undefined) patch.failed_at = input.failedAt
 
   let { data, error } = await supabase
     .from(TABLE)
@@ -243,6 +252,9 @@ export async function updateWalletOperation(
     delete fallbackPatch.provider_transaction_id
     delete fallbackPatch.provider_secondary_reference
     delete fallbackPatch.provider_created_at
+    delete fallbackPatch.submitted_at
+    delete fallbackPatch.confirmed_at
+    delete fallbackPatch.failed_at
     const compatibility = compatibilityProviderStatus(input)
     if (compatibility) fallbackPatch.raw_provider_status = compatibility
     ;({ data, error } = await supabase
@@ -334,9 +346,10 @@ export async function sumPendingWithdrawalOperationBaseUnits(
  * never actually write to.
  */
 export async function listProcessingWalletOperationsForReconciliation(
-  limit: number
+  limit: number,
+  merchantId?: string
 ): Promise<MerchantWalletOperation[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from(TABLE)
     .select("*")
     .eq("status", "PROCESSING")
@@ -345,6 +358,9 @@ export async function listProcessingWalletOperationsForReconciliation(
     .order("created_at", { ascending: true })
     .limit(limit)
 
+  if (merchantId) query = query.eq("merchant_id", merchantId)
+
+  const { data, error } = await query
   if (error) throw new Error(`Failed to list processing wallet operations for reconciliation: ${error.message}`)
   return (data || []) as MerchantWalletOperation[]
 }

@@ -68,7 +68,11 @@ describe("account-scoped withdrawal safeguards", () => {
     await expect(createWalletWithdrawal("merchant-1", {
       asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
     })).rejects.toMatchObject({ code: "WALLET_PROVIDER_TIMEOUT", retryable: true })
-    expect(arranged.updateWalletOperation).toHaveBeenCalledWith("merchant-1", "op-1", { status: "PROCESSING" })
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({ status: "PROCESSING", submittedAt: expect.any(String) })
+    )
     expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ status: "FAILED" }))
   })
 })

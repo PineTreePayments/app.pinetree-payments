@@ -353,9 +353,10 @@ export async function listRecentWalletWithdrawalsForActivity(
 }
 
 export async function listProcessingWithdrawalsForReconciliation(
-  limit: number
+  limit: number,
+  merchantId?: string
 ): Promise<WalletWithdrawalRequestRecord[]> {
-  const { data, error } = await db
+  let query = db
     .from(TABLE)
     .select("*")
     .eq("status", "processing")
@@ -364,6 +365,9 @@ export async function listProcessingWithdrawalsForReconciliation(
     .order("created_at", { ascending: true })
     .limit(limit)
 
+  if (merchantId) query = query.eq("merchant_id", merchantId)
+
+  const { data, error } = await query
   if (error) throw new Error(`Failed to list processing withdrawals for reconciliation: ${error.message}`)
   return (data || []).map((row) => normalize(row as Record<string, unknown>))
 }
@@ -375,9 +379,10 @@ export async function listProcessingWithdrawalsForReconciliation(
  * query separate from listProcessingWithdrawalsForReconciliation above.
  */
 export async function listProcessingBitcoinWithdrawalsForReconciliation(
-  limit: number
+  limit: number,
+  merchantId?: string
 ): Promise<WalletWithdrawalRequestRecord[]> {
-  const { data, error } = await db
+  let query = db
     .from(TABLE)
     .select("*")
     .eq("status", "processing")
@@ -386,6 +391,9 @@ export async function listProcessingBitcoinWithdrawalsForReconciliation(
     .order("created_at", { ascending: true })
     .limit(limit)
 
+  if (merchantId) query = query.eq("merchant_id", merchantId)
+
+  const { data, error } = await query
   if (error) throw new Error(`Failed to list processing Bitcoin withdrawals for reconciliation: ${error.message}`)
   return (data || []).map((row) => normalize(row as Record<string, unknown>))
 }

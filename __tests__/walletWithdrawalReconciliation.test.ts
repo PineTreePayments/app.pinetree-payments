@@ -368,17 +368,25 @@ describe("reconcileProcessingWithdrawals", () => {
   it("uses the provided limit when querying processing withdrawals", async () => {
     await reconcileProcessingWithdrawals({ limit: 10 })
 
-    expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(10)
-    expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(10)
-    expect(mocks.listProcessingWalletOperationsForReconciliation).toHaveBeenCalledWith(10)
+    expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(10, undefined)
+    expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(10, undefined)
+    expect(mocks.listProcessingWalletOperationsForReconciliation).toHaveBeenCalledWith(10, undefined)
   })
 
   it("defaults limit to 50 when not provided", async () => {
     await reconcileProcessingWithdrawals({})
 
-    expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(50)
-    expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(50)
-    expect(mocks.listProcessingWalletOperationsForReconciliation).toHaveBeenCalledWith(50)
+    expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(50, undefined)
+    expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(50, undefined)
+    expect(mocks.listProcessingWalletOperationsForReconciliation).toHaveBeenCalledWith(50, undefined)
+  })
+
+  it("scopes every underlying reconciliation query to a single merchant when merchantId is provided", async () => {
+    await reconcileProcessingWithdrawals({ limit: 10, merchantId: "merch-scoped" })
+
+    expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(10, "merch-scoped")
+    expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(10, "merch-scoped")
+    expect(mocks.listProcessingWalletOperationsForReconciliation).toHaveBeenCalledWith(10, "merch-scoped")
   })
 
   // Bitcoin withdrawals actually submitted through the live UI write to

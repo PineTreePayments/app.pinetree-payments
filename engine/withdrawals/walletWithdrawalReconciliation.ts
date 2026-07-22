@@ -270,24 +270,25 @@ async function reconcileOne(
  * same merchant->Speed-account context used to create the withdrawal and
  * persists the result - this just needs to be called on a schedule.
  */
-async function reconcileProcessingWalletOperations(limit: number): Promise<{
+async function reconcileProcessingWalletOperations(limit: number, merchantId?: string): Promise<{
   checked: number
   confirmed: number
   failed: number
   still_processing: number
   skipped: number
 }> {
-  const operations = await listProcessingWalletOperationsForReconciliation(limit)
+  const operations = await listProcessingWalletOperationsForReconciliation(limit, merchantId)
   const result = { checked: operations.length, confirmed: 0, failed: 0, still_processing: 0, skipped: 0 }
-  reconcileLog("WITHDRAWAL_RECONCILE_SELECTED", {
+  reconcileLog("WALLET_OPERATION_RECONCILE_SELECTED", {
     table: "merchant_wallet_operations",
     count: operations.length,
     limit,
+    merchantScoped: Boolean(merchantId),
   })
 
   for (const operation of operations) {
     try {
-      reconcileLog("WITHDRAWAL_RECONCILE_PROVIDER_LOOKUP_STARTED", {
+      reconcileLog("WALLET_OPERATION_PROVIDER_LOOKUP_STARTED", {
         table: "merchant_wallet_operations",
         merchantId: operation.merchant_id,
         operationId: operation.id,
@@ -295,13 +296,38 @@ async function reconcileProcessingWalletOperations(limit: number): Promise<{
         providerReference: maskReference(operation.provider_reference),
       })
       const updated = await getWalletWithdrawal(operation.merchant_id, operation.id)
+      const statusNormalized = updated.status !== "PROCESSING"
+      reconcileLog("WALLET_OPERATION_STATUS_NORMALIZED", {
+        table: "merchant_wallet_operations",
+        merchantId: operation.merchant_id,
+        operationId: operation.id,
+        persistedStatusBefore: "PROCESSING",
+        providerStatus: updated.status,
+        changed: statusNormalized,
+      })
       if (updated.status === "COMPLETED") {
         result.confirmed++
-        reconcileLog("WITHDRAWAL_RECONCILE_CONFIRMED", {
+        reconcileLog("CANONICAL_WALLET_STATUS_CONFLICT_DETECTED", {
+          table: "merchant_wallet_operations",
+          operationId: operation.id,
+          linkedPaymentOrTransactionId: null,
+          activityStatus: "processing",
+          paymentStatus: null,
+          providerStatus: "COMPLETED",
+          chosenStatus: "confirmed",
+          reason: "provider_confirmed_while_activity_still_processing",
+        })
+        reconcileLog("WALLET_OPERATION_CONFIRMED", {
           table: "merchant_wallet_operations",
           merchantId: operation.merchant_id,
           operationId: operation.id,
           provider: operation.provider,
+        })
+        reconcileLog("CANONICAL_WALLET_STATUS_CONFLICT_REPAIRED", {
+          table: "merchant_wallet_operations",
+          operationId: operation.id,
+          chosenStatus: "confirmed",
+          reason: "reconciled_from_provider_evidence",
         })
         await refreshBalancesAfterLifecycleChange({
           merchantId: operation.merchant_id,
@@ -313,7 +339,7 @@ async function reconcileProcessingWalletOperations(limit: number): Promise<{
         })
       } else if (updated.status === "FAILED") {
         result.failed++
-        reconcileLog("WITHDRAWAL_RECONCILE_FAILED", {
+        reconcileLog("WALLET_OPERATION_FAILED", {
           table: "merchant_wallet_operations",
           merchantId: operation.merchant_id,
           operationId: operation.id,
@@ -329,7 +355,7 @@ async function reconcileProcessingWalletOperations(limit: number): Promise<{
         })
       } else {
         result.still_processing++
-        reconcileLog("WITHDRAWAL_RECONCILE_STILL_PROCESSING", {
+        reconcileLog("WALLET_OPERATION_STILL_PROCESSING", {
           table: "merchant_wallet_operations",
           merchantId: operation.merchant_id,
           operationId: operation.id,
@@ -349,7 +375,7 @@ async function reconcileProcessingWalletOperations(limit: number): Promise<{
         merchantId: operation.merchant_id,
         error: error instanceof Error ? error.message : String(error),
       })
-      reconcileLog("WITHDRAWAL_RECONCILE_SKIPPED", {
+      reconcileLog("WALLET_OPERATION_RECONCILE_SKIPPED", {
         table: "merchant_wallet_operations",
         merchantId: operation.merchant_id,
         operationId: operation.id,
@@ -364,12 +390,20 @@ async function reconcileProcessingWalletOperations(limit: number): Promise<{
 
 export async function reconcileProcessingWithdrawals(options: {
   limit?: number
+  /**
+   * When provided, scopes every underlying reconciliation query to a single
+   * merchant so this can be safely awaited inline on a request path (e.g.
+   * the PineTree Wallet sync route) without paying for or blocking on other
+   * merchants' processing rows. Omit for the global background sweep.
+   */
+  merchantId?: string
 }): Promise<ReconciliationResult> {
   const limit = options.limit ?? 50
+  const merchantId = options.merchantId
   const [onChainWithdrawals, bitcoinWithdrawals, walletOperations] = await Promise.all([
-    listProcessingWithdrawalsForReconciliation(limit),
-    listProcessingBitcoinWithdrawalsForReconciliation(limit),
-    reconcileProcessingWalletOperations(limit),
+    listProcessingWithdrawalsForReconciliation(limit, merchantId),
+    listProcessingBitcoinWithdrawalsForReconciliation(limit, merchantId),
+    reconcileProcessingWalletOperations(limit, merchantId),
   ])
   const withdrawals = [...onChainWithdrawals, ...bitcoinWithdrawals]
   reconcileLog("WITHDRAWAL_RECONCILE_SELECTED", {
@@ -378,6 +412,7 @@ export async function reconcileProcessingWithdrawals(options: {
     bitcoinCount: bitcoinWithdrawals.length,
     total: withdrawals.length,
     limit,
+    merchantScoped: Boolean(merchantId),
   })
 
   const result: ReconciliationResult = {

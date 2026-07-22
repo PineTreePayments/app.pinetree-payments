@@ -69,6 +69,7 @@ describe("wallet withdrawal maintenance route triggers", () => {
   const completeDynamicWalletWithdrawal = vi.fn()
   const syncPineTreeWalletBalances = vi.fn()
   const scheduleWalletWithdrawalMaintenance = vi.fn()
+  const reconcileProcessingWithdrawals = vi.fn()
 
   beforeEach(() => {
     vi.resetModules()
@@ -90,7 +91,13 @@ describe("wallet withdrawal maintenance route triggers", () => {
       recentActivity: [],
       lastSyncedAt: "2026-06-30T00:00:00.000Z",
     })
+    reconcileProcessingWithdrawals.mockResolvedValue({
+      checked: 0, confirmed: 0, failed: 0, still_processing: 0, skipped: 0,
+    })
 
+    vi.doMock("@/engine/withdrawals/walletWithdrawalReconciliation", () => ({
+      reconcileProcessingWithdrawals,
+    }))
     vi.doMock("@/lib/api/merchantAuth", () => ({
       requireMerchantIdFromRequest,
       getRouteErrorStatus,
@@ -148,5 +155,48 @@ describe("wallet withdrawal maintenance route triggers", () => {
     expect(body.lastSyncedAt).toBe("2026-06-30T00:00:00.000Z")
     expect(syncPineTreeWalletBalances).toHaveBeenCalledWith("merchant_1")
     expect(scheduleWalletWithdrawalMaintenance).toHaveBeenCalledWith("pinetree-wallet.sync")
+  })
+
+  it("reconciles this merchant's own processing withdrawals synchronously, BEFORE computing the balance snapshot", async () => {
+    // This is the fix for a merchant reopening their wallet right after a
+    // withdrawal actually confirms provider-side and still seeing the stale
+    // pre-reconciliation "Processing" snapshot: scheduleWalletWithdrawalMaintenance
+    // runs via Next's after() hook, which only fires once the response has
+    // already been sent, so it can never affect what this same request
+    // returns. The merchant-scoped reconcile call must be awaited before
+    // syncPineTreeWalletBalances is called, not merely scheduled alongside it.
+    const callOrder: string[] = []
+    reconcileProcessingWithdrawals.mockImplementation(async () => {
+      callOrder.push("reconcile")
+      return { checked: 1, confirmed: 1, failed: 0, still_processing: 0, skipped: 0 }
+    })
+    syncPineTreeWalletBalances.mockImplementation(async () => {
+      callOrder.push("sync")
+      return {
+        totalUsd: 0,
+        balances: { base: [], solana: [], bitcoin: [] },
+        recentActivity: [],
+        lastSyncedAt: "2026-06-30T00:00:00.000Z",
+      }
+    })
+
+    const { POST } = await import("@/app/api/wallets/pinetree/sync/route")
+    const response = await POST({} as never)
+
+    expect(response.status).toBe(200)
+    expect(reconcileProcessingWithdrawals).toHaveBeenCalledWith({ limit: 10, merchantId: "merchant_1" })
+    expect(callOrder).toEqual(["reconcile", "sync"])
+  })
+
+  it("does not fail the sync response when the inline merchant-scoped reconcile throws", async () => {
+    reconcileProcessingWithdrawals.mockRejectedValue(new Error("speed unreachable"))
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    const { POST } = await import("@/app/api/wallets/pinetree/sync/route")
+    const response = await POST({} as never)
+
+    expect(response.status).toBe(200)
+    expect(syncPineTreeWalletBalances).toHaveBeenCalledWith("merchant_1")
+    warnSpy.mockRestore()
   })
 })

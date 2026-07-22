@@ -17,6 +17,10 @@ import {
 import { getSpeedWithdrawalFeeReserveSats } from "@/engine/withdrawals/speedWithdrawalQuote"
 import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
 import { PINETREE_INTERNAL_RAIL_PROVIDER, type PineTreeWalletRail } from "@/lib/pinetreeRailProviderMapping"
+import {
+  mapWalletWithdrawalRequestStatusToActivity,
+  mapWalletOperationStatusToActivity,
+} from "@/engine/withdrawals/canonicalWithdrawalStatus"
 
 export type PineTreeBalanceAsset = {
   key: "BASE_ETH" | "BASE_USDC" | "SOLANA_SOL" | "SOLANA_USDC" | "BTC"
@@ -468,6 +472,11 @@ export async function getPineTreeWalletBalanceSnapshot(
   speedBitcoinSyncState: SpeedBitcoinSyncState = "cached",
   options?: { liveSyncedAssetKeys?: Set<string> }
 ): Promise<PineTreeWalletSyncResult> {
+  console.info("[pinetree-withdrawals] CANONICAL_WALLET_READ_STARTED", {
+    merchantId,
+    speedBitcoinSyncState,
+    routeStage: "canonical_wallet_read_started",
+  })
   await cancelStaleUnsignedWithdrawalReviews(merchantId).catch(() => ({ canceled: 0 }))
   const [profile, rows, prices, recentWithdrawals, recentOperations, providers, lightningProfile] = await Promise.all([
     getPineTreeWalletProfile(merchantId),
@@ -569,6 +578,13 @@ export async function getPineTreeWalletBalanceSnapshot(
   }
 
   const all = BALANCE_DEFS.map(toBalance)
+  console.info("[pinetree-withdrawals] CANONICAL_WALLET_BALANCE_SOURCE_RESOLVED", {
+    merchantId,
+    assetCount: all.length,
+    syncedCount: all.filter((item) => item.status === "synced").length,
+    knownBalanceCount: all.filter((item) => item.usdValue !== null).length,
+    routeStage: "canonical_wallet_balance_source_resolved",
+  })
   for (const balance of all) {
     console.info("[pinetree-withdrawals] CANONICAL_BALANCE_RESOLVED", {
       merchantId,
@@ -593,49 +609,39 @@ export async function getPineTreeWalletBalanceSnapshot(
       routeStage: "balance_source_resolved",
     })
   }
-  const synced = all.filter((item) => item.status === "synced" && item.usdValue !== null)
-  const totalUsd = synced.length > 0
-    ? synced.reduce((sum, item) => sum + Number(item.usdValue || 0), 0)
+  // Sum every asset with a KNOWN balance (synced this cycle, cached from a
+  // prior sync, or stale-but-still-the-last-known-value) - not just assets
+  // that happened to be freshly re-synced on this exact call. Previously this
+  // excluded "cached"/"stale" items, so total_balance_usd could silently
+  // disagree with the per-rail sums the client computes from the same
+  // `balances` array (WalletOverviewSummary sums every item with a usdValue,
+  // regardless of status) - the same withdrawal screen could show a "Total
+  // Balance" that didn't equal the sum of the rail rows directly below it.
+  const withKnownBalance = all.filter((item) => item.usdValue !== null)
+  const totalUsd = withKnownBalance.length > 0
+    ? withKnownBalance.reduce((sum, item) => sum + Number(item.usdValue || 0), 0)
     : null
 
-  const withdrawalActivity = recentWithdrawals.map((wd) => {
-    // "processing" only ever gets set alongside a tx_hash (the transaction was signed
-    // and submitted) - display that as "sent" rather than a raw internal status name,
-    // since PineTree has not independently reconciled final on-chain confirmation yet.
-    const status =
-      wd.status === "confirmed" ? "confirmed"
-      : wd.status === "failed" ? "failed"
-      : wd.status === "canceled" ? "canceled"
-      : wd.status === "blocked" ? "blocked"
-      : (wd.status === "processing" || Boolean(wd.tx_hash)) ? "sent"
-      : "pending"
-    return {
-      id: wd.id,
-      label: `${wd.source === "automatic_sweep" ? "Auto-swept" : "Sent"} ${wd.amount_decimal} ${wd.asset}`,
-      rail: wd.rail,
-      status,
-      createdAt: wd.created_at,
-      source: wd.source,
-    }
-  })
+  const withdrawalActivity = recentWithdrawals.map((wd) => ({
+    id: wd.id,
+    label: `${wd.source === "automatic_sweep" ? "Auto-swept" : "Sent"} ${wd.amount_decimal} ${wd.asset}`,
+    rail: wd.rail,
+    status: mapWalletWithdrawalRequestStatusToActivity(wd.status, Boolean(wd.tx_hash)),
+    createdAt: wd.created_at,
+    source: wd.source,
+  }))
 
-  // Bitcoin/Speed withdrawals - a separate ledger table (merchant_wallet_operations)
-  // from Base/Solana's wallet_withdrawal_requests, so they need their own mapping.
-  const operationStatusMap: Record<string, string> = {
-    COMPLETED: "confirmed",
-    FAILED: "failed",
-    CANCELED: "canceled",
-    EXPIRED: "failed",
-    PROCESSING: "sent",
-    PENDING: "pending",
-    CREATED: "pending",
-    REQUIRES_ACTION: "pending",
-  }
+  // Bitcoin/Speed withdrawals live in a separate ledger table
+  // (merchant_wallet_operations) from Base/Solana's wallet_withdrawal_requests,
+  // so they need their own query - but both go through the same canonical
+  // status mapper (engine/withdrawals/canonicalWithdrawalStatus.ts) so a
+  // withdrawal can never render a different status here than reconciliation
+  // just persisted for it.
   const operationActivity = recentOperations.map((op) => ({
     id: op.id,
     label: `${op.source === "automatic_sweep" ? "Auto-swept" : "Sent"} ${satsToBtcDecimal(op.amount_base_units) ?? "0"} BTC`,
     rail: "bitcoin" as const,
-    status: operationStatusMap[op.status] || "pending",
+    status: mapWalletOperationStatusToActivity(op.status),
     createdAt: op.created_at,
     source: op.source,
   }))
@@ -643,6 +649,14 @@ export async function getPineTreeWalletBalanceSnapshot(
   const recentActivity = [...withdrawalActivity, ...operationActivity]
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 15)
+
+  console.info("[pinetree-withdrawals] CANONICAL_WALLET_ACTIVITY_SOURCE_RESOLVED", {
+    merchantId,
+    walletWithdrawalRequestCount: withdrawalActivity.length,
+    walletOperationCount: operationActivity.length,
+    mergedCount: recentActivity.length,
+    routeStage: "canonical_wallet_activity_source_resolved",
+  })
 
   const baseReady = railReadiness.base.walletProvisioned
   const solanaReady = railReadiness.solana.walletProvisioned
@@ -692,6 +706,18 @@ export async function getPineTreeWalletBalanceSnapshot(
     },
   ]
   void PINETREE_INTERNAL_RAIL_PROVIDER
+
+  console.info("[pinetree-withdrawals] CANONICAL_WALLET_BALANCES_RETURNED", {
+    merchantId,
+    totalUsd,
+    railTotalsUsd: {
+      base: normalizedRails.find((r) => r.rail === "base") ? all.filter((i) => i.rail === "base").reduce((s, i) => s + Number(i.usdValue || 0), 0) : null,
+      solana: all.filter((i) => i.rail === "solana").reduce((s, i) => s + Number(i.usdValue || 0), 0),
+      bitcoin: all.filter((i) => i.rail === "bitcoin").reduce((s, i) => s + Number(i.usdValue || 0), 0),
+    },
+    activityCount: recentActivity.length,
+    routeStage: "canonical_wallet_balances_returned",
+  })
 
   return {
     readiness: {

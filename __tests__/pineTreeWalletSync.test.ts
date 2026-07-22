@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getMarketPricesUSD: vi.fn(),
   listRecentWalletWithdrawalsForActivity: vi.fn(),
   cancelStaleUnsignedWithdrawalReviews: vi.fn(),
+  listRecentWalletOperationsForActivity: vi.fn(),
   getMerchantProviders: vi.fn(),
   getMerchantLightningProfile: vi.fn(),
   getPineTreeSpeedConfigStatus: vi.fn(),
@@ -39,6 +40,10 @@ vi.mock("@/engine/marketPrices", () => ({
 vi.mock("@/database/walletWithdrawalRequests", () => ({
   listRecentWalletWithdrawalsForActivity: mocks.listRecentWalletWithdrawalsForActivity,
   cancelStaleUnsignedWithdrawalReviews: mocks.cancelStaleUnsignedWithdrawalReviews,
+}))
+
+vi.mock("@/database/merchantWalletOperations", () => ({
+  listRecentWalletOperationsForActivity: mocks.listRecentWalletOperationsForActivity,
 }))
 
 vi.mock("@/database/merchants", () => ({
@@ -100,6 +105,7 @@ describe("PineTree Wallet balance sync", () => {
     mocks.fetchSolanaUsdcBalance.mockResolvedValue(1.25)
     mocks.getMarketPricesUSD.mockResolvedValue({ SOL: 100, ETH: 2000, BTC: 60000 })
     mocks.listRecentWalletWithdrawalsForActivity.mockResolvedValue([])
+    mocks.listRecentWalletOperationsForActivity.mockResolvedValue([])
     mocks.cancelStaleUnsignedWithdrawalReviews.mockResolvedValue({ canceled: 0 })
     mocks.getMerchantProviders.mockResolvedValue([])
     mocks.getMerchantLightningProfile.mockResolvedValue(null)
@@ -336,6 +342,47 @@ describe("PineTree Wallet balance sync", () => {
     expect(result.recentActivity[0].rail).toBe("bitcoin")
   })
 
+  it("a Bitcoin/Speed withdrawal reconciled to COMPLETED in merchant_wallet_operations renders as confirmed in Activity, not stuck Processing", async () => {
+    mocks.listRecentWalletOperationsForActivity.mockResolvedValue([
+      {
+        id: "op-confirmed-1",
+        merchant_id: "merchant_1",
+        status: "COMPLETED",
+        amount_base_units: "2217713",
+        source: "manual",
+        created_at: "2026-07-22T00:00:00Z",
+      },
+    ])
+
+    const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
+
+    expect(result.recentActivity[0]).toMatchObject({
+      id: "op-confirmed-1",
+      rail: "bitcoin",
+      status: "confirmed",
+    })
+  })
+
+  it("a Bitcoin/Speed withdrawal still PROCESSING in merchant_wallet_operations renders as sent, never confirmed", async () => {
+    mocks.listRecentWalletOperationsForActivity.mockResolvedValue([
+      {
+        id: "op-processing-1",
+        merchant_id: "merchant_1",
+        status: "PROCESSING",
+        amount_base_units: "100000",
+        source: "manual",
+        created_at: "2026-07-22T00:00:00Z",
+      },
+    ])
+
+    const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
+
+    expect(result.recentActivity[0]).toMatchObject({
+      id: "op-processing-1",
+      status: "sent",
+    })
+  })
+
   it("returns a normalized provider-agnostic rail contract with an explicit stale BTC balance", async () => {
     storedRows = [
       {
@@ -368,8 +415,13 @@ describe("PineTree Wallet balance sync", () => {
     const serialized = JSON.stringify(result.rails)
 
     expect(result.status).toBe("ready")
-    expect(result.totalUsd).toBeNull()
-    expect(result.total_balance_usd).toBeNull()
+    // A stale balance is still a KNOWN balance (the last confirmed value from
+    // provider/chain evidence, just not re-verified this cycle) - it must
+    // still count toward the total, or the "Total Balance" tile can disagree
+    // with the sum of the rail rows shown directly beneath it on the same
+    // screen (both BTC and BASE_USDC here are "stale", not "synced").
+    expect(result.totalUsd).toBe(30000 + 10)
+    expect(result.total_balance_usd).toBe("30010.00")
     expect(result.rails).toEqual(expect.arrayContaining([
       expect.objectContaining({
         rail: "bitcoin",

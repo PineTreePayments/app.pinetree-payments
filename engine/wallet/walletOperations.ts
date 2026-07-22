@@ -358,6 +358,7 @@ async function reconcileOperationWithAdapterResult(
   providerAccountId: string,
   result: WalletAdapterOperationResult
 ): Promise<MerchantWalletOperation> {
+  const now = new Date().toISOString()
   return updateWalletOperation(merchantId, operationId, {
     providerAccountId,
     status: result.status,
@@ -368,7 +369,9 @@ async function reconcileOperationWithAdapterResult(
     txHash: result.txHash ?? undefined,
     explorerUrl: result.explorerUrl ?? undefined,
     feeBaseUnits: result.feeBaseUnits ?? undefined,
-    completedAt: result.status === "COMPLETED" ? new Date().toISOString() : undefined,
+    completedAt: result.status === "COMPLETED" ? now : undefined,
+    confirmedAt: result.status === "COMPLETED" ? now : undefined,
+    failedAt: result.status === "FAILED" || result.status === "EXPIRED" ? now : undefined,
   })
 }
 
@@ -559,7 +562,10 @@ async function createWalletWrite(
     return { operation: toPineTreeWalletOperation(failed), capabilityAvailable: false }
   }
 
-  await updateWalletOperation(merchantId, operation.id, { status: "PROCESSING" })
+  await updateWalletOperation(merchantId, operation.id, {
+    status: "PROCESSING",
+    submittedAt: new Date().toISOString(),
+  })
   try {
     const result = await call
     input.diagnostics?.setSubstage?.("operation_persistence")

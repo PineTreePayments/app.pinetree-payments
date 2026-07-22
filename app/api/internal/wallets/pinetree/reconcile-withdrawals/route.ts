@@ -16,9 +16,15 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = (await req.json().catch(() => ({}))) as { limit?: number }
+    const body = (await req.json().catch(() => ({}))) as { limit?: number; merchantId?: string }
     const limit = Number.isFinite(Number(body.limit)) ? Number(body.limit) : 50
-    const result = await reconcileProcessingWithdrawals({ limit })
+    const merchantId = typeof body.merchantId === "string" && body.merchantId.trim() ? body.merchantId.trim() : undefined
+    // Historical/one-off repair: pass merchantId to force-reconcile a single
+    // merchant's currently-stuck processing withdrawals on demand (e.g. a
+    // support report of a withdrawal stuck at "Processing") instead of
+    // waiting for the next scheduled sweep. Still requires real provider
+    // evidence via reconcileProcessingWithdrawals - never blindly confirms.
+    const result = await reconcileProcessingWithdrawals({ limit, merchantId })
     return NextResponse.json(result)
   } catch (error) {
     const message = error instanceof Error ? error.message : "Withdrawal reconciliation failed"
