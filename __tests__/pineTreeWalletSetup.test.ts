@@ -664,8 +664,8 @@ describe("PineTree embedded wallet setup", () => {
       page.indexOf("const walletSetupPrimaryState = useMemo<WalletSetupPrimaryState>(() => {"),
       page.indexOf("return \"idle\"\n  }, [")
     )
-    const ctaStart = page.indexOf(") : hasWallet ? (")
-    const ctaBlock = page.slice(ctaStart, ctaStart + 1400)
+    const setupCardStart = page.indexOf('{showWalletSetupCard ? (')
+    const setupCard = page.slice(setupCardStart, page.indexOf("</article>", setupCardStart))
 
     expect(derivedState).toContain("railReadiness?.bitcoin_lightning.walletProvisioned ??")
     expect(derivedState).toContain('lightningProfileState.kind === "loaded" && lightningProfileState.profile.status === "ready"')
@@ -674,10 +674,13 @@ describe("PineTree embedded wallet setup", () => {
     expect(resolverBody).toContain('if (profileState.kind === "none" || !profileHasDynamicAddresses) return "create_wallet"')
     expect(resolverBody).not.toContain('lightningProfileState.profile.status === "needs_attention"')
     expect(page).toContain('walletSetupPrimaryState === "create_wallet" ? "Create wallet" :')
-    expect(ctaBlock).toContain("hasWallet ? (")
-    expect(ctaBlock).toContain("Open PineTree Wallet")
-    expect(ctaBlock).toContain("Create PineTree Wallet")
-    expect(ctaBlock).toContain("disabled={businessProfileGateBlocking || syncing || logoutPending || walletCreationInProgress}")
+    expect(page).toContain("directWalletOpenAttemptedRef")
+    expect(page).toContain('if (!hasWallet || walletSetupPrimaryState !== "ready" || walletOpen || walletOpening) return')
+    expect(page).toContain("void handleOpenWallet()")
+    expect(setupCard).not.toContain("hasWallet ? (")
+    expect(setupCard).not.toContain("Open PineTree Wallet")
+    expect(setupCard).toContain("Create PineTree Wallet")
+    expect(setupCard).toContain("disabled={businessProfileGateBlocking || syncing || logoutPending || walletCreationInProgress}")
   })
 
   it("clicking Create still starts the core orchestrator before any Speed outcome can block it", () => {

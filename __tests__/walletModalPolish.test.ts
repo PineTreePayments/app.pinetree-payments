@@ -82,12 +82,16 @@ describe("Overview tab - polished PineTree summary", () => {
     expect(walletOverviewSrc()).toContain("WalletStatusPill")
   })
 
-  it("Overview only renders Total Balance and Wallet Summary wallet sections", () => {
+  it("Overview renders Total Balance, Wallet Summary, and compact Recent Activity only", () => {
     const src = walletOverviewSrc()
     expect(src).toContain("TOTAL BALANCE")
     expect(src).toContain("WALLET SUMMARY")
+    expect(src).toContain("RECENT ACTIVITY")
+    expect(src).toContain("recentItems")
+    expect(src).toContain("slice(0, 3)")
+    expect(src).toContain("View All Activity")
     expect(src).not.toContain("Bitcoin Lightning payout")
-    expect(src).not.toContain("Recent activity")
+    expect(src).not.toContain("RECENT WITHDRAWALS")
   })
 
   it("shows Last synced or Pending sync copy", () => {
@@ -154,7 +158,8 @@ describe("Balances tab - compact selected asset detail", () => {
     expect(walletPage).toContain('pendingBalance("SOLANA_USDC", "solana", "USDC", "solana", "dynamic", 6)')
     const src = balanceRowsSrc()
     expect(src).toContain("key: row.key")
-    expect(src).toContain("railLabel: assetRailLabel(row.rail)")
+    expect(src).toContain("asset: `${row.asset} • ${assetRailLabel(row.rail)}`")
+    expect(src).toContain('railLabel: "PineTree Wallet"')
   })
 
   it("BTC is included for a ready connected account without requiring a payout address", () => {
@@ -200,25 +205,25 @@ describe("Balances tab - compact selected asset detail", () => {
 })
 
 describe("Provider-branded wallet tab removed", () => {
-  it("modal tabs include exactly Overview, Balances, Withdraw, and Activity", () => {
+  it("modal tabs include exactly Overview, Balances, Withdraw, Activity, and Address Book", () => {
     expect(walletPage).toContain(
-      'type WalletTab = "overview" | "balances" | "withdraw" | "activity"'
+      'type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "address-book"'
     )
     expect(walletPage).toContain('{ id: "overview", label: "Overview" }')
     expect(walletPage).toContain('{ id: "balances", label: "Balances" }')
     expect(walletPage).toContain('{ id: "withdraw", label: "Withdraw" }')
     expect(walletPage).toContain('{ id: "activity", label: "Activity" }')
+    expect(walletPage).toContain('{ id: "address-book", label: "Address Book" }')
     expect(walletPage).not.toContain('{ id: "speed"')
     expect(walletPage).not.toContain("Speed Wallet")
-    expect(walletPage).not.toContain('{ id: "address-book"')
     expect(walletPage).not.toContain('{ id: "automatic-settlement"')
-    expect(walletPage).toContain("grid-cols-4")
+    expect(walletPage).toContain("grid-cols-5")
     expect(walletPage).toContain("whitespace-nowrap")
-    expect(walletPage).not.toContain("grid-cols-5")
     expect(walletPage).not.toContain("grid-cols-6")
     expect(walletPage).not.toContain('label: "Wallets"')
     expect(walletPage).not.toContain('activeTab === "wallets"')
     expect(walletPage).not.toContain('activeTab === "speed"')
+    expect(walletPage).toContain('activeTab === "address-book"')
   })
 
   it("old wallet-row and receive-row components are gone", () => {
@@ -367,14 +372,15 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
   })
 
   it("withdraw validation and pending review states are not yellow warning blocks", () => {
-    const src = withdrawalFormSrc()
-    expect(src).not.toContain("border-amber")
-    expect(src).not.toContain("bg-amber")
-    expect(src).not.toContain("text-amber")
-    expect(src).toContain("border-blue-100")
-    expect(src).toContain("bg-blue-50")
-    expect(src).toContain("border-gray-200")
-    expect(src).toContain("bg-gray-50")
+    const src = withdrawalFormSrc().replace(/\r\n/g, "\n")
+    const formScreen = src.slice(src.lastIndexOf('return (\n    <div className="space-y-4">'))
+    expect(formScreen).not.toContain("border-amber")
+    expect(formScreen).not.toContain("bg-amber")
+    expect(formScreen).not.toContain("text-amber")
+    expect(formScreen).toContain("border-blue-100")
+    expect(formScreen).toContain("bg-blue-50")
+    expect(formScreen).toContain("border-gray-200")
+    expect(formScreen).toContain("bg-gray-50")
   })
 
   it("does not render the legacy Bitcoin Lightning payout card anywhere in the withdrawal form", () => {
@@ -387,12 +393,12 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(walletPage).not.toContain("lightningPayoutSummary")
   })
 
-  it("Transfer type renders immediately after the asset selector, with Saved destination beneath it", () => {
+  it("Transfer type renders immediately after the asset selector, with saved-destination chooser beneath it", () => {
     const src = withdrawalFormSrc()
     const assetSelectorIndex = src.indexOf("<AssetSelectDropdown")
     const transferTypeIndex = src.indexOf('<p className="text-xs font-semibold uppercase text-gray-500">Transfer type</p>')
-    const savedDestinationIndex = src.indexOf("Saved destination</p>")
-    const sendToIndex = src.indexOf('<p className="text-xs font-semibold uppercase text-gray-500">Send to</p>')
+    const savedDestinationIndex = src.indexOf("Choose Saved Destination</p>")
+    const sendToIndex = src.indexOf('<p className="text-xs font-semibold uppercase text-gray-500">Paste New Address</p>')
     expect(assetSelectorIndex).toBeGreaterThan(-1)
     expect(transferTypeIndex).toBeGreaterThan(assetSelectorIndex)
     expect(savedDestinationIndex).toBeGreaterThan(transferTypeIndex)
@@ -477,18 +483,19 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(modalHeader).not.toContain("One merchant wallet profile")
   })
 
-  it("Open/Create PineTree Wallet button remains in the content flow", () => {
+  it("ready wallet launcher is removed while setup actions remain in the content flow", () => {
     const src = runtimeSrc()
     const setupCardStart = src.indexOf('<article className="max-w-2xl')
     const setupCard = src.slice(
       setupCardStart,
       src.indexOf("</article>", setupCardStart)
     )
-    expect(setupCard).toContain("Open PineTree Wallet")
+    expect(src).toContain("directWalletOpenAttemptedRef")
+    expect(src).toContain("void handleOpenWallet()")
+    expect(src).toContain("showWalletSetupCard")
+    expect(setupCard).not.toContain("Open PineTree Wallet")
     expect(setupCard).toContain("Create PineTree Wallet")
-    expect(setupCard).toContain("onClick={handleOpenWallet}")
     expect(setupCard).toContain("onClick={handleCreateWallet}")
-    expect(setupCard.indexOf("Open PineTree Wallet")).toBeGreaterThan(setupCard.indexOf("<EnabledRailChips rows={walletRailRows} />"))
   })
 
   it("withdrawal form keeps reconnect handling out of the initial review action", () => {
@@ -558,7 +565,8 @@ describe("Activity tab - recent withdrawal visibility", () => {
     const src = activityTabSrc()
     expect(src).toContain("recentActivity")
     expect(src).toContain("items.map")
-    expect(src).toContain("item.label")
+    expect(src).toContain("activityAmountLabel(item)")
+    expect(src).toContain("activityDestinationLabel(item)")
     expect(src).toContain("item.status")
     expect(src).toContain("item.createdAt")
   })
@@ -614,6 +622,20 @@ describe("Activity tab - recent withdrawal visibility", () => {
     const src = activityTabSrc()
     expect(src).toContain("Syncing...")
     expect(src).toContain("syncing")
+  })
+
+  it("Activity rows open a withdrawal detail card with copyable fields and Advanced metadata", () => {
+    const src = activityTabSrc()
+    expect(src).toContain("openActivityDetail(item)")
+    expect(src).toContain("Withdrawal details")
+    expect(src).toContain("Destination Address")
+    expect(src).toContain("Transaction Hash")
+    expect(src).toContain("View Explorer")
+    expect(src).toContain("Provider Reference")
+    expect(src).toContain("Withdrawal ID")
+    expect(src).toContain("Instant Send ID")
+    expect(src).toContain("Raw provider status")
+    expect(src).toContain("CopyableDetailValue")
   })
 })
 

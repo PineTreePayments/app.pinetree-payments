@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { ChainEnum, useDynamicContext, useDynamicEvents, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction, VersionedTransaction } from "@solana/web3.js"
 import { AlertTriangle, CheckCircle2, ChevronDown, Copy, Loader2, X } from "lucide-react"
@@ -82,7 +82,7 @@ import { runWithBoundedTimeout, type BoundedProviderCallSettlement } from "@/lib
 // Types
 // ---------------------------------------------------------------------------
 
-type WalletTab = "overview" | "balances" | "withdraw" | "activity"
+type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "address-book"
 type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
@@ -198,7 +198,45 @@ type PineTreeWalletSyncResponse = {
     status: string
     createdAt: string
     source?: "manual" | "saved_address" | "automatic_sweep"
+    amountLabel?: string | null
+    amountDecimal?: string | null
+    asset?: WithdrawalAsset | null
+    feeLabel?: string | null
+    destinationLabel?: string | null
+    destinationAddress?: string | null
+    provider?: string | null
+    network?: string | null
+    submittedAt?: string | null
+    completedAt?: string | null
+    txHash?: string | null
+    explorerUrl?: string | null
+    providerReference?: string | null
+    withdrawalId?: string | null
+    instantSendId?: string | null
+    rawProviderStatus?: string | null
   }>
+}
+
+type WalletActivityItem = PineTreeWalletSyncResponse["recentActivity"][number]
+
+type WalletActivityDetail = {
+  id: string
+  status: string
+  amount: string
+  fee: string
+  destinationLabel: string
+  destinationAddress: string | null
+  provider: string
+  network: string
+  rail: WithdrawalRail
+  submittedAt: string | null
+  completedAt: string | null
+  txHash: string | null
+  explorerUrl: string | null
+  providerReference: string | null
+  withdrawalId: string
+  instantSendId: string | null
+  rawProviderStatus: string | null
 }
 
 type PineTreeWalletProfile = {
@@ -505,6 +543,7 @@ const walletTabs: Array<{ id: WalletTab; label: string }> = [
   { id: "balances", label: "Balances" },
   { id: "withdraw", label: "Withdraw" },
   { id: "activity", label: "Activity" },
+  { id: "address-book", label: "Address Book" },
 ]
 
 const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
@@ -2292,6 +2331,7 @@ function WithdrawalFormShell({
   onReview,
   onSubmit,
   onOpenWallet,
+  onOpenAddressBook,
   onFinishSetup,
 }: {
   rail: WithdrawalRail
@@ -2326,6 +2366,7 @@ function WithdrawalFormShell({
   onReview: () => void
   onSubmit: (context?: WithdrawalSubmitContext) => void
   onOpenWallet?: () => void
+  onOpenAddressBook?: () => void
   onFinishSetup?: () => void
 }) {
   const [savedDestinations, setSavedDestinations] = useState<SavedWithdrawalDestination[]>([])
@@ -2672,9 +2713,20 @@ function WithdrawalFormShell({
       ) : null}
 
       {savedDestinations.length > 0 ? (
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">Saved destination</p>
-          <div className="relative">
+        <div className="space-y-2 rounded-[1.1rem] border border-blue-100 bg-blue-50/40 px-3 py-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">Choose Saved Destination</p>
+            {onOpenAddressBook ? (
+              <button
+                type="button"
+                onClick={onOpenAddressBook}
+                className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-white px-3 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+              >
+                Open Address Book
+              </button>
+            ) : null}
+          </div>
+          <div className="relative bg-white">
             <select
               aria-label="Saved destination"
               value={selectedDestinationId || ""}
@@ -2697,7 +2749,7 @@ function WithdrawalFormShell({
       ) : null}
 
       <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase text-gray-500">Send to</p>
+        <p className="text-xs font-semibold uppercase text-gray-500">Paste New Address</p>
         <input
           value={destinationAddress}
           onChange={(event) => onDestinationChange(event.target.value)}
@@ -2877,19 +2929,61 @@ function formatActivityTimestamp(value: string | null) {
   return `${datePart} at ${timePart}`
 }
 
+function activityAmountLabel(item: WalletActivityItem) {
+  if (item.amountLabel) return item.amountLabel
+  if (item.amountDecimal && item.asset) return `${item.amountDecimal} ${item.asset}`
+  return item.label.replace(/^Auto-swept\s+/i, "").replace(/^Sent\s+/i, "")
+}
+
+function activityDestinationLabel(item: WalletActivityItem) {
+  if (item.destinationLabel) return item.destinationLabel
+  if (item.destinationAddress) return shortAddress(item.destinationAddress)
+  if (item.source === "saved_address") return "Saved destination"
+  if (item.source === "automatic_sweep") return "Default destination"
+  return "Manual destination"
+}
+
+function providerDisplayLabel(value: string | null | undefined) {
+  const normalized = String(value || "").trim().toLowerCase()
+  if (!normalized) return "PineTree"
+  if (normalized === "speed") return "Speed"
+  if (normalized === "dynamic") return "Dynamic"
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
+function networkDisplayLabel(value: string | null | undefined, rail?: WithdrawalRail | null) {
+  const normalized = String(value || "").trim().toLowerCase()
+  if (normalized === "base") return "Base"
+  if (normalized === "solana") return "Solana"
+  if (normalized === "bitcoin" || normalized === "bitcoin_lightning") return "Bitcoin"
+  return rail ? railDisplayName(rail) : "PineTree Wallet"
+}
+
+function explorerUrlForActivity(detail: WalletActivityDetail) {
+  if (detail.explorerUrl) return detail.explorerUrl
+  if (!detail.txHash) return null
+  if (detail.rail === "base") return `https://basescan.org/tx/${encodeURIComponent(detail.txHash)}`
+  if (detail.rail === "solana") return `https://solscan.io/tx/${encodeURIComponent(detail.txHash)}`
+  if (detail.rail === "bitcoin") return `https://mempool.space/tx/${encodeURIComponent(detail.txHash)}`
+  return null
+}
+
 function WalletOverviewSummary({
   rows,
   sync,
   syncing,
   onSelectRail,
+  onViewAllActivity,
 }: {
   rows: WalletRailRow[]
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
   onSelectRail?: (rail: WithdrawalRail) => void
+  onViewAllActivity?: () => void
 }) {
   const visibleRows = rows
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
+  const recentItems = (sync?.recentActivity ?? []).slice(0, 3)
   return (
     <div className="space-y-4">
       <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_90%_8%,rgba(0,82,255,0.20),transparent_34%),linear-gradient(135deg,rgba(239,246,255,0.98),rgba(255,255,255,0.96))] px-5 py-5 shadow-[0_22px_50px_rgba(37,99,235,0.13)] sm:px-6 sm:py-6">
@@ -2945,6 +3039,39 @@ function WalletOverviewSummary({
           Manage rails in Providers
         </div>
       )}
+      <div className="overflow-hidden rounded-[1.35rem] border border-blue-200/60 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.07)]">
+        <div className="flex items-center justify-between gap-3 border-b border-blue-100/70 bg-blue-50/55 px-4 py-3 sm:px-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">RECENT ACTIVITY</p>
+          {recentItems.length > 0 ? (
+            <button
+              type="button"
+              onClick={onViewAllActivity}
+              className="shrink-0 text-xs font-semibold text-blue-700 transition hover:text-blue-900"
+            >
+              View All Activity
+            </button>
+          ) : null}
+        </div>
+        {recentItems.length === 0 ? (
+          <div className="px-4 py-5 sm:px-5">
+            <p className="text-sm text-gray-500">No wallet activity yet.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-blue-50">
+            {recentItems.map((item) => (
+              <div key={item.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3 sm:px-5">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-gray-950">{activityAmountLabel(item)}</p>
+                  <p className="mt-0.5 truncate text-xs text-gray-500">
+                    {activityDestinationLabel(item)} - {formatActivityTimestamp(item.createdAt) ?? item.createdAt}
+                  </p>
+                </div>
+                <ActivityStatusPill status={item.status} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -3098,8 +3225,8 @@ function BalanceRows({
 
   const dropdownOptions: AssetDropdownOption[] = balanceOptions.map((row) => ({
     key: row.key,
-    asset: row.asset,
-    railLabel: assetRailLabel(row.rail),
+    asset: `${row.asset} • ${assetRailLabel(row.rail)}`,
+    railLabel: "PineTree Wallet",
     balanceLabel: formatBalance(row.balance, row.asset),
     usdLabel: ["synced", "cached", "stale"].includes(row.status) && row.usdValue !== null ? `~ ${formatUsd(row.usdValue)}` : null,
   }))
@@ -3135,8 +3262,8 @@ function BalanceRows({
         <div className="rounded-[1.2rem] border border-blue-100/80 bg-white px-4 py-4 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-gray-950">{selectedAsset.asset}</p>
-              <p className="mt-1 text-xs text-gray-500">{assetRailLabel(selectedAsset.rail)}</p>
+              <p className="text-sm font-semibold text-gray-950">{selectedAsset.asset} • {assetRailLabel(selectedAsset.rail)}</p>
+              <p className="mt-1 text-xs text-gray-500">Wallet balance</p>
             </div>
             <p className="text-right text-sm font-semibold text-gray-950">
               {formatBalance(selectedAsset.balance, selectedAsset.asset)}
@@ -3233,11 +3360,141 @@ function ActivityStatusPill({ status }: { status: string }) {
 function ActivityTab({
   sync,
   syncing,
+  accessToken,
 }: {
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
+  accessToken: string | null
 }) {
   const items = sync?.recentActivity ?? []
+  const [selectedItem, setSelectedItem] = useState<WalletActivityItem | null>(null)
+  const [selectedDetail, setSelectedDetail] = useState<WalletActivityDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState("")
+  const [copiedDetailValue, setCopiedDetailValue] = useState("")
+
+  function detailFromItem(item: WalletActivityItem): WalletActivityDetail {
+    return {
+      id: item.id,
+      status: item.status,
+      amount: activityAmountLabel(item),
+      fee: item.feeLabel || "Network fee may apply",
+      destinationLabel: activityDestinationLabel(item),
+      destinationAddress: item.destinationAddress || null,
+      provider: providerDisplayLabel(item.provider || (item.rail === "bitcoin" ? "speed" : "dynamic")),
+      network: networkDisplayLabel(item.network, item.rail),
+      rail: item.rail,
+      submittedAt: item.submittedAt || item.createdAt,
+      completedAt: item.completedAt || null,
+      txHash: item.txHash || null,
+      explorerUrl: item.explorerUrl || null,
+      providerReference: item.providerReference || null,
+      withdrawalId: item.withdrawalId || item.id,
+      instantSendId: item.instantSendId || null,
+      rawProviderStatus: item.rawProviderStatus || null,
+    }
+  }
+
+  function detailFromWithdrawalRequest(item: WalletActivityItem, request: Record<string, unknown>): WalletActivityDetail {
+    const destinationSnapshot = request.destination_snapshot
+    const snapshot =
+      typeof destinationSnapshot === "object" && destinationSnapshot !== null && !Array.isArray(destinationSnapshot)
+        ? destinationSnapshot as Record<string, unknown>
+        : {}
+    const rail = String(request.rail || item.rail) as WithdrawalRail
+    const asset = String(request.asset || item.asset || "").trim()
+    const amount = String(request.amount_decimal || item.amountDecimal || "").trim()
+    const feeAmount = request.fee_amount_decimal != null ? String(request.fee_amount_decimal) : ""
+    const feeAsset = request.native_fee_asset != null ? String(request.native_fee_asset) : asset
+    const txHash = request.tx_hash != null ? String(request.tx_hash) : item.txHash || null
+    return {
+      ...detailFromItem(item),
+      status: mapActivityDetailStatus(String(request.status || item.status)),
+      amount: amount && asset ? `${amount} ${asset}` : activityAmountLabel(item),
+      fee: feeAmount ? `${feeAmount} ${feeAsset}` : item.feeLabel || "Network fee may apply",
+      destinationLabel: String(snapshot.label || item.destinationLabel || activityDestinationLabel(item)),
+      destinationAddress: request.destination_address != null ? String(request.destination_address) : item.destinationAddress || null,
+      provider: providerDisplayLabel(request.provider != null ? String(request.provider) : item.provider || "dynamic"),
+      network: networkDisplayLabel(request.chain_id != null ? String(request.chain_id) : null, rail),
+      rail,
+      submittedAt: request.submitted_at != null ? String(request.submitted_at) : item.submittedAt || String(request.created_at || item.createdAt),
+      completedAt:
+        request.confirmed_at != null
+          ? String(request.confirmed_at)
+          : item.completedAt || (String(request.status || "").toLowerCase() === "confirmed" ? String(request.updated_at || "") || null : null),
+      txHash,
+      providerReference: request.provider_reference != null ? String(request.provider_reference) : item.providerReference || null,
+      withdrawalId: String(request.id || item.id),
+      instantSendId: request.provider_request_id != null ? String(request.provider_request_id) : item.instantSendId || null,
+    }
+  }
+
+  function detailFromWalletOperation(item: WalletActivityItem, operation: Record<string, unknown>): WalletActivityDetail {
+    const network = operation.network != null ? String(operation.network) : item.network || null
+    const rail: WithdrawalRail = network === "base" ? "base" : network === "solana" ? "solana" : "bitcoin"
+    const amountBaseUnits = operation.amountBaseUnits != null ? String(operation.amountBaseUnits) : ""
+    const feeBaseUnits = operation.feeBaseUnits != null ? String(operation.feeBaseUnits) : ""
+    return {
+      ...detailFromItem(item),
+      status: String(operation.status || item.status),
+      amount: item.amountLabel || (amountBaseUnits ? `${amountBaseUnits} base units` : activityAmountLabel(item)),
+      fee: item.feeLabel || (feeBaseUnits ? `${feeBaseUnits} base units` : "Network fee may apply"),
+      destinationLabel: item.destinationLabel || (operation.destinationSummary != null ? String(operation.destinationSummary) : activityDestinationLabel(item)),
+      destinationAddress: item.destinationAddress || (operation.destinationSummary != null ? String(operation.destinationSummary) : null),
+      provider: providerDisplayLabel(operation.provider != null ? String(operation.provider) : item.provider || "speed"),
+      network: networkDisplayLabel(network, rail),
+      rail,
+      submittedAt: item.submittedAt || (operation.createdAt != null ? String(operation.createdAt) : item.createdAt),
+      completedAt: operation.completedAt != null ? String(operation.completedAt) : item.completedAt || null,
+      txHash: operation.txHash != null ? String(operation.txHash) : item.txHash || null,
+      explorerUrl: operation.explorerUrl != null ? String(operation.explorerUrl) : item.explorerUrl || null,
+      withdrawalId: String(operation.id || item.id),
+    }
+  }
+
+  async function copyDetailValue(value: string) {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedDetailValue(value)
+      window.setTimeout(() => setCopiedDetailValue(""), 1600)
+    } catch {
+      setCopiedDetailValue("")
+    }
+  }
+
+  async function openActivityDetail(item: WalletActivityItem) {
+    setSelectedItem(item)
+    setSelectedDetail(detailFromItem(item))
+    setDetailError("")
+    if (!accessToken) return
+    setDetailLoading(true)
+    try {
+      const url = item.rail === "bitcoin"
+        ? `/api/wallets/operations/${encodeURIComponent(item.id)}`
+        : `/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(item.id)}`
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        credentials: "include",
+        cache: "no-store",
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setDetailError(json?.error || "Could not load withdrawal details.")
+        return
+      }
+      if (item.rail === "bitcoin") {
+        setSelectedDetail(detailFromWalletOperation(item, json.operation || json))
+      } else {
+        setSelectedDetail(detailFromWithdrawalRequest(item, json.request || json))
+      }
+    } catch {
+      setDetailError("Could not load withdrawal details.")
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const explorerUrl = selectedDetail ? explorerUrlForActivity(selectedDetail) : null
   return (
     <div className="space-y-4">
       <div className="overflow-hidden rounded-[1.35rem] border border-blue-200/60 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.07)]">
@@ -3253,11 +3510,16 @@ function ActivityTab({
         ) : (
           <div className="divide-y divide-blue-50">
             {items.map((item) => (
-              <div key={item.id} className="px-4 py-3.5 sm:px-5">
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => void openActivityDetail(item)}
+                className="block w-full px-4 py-3.5 text-left transition hover:bg-blue-50/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 sm:px-5"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <p className="truncate text-sm font-semibold text-gray-900">{item.label}</p>
+                      <p className="truncate text-sm font-semibold text-gray-900">{activityAmountLabel(item)}</p>
                       {item.source === "automatic_sweep" ? (
                         <span className="inline-flex shrink-0 items-center rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
                           Automatic
@@ -3265,17 +3527,164 @@ function ActivityTab({
                       ) : null}
                     </div>
                     <p className="mt-0.5 text-xs text-gray-500">
-                      {railDisplayName(item.rail)} - {formatActivityTimestamp(item.createdAt) ?? item.createdAt}
+                      {activityDestinationLabel(item)} - {railDisplayName(item.rail)} - {formatActivityTimestamp(item.createdAt) ?? item.createdAt}
                     </p>
                   </div>
                   <ActivityStatusPill status={item.status} />
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </div>
+      {selectedItem && selectedDetail ? (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) {
+              setSelectedItem(null)
+              setSelectedDetail(null)
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wallet-withdrawal-detail-title"
+            className="flex max-h-[88dvh] w-full max-w-lg flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(15,23,42,0.30)] backdrop-blur-xl"
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5">
+              <div className="min-w-0">
+                <h3 id="wallet-withdrawal-detail-title" className="text-base font-semibold text-gray-950">Withdrawal details</h3>
+                {detailLoading ? (
+                  <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-500"><Loader2 size={12} className="animate-spin" /> Loading latest details...</p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedItem(null)
+                  setSelectedDetail(null)
+                }}
+                aria-label="Close withdrawal details"
+                className={modalCloseButtonClass}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5">
+              {detailError ? (
+                <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs font-semibold leading-5 text-blue-800">
+                  {detailError}
+                </div>
+              ) : null}
+              <dl className="divide-y divide-gray-100 text-sm">
+                <DetailRow label="Status"><ActivityStatusPill status={selectedDetail.status} /></DetailRow>
+                <DetailRow label="Amount">{selectedDetail.amount}</DetailRow>
+                <DetailRow label="Network Fee">{selectedDetail.fee}</DetailRow>
+                <DetailRow label="Destination Label">{selectedDetail.destinationLabel}</DetailRow>
+                <DetailRow label="Destination Address">
+                  {selectedDetail.destinationAddress ? (
+                    <CopyableDetailValue
+                      value={selectedDetail.destinationAddress}
+                      copied={copiedDetailValue === selectedDetail.destinationAddress}
+                      onCopy={() => void copyDetailValue(selectedDetail.destinationAddress || "")}
+                    />
+                  ) : (
+                    "Not available"
+                  )}
+                </DetailRow>
+                <DetailRow label="Provider">{selectedDetail.provider}</DetailRow>
+                <DetailRow label="Network">{selectedDetail.network}</DetailRow>
+                <DetailRow label="Submitted Time">{formatActivityTimestamp(selectedDetail.submittedAt) ?? selectedDetail.submittedAt ?? "Not available"}</DetailRow>
+                <DetailRow label="Completed Time">{formatActivityTimestamp(selectedDetail.completedAt) ?? selectedDetail.completedAt ?? "Not completed"}</DetailRow>
+                <DetailRow label="Transaction Hash">
+                  {selectedDetail.txHash ? (
+                    <CopyableDetailValue
+                      value={selectedDetail.txHash}
+                      copied={copiedDetailValue === selectedDetail.txHash}
+                      onCopy={() => void copyDetailValue(selectedDetail.txHash || "")}
+                    />
+                  ) : (
+                    "Not available"
+                  )}
+                </DetailRow>
+              </dl>
+              {explorerUrl ? (
+                <a
+                  href={explorerUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                >
+                  View Explorer
+                </a>
+              ) : null}
+              <details className="mt-4 rounded-xl border border-gray-200 bg-gray-50/80 px-3 py-2 text-xs text-gray-600">
+                <summary className="cursor-pointer font-semibold text-gray-700">Advanced</summary>
+                <dl className="mt-2 divide-y divide-gray-200">
+                  <DetailRow label="Provider Reference">{selectedDetail.providerReference || "Not available"}</DetailRow>
+                  <DetailRow label="Withdrawal ID">{selectedDetail.withdrawalId}</DetailRow>
+                  <DetailRow label="Instant Send ID">{selectedDetail.instantSendId || "Not available"}</DetailRow>
+                  {selectedDetail.rawProviderStatus ? (
+                    <DetailRow label="Raw provider status">{selectedDetail.rawProviderStatus}</DetailRow>
+                  ) : null}
+                </dl>
+              </details>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
+  )
+}
+
+function mapActivityDetailStatus(status: string) {
+  const normalized = status.toLowerCase()
+  if (normalized === "confirmed") return "COMPLETED"
+  if (normalized === "processing") return "PROCESSING"
+  if (normalized === "failed") return "FAILED"
+  if (normalized === "canceled") return "CANCELED"
+  return status
+}
+
+function DetailRow({
+  label,
+  children,
+}: {
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-3 py-2.5">
+      <dt className="text-xs font-semibold text-gray-500">{label}</dt>
+      <dd className="min-w-0 text-right font-semibold text-gray-950">{children}</dd>
+    </div>
+  )
+}
+
+function CopyableDetailValue({
+  value,
+  copied,
+  onCopy,
+}: {
+  value: string
+  copied: boolean
+  onCopy: () => void
+}) {
+  return (
+    <span className="flex min-w-0 items-center justify-end gap-2">
+      <span className="min-w-0 flex-1 truncate font-mono text-xs text-gray-800" title={value}>{value}</span>
+      <button
+        type="button"
+        onClick={onCopy}
+        aria-label="Copy value"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:text-blue-700"
+      >
+        {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+      </button>
+    </span>
   )
 }
 
@@ -3336,11 +3745,11 @@ function PineTreeWalletRuntime() {
   // --- UI state ---
   const [sdkTimedOut, setSdkTimedOut] = useState(false)
   const [walletOpen, setWalletOpen] = useState(false)
-  const [addressBookOpen, setAddressBookOpen] = useState(false)
   const [walletOpening, setWalletOpening] = useState(false)
   const [walletSetupOpeningAfterCreate, setWalletSetupOpeningAfterCreate] = useState(false)
   const [openWalletReconnectNeeded, setOpenWalletReconnectNeeded] = useState(false)
   const [activeTab, setActiveTab] = useState<WalletTab>("overview")
+  const directWalletOpenAttemptedRef = useRef(false)
   const [selectedWalletBalanceKey, setSelectedWalletBalanceKey] = useState("BASE_ETH")
   const [merchantId, setMerchantId] = useState<string | null>(null)
   const [merchantEmail, setMerchantEmail] = useState<string | null>(null)
@@ -7669,6 +8078,17 @@ function PineTreeWalletRuntime() {
     walletSetupOpeningAfterCreate,
   })
   const showProvisioningRetryOnly = walletSetupPrimaryState === "failed" && Boolean(user)
+  const showWalletSetupCard = walletSetupPrimaryState !== "ready" || !hasWallet
+
+  useEffect(() => {
+    if (directWalletOpenAttemptedRef.current) return
+    if (!hasWallet || walletSetupPrimaryState !== "ready" || walletOpen || walletOpening) return
+    directWalletOpenAttemptedRef.current = true
+    void handleOpenWallet()
+    // handleOpenWallet intentionally owns the existing hydration/sync path; this
+    // effect only removes the extra merchant click after readiness is known.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasWallet, walletOpen, walletOpening, walletSetupPrimaryState])
 
   useEffect(() => {
     if (lastWalletSetupPrimaryStateRef.current === walletSetupPrimaryState) return
@@ -8623,7 +9043,6 @@ function PineTreeWalletRuntime() {
     method: "onchain" | "lightning" | null
     destination_address: string
   }) {
-    setAddressBookOpen(false)
     resetWithdrawalDraft()
     setWithdrawalRail(destination.rail)
     setWithdrawalAsset(destination.asset)
@@ -9416,6 +9835,7 @@ function PineTreeWalletRuntime() {
           />
         </div>
       ) : null}
+      {showWalletSetupCard ? (
       <article className="max-w-2xl min-h-[15rem] flex flex-col rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:min-h-[16rem] sm:p-7">
         <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>
         {!walletProvisioningInProgress ? (
@@ -9665,17 +10085,6 @@ function PineTreeWalletRuntime() {
             >
               {coreSetupNeedsUserAuth ? "Continue setup" : walletSetupFailureRecoveryLabel(walletSetupFailureReason)}
             </button>
-          ) : hasWallet ? (
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={handleOpenWallet}
-                disabled={syncing || walletCreationInProgress || walletOpening}
-                className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-              >
-                {walletOpening ? "Opening PineTree Wallet..." : "Open PineTree Wallet"}
-              </button>
-            </div>
           ) : showProvisioningRetryOnly ? null : (
             <button
               type="button"
@@ -9688,53 +10097,6 @@ function PineTreeWalletRuntime() {
           )}
         </div>
       </article>
-
-      <article className="mt-5 max-w-2xl rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:p-7">
-        <h2 className="min-w-0 text-base font-semibold text-gray-950">Address Book</h2>
-        <p className="mt-2 max-w-md text-sm leading-6 text-gray-600">
-          Save trusted withdrawal destinations for faster payouts.
-        </p>
-        <div className="mt-5 flex justify-start">
-          <button
-            type="button"
-            onClick={() => setAddressBookOpen(true)}
-            className="h-10 rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
-          >
-            Open Address Book
-          </button>
-        </div>
-      </article>
-
-      {addressBookOpen ? (
-        <div
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.currentTarget === event.target) setAddressBookOpen(false)
-          }}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="address-book-modal-title"
-            className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(15,23,42,0.30)] backdrop-blur-xl"
-          >
-            <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-7 sm:py-6">
-              <h2 id="address-book-modal-title" className="min-w-0 flex-1 text-lg font-semibold text-gray-950">Address Book</h2>
-              <button
-                type="button"
-                onClick={() => setAddressBookOpen(false)}
-                aria-label="Close Address Book"
-                className={modalCloseButtonClass}
-              >
-                <X size={18} />
-              </button>
-            </header>
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
-              <AddressBookTab accessToken={accessTokenRef.current} onWithdraw={handleWithdrawShortcut} />
-            </div>
-          </section>
-        </div>
       ) : null}
 
       {process.env.NODE_ENV !== "production" ? (
@@ -9860,7 +10222,7 @@ function PineTreeWalletRuntime() {
             </header>
 
             <nav
-              className="grid shrink-0 grid-cols-4 gap-1.5 border-b border-gray-100 px-3 py-3 sm:px-6"
+              className="grid shrink-0 grid-cols-5 gap-1 border-b border-gray-100 px-2 py-3 sm:gap-1.5 sm:px-6"
               aria-label="PineTree Wallet sections"
             >
               {walletTabs.map((tab) => (
@@ -9868,7 +10230,7 @@ function PineTreeWalletRuntime() {
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`min-w-0 shrink-0 whitespace-nowrap rounded-xl px-2 py-2.5 text-[11px] font-semibold transition sm:px-4 sm:text-xs ${
+                  className={`min-w-0 shrink-0 whitespace-nowrap rounded-xl px-1 py-2.5 text-[10px] font-semibold transition sm:px-4 sm:text-xs ${
                     activeTab === tab.id
                       ? "bg-[#0052FF] text-white"
                       : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
@@ -9888,6 +10250,7 @@ function PineTreeWalletRuntime() {
                     sync={walletSync}
                     syncing={walletSyncing}
                     onSelectRail={handleOverviewRailSelect}
+                    onViewAllActivity={() => setActiveTab("activity")}
                   />
                 </>
               ) : null}
@@ -9990,12 +10353,17 @@ function PineTreeWalletRuntime() {
                   onReview={() => void handleReviewWithdrawal()}
                   onSubmit={(context) => void handleSubmitWithdrawal(context)}
                   onOpenWallet={handleWithdrawalReconnect}
+                  onOpenAddressBook={() => setActiveTab("address-book")}
                   onFinishSetup={handleFinishWalletSetup}
                 />
               ) : null}
 
               {activeTab === "activity" ? (
-                <ActivityTab sync={walletSync} syncing={walletSyncing} />
+                <ActivityTab sync={walletSync} syncing={walletSyncing} accessToken={accessTokenRef.current} />
+              ) : null}
+
+              {activeTab === "address-book" ? (
+                <AddressBookTab accessToken={accessTokenRef.current} onWithdraw={handleWithdrawShortcut} />
               ) : null}
 
             </div>

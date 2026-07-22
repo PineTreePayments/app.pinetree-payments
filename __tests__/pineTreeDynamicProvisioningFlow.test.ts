@@ -148,9 +148,11 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(openWalletFn).not.toContain("setShowDynamicUserProfile(true)")
   })
 
-  it("Ready state remains visible while Opening PineTree Wallet runs", () => {
+  it("Ready state opens the wallet workspace directly without a launcher button", () => {
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
-    expect(page).toContain('{walletOpening ? "Opening PineTree Wallet..." : "Open PineTree Wallet"}')
+    expect(page).toContain("directWalletOpenAttemptedRef")
+    expect(page).toContain("void handleOpenWallet()")
+    expect(page).toContain("showWalletSetupCard")
     expect(page).not.toContain('walletOpening ? "Opening" : walletSetupPrimaryState === "ready"')
   })
 
@@ -491,7 +493,7 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain('"Try Again"')
     const ctaBlock = page.slice(
       page.indexOf('<div className="mt-auto flex justify-start pt-8">'),
-      page.indexOf(") : hasWallet ? (")
+      page.indexOf(") : showProvisioningRetryOnly ? null : (")
     )
     expect(ctaBlock).not.toContain("Create PineTree Wallet")
   })
@@ -635,7 +637,8 @@ describe("PineTree Dynamic provisioning flow", () => {
     )
     expect(resolverBody).toContain('if (dynamicProfileReady || hasReadyBaseAndSolanaProfile) return "ready"')
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
-    expect(page).toContain("Open PineTree Wallet")
+    expect(page).toContain("directWalletOpenAttemptedRef")
+    expect(page).toContain("void handleOpenWallet()")
   })
 
   it("existing ready profile plus wrong Dynamic session shows older setup guidance", () => {
@@ -758,14 +761,15 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain("Safe diagnostics, visible only with ?walletDebug=1")
   })
 
-  it("ready profile still shows Base/Solana chips and Open PineTree Wallet", () => {
+  it("ready profile still has rail chips but opens the wallet workspace directly", () => {
     expect(page).toContain("<EnabledRailChips rows={walletRailRows} />")
-    const ctaBlock = page.slice(
-      page.indexOf('<div className="mt-auto flex justify-start pt-8">'),
-      page.indexOf(") : showProvisioningRetryOnly ? null : (")
-    )
-    expect(ctaBlock).toContain("hasWallet ? (")
-    expect(ctaBlock).toContain("Open PineTree Wallet")
+    expect(page).toContain("directWalletOpenAttemptedRef")
+    expect(page).toContain('if (!hasWallet || walletSetupPrimaryState !== "ready" || walletOpen || walletOpening) return')
+    expect(page).toContain("void handleOpenWallet()")
+    const setupCardStart = page.indexOf('{showWalletSetupCard ? (')
+    const setupCard = page.slice(setupCardStart, page.indexOf("</article>", setupCardStart))
+    expect(setupCard).not.toContain("hasWallet ? (")
+    expect(setupCard).not.toContain("Open PineTree Wallet")
   })
 
   it("a stale failed/timeout step self-corrects once the profile is ready, instead of only clearing on the false->true transition", () => {
@@ -819,17 +823,14 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
   })
 
-  it("ready profile with a matching Dynamic session shows Ready and Open PineTree Wallet only", () => {
+  it("ready profile with a matching Dynamic session opens Ready wallet workspace only", () => {
     expect(page).toContain('walletSetupPrimaryState === "ready" ? "Connected" :')
-    const ctaChain = page.slice(
-      page.indexOf('<div className="mt-auto flex justify-start pt-8">'),
-      page.indexOf(") : showProvisioningRetryOnly ? null : (")
-    )
-    // When primaryState is "ready", every earlier CTA branch (mismatch/unverified/
-    // reconnect) is false, so control falls through to hasWallet's plain Open button
-    // with no Repair button alongside it.
-    expect(ctaChain).toContain("Open PineTree Wallet")
-    expect(ctaChain).toContain("Open PineTree Wallet")
+    expect(page).toContain("directWalletOpenAttemptedRef")
+    expect(page).toContain('if (!hasWallet || walletSetupPrimaryState !== "ready" || walletOpen || walletOpening) return')
+    const setupCardStart = page.indexOf('{showWalletSetupCard ? (')
+    const setupCard = page.slice(setupCardStart, page.indexOf("</article>", setupCardStart))
+    expect(setupCard).not.toContain("Open PineTree Wallet")
+    expect(setupCard).not.toContain("Repair")
   })
 
   it("badge distinguishes Reconnect needed, Older setup found, Save needed, and Rail sync needed", () => {
