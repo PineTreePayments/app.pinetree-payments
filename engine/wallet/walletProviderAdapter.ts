@@ -73,6 +73,7 @@ export type WalletAdapterWriteInput = {
   destination: string
   note?: string
   idempotencyKey: string
+  correlationId?: string | null
 }
 
 export type WalletAdapterOperationResult = {

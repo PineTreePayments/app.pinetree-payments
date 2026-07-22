@@ -346,7 +346,7 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     )
     expect(reviewScreen).toContain("{reviewActionLabel}")
     expect(reviewScreen).toContain(">\n            Back\n          </button>")
-    expect(reviewScreen).toContain("onClick={onSubmit}")
+    expect(reviewScreen).toContain("onClick={() => onSubmit({ irreversibleAckChecked })}")
     expect(reviewScreen).toContain("onClick={onEdit}")
     expect(reviewScreen).toContain("flex-col gap-2 sm:flex-row")
     expect(reviewScreen).not.toContain("window.confirm")
@@ -582,11 +582,11 @@ describe("Activity tab - recent withdrawal visibility", () => {
     expect(walletPage).toContain('setWithdrawalScreen("submitted")')
     const pollFn = walletPage.slice(
       walletPage.indexOf("async function pollWithdrawalRequest"),
-      walletPage.indexOf("async function handleSubmitWithdrawal()")
+      walletPage.indexOf("async function handleSubmitWithdrawal")
     )
     expect(pollFn).toContain("void syncPineTreeWallet()")
     const submitFn = walletPage.slice(
-      walletPage.indexOf("async function handleSubmitWithdrawal()"),
+      walletPage.indexOf("async function handleSubmitWithdrawal"),
       walletPage.indexOf("// ---------------------------------------------------------------------------\n  // Early returns")
     )
     expect(submitFn).toContain("void syncPineTreeWallet()")

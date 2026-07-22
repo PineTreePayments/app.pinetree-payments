@@ -214,6 +214,45 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
+  it("logs a safe failed-send diagnostic and preserves provider 400 classification", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      error: { code: "unsupported_destination", message: "destination is not supported" },
+    }), { status: 400, headers: { "speed-request-id": "req_send_400" } }))
+    const { createConnectedAccountWithdrawal } = await import("@/providers/lightning/speedWalletManagement")
+    await expect(createConnectedAccountWithdrawal({
+      ...context,
+      amount: 1000,
+      currency: "SATS",
+      withdrawMethod: "onchain",
+      withdrawRequest: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+      idempotencyKey: "local-key",
+      correlationId: "5424ca86",
+    })).rejects.toMatchObject({
+      category: "validation",
+      httpStatus: 400,
+      providerCode: "unsupported_destination",
+      requestId: "req_send_400",
+      retryable: false,
+    })
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[pinetree-withdrawals] SPEED_SEND_FAILED",
+      expect.objectContaining({
+        correlationId: "5424ca86",
+        merchantId: "merchant-1",
+        providerAccountSuffix: "hant_1",
+        destinationMethod: "onchain",
+        amountSats: 1000,
+        httpStatus: 400,
+        speedRequestId: "req_send_400",
+        normalizedErrorCode: "unsupported_destination",
+        providerErrorCategory: "validation",
+        retryable: false,
+      })
+    )
+  })
+
   it("scopes connected-account payment creation with the same canonical header", async () => {
     const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
       id: "pay_1", status: "unpaid", payment_request: "lnbc1paymentrequest",

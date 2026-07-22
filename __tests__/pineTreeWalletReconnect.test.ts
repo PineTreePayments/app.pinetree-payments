@@ -39,17 +39,16 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain("signatureRequired")
     expect(page).toContain("runtimeUserPresent")
     expect(page).toContain("runtimeWalletCount")
-    expect(page).toContain('logProviderSheetOpenRequested("withdrawal_submit_before_signing", {')
+    expect(page).toContain('openDynamicEmailFallbackAuth("withdrawal_reconnect", {')
     expect(page).toContain("explicitUserAction: true")
-    expect(page).toContain("signatureRequired: true")
+    expect(page).toContain("signatureRequired: false")
     expect(page).toContain('if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
   })
 
   it("keeps Bitcoin out of Dynamic authorization recovery", () => {
-    expect(page).toContain("if (_debugRail === \"base\" || _debugRail === \"solana\") {")
+    expect(page).toContain('if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
     expect(page).toContain("setWithdrawalAuthorizationRecoveryOpen(true)")
     expect(page).toContain("const usesDynamicSigner = dynamicSignerWithdrawalRails.includes(withdrawalRail)")
-    expect(page).toContain("const _debugRailUsesDynamicSigner = Boolean(_debugRail && dynamicSignerWithdrawalRails.includes(_debugRail))")
     expect(page).not.toContain('selectedRail: "bitcoin"')
   })
 
@@ -70,7 +69,7 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(modal).toContain("{withdrawalReview ? (")
     expect(modal).toContain("Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.")
     expect(modal).toContain("Review the withdrawal details again before authorizing.")
-    expect(modal).toContain("void handleSubmitWithdrawal()")
+    expect(modal).toContain("void handleSubmitWithdrawal({ irreversibleAckChecked: true })")
     expect(modal).toContain("disabled={submittingWithdrawal}")
     expect(modal).not.toContain("disabled={submittingWithdrawal || !withdrawalReview}")
     expect(modal).toContain('{submittingWithdrawal ? "Trying again..." : "Try Again"}')
@@ -82,20 +81,18 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain("findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress, prepared.rail)")
   })
 
-  it("approve withdrawal refreshes Dynamic before signer lookup/signing", () => {
-    expect(page).toContain('await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
+  it("approve withdrawal prepares before signer lookup/signing", () => {
+    expect(page).toContain("wallet_withdrawal_prepare_requested")
     // Signs with walletsRef.current/primaryWalletRef.current, not the
-    // closed-over wallets/primaryWallet - the refresh above may have just
-    // hydrated the SDK's wallet list mid-execution of this same handler,
-    // which a plain closure variable never observes.
+    // closed-over wallets/primaryWallet.
     expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, walletsRef.current, primaryWalletRef.current, {")
   })
 
   it("blocks selected signer and asset rail mismatches before Dynamic approval opens", () => {
     expect(page).toContain('const withdrawalSignerRailMismatchMessage = "Selected wallet network does not match this withdrawal asset."')
     expect(page).toContain("assertPreparedWithdrawalSignerMatchesRail(prepared, wallet)")
-    expect(page).toContain('console.warn("[pinetree-withdrawals] selected_signer_asset_rail_mismatch"')
-    expect(page).toContain("setWithdrawalApprovalError(withdrawalSignerRailMismatchMessage)")
+    expect(page).toContain('console.warn("[pinetree-withdrawals] signer_rail_mismatch"')
+    expect(page).toContain("throw new Error(withdrawalSignerRailMismatchMessage)")
   })
 
   it("saved profiles with empty Dynamic runtime wallets trigger hydration", () => {
@@ -168,7 +165,6 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(sendFn).toContain("getDynamicWalletSearchList(wallets as unknown[], primaryWallet, prepared.rail)")
     expect(sendFn).toContain('if (!hasAnyDynamicWallet && prepared.rail === "solana") {')
     expect(sendFn).toContain('throw new Error("Reconnect your Solana wallet session before approving this withdrawal.")')
-    expect(page).toContain('_debugRail === "solana"')
     expect(page).toContain("solanaWithdrawalReconnectMessage")
   })
 
@@ -240,7 +236,7 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(dynamicSignerLookup).toContain("DYNAMIC_SOLANA_SIGN_TIMEOUT_MS = 45_000")
     expect(dynamicSignerLookup).toContain("Withdrawal approval is still pending. Check your wallet activity before trying again.")
     expect(page).toContain('if (raw === "Withdrawal approval is still pending. Check your wallet activity before trying again.") return raw')
-    const dynamicCatchStart = page.indexOf("} catch (error) {", page.indexOf("async function handleSubmitWithdrawal()"))
+    const dynamicCatchStart = page.indexOf("} catch (error) {", page.indexOf("async function handleSubmitWithdrawal"))
     const catchBlock = page.slice(
       dynamicCatchStart,
       page.indexOf("} finally {", dynamicCatchStart)
@@ -252,7 +248,7 @@ describe("PineTree Wallet reconnect flow", () => {
 
   it("successful Solana signing posts normalized tx_hash/provider_reference and refreshes activity", () => {
     const submitFn = page.slice(
-      page.indexOf("async function handleSubmitWithdrawal()"),
+      page.indexOf("async function handleSubmitWithdrawal"),
       page.indexOf("// ---------------------------------------------------------------------------\n  // Early returns")
     )
     expect(submitFn).toContain("tx_hash: dynamicSubmission.txHash || \"\"")

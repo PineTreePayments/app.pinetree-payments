@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { requireMerchantAuthFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
+import { getDeploymentBuildId } from "@/lib/deploymentInfo"
 
 /**
  * POST /api/debug/pinetree-wallet/setup-event
@@ -130,6 +131,7 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_withdrawal_review_screen_shown",
   "wallet_withdrawal_review_blocked",
   "wallet_withdrawal_approve_clicked",
+  "wallet_withdrawal_submit_entered",
   "wallet_withdrawal_submit_blocked",
   "wallet_withdrawal_submit_unhandled_error",
   "wallet_withdrawal_prepare_requested",
@@ -140,6 +142,14 @@ const WHITELISTED_EVENTS = new Set([
   "wallet_withdrawal_submit_returned",
   "wallet_withdrawal_speed_submit_requested",
   "wallet_withdrawal_speed_submit_returned",
+])
+
+const PRODUCTION_ALLOWED_WITHDRAWAL_EVENTS = new Set([
+  "wallet_withdrawal_approve_clicked",
+  "wallet_withdrawal_submit_entered",
+  "wallet_withdrawal_submit_blocked",
+  "wallet_withdrawal_submit_unhandled_error",
+  "wallet_withdrawal_prepare_requested",
 ])
 
 const MAX_DETAIL_KEYS = 12
@@ -183,7 +193,8 @@ function sanitizeDetails(input: unknown): Record<string, boolean | number | stri
   return safe
 }
 
-function debugEventsEnabled() {
+function debugEventsEnabled(event: string) {
+  if (PRODUCTION_ALLOWED_WITHDRAWAL_EVENTS.has(event)) return true
   return (
     process.env.NODE_ENV !== "production" ||
     process.env.NEXT_PUBLIC_WALLET_DEBUG_EVENTS === "true"
@@ -192,23 +203,27 @@ function debugEventsEnabled() {
 
 export async function POST(req: NextRequest) {
   try {
-    if (!debugEventsEnabled()) {
-      return NextResponse.json({ error: "Wallet setup diagnostics are disabled" }, { status: 404 })
-    }
-
-    const auth = await requireMerchantAuthFromRequest(req)
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
     const event = typeof body.event === "string" ? body.event : ""
+
+    if (!debugEventsEnabled(event)) {
+      return NextResponse.json({ error: "Wallet setup diagnostics are disabled" }, { status: 404 })
+    }
 
     if (!WHITELISTED_EVENTS.has(event)) {
       return NextResponse.json({ error: "Unknown wallet setup event" }, { status: 400 })
     }
 
+    const auth = await requireMerchantAuthFromRequest(req)
     const details = sanitizeDetails(body.details)
+    const buildId = getDeploymentBuildId()
 
     console.info("[pinetree-wallets] wallet_setup_client_event", {
       merchantId: auth.merchantId,
       event,
+      buildId,
+      correlationId: typeof details.correlationId === "string" ? details.correlationId : null,
+      routeStage: typeof details.stage === "string" ? details.stage : event,
       details,
     })
 

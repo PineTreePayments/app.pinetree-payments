@@ -53,6 +53,8 @@ export class SpeedWalletProviderError extends Error {
   readonly httpStatus: number | null
   readonly retryable: boolean
   readonly providerCode: string | null
+  readonly requestId: string | null
+  readonly outcomeUncertain: boolean
 
   constructor(
     message: string,
@@ -61,6 +63,8 @@ export class SpeedWalletProviderError extends Error {
       httpStatus?: number | null
       retryable: boolean
       providerCode?: string | null
+      requestId?: string | null
+      outcomeUncertain?: boolean
     }
   ) {
     super(message)
@@ -69,6 +73,8 @@ export class SpeedWalletProviderError extends Error {
     this.httpStatus = options.httpStatus ?? null
     this.retryable = options.retryable
     this.providerCode = options.providerCode ?? null
+    this.requestId = options.requestId ?? null
+    this.outcomeUncertain = Boolean(options.outcomeUncertain)
   }
 }
 
@@ -92,6 +98,7 @@ function providerError(error: unknown): never {
       category: "provider_unavailable",
       retryable: true,
       providerCode: error.timedOut ? "timeout" : "transport_error",
+      outcomeUncertain: error.outcomeUncertain,
     })
   }
   if (error instanceof SpeedApiError) {
@@ -109,6 +116,7 @@ function providerError(error: unknown): never {
       httpStatus: error.status,
       retryable: error.retryable,
       providerCode: error.providerCode,
+      requestId: error.requestId,
     })
   }
   throw new SpeedWalletProviderError("Speed returned an invalid wallet response.", {
@@ -116,6 +124,62 @@ function providerError(error: unknown): never {
     retryable: true,
     providerCode: "malformed_response",
   })
+}
+
+function speedProviderFailureDiagnostic(error: unknown): {
+  httpStatus: number | null
+  speedRequestId: string | null
+  normalizedErrorCode: string
+  category: SpeedWalletErrorCategory
+  retryable: boolean
+} {
+  if (error instanceof SpeedApiError) {
+    const category: SpeedWalletErrorCategory = error.status === 401
+      ? "authentication"
+      : error.status === 403
+        ? "permission"
+        : error.status === 429
+          ? "rate_limit"
+          : error.status >= 500
+            ? "provider_unavailable"
+            : "validation"
+    return {
+      httpStatus: error.status,
+      speedRequestId: error.requestId,
+      normalizedErrorCode: error.providerCode || `speed_http_${error.status}`,
+      category,
+      retryable: error.retryable,
+    }
+  }
+  if (error instanceof SpeedTransportError) {
+    return {
+      httpStatus: null,
+      speedRequestId: null,
+      normalizedErrorCode: error.timedOut ? "timeout" : "transport_error",
+      category: "provider_unavailable",
+      retryable: true,
+    }
+  }
+  if (error instanceof SpeedWalletProviderError) {
+    return {
+      httpStatus: error.httpStatus,
+      speedRequestId: error.requestId,
+      normalizedErrorCode: error.providerCode || error.category,
+      category: error.category,
+      retryable: error.retryable,
+    }
+  }
+  return {
+    httpStatus: null,
+    speedRequestId: null,
+    normalizedErrorCode: "malformed_response",
+    category: "provider_unavailable",
+    retryable: true,
+  }
+}
+
+function accountSuffix(accountId: string): string {
+  return String(accountId || "").trim().slice(-6)
 }
 
 function merchantContext(context: ConnectedAccountContext, operation: string) {
@@ -269,6 +333,7 @@ export type CreateConnectedWithdrawalInput = ConnectedAccountContext & {
   withdrawRequest: string
   note?: string
   idempotencyKey: string
+  correlationId?: string | null
 }
 
 export async function createConnectedAccountWithdrawal(
@@ -284,13 +349,47 @@ export async function createConnectedAccountWithdrawal(
       withdraw_request: input.withdrawRequest,
       ...(input.note?.trim() ? { note: input.note.trim().slice(0, 200) } : {}),
     }
+    console.info("[pinetree-withdrawals] SPEED_SEND_REQUESTED", {
+      correlationId: input.correlationId || null,
+      merchantId: input.merchantId,
+      providerAccountSuffix: accountSuffix(input.speedAccountId),
+      destinationMethod: input.withdrawMethod === "onchain" ? "onchain" : "lightning",
+      amountSats: input.amount,
+      currency: input.currency,
+      routeStage: "send_requested",
+    })
     const response = await speedRequest<SpeedInstantSendObject>("/send", {
       method: "POST",
       body: JSON.stringify(body),
       merchantContext: merchantContext(input, "instant_send.create"),
     })
-    return validateInstantSend(response)
+    const validated = validateInstantSend(response)
+    console.info("[pinetree-withdrawals] SPEED_SEND_RESPONSE", {
+      correlationId: input.correlationId || null,
+      merchantId: input.merchantId,
+      providerAccountSuffix: accountSuffix(input.speedAccountId),
+      destinationMethod: input.withdrawMethod === "onchain" ? "onchain" : "lightning",
+      amountSats: input.amount,
+      status: validated.status,
+      providerReferencePresent: Boolean(validated.id),
+      routeStage: "send_response",
+    })
+    return validated
   } catch (error) {
+    const diagnostic = speedProviderFailureDiagnostic(error)
+    console.warn("[pinetree-withdrawals] SPEED_SEND_FAILED", {
+      correlationId: input.correlationId || null,
+      merchantId: input.merchantId,
+      providerAccountSuffix: accountSuffix(input.speedAccountId),
+      destinationMethod: input.withdrawMethod === "onchain" ? "onchain" : "lightning",
+      amountSats: input.amount,
+      httpStatus: diagnostic.httpStatus,
+      speedRequestId: diagnostic.speedRequestId,
+      normalizedErrorCode: diagnostic.normalizedErrorCode,
+      providerErrorCategory: diagnostic.category,
+      retryable: diagnostic.retryable,
+      routeStage: "send_failed",
+    })
     providerError(error)
   }
 }

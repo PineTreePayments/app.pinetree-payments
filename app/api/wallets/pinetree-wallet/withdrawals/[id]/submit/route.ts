@@ -3,18 +3,20 @@ import { completeDynamicWalletWithdrawal } from "@/engine/withdrawals/walletWith
 import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import { scheduleWalletWithdrawalMaintenance } from "@/lib/api/walletWithdrawalMaintenance"
+import { getDeploymentBuildId } from "@/lib/deploymentInfo"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const correlationId = req.headers?.get("x-pinetree-withdrawal-correlation") || null
+  const buildId = getDeploymentBuildId()
   const { id } = await params
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const body = (await req.json()) as Record<string, unknown>
     console.info("[pinetree-withdrawals] SUBMIT_RECEIVED", {
-      correlationId, merchantId, requestId: id,
+      correlationId, merchantId, requestId: id, buildId, routeStage: "submit_received",
       hasTxHash: Boolean(body.tx_hash || body.txHash),
       hasSignedPsbt: Boolean(body.signed_psbt || body.signedPsbt),
     })
@@ -32,7 +34,7 @@ export async function POST(
           : null,
     })
     console.info("[pinetree-withdrawals] SUBMIT_RETURNED", {
-      correlationId, merchantId, requestId: id, merchantStatus: result.merchantStatus,
+      correlationId, merchantId, requestId: id, buildId, routeStage: "submit_returned", merchantStatus: result.merchantStatus,
     })
     scheduleWalletWithdrawalMaintenance("wallet-withdrawal.submit")
     return NextResponse.json(result)
@@ -40,7 +42,7 @@ export async function POST(
     const presented = presentWithdrawalError({
       rawMessage: error instanceof Error ? error.message : "Failed to submit wallet approval",
     })
-    console.warn("[pinetree-withdrawals] SUBMIT_FAILED", { correlationId, requestId: id, code: presented.code })
+    console.warn("[pinetree-withdrawals] SUBMIT_FAILED", { correlationId, requestId: id, buildId, routeStage: "submit_failed", code: presented.code })
     return NextResponse.json(
       { error: presented.message, error_code: presented.code },
       { status: getRouteErrorStatus(error) }

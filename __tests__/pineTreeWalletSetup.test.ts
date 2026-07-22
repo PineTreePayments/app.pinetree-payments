@@ -283,8 +283,8 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("withdrawal signing still requires restored Dynamic signer access", () => {
-    expect(page).toContain('refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
-    expect(page).toContain('if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet)')
+    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, walletsRef.current, primaryWalletRef.current, {")
+    expect(page).toContain("findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress, prepared.rail)")
     expect(page).toContain("pineTreeSignerReconnectMessage")
     expect(page).toContain("Reconnect PineTree Wallet to verify secure signing access.")
   })
@@ -1666,7 +1666,7 @@ describe("PineTree embedded wallet setup", () => {
 
   it("routes non-Dynamic wallet sends to a signer-unavailable failure instead of manual review", () => {
     expect(page).toContain("Submit withdrawal request")
-    expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
+    expect(page).toContain("if (review.review.approvalMethod === \"dynamic_browser\")")
     expect(page).toContain("This withdrawal cannot be signed in this browser session.")
     expect(page).not.toContain("action: \"submit\"")
     expect(page).not.toContain("withdrawal_id: withdrawalId")
@@ -1792,7 +1792,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(reviewButton).not.toContain("Reconnect PineTree Wallet")
   })
 
-  it("defers browser signer resolution until a withdrawal is being reviewed or submitted", () => {
+  it("defers browser signer resolution until review or after prepare returns the authoritative source", () => {
     const diagnostics = page.slice(
       page.indexOf("const withdrawalDiagnostics = useMemo"),
       page.indexOf("const lightningPayoutSummary = useMemo")
@@ -1802,7 +1802,7 @@ describe("PineTree embedded wallet setup", () => {
       page.indexOf("function handleMaxWithdrawalAmount()")
     )
     const submitHandler = page.slice(
-      page.indexOf("async function handleSubmitWithdrawal()"),
+      page.indexOf("async function handleSubmitWithdrawal"),
       page.indexOf("// ---------------------------------------------------------------------------\n  // Early returns")
     )
 
@@ -1811,13 +1811,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(reviewHandler.indexOf("if (!destination)")).toBeLessThan(reviewHandler.indexOf("findDynamicApprovalWalletForSource"))
     expect(reviewHandler.indexOf("if (!amount)")).toBeLessThan(reviewHandler.indexOf("findDynamicApprovalWalletForSource"))
     expect(reviewHandler.indexOf("No available balance for this asset.")).toBeLessThan(reviewHandler.indexOf("findDynamicApprovalWalletForSource"))
-    expect(submitHandler).toContain('await refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
-    // Reads via walletsRef/primaryWalletRef, not the closed-over
-    // wallets/primaryWallet bindings - refreshDynamicWalletRuntime above may
-    // have just hydrated the SDK's wallet list mid-execution of this same
-    // handler, which a plain closure variable never observes (see the
-    // walletsRef declaration comment near useUserWallets()).
-    expect(submitHandler).toContain("findDynamicApprovalWalletForSource(walletsRef.current, primaryWalletRef.current, _debugRail, _debugSourceAddress)")
+    const prepareIndex = submitHandler.indexOf("wallet_withdrawal_prepare_requested")
+    const signerIndex = submitHandler.indexOf("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse")
+    expect(prepareIndex).toBeGreaterThan(-1)
+    expect(signerIndex).toBeGreaterThan(prepareIndex)
+    expect(submitHandler).not.toContain('refreshDynamicWalletRuntime("withdrawal_submit_before_signing"')
+    expect(submitHandler).not.toContain("findDynamicApprovalWalletForSource(walletsRef.current, primaryWalletRef.current")
   })
 
   // 2026-07-21 production incident: a Solana review POST returned 200
@@ -1827,7 +1826,7 @@ describe("PineTree embedded wallet setup", () => {
   // or returned silently in the browser before any fetch ever fired.
   it("never silently returns or throws uncaught before prepare/submit - every blocking branch is visible and diagnosed", () => {
     const submitHandler = page.slice(
-      page.indexOf("async function handleSubmitWithdrawal()"),
+      page.indexOf("async function handleSubmitWithdrawal"),
       page.indexOf("// ---------------------------------------------------------------------------\n  // Early returns")
     )
     const reviewHandler = page.slice(
@@ -1838,23 +1837,24 @@ describe("PineTree embedded wallet setup", () => {
     // The top-of-function token/request-id guard used to be a bare `return`
     // - completely silent, no error, no log, no network request ever sent.
     expect(submitHandler).not.toMatch(/if \(!token \|\| !withdrawalId\) return\b/)
-    expect(submitHandler).toContain('emitWalletSetupDebugEvent("wallet_withdrawal_submit_blocked", { correlationId, reason })')
-    expect(submitHandler).toContain("CLIENT_ACCESS_TOKEN_MISSING")
-    expect(submitHandler).toContain("CLIENT_REQUEST_ID_MISSING")
-
-    // The pre-flight Dynamic signer lookup (getWithdrawalSourceAddress,
-    // findDynamicApprovalWalletForSource, assertDynamicWalletChain) used to
-    // run entirely outside any try/catch, between the bitcoin-rail branch
-    // and the fetch calls - an uncaught throw there left the merchant on an
-    // unresponsive review screen with zero visible feedback and zero server
-    // requests. It must now be inside the same try block whose catch clears
-    // loading state and shows a visible error.
-    const preflightIndex = submitHandler.indexOf("const _debugRail = withdrawalReview?.review.rail")
-    const tryBeforePreflight = submitHandler.lastIndexOf("try {", preflightIndex)
-    const catchAfterPreflight = submitHandler.indexOf("} catch (error) {", preflightIndex)
-    expect(tryBeforePreflight).toBeGreaterThan(-1)
-    expect(tryBeforePreflight).toBeLessThan(preflightIndex)
-    expect(catchAfterPreflight).toBeGreaterThan(preflightIndex)
+    expect(submitHandler).toContain('const emitSubmitBlocked = (reason: string) => {')
+    for (const reason of [
+      "CHECKBOX_NOT_CONFIRMED",
+      "SUBMIT_ALREADY_RUNNING",
+      "TOKEN_MISSING",
+      "REVIEW_MISSING",
+      "REQUEST_ID_MISSING",
+      "APPROVAL_METHOD_INVALID",
+      "RAIL_MISMATCH",
+      "ASSET_MISMATCH",
+    ]) {
+      expect(submitHandler).toContain(reason)
+    }
+    expect(submitHandler).toContain("wallet_withdrawal_submit_entered")
+    expect(submitHandler).toContain("wallet_withdrawal_prepare_requested")
+    expect(submitHandler.indexOf("wallet_withdrawal_prepare_requested")).toBeLessThan(
+      submitHandler.indexOf("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse")
+    )
     expect(submitHandler).toContain('emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", { correlationId, stage: "dynamic_submit" })')
 
     // handleReviewWithdrawal's own Dynamic-signer pre-check + fetch must
@@ -1879,7 +1879,8 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("the review screen explains why the primary action button is disabled instead of leaving it silently greyed out", () => {
-    expect(page).toContain("Check the box above to enable")
+    expect(page).toContain("Confirm the acknowledgment above to enable withdrawal approval.")
+    expect(page).toContain("Ready to approve withdrawal.")
     expect(page).toContain("This withdrawal can&apos;t be approved right now")
   })
 
@@ -1981,7 +1982,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("prepared.payload.transactionBase64")
     expect(dynamicSignerLookup).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
     expect(page).toContain("const dynamicSubmission = await sendDynamicPreparedWithdrawal")
-    expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
+    expect(page).toContain("if (review.review.approvalMethod === \"dynamic_browser\")")
     expect(page).toContain("Unable to sign this withdrawal. Please try again.")
     expect(page).not.toContain("action: \"submit\"")
   })
@@ -2429,10 +2430,10 @@ describe("PineTree embedded wallet setup", () => {
 
   it("clicking Approve calls the prepare route before signing", () => {
     // handleSubmitWithdrawal routes to prepare first when approvalMethod is dynamic_browser
-    expect(page).toContain("if (withdrawalReview?.review.approvalMethod === \"dynamic_browser\")")
+    expect(page).toContain("if (review.review.approvalMethod === \"dynamic_browser\")")
     expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare")
     // prepare is fetched with POST before sendDynamicPreparedWithdrawal is called
-    const submitFn = page.slice(page.indexOf("async function handleSubmitWithdrawal()"), page.indexOf("// ---------------------------------------------------------------------------\n  // Early returns"))
+    const submitFn = page.slice(page.indexOf("async function handleSubmitWithdrawal"), page.indexOf("// ---------------------------------------------------------------------------\n  // Early returns"))
     const prepareIndex = submitFn.indexOf("/prepare")
     const signingIndex = submitFn.indexOf("sendDynamicPreparedWithdrawal")
     expect(prepareIndex).toBeGreaterThan(-1)

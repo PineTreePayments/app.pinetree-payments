@@ -56,6 +56,7 @@ export type WalletApiError = {
     message: string
     retryable: boolean
   }
+  correlationId?: string
 }
 
 export type WalletApiResponse<T> = WalletApiSuccess<T> | WalletApiError

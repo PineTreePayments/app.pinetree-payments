@@ -309,6 +309,7 @@ export type CreateWalletWithdrawalOrPayoutInput = {
   destination: string
   note?: string
   idempotencyKey: string
+  correlationId?: string | null
 }
 
 function validateWriteInput(input: CreateWalletWithdrawalOrPayoutInput): {
@@ -454,6 +455,12 @@ async function createWalletWrite(
     let balances
     try {
       balances = await resolution.adapter.getBalances(resolution.context)
+      console.info("[pinetree-withdrawals] SPEED_BALANCE_CONFIRMED", {
+        correlationId: input.correlationId || null,
+        merchantId,
+        providerAccountSuffix: resolution.context.providerAccountId.slice(-6),
+        routeStage: "balance_confirmed",
+      })
     } catch (error) {
       await updateWalletOperation(merchantId, operation.id, {
         status: "FAILED",
@@ -474,6 +481,13 @@ async function createWalletWrite(
       })
       throw new WalletApiRouteError("INSUFFICIENT_BALANCE", "The available balance is insufficient for this withdrawal.")
     }
+    console.info("[pinetree-withdrawals] SPEED_AMOUNT_VALIDATED", {
+      correlationId: input.correlationId || null,
+      merchantId,
+      providerAccountSuffix: resolution.context.providerAccountId.slice(-6),
+      amountSats: input.amountBaseUnits.toString(),
+      routeStage: "amount_validated",
+    })
   }
 
   const call = adapterCall(resolution)
@@ -495,6 +509,16 @@ async function createWalletWrite(
       resolution.context.providerAccountId,
       result
     )
+    if (operationType === "WITHDRAWAL" && resolution.provider === "speed") {
+      console.info("[pinetree-withdrawals] SPEED_OPERATION_PERSISTED", {
+        correlationId: input.correlationId || null,
+        merchantId,
+        providerAccountSuffix: resolution.context.providerAccountId.slice(-6),
+        operationId: operation.id,
+        status: reconciled.status,
+        routeStage: "operation_persisted",
+      })
+    }
     return { operation: toPineTreeWalletOperation(reconciled), capabilityAvailable: true }
   } catch (error) {
     if (error instanceof WalletApiRouteError && !error.retryable) {
@@ -519,6 +543,7 @@ export async function createWalletWithdrawal(
     destination: validated.destination,
     note: input.note,
     idempotencyKey: input.idempotencyKey,
+    correlationId: input.correlationId,
   }
   const resolution = await resolveMerchantWalletProvider(merchantId)
   resolution.adapter.validateWithdrawal?.(adapterInput)

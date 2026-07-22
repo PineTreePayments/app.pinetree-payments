@@ -72,7 +72,9 @@ function translateSpeedWalletError(error: unknown): never {
     // code when the message clearly indicates destination/amount/balance,
     // rather than always surfacing the generic fallback copy.
     let code = error.providerCode === "timeout"
-      ? "WALLET_PROVIDER_TIMEOUT"
+      ? error.outcomeUncertain
+        ? "STATUS_UNKNOWN"
+        : "WALLET_PROVIDER_TIMEOUT"
       : codeByCategory[error.category] ?? "WALLET_PROVIDER_UNAVAILABLE"
     if (error.category === "validation") {
       if (/insufficient|balance/i.test(error.message)) code = "INSUFFICIENT_BALANCE"
@@ -316,6 +318,7 @@ export const speedWalletAdapter: WalletProviderAdapter = {
         withdrawRequest: classified.normalized,
         note: input.note,
         idempotencyKey: input.idempotencyKey,
+        correlationId: input.correlationId,
       })
       return toAdapterOperationResult(payment)
     })

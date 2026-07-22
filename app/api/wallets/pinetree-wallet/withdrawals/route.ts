@@ -8,9 +8,11 @@ import { updateWalletWithdrawalRequestCanonicalFields } from "@/database/walletW
 import { submitCanonicalWithdrawal } from "@/engine/withdrawals/canonicalWithdrawal"
 import { normalizeWithdrawalRail, normalizeWithdrawalAsset } from "@/engine/withdrawals/walletWithdrawals"
 import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
+import { getDeploymentBuildId } from "@/lib/deploymentInfo"
 
 export async function POST(req: NextRequest) {
   const correlationId = req.headers?.get("x-pinetree-withdrawal-correlation") || null
+  const buildId = getDeploymentBuildId()
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     const body = (await req.json()) as Record<string, unknown>
@@ -18,6 +20,8 @@ export async function POST(req: NextRequest) {
     console.info("[pinetree-withdrawals] REVIEW_RECEIVED", {
       correlationId,
       merchantId,
+      buildId,
+      routeStage: "review_received",
       action,
       rail: body.rail ?? null,
       asset: body.asset ?? null,
@@ -68,6 +72,7 @@ export async function POST(req: NextRequest) {
       if (canonical.kind === "review_required") {
         console.info("[pinetree-withdrawals] REVIEW_RETURNED", {
           correlationId, merchantId, requestId: canonical.request.id,
+          buildId, routeStage: "review_returned",
           approvalMethod: canonical.review.approvalMethod ?? null, canSubmit: canonical.canSubmit,
         })
         return NextResponse.json({
@@ -95,6 +100,7 @@ export async function POST(req: NextRequest) {
 
     console.info("[pinetree-withdrawals] REVIEW_RETURNED", {
       correlationId, merchantId, requestId: request.id,
+      buildId, routeStage: "review_returned",
       approvalMethod: result.review.approvalMethod ?? null, canSubmit: result.canSubmit,
     })
     return NextResponse.json({ ...result, request })
@@ -102,7 +108,7 @@ export async function POST(req: NextRequest) {
     const presented = presentWithdrawalError({
       rawMessage: error instanceof Error ? error.message : "Failed to prepare withdrawal review",
     })
-    console.warn("[pinetree-withdrawals] REVIEW_FAILED", { correlationId, code: presented.code })
+    console.warn("[pinetree-withdrawals] REVIEW_FAILED", { correlationId, buildId, routeStage: "review_failed", code: presented.code })
     return NextResponse.json(
       { error: presented.message, error_code: presented.code },
       { status: getRouteErrorStatus(error) }

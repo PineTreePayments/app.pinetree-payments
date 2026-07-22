@@ -49,9 +49,12 @@ describe("Dynamic embedded wallet hydration", () => {
     expect(page).toContain('refreshDynamicWalletRuntime("withdrawal_reconnect_before_lookup"')
   })
 
-  it("Approve withdrawal is blocked when Dynamic runtime has no matching signer", () => {
-    expect(page).toContain('refreshDynamicWalletRuntime("withdrawal_submit_before_signing", { requireApprovalWallet: true })')
-    expect(page).toContain('if (_debugApprovalMethod === "dynamic_browser" && !_debugMatchingWallet)')
+  it("Approve withdrawal prepares before matching the Dynamic runtime signer", () => {
+    expect(page).toContain("wallet_withdrawal_prepare_requested")
+    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, walletsRef.current, primaryWalletRef.current, {")
+    expect(page.indexOf("wallet_withdrawal_prepare_requested")).toBeLessThan(
+      page.indexOf("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse")
+    )
     expect(page).toContain("Reconnect PineTree Wallet to verify secure signing access.")
     expect(page).toContain('setWithdrawalScreen("failed")')
   })

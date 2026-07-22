@@ -21,6 +21,12 @@ export function walletErrorResponse(error: unknown): NextResponse {
   })
 }
 
+function attachCorrelationId<T extends { ok: boolean }>(body: T, correlationId?: string | null): T & { correlationId?: string } {
+  const safeCorrelationId = String(correlationId || "").trim()
+  if (!safeCorrelationId) return body
+  return { ...body, correlationId: safeCorrelationId.slice(0, 40) }
+}
+
 /**
  * Authenticates the request, resolves the PineTree merchant id, and runs
  * `handler(merchantId)`, wrapping the result/error in the shared
@@ -31,13 +37,14 @@ export function walletErrorResponse(error: unknown): NextResponse {
  */
 export async function withWalletMerchant<T>(
   req: NextRequest,
-  handler: (merchantId: string) => Promise<T>
+  handler: (merchantId: string) => Promise<T>,
+  options: { correlationId?: string | null } = {}
 ): Promise<NextResponse> {
   let merchantId: string
   try {
     merchantId = await requireMerchantIdFromRequest(req)
   } catch {
-    return NextResponse.json(walletError("UNAUTHORIZED", "Unauthorized."), {
+    return NextResponse.json(attachCorrelationId(walletError("UNAUTHORIZED", "Unauthorized."), options.correlationId), {
       status: 401,
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     })
@@ -45,11 +52,21 @@ export async function withWalletMerchant<T>(
 
   try {
     const data = await handler(merchantId)
-    return NextResponse.json(walletOk(data), {
+    return NextResponse.json(attachCorrelationId(walletOk(data), options.correlationId), {
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     })
   } catch (error) {
-    return walletErrorResponse(error)
+    if (error instanceof WalletApiRouteError) {
+      return NextResponse.json(attachCorrelationId(walletError(error.code, error.message, error.retryable), options.correlationId), {
+        status: walletErrorHttpStatus(error.code),
+        headers: { "Cache-Control": "private, no-store, max-age=0" },
+      })
+    }
+    console.error("[wallet-api] unhandled error", error instanceof Error ? error.message : error)
+    return NextResponse.json(attachCorrelationId(walletError("INTERNAL_ERROR", "Something went wrong. Please try again."), options.correlationId), {
+      status: 500,
+      headers: { "Cache-Control": "private, no-store, max-age=0" },
+    })
   }
 }
 

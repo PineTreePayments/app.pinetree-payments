@@ -153,4 +153,19 @@ describe("Speed wallet adapter normalization", () => {
       expect.objectContaining({ withdrawMethod: "lightning", withdrawRequest: "merchant@speed.app" })
     )
   })
+
+  it("maps an uncertain send timeout to STATUS_UNKNOWN", async () => {
+    const { SpeedWalletProviderError } = await import("@/providers/lightning/speedWalletManagement")
+    mocks.withdrawal.mockRejectedValue(new SpeedWalletProviderError("Speed API request timed out.", {
+      category: "provider_unavailable",
+      retryable: true,
+      providerCode: "timeout",
+      outcomeUncertain: true,
+    }))
+    const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
+    await expect(speedWalletAdapter.createWithdrawal!(
+      { merchantId: "m1", providerAccountId: "acct_1" },
+      { asset: "SATS", amountBaseUnits: BigInt(1000), destination: "merchant@speed.app", idempotencyKey: "key" }
+    )).rejects.toMatchObject({ code: "STATUS_UNKNOWN", retryable: true })
+  })
 })

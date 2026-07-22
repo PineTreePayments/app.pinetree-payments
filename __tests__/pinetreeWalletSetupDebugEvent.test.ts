@@ -255,6 +255,50 @@ describe("POST /api/debug/pinetree-wallet/setup-event", () => {
     expect(response.status).toBe(200)
   })
 
+  it("accepts withdrawal-stage events in production without the broad debug flag", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("NEXT_PUBLIC_WALLET_DEBUG_EVENTS", "false")
+    vi.stubEnv("VERCEL_GIT_COMMIT_SHA", "4ed1cbb123456789")
+
+    const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
+    const response = await POST(request({
+      event: "wallet_withdrawal_submit_entered",
+      details: {
+        correlationId: "5424ca86",
+        stage: "submit_entered",
+        rail: "solana",
+        asset: "SOL",
+        requestId: "fafdc826-329e-4daa-8d9c-a443f31ce0b7",
+        reason: "TOKEN_MISSING",
+        buildId: "4ed1cbb12345",
+        walletAddress: "0x1234567890abcdef1234567890abcdef12345678",
+      },
+    }))
+
+    expect(response.status).toBe(200)
+    expect(console.info).toHaveBeenCalledWith(
+      "[pinetree-wallets] wallet_setup_client_event",
+      expect.objectContaining({
+        merchantId,
+        event: "wallet_withdrawal_submit_entered",
+        buildId: "4ed1cbb12345",
+        correlationId: "5424ca86",
+        routeStage: "submit_entered",
+        details: expect.objectContaining({
+          correlationId: "5424ca86",
+          stage: "submit_entered",
+          rail: "solana",
+          asset: "SOL",
+          requestId: "fafdc826-329e-4daa-8d9c-a443f31ce0b7",
+          reason: "TOKEN_MISSING",
+          buildId: "4ed1cbb12345",
+        }),
+      })
+    )
+    const loggedDetails = (console.info as ReturnType<typeof vi.fn>).mock.calls[0][1].details
+    expect(loggedDetails).not.toHaveProperty("walletAddress")
+  })
+
   it("never returns secrets or the raw request body back to the caller", async () => {
     const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
     const response = await POST(request({
