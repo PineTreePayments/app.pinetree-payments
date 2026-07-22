@@ -222,7 +222,7 @@ describe("PineTree Wallet reconnect flow", () => {
       dynamicSignerLookup.indexOf("export async function signDynamicSolanaTransactionWithActiveAccount("),
       dynamicSignerLookup.length
     )
-    const callIndex = signFn.indexOf("const txResult = await withTimeout(")
+    const callIndex = signFn.indexOf("txResult = await withTimeout(")
     const logIndex = signFn.indexOf('console.info("[pinetree-withdrawals] dynamic_solana_sign_result"')
     expect(callIndex).toBeGreaterThan(-1)
     expect(logIndex).toBeGreaterThan(callIndex)

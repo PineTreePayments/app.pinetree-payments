@@ -1876,8 +1876,10 @@ describe("PineTree embedded wallet setup", () => {
     expect(submitHandler).toContain("wallet_withdrawal_prepare_returned")
     expect(submitHandler).toContain("wallet_withdrawal_signature_started")
     expect(submitHandler).toContain("wallet_withdrawal_signature_returned")
+    expect(page).toContain("DYNAMIC_SIGNATURE_RECEIVED")
     expect(submitHandler).toContain("wallet_withdrawal_submit_requested")
     expect(submitHandler).toContain("wallet_withdrawal_submit_returned")
+    expect(submitHandler).toContain("DYNAMIC_SUBMIT_COMPLETED")
     expect(submitHandler).toContain("wallet_withdrawal_speed_submit_requested")
     expect(submitHandler).toContain("wallet_withdrawal_speed_submit_returned")
   })
@@ -2620,9 +2622,9 @@ describe("PineTree embedded wallet setup", () => {
     // signAndSendTransaction on TurnkeySolanaWalletConnector calls this.walletUiUtils, so
     // 'this' must remain the connector object — inline ?. calls guarantee that.
     expect(page).toContain("signDynamicSolanaTransactionWithActiveAccount(")
-    expect(dynamicSignerLookup).toContain("capability.signAndSendTransaction(transaction, signOptions)")
+    expect(dynamicSignerLookup).toContain("capability.signAndSendTransaction(transaction)")
     expect(dynamicSignerLookup).toContain("resolveDynamicSolanaSignAndSendCapability(wallet)")
-    expect(dynamicSignerLookup).toContain("const txResult = await withTimeout(")
+    expect(dynamicSignerLookup).toContain("txResult = await withTimeout(")
     expect(page).not.toContain("const signAndSendTransaction = wallet.signAndSendTransaction")
   })
 

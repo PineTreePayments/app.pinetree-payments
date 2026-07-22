@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   DYNAMIC_SOLANA_SIGN_TIMEOUT_MESSAGE,
   DYNAMIC_SOLANA_SIGN_TIMEOUT_MS,
@@ -17,6 +17,10 @@ import {
 } from "@/lib/wallets/dynamicSignerLookup"
 
 describe("Dynamic signer lookup", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("searches primaryWallet before all Dynamic wallets", () => {
     const primary = { address: "primary", getWalletClient: vi.fn() }
     const secondary = { address: "secondary", getWalletClient: vi.fn() }
@@ -104,7 +108,7 @@ describe("Dynamic signer lookup", () => {
     )).toBeNull()
   })
 
-  it("signs with a Solana wallet address and passes the active account", async () => {
+  it("signs with a Solana wallet address after validating the active account", async () => {
     const signAndSendTransaction = vi.fn().mockResolvedValue({ signature: "sig-address" })
     const wallet = {
       address: "SolanaAddress111111111111111111111111111111",
@@ -117,10 +121,7 @@ describe("Dynamic signer lookup", () => {
       "tx",
       "SolanaAddress111111111111111111111111111111"
     )).resolves.toMatchObject({ txHash: "sig-address" })
-    expect(signAndSendTransaction).toHaveBeenCalledWith(
-      "tx",
-      expect.objectContaining({ accountAddress: "SolanaAddress111111111111111111111111111111" })
-    )
+    expect(signAndSendTransaction).toHaveBeenCalledWith("tx")
   })
 
   it("signs with a Solana wallet publicKey", async () => {
@@ -153,10 +154,7 @@ describe("Dynamic signer lookup", () => {
       "tx",
       "SolanaActive11111111111111111111111111111"
     )).resolves.toMatchObject({ txHash: "sig-active-account" })
-    expect(signAndSendTransaction).toHaveBeenCalledWith(
-      "tx",
-      expect.objectContaining({ accountAddress: "SolanaActive11111111111111111111111111111" })
-    )
+    expect(signAndSendTransaction).toHaveBeenCalledWith("tx")
   })
 
   it("signs with a Solana connector getPublicKey", async () => {
@@ -265,37 +263,71 @@ describe("Dynamic signer lookup", () => {
       chain: "solana",
       signAndSendTransaction: walletMethod,
     })
-    await expect(walletCapability.signAndSendTransaction("tx", { accountAddress: "addr" })).resolves.toBe("sig-wallet")
+    await expect(walletCapability.signAndSendTransaction("tx")).resolves.toBe("sig-wallet")
+    expect(walletMethod).toHaveBeenCalledWith("tx")
 
     const connectorMethod = vi.fn().mockResolvedValue("sig-connector")
     const connectorCapability = resolveDynamicSolanaSignAndSendCapability({
       chain: "solana",
       connector: { key: "dynamicwaas-svm", signAndSendTransaction: connectorMethod },
     })
-    await expect(connectorCapability.signAndSendTransaction("tx", { accountAddress: "addr" })).resolves.toBe("sig-connector")
+    await expect(connectorCapability.signAndSendTransaction("tx")).resolves.toBe("sig-connector")
+    expect(connectorMethod).toHaveBeenCalledWith("tx")
 
     const signerMethod = vi.fn().mockResolvedValue("sig-signer")
     const signerCapability = resolveDynamicSolanaSignAndSendCapability({
       chain: "solana",
       getSigner: vi.fn().mockResolvedValue({ signAndSendTransaction: signerMethod }),
     })
-    await expect(signerCapability.signAndSendTransaction("tx", { accountAddress: "addr" })).resolves.toBe("sig-signer")
+    await expect(signerCapability.signAndSendTransaction("tx")).resolves.toBe("sig-signer")
+    expect(signerMethod).toHaveBeenCalledWith("tx")
 
     const clientMethod = vi.fn().mockResolvedValue("sig-client")
     const clientCapability = resolveDynamicSolanaSignAndSendCapability({
       chain: "solana",
       connector: { getWalletClient: vi.fn().mockResolvedValue({ signAndSendTransaction: clientMethod }) },
     })
-    await expect(clientCapability.signAndSendTransaction("tx", { accountAddress: "addr" })).resolves.toBe("sig-client")
+    await expect(clientCapability.signAndSendTransaction("tx")).resolves.toBe("sig-client")
+    expect(clientMethod).toHaveBeenCalledWith("tx")
   })
 
   it("returns SIGNER_NOT_AVAILABLE when a Solana wallet exposes no usable signer method", async () => {
     const capability = resolveDynamicSolanaSignAndSendCapability({ chain: "solana" })
     expect(capability.hasSignAndSendTransaction).toBe(false)
-    await expect(capability.signAndSendTransaction("tx", { accountAddress: "addr" })).rejects.toMatchObject({
+    await expect(capability.signAndSendTransaction("tx")).rejects.toMatchObject({
       code: "SIGNER_NOT_AVAILABLE",
       message: "Dynamic wallet does not expose signAndSendTransaction.",
     })
+  })
+
+  it("logs and classifies Dynamic SDK rejections before returning to the submit error path", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const signAndSendTransaction = vi.fn().mockRejectedValue(Object.assign(new Error("User rejected the request"), {
+      code: "USER_REJECTED",
+      response: { status: 400, statusText: "Rejected", body: "wallet declined" },
+    }))
+    const wallet = {
+      address: "SolanaReject1111111111111111111111111111",
+      chain: "solana",
+      connector: { key: "dynamicwaas-svm", name: "Dynamic WaaS" },
+      signAndSendTransaction,
+    }
+
+    await expect(signDynamicSolanaTransactionWithActiveAccount(
+      wallet,
+      "tx",
+      "SolanaReject1111111111111111111111111111"
+    )).rejects.toMatchObject({ code: "DYNAMIC_SIGNING_REJECTED" })
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[pinetree-withdrawals] dynamic_solana_sign_error",
+      expect.objectContaining({
+        errorCode: "DYNAMIC_SIGNING_REJECTED",
+        sdkCode: "USER_REJECTED",
+        responseStatus: 400,
+        responseBody: "wallet declined",
+      })
+    )
   })
 
   it("times out a Solana Dynamic signing promise that never resolves", async () => {

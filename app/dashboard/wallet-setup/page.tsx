@@ -945,10 +945,21 @@ async function sendDynamicPreparedWithdrawal(
   let substage = "DYNAMIC_PREPARE_RESPONSE_PARSED"
   let matchingWalletFound = false
   const failWithStage = (error: unknown): never => {
+    const dynamicErrorCode = safeDynamicErrorCode(error) || "UNKNOWN_DYNAMIC_ERROR"
+    if (substage === "DYNAMIC_SIGNING_STARTED" || substage === "DYNAMIC_SIGNING_RETURNED") {
+      emitDynamicPostPrepareStage(context, "DYNAMIC_SIGNING_FAILED", {
+        substage,
+        errorName: safeDynamicErrorName(error),
+        errorCode: dynamicErrorCode,
+        errorMessage: safeDynamicErrorMessage(error),
+        walletCount: wallets.length,
+        matchingWalletFound,
+      })
+    }
     emitDynamicPostPrepareStage(context, "DYNAMIC_POST_PREPARE_FAILED", {
       substage,
       errorName: safeDynamicErrorName(error),
-      errorCode: safeDynamicErrorCode(error) || "UNKNOWN_DYNAMIC_ERROR",
+      errorCode: dynamicErrorCode,
       errorMessage: safeDynamicErrorMessage(error),
       walletCount: wallets.length,
       matchingWalletFound,
@@ -1151,6 +1162,12 @@ async function sendDynamicPreparedWithdrawal(
   emitDynamicPostPrepareStage(context, "DYNAMIC_SIGNATURE_NORMALIZED", {
     substage,
     signature: maskDiagnosticValue(result.txHash),
+  })
+  substage = "DYNAMIC_SIGNATURE_RECEIVED"
+  emitDynamicPostPrepareStage(context, "DYNAMIC_SIGNATURE_RECEIVED", {
+    substage,
+    signature: maskDiagnosticValue(result.txHash),
+    providerReference: maskDiagnosticValue(result.providerReference),
   })
   return result
   } catch (error) {
@@ -1780,8 +1797,11 @@ const PRODUCTION_WALLET_WITHDRAWAL_DEBUG_EVENTS = new Set([
   "DYNAMIC_TRANSACTION_DESERIALIZED",
   "DYNAMIC_SIGNING_STARTED",
   "DYNAMIC_SIGNING_RETURNED",
+  "DYNAMIC_SIGNING_FAILED",
   "DYNAMIC_SIGNATURE_NORMALIZED",
+  "DYNAMIC_SIGNATURE_RECEIVED",
   "DYNAMIC_SUBMIT_REQUESTED",
+  "DYNAMIC_SUBMIT_COMPLETED",
   "DYNAMIC_POST_PREPARE_FAILED",
   "DYNAMIC_AUTH_CHECK_STARTED",
   "DYNAMIC_AUTH_RESTORED",
@@ -9193,6 +9213,14 @@ function PineTreeWalletRuntime() {
           setWithdrawalScreen("failed")
           return
         }
+        emitWalletSetupDebugEvent("DYNAMIC_SUBMIT_COMPLETED", {
+          correlationId,
+          requestId: withdrawalId,
+          rail: review.review.rail,
+          asset: review.review.asset,
+          stage: "DYNAMIC_SUBMIT_COMPLETED",
+          httpStatus: submitRes.status,
+        })
         setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)
         setWithdrawalScreen("submitted")
         // Refresh Activity immediately so it reflects the just-submitted transaction

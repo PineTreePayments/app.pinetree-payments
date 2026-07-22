@@ -82,7 +82,7 @@ export type DynamicSolanaSignAndSendCapability = {
   connectorName: string | null
   connectorType: string | null
   hasSignAndSendTransaction: boolean
-  signAndSendTransaction: (transaction: unknown, signOptions: Record<string, string>) => Promise<unknown>
+  signAndSendTransaction: (transaction: unknown) => Promise<unknown>
 }
 
 export const DYNAMIC_SOLANA_SIGN_TIMEOUT_MS = 45_000
@@ -475,6 +475,50 @@ function maskSignature(value: string | null) {
   return value.length <= 12 ? value : `${value.slice(0, 6)}...${value.slice(-6)}`
 }
 
+function safeDiagnosticString(value: unknown, fallback: string | null = null) {
+  const text = String(value || "").trim()
+  if (!text) return fallback
+  return text
+    .replace(/(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(/[A-Za-z0-9+/=]{120,}/g, "[redacted-payload]")
+    .slice(0, 500)
+}
+
+function dynamicErrorRecord(error: unknown) {
+  return error && typeof error === "object" ? error as Record<string, unknown> : null
+}
+
+function classifyDynamicSolanaSigningFailure(error: unknown) {
+  const record = dynamicErrorRecord(error)
+  const name = safeDiagnosticString(record?.name, error instanceof Error ? error.name : null)
+  const code = safeDiagnosticString(record?.code, null)
+  const message = safeDiagnosticString(error instanceof Error ? error.message : error, null)
+  const combined = `${name || ""} ${code || ""} ${message || ""}`.toLowerCase()
+  if (message === DYNAMIC_SOLANA_SIGN_TIMEOUT_MESSAGE) return "DYNAMIC_SIGNING_TIMEOUT"
+  if (/timeout|timed out/.test(combined)) return "DYNAMIC_SIGNING_TIMEOUT"
+  if (/cancel|reject|denied|declin|user rejected|user denied/.test(combined)) return "DYNAMIC_SIGNING_REJECTED"
+  if (/not implemented|not expose|not available|signer not found|signer_not_available/.test(combined)) return "SIGNER_NOT_AVAILABLE"
+  return code || "DYNAMIC_SIGNING_FAILED"
+}
+
+function dynamicSolanaSigningFailureDiagnostics(error: unknown, capability: DynamicSolanaSignAndSendCapability) {
+  const record = dynamicErrorRecord(error)
+  const response = dynamicErrorRecord(record?.response)
+  return {
+    errorName: safeDiagnosticString(record?.name, error instanceof Error ? error.name : "Error"),
+    errorCode: classifyDynamicSolanaSigningFailure(error),
+    sdkCode: safeDiagnosticString(record?.code, null),
+    errorMessage: safeDiagnosticString(error instanceof Error ? error.message : error, "Dynamic signing failed."),
+    stack: safeDiagnosticString(error instanceof Error ? error.stack : record?.stack, null),
+    cause: safeDiagnosticString(record?.cause, null),
+    responseStatus: typeof response?.status === "number" ? response.status : null,
+    responseStatusText: safeDiagnosticString(response?.statusText, null),
+    responseBody: safeDiagnosticString(response?.body ?? response?.data, null),
+    connectorKey: capability.connectorKey,
+    connectorType: capability.connectorType,
+  }
+}
+
 function signerMethod(candidate: unknown) {
   if (!candidate || typeof candidate !== "object") return null
   const method = (candidate as { signAndSendTransaction?: unknown }).signAndSendTransaction
@@ -504,8 +548,8 @@ export function resolveDynamicSolanaSignAndSendCapability(
       ...connectorInfo,
       connectorType: candidateConnectorType(wallet.connector ?? wallet.walletConnector ?? wallet),
       hasSignAndSendTransaction: true,
-      signAndSendTransaction: (transaction, signOptions) =>
-        wallet.signAndSendTransaction!(transaction, signOptions),
+      signAndSendTransaction: (transaction) =>
+        wallet.signAndSendTransaction!(transaction),
     }
   }
 
@@ -515,8 +559,8 @@ export function resolveDynamicSolanaSignAndSendCapability(
       ...connectorInfo,
       connectorType: candidateConnectorType(wallet.connector),
       hasSignAndSendTransaction: true,
-      signAndSendTransaction: (transaction, signOptions) =>
-        wallet.connector!.signAndSendTransaction!(transaction, signOptions),
+      signAndSendTransaction: (transaction) =>
+        wallet.connector!.signAndSendTransaction!(transaction),
     }
   }
 
@@ -526,7 +570,7 @@ export function resolveDynamicSolanaSignAndSendCapability(
       ...connectorInfo,
       connectorType: candidateConnectorType(wallet.connector ?? wallet),
       hasSignAndSendTransaction: true,
-      signAndSendTransaction: async (transaction, signOptions) => {
+      signAndSendTransaction: async (transaction) => {
         const signer = await signerFactory.call(wallet.getSigner ? wallet : wallet.connector)
         const method = signerMethod(signer)
         if (!method) {
@@ -534,7 +578,7 @@ export function resolveDynamicSolanaSignAndSendCapability(
             code: "SIGNER_NOT_AVAILABLE",
           })
         }
-        return method.call(signer, transaction, signOptions)
+        return method.call(signer, transaction)
       },
     }
   }
@@ -545,7 +589,7 @@ export function resolveDynamicSolanaSignAndSendCapability(
       ...connectorInfo,
       connectorType: candidateConnectorType(wallet.connector ?? wallet),
       hasSignAndSendTransaction: true,
-      signAndSendTransaction: async (transaction, signOptions) => {
+      signAndSendTransaction: async (transaction) => {
         const client = await walletClientFactory.call(wallet.getWalletClient ? wallet : wallet.connector, "solana")
         const method = signerMethod(client)
         if (!method) {
@@ -553,7 +597,7 @@ export function resolveDynamicSolanaSignAndSendCapability(
             code: "SIGNER_NOT_AVAILABLE",
           })
         }
-        return method.call(client, transaction, signOptions)
+        return method.call(client, transaction)
       },
     }
   }
@@ -619,23 +663,26 @@ export async function signDynamicSolanaTransactionWithActiveAccount(
 
   wallet.connector?.getWalletClientByAddress?.({ accountAddress: activeAccountAddress })
 
-  const signOptions = {
-    accountAddress: activeAccountAddress,
-    address: activeAccountAddress,
-    publicKey: activeAccountAddress,
-  }
   onBeforeDynamicModal?.()
   if (!capability.hasSignAndSendTransaction) {
     throw Object.assign(new Error("Dynamic wallet does not expose signAndSendTransaction."), {
       code: "SIGNER_NOT_AVAILABLE",
     })
   }
-  const signPromise = capability.signAndSendTransaction(transaction, signOptions)
-  const txResult = await withTimeout(
-    signPromise,
-    DYNAMIC_SOLANA_SIGN_TIMEOUT_MS,
-    DYNAMIC_SOLANA_SIGN_TIMEOUT_MESSAGE
-  )
+  let txResult: unknown
+  try {
+    const signPromise = capability.signAndSendTransaction(transaction)
+    txResult = await withTimeout(
+      signPromise,
+      DYNAMIC_SOLANA_SIGN_TIMEOUT_MS,
+      DYNAMIC_SOLANA_SIGN_TIMEOUT_MESSAGE
+    )
+  } catch (error) {
+    const diagnostics = dynamicSolanaSigningFailureDiagnostics(error, capability)
+    console.warn("[pinetree-withdrawals] dynamic_solana_sign_error", diagnostics)
+    const classified = error instanceof Error ? error : new Error(String(error || "Dynamic signing failed."))
+    throw Object.assign(classified, { code: diagnostics.errorCode })
+  }
   const txHash = normalizeDynamicSolanaSignature(txResult)
   console.info("[pinetree-withdrawals] dynamic_solana_sign_result", {
     returned: summarizeDynamicSolanaSignResult(txResult),
@@ -646,9 +693,20 @@ export async function signDynamicSolanaTransactionWithActiveAccount(
     connectorType: capability.connectorType,
   })
   if (!txResult) {
+    console.warn("[pinetree-withdrawals] dynamic_solana_sign_empty_result", {
+      returned: summarizeDynamicSolanaSignResult(txResult),
+      connectorKey: capability.connectorKey,
+      connectorType: capability.connectorType,
+    })
     throw Object.assign(new Error("Dynamic returned no transaction signature."), { code: "SIGNATURE_MISSING" })
   }
   if (!txHash) {
+    console.warn("[pinetree-withdrawals] dynamic_solana_sign_missing_signature", {
+      returned: summarizeDynamicSolanaSignResult(txResult),
+      resultType: txResult === null ? "null" : Array.isArray(txResult) ? "array" : typeof txResult,
+      connectorKey: capability.connectorKey,
+      connectorType: capability.connectorType,
+    })
     throw Object.assign(new Error("Dynamic returned no transaction signature."), { code: "SIGNATURE_MISSING" })
   }
   return { txHash, providerReference: txHash, activeAccountAddress }

@@ -693,6 +693,28 @@ function speedRequestId(response: Response): string | null {
   )
 }
 
+function safeSpeedDiagnosticText(value: unknown, maxLength = 2_000) {
+  return String(value || "")
+    .replace(/(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(/sk_(test|live)_[A-Za-z0-9._-]+/gi, "sk_$1_[redacted]")
+    .slice(0, maxLength)
+}
+
+function responseHeadersForDiagnostics(headers: Headers) {
+  const result: Record<string, string> = {}
+  headers.forEach((value, key) => {
+    const normalizedKey = key.toLowerCase()
+    result[normalizedKey] = normalizedKey === "set-cookie"
+      ? "[redacted]"
+      : safeSpeedDiagnosticText(value, 500)
+  })
+  return result
+}
+
+function speedWorkspaceIdForDiagnostics() {
+  return String(process.env.SPEED_PLATFORM_ACCOUNT_ID || "").trim() || null
+}
+
 function speedRetryAfterMs(response: Response): number | null {
   const value = response.headers?.get("retry-after")
   if (!value) return null
@@ -728,6 +750,8 @@ export async function speedRequestWithStatus<T>(
   const operation = init?.merchantContext?.operation || `${init?.method || "GET"} ${path}`
   const pineTreePaymentId = init?.merchantContext?.pineTreePaymentId || null
   const pineTreePaymentIntentId = init?.merchantContext?.pineTreePaymentIntentId || null
+  const requestUrl = `${config.apiBaseUrl}${path}`
+  const method = init?.method || "GET"
 
   if (init?.merchantContext && !providerAccountId) {
     clearTimeout(timeout)
@@ -739,18 +763,20 @@ export async function speedRequestWithStatus<T>(
   }
   const requestInit = { ...(init || {}) }
   delete requestInit.merchantContext
+  let requestHeaders: Record<string, string> = {}
 
   try {
     if (path === "/connect/custom") {
       console.info("[speed] speed_connect_custom_prefetch_diagnostic", getConnectCustomRequestMetadata(init?.body))
     }
-    response = await fetch(`${config.apiBaseUrl}${path}`, {
+    requestHeaders = {
+      ...(init?.headers || {}),
+      ...getSpeedAuthHeaders(),
+      ...(providerAccountId ? { "speed-account": providerAccountId } : {}),
+    }
+    response = await fetch(requestUrl, {
       ...requestInit,
-      headers: {
-        ...(init?.headers || {}),
-        ...getSpeedAuthHeaders(),
-        ...(providerAccountId ? { "speed-account": providerAccountId } : {}),
-      },
+      headers: requestHeaders,
       signal: controller.signal
     })
   } catch {
@@ -776,6 +802,24 @@ export async function speedRequestWithStatus<T>(
   const requestId = speedRequestId(response)
   const retryAfterMs = speedRetryAfterMs(response)
   const body = await response.text().catch(() => "")
+  if (operation === "balance.retrieve" || path === "/balances") {
+    console.warn("[pinetree-withdrawals] SPEED_BALANCE_PROVIDER_RESPONSE_RAW", {
+      requestUrl,
+      method,
+      responseStatus: response.status,
+      responseBody: safeSpeedDiagnosticText(body),
+      providerHeaders: responseHeadersForDiagnostics(response.headers),
+      authorizationHeaderPresent: Boolean(new Headers(requestHeaders).get("authorization")),
+      speedAccountHeaderPresent: Boolean(new Headers(requestHeaders).get("speed-account")),
+      connectedAccountId: providerAccountId || null,
+      workspaceId: speedWorkspaceIdForDiagnostics(),
+      merchantId,
+      environment: config.mode,
+      apiHost: getSpeedApiHost(),
+      requestId,
+      ok: response.ok,
+    })
+  }
 
   if (!response.ok) {
     const { providerCode, fieldErrors } = parseSpeedErrorBody(body)

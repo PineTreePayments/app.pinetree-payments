@@ -299,6 +299,36 @@ describe("POST /api/debug/pinetree-wallet/setup-event", () => {
     expect(loggedDetails).not.toHaveProperty("walletAddress")
   })
 
+  it("accepts Dynamic signing success checkpoints in production without the broad debug flag", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("NEXT_PUBLIC_WALLET_DEBUG_EVENTS", "false")
+
+    const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
+    const signatureResponse = await POST(request({
+      event: "DYNAMIC_SIGNATURE_RECEIVED",
+      details: {
+        correlationId: "5424ca86",
+        stage: "DYNAMIC_SIGNATURE_RECEIVED",
+        rail: "solana",
+        asset: "SOL",
+        requestId: "fafdc826-329e-4daa-8d9c-a443f31ce0b7",
+      },
+    }))
+    const submitResponse = await POST(request({
+      event: "DYNAMIC_SUBMIT_COMPLETED",
+      details: {
+        correlationId: "5424ca86",
+        stage: "DYNAMIC_SUBMIT_COMPLETED",
+        rail: "solana",
+        asset: "SOL",
+        requestId: "fafdc826-329e-4daa-8d9c-a443f31ce0b7",
+      },
+    }))
+
+    expect(signatureResponse.status).toBe(200)
+    expect(submitResponse.status).toBe(200)
+  })
+
   it("never returns secrets or the raw request body back to the caller", async () => {
     const { POST } = await import("@/app/api/debug/pinetree-wallet/setup-event/route")
     const response = await POST(request({

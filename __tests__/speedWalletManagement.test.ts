@@ -181,6 +181,42 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     await expect(getConnectedAccountBalances(context)).rejects.toMatchObject({ category, httpStatus: status, retryable })
   })
 
+  it("logs the raw Speed balances response before provider error normalization", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      error: { code: "workspace_disabled", message: "Workspace is not enabled for balances" },
+    }), {
+      status: 503,
+      headers: {
+        "speed-request-id": "req_balance_503",
+        "x-provider-diagnostic": "workspace-disabled",
+      },
+    }))
+
+    const { getConnectedAccountBalances } = await import("@/providers/lightning/speedWalletManagement")
+    await expect(getConnectedAccountBalances(context)).rejects.toMatchObject({
+      category: "provider_unavailable",
+      httpStatus: 503,
+    })
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[pinetree-withdrawals] SPEED_BALANCE_PROVIDER_RESPONSE_RAW",
+      expect.objectContaining({
+        requestUrl: "https://api.tryspeed.com/balances",
+        method: "GET",
+        responseStatus: 503,
+        responseBody: expect.stringContaining("workspace_disabled"),
+        authorizationHeaderPresent: true,
+        speedAccountHeaderPresent: true,
+        connectedAccountId: "acct_merchant_1",
+        merchantId: "merchant-1",
+        environment: "test",
+        requestId: "req_balance_503",
+        ok: false,
+      })
+    )
+  })
+
   it("classifies transport failures as retryable without leaking the raw error", async () => {
     vi.spyOn(global, "fetch").mockRejectedValue(new Error("socket exposed detail"))
     const { getConnectedAccountBalances } = await import("@/providers/lightning/speedWalletManagement")
