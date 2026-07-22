@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChainEnum, useDynamicContext, useDynamicEvents, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
-import { Transaction } from "@solana/web3.js"
+import { Transaction, VersionedTransaction } from "@solana/web3.js"
 import { AlertTriangle, CheckCircle2, ChevronDown, Copy, Loader2, X } from "lucide-react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
@@ -27,6 +27,7 @@ import {
   getDynamicWalletConnectorInfo,
   getDynamicWalletSearchList,
   inferredSignerRailForWallet,
+  resolveDynamicSolanaSignAndSendCapability,
   signDynamicSolanaTransactionWithActiveAccount,
   type DynamicSignerRail,
   type DynamicWalletLike,
@@ -130,6 +131,7 @@ type WithdrawalPrepareResponse = {
   rail: WithdrawalRail
   asset: WithdrawalAsset
   sourceAddress: string
+  destinationAddress?: string
   payload:
     | {
         kind: "evm_transaction"
@@ -605,6 +607,9 @@ type DynamicSigningPreflightContext = {
   pineTreeProfileSolanaAddress: string | null
   primaryWallet: unknown
   switchDynamicWallet?: (walletId: string) => Promise<void>
+  requestId?: string
+  correlationId?: string | null
+  emitDynamicStage?: (event: string, details?: WalletSetupDebugDetails) => void
 }
 
 function dynamicWalletConnectorValue(wallet: DynamicWalletLike, key: "key" | "name") {
@@ -781,12 +786,155 @@ async function assertSolanaWithdrawalModalPreflight(
   }
 }
 
+function maskDiagnosticValue(value: string | null | undefined) {
+  const normalized = String(value || "").trim()
+  if (!normalized) return null
+  return normalized.length <= 14 ? normalized : `${normalized.slice(0, 7)}...${normalized.slice(-7)}`
+}
+
+function safeDynamicErrorName(error: unknown) {
+  const name = error && typeof error === "object" && "name" in error ? String((error as { name?: unknown }).name || "") : ""
+  return name.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 60) || "Error"
+}
+
+function safeDynamicErrorCode(error: unknown) {
+  const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code || "") : ""
+  return code.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 60) || null
+}
+
+function safeDynamicErrorMessage(error: unknown) {
+  const raw = error instanceof Error ? error.message : String(error || "")
+  const trimmed = raw.trim()
+  if (!trimmed) return "Dynamic signing failed."
+  return trimmed
+    .replace(/(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(/[A-Za-z0-9+/=]{120,}/g, "[redacted-payload]")
+    .slice(0, 180)
+}
+
+function dynamicPreparedPayloadType(prepared: WithdrawalPrepareResponse) {
+  if (prepared.payload.kind !== "solana_transaction") return prepared.payload.kind
+  const payload = prepared.payload as typeof prepared.payload & Record<string, unknown>
+  if (typeof payload.transactionBase64 === "string") return "base64"
+  if (Array.isArray(payload.transactionBytes)) return "byte_array"
+  if (Array.isArray(payload.transaction)) return "byte_array"
+  return "unknown"
+}
+
+function emitDynamicPostPrepareStage(
+  context: DynamicSigningPreflightContext,
+  event: string,
+  details: WalletSetupDebugDetails = {}
+) {
+  context.emitDynamicStage?.(event, {
+    correlationId: context.correlationId || "none",
+    requestId: context.requestId || "none",
+    rail: context.selectedRail,
+    asset: context.selectedAsset,
+    stage: event,
+    ...details,
+  })
+}
+
+function makeDynamicPostPrepareError(message: string, code: string) {
+  return Object.assign(new Error(message), { code })
+}
+
+function solanaTransactionBytesFromPrepared(prepared: WithdrawalPrepareResponse) {
+  if (prepared.payload.kind !== "solana_transaction") {
+    throw makeDynamicPostPrepareError("Prepared Solana transaction could not be deserialized.", "PREPARED_TRANSACTION_INVALID")
+  }
+  const payload = prepared.payload as typeof prepared.payload & Record<string, unknown>
+  if (typeof payload.transactionBase64 === "string" && payload.transactionBase64.trim()) {
+    return base64ToBytes(payload.transactionBase64)
+  }
+  const candidate = payload.transactionBytes ?? payload.transaction
+  if (Array.isArray(candidate) && candidate.every((value) => Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 255)) {
+    return new Uint8Array(candidate as number[])
+  }
+  throw makeDynamicPostPrepareError("Prepared Solana transaction could not be deserialized.", "PREPARED_TRANSACTION_INVALID")
+}
+
+function deserializePreparedSolanaTransaction(prepared: WithdrawalPrepareResponse) {
+  const bytes = solanaTransactionBytesFromPrepared(prepared)
+  try {
+    return VersionedTransaction.deserialize(bytes)
+  } catch {
+    try {
+      return Transaction.from(bytes)
+    } catch {
+      throw makeDynamicPostPrepareError(
+        "Prepared Solana transaction could not be deserialized.",
+        "PREPARED_TRANSACTION_INVALID"
+      )
+    }
+  }
+}
+
+function preparedSolanaFeePayer(transaction: Transaction | VersionedTransaction) {
+  if (transaction instanceof Transaction) return transaction.feePayer?.toBase58() ?? null
+  const staticAccountKeys = transaction.message.staticAccountKeys
+  return staticAccountKeys[0]?.toBase58() ?? null
+}
+
+function validatePreparedSolanaTransaction(
+  prepared: WithdrawalPrepareResponse,
+  transaction: Transaction | VersionedTransaction,
+  context: DynamicSigningPreflightContext
+) {
+  if (prepared.payload.kind !== "solana_transaction" || prepared.payload.network !== "solana") {
+    throw makeDynamicPostPrepareError("Dynamic rejected the prepared transaction format.", "PREPARED_TRANSACTION_INVALID")
+  }
+  if (context.selectedRail !== "solana" || prepared.rail !== "solana") {
+    throw makeDynamicPostPrepareError("Dynamic rejected the prepared transaction format.", "RAIL_MISMATCH")
+  }
+  if (prepared.asset !== context.selectedAsset) {
+    throw makeDynamicPostPrepareError("Dynamic rejected the prepared transaction format.", "ASSET_MISMATCH")
+  }
+  if (prepared.payload.from !== prepared.sourceAddress) {
+    throw makeDynamicPostPrepareError("Prepared Solana transaction source did not match the reviewed source address.", "SOURCE_ADDRESS_MISMATCH")
+  }
+  const feePayer = preparedSolanaFeePayer(transaction)
+  if (!dynamicWalletAddressesMatch(feePayer, prepared.sourceAddress, "solana")) {
+    throw makeDynamicPostPrepareError("Prepared Solana transaction source did not match the reviewed source address.", "SOURCE_ADDRESS_MISMATCH")
+  }
+  if (prepared.destinationAddress && prepared.destinationAddress !== context.destinationAddress) {
+    throw makeDynamicPostPrepareError("Prepared Solana transaction destination did not match the reviewed destination.", "DESTINATION_MISMATCH")
+  }
+}
+
 async function sendDynamicPreparedWithdrawal(
   prepared: WithdrawalPrepareResponse,
   wallets: unknown[],
   primaryWallet: unknown,
   context: DynamicSigningPreflightContext
 ): Promise<{ txHash?: string; signedPsbtBase64?: string; providerReference?: string }> {
+  let substage = "DYNAMIC_PREPARE_RESPONSE_PARSED"
+  let matchingWalletFound = false
+  const failWithStage = (error: unknown): never => {
+    emitDynamicPostPrepareStage(context, "DYNAMIC_POST_PREPARE_FAILED", {
+      substage,
+      errorName: safeDynamicErrorName(error),
+      errorCode: safeDynamicErrorCode(error) || "UNKNOWN_DYNAMIC_ERROR",
+      errorMessage: safeDynamicErrorMessage(error),
+      walletCount: wallets.length,
+      matchingWalletFound,
+      sourceAddress: maskDiagnosticValue(prepared.sourceAddress),
+      preparedPayloadType: dynamicPreparedPayloadType(prepared),
+    })
+    throw error
+  }
+  try {
+    emitDynamicPostPrepareStage(context, "DYNAMIC_PREPARE_RESPONSE_PARSED", {
+      substage,
+      preparedPayloadType: dynamicPreparedPayloadType(prepared),
+      sourceAddress: maskDiagnosticValue(prepared.sourceAddress),
+    })
+    substage = "DYNAMIC_SOURCE_ADDRESS_RESOLVED"
+    emitDynamicPostPrepareStage(context, "DYNAMIC_SOURCE_ADDRESS_RESOLVED", {
+      substage,
+      sourceAddress: maskDiagnosticValue(prepared.sourceAddress),
+    })
   const walletsToCheck = getDynamicWalletSearchList(wallets as unknown[], primaryWallet, prepared.rail)
 
   if (walletCreationDebugEnabled) {
@@ -817,6 +965,13 @@ async function sendDynamicPreparedWithdrawal(
     })
   }
 
+  substage = "DYNAMIC_WALLET_MATCH_STARTED"
+  emitDynamicPostPrepareStage(context, "DYNAMIC_WALLET_MATCH_STARTED", {
+    substage,
+    walletCount: wallets.length,
+    matchingWalletFound: false,
+    sourceAddress: maskDiagnosticValue(prepared.sourceAddress),
+  })
   const wallet = findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress, prepared.rail)
 
   if (walletCreationDebugEnabled && wallet) {
@@ -826,9 +981,7 @@ async function sendDynamicPreparedWithdrawal(
       selectedWalletChainClassification: classifyDynamicWalletChain(walletLike),
       selectedConnectorKey: walletLike.connector?.key ?? walletLike.walletConnector?.key ?? null,
       selectedConnectorName: walletLike.connector?.name ?? walletLike.walletConnector?.name ?? null,
-      hasSolanaSigner: Boolean(
-        walletLike.signAndSendTransaction || walletLike.connector?.signAndSendTransaction
-      ),
+      hasSolanaSigner: resolveDynamicSolanaSignAndSendCapability(walletLike).hasSignAndSendTransaction,
       hasEvmClient: Boolean(
         walletLike.getWalletClient || walletLike.connector?.getWalletClient
       ),
@@ -849,17 +1002,27 @@ async function sendDynamicPreparedWithdrawal(
     // any other chain's signer. Solana gets its own explicit copy per rail; Base/Bitcoin
     // fall back to the existing generic reconnect copy.
     if (!hasAnyDynamicWallet && prepared.rail === "solana") {
-      throw new Error("Reconnect your Solana wallet session before approving this withdrawal.")
+      throw makeDynamicPostPrepareError("No Dynamic Solana wallet matched the prepared source address.", "WALLET_NOT_CONNECTED")
     }
     if (hasAnyDynamicWallet) {
       // Wallets are loaded but none match the saved DB address - different account/session.
-      throw new Error(
-        "This browser is connected to a different PineTree Wallet session. Reopen PineTree Wallet or verify access."
-      )
+      throw makeDynamicPostPrepareError("No Dynamic Solana wallet matched the prepared source address.", "WALLET_NOT_CONNECTED")
     }
     // No Dynamic wallets present at all - session expired or SDK not yet loaded.
-    throw new Error(pineTreeSignerReconnectMessage)
+    throw makeDynamicPostPrepareError("No Dynamic Solana wallet matched the prepared source address.", "WALLET_NOT_CONNECTED")
   }
+  const solanaCapability = prepared.rail === "solana" ? resolveDynamicSolanaSignAndSendCapability(wallet) : null
+  matchingWalletFound = true
+  substage = "DYNAMIC_WALLET_MATCHED"
+  emitDynamicPostPrepareStage(context, "DYNAMIC_WALLET_MATCHED", {
+    substage,
+    walletCount: wallets.length,
+    matchingWalletFound: true,
+    sourceAddress: maskDiagnosticValue(prepared.sourceAddress),
+    connectorKey: solanaCapability?.connectorKey ?? wallet.connector?.key ?? wallet.walletConnector?.key ?? null,
+    connectorType: solanaCapability?.connectorType ?? wallet.connector?.name ?? wallet.walletConnector?.name ?? null,
+    hasSignAndSendTransaction: solanaCapability?.hasSignAndSendTransaction ?? null,
+  })
 
   assertPreparedWithdrawalSignerMatchesRail(prepared, wallet)
 
@@ -909,8 +1072,27 @@ async function sendDynamicPreparedWithdrawal(
   }
 
   // Solana transaction. Resolve and activate the signer account before calling Dynamic.
-  const transaction = Transaction.from(base64ToBytes(prepared.payload.transactionBase64))
-  return signDynamicSolanaTransactionWithActiveAccount(
+  substage = "DYNAMIC_TRANSACTION_DESERIALIZE_STARTED"
+  emitDynamicPostPrepareStage(context, "DYNAMIC_TRANSACTION_DESERIALIZE_STARTED", {
+    substage,
+    preparedPayloadType: dynamicPreparedPayloadType(prepared),
+  })
+  const transaction = deserializePreparedSolanaTransaction(prepared)
+  validatePreparedSolanaTransaction(prepared, transaction, context)
+  substage = "DYNAMIC_TRANSACTION_DESERIALIZED"
+  emitDynamicPostPrepareStage(context, "DYNAMIC_TRANSACTION_DESERIALIZED", {
+    substage,
+    preparedPayloadType: transaction instanceof VersionedTransaction ? "versioned_transaction" : "legacy_transaction",
+    sourceAddress: maskDiagnosticValue(prepared.sourceAddress),
+  })
+  substage = "DYNAMIC_SIGNING_STARTED"
+  emitDynamicPostPrepareStage(context, "DYNAMIC_SIGNING_STARTED", {
+    substage,
+    connectorKey: solanaCapability?.connectorKey ?? null,
+    connectorType: solanaCapability?.connectorType ?? null,
+    hasSignAndSendTransaction: solanaCapability?.hasSignAndSendTransaction ?? false,
+  })
+  const result = await signDynamicSolanaTransactionWithActiveAccount(
     wallet,
     transaction,
     prepared.sourceAddress,
@@ -922,6 +1104,23 @@ async function sendDynamicPreparedWithdrawal(
       logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)
     }
   )
+  substage = "DYNAMIC_SIGNING_RETURNED"
+  emitDynamicPostPrepareStage(context, "DYNAMIC_SIGNING_RETURNED", {
+    substage,
+    hasSignAndSendTransaction: true,
+  })
+  if (!result.txHash) {
+    throw makeDynamicPostPrepareError("Dynamic returned no transaction signature.", "SIGNATURE_MISSING")
+  }
+  substage = "DYNAMIC_SIGNATURE_NORMALIZED"
+  emitDynamicPostPrepareStage(context, "DYNAMIC_SIGNATURE_NORMALIZED", {
+    substage,
+    signature: maskDiagnosticValue(result.txHash),
+  })
+  return result
+  } catch (error) {
+    return failWithStage(error)
+  }
 }
 
 function base64ToBytes(value: string) {
@@ -1538,6 +1737,17 @@ const PRODUCTION_WALLET_WITHDRAWAL_DEBUG_EVENTS = new Set([
   "wallet_withdrawal_submit_blocked",
   "wallet_withdrawal_submit_unhandled_error",
   "wallet_withdrawal_prepare_requested",
+  "DYNAMIC_PREPARE_RESPONSE_PARSED",
+  "DYNAMIC_SOURCE_ADDRESS_RESOLVED",
+  "DYNAMIC_WALLET_MATCH_STARTED",
+  "DYNAMIC_WALLET_MATCHED",
+  "DYNAMIC_TRANSACTION_DESERIALIZE_STARTED",
+  "DYNAMIC_TRANSACTION_DESERIALIZED",
+  "DYNAMIC_SIGNING_STARTED",
+  "DYNAMIC_SIGNING_RETURNED",
+  "DYNAMIC_SIGNATURE_NORMALIZED",
+  "DYNAMIC_SUBMIT_REQUESTED",
+  "DYNAMIC_POST_PREPARE_FAILED",
 ])
 
 function isProductionWalletWithdrawalDebugEvent(event: string) {
@@ -7601,8 +7811,7 @@ function PineTreeWalletRuntime() {
           dynamicWalletCount: (wallets as unknown[]).length,
           matchingWalletFound: Boolean(matched),
           hasSolanaSigner: Boolean(
-            walletLike &&
-              (walletLike.signAndSendTransaction || walletLike.connector?.signAndSendTransaction)
+            walletLike && resolveDynamicSolanaSignAndSendCapability(walletLike).hasSignAndSendTransaction
           ),
           hasEvmClient: Boolean(
             walletLike && (walletLike.getWalletClient || walletLike.connector?.getWalletClient)
@@ -8608,12 +8817,23 @@ function PineTreeWalletRuntime() {
           pineTreeProfileSolanaAddress: profile?.solana_address ?? null,
           primaryWallet: primaryWalletRef.current,
           switchDynamicWallet,
+          requestId: withdrawalId,
+          correlationId,
+          emitDynamicStage: emitWalletSetupDebugEvent,
         })
         emitWalletSetupDebugEvent("wallet_withdrawal_signature_returned", {
           correlationId,
           hasTxHash: Boolean(dynamicSubmission.txHash),
           hasSignedPsbt: Boolean(dynamicSubmission.signedPsbtBase64),
         })
+        emitWalletSetupDebugEvent("DYNAMIC_SUBMIT_REQUESTED", {
+          correlationId,
+          requestId: withdrawalId,
+          rail: review.review.rail,
+          asset: review.review.asset,
+          stage: "DYNAMIC_SUBMIT_REQUESTED",
+        })
+        emitWalletSetupDebugEvent("wallet_withdrawal_submit_requested", { correlationId, requestId: withdrawalId })
         const submitRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit`, {
           method: "POST",
           headers: {
@@ -8631,7 +8851,6 @@ function PineTreeWalletRuntime() {
             },
           }),
         })
-        emitWalletSetupDebugEvent("wallet_withdrawal_submit_requested", { correlationId, requestId: withdrawalId })
         const submitted = (await submitRes.json()) as WithdrawalSubmitResponse | { error?: string; error_code?: string }
         emitWalletSetupDebugEvent("wallet_withdrawal_submit_returned", {
           correlationId,
@@ -8669,7 +8888,16 @@ function PineTreeWalletRuntime() {
         rail: withdrawalReview?.review.rail,
         error: error instanceof Error ? error.message : "unknown",
       })
-      emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", { correlationId, stage: "dynamic_submit" })
+      emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", {
+        correlationId,
+        stage: "dynamic_post_prepare",
+        rail: review.review.rail,
+        asset: review.review.asset,
+        requestId: withdrawalId,
+        errorName: safeDynamicErrorName(error),
+        errorCode: safeDynamicErrorCode(error) || "UNKNOWN_DYNAMIC_ERROR",
+        errorMessage: safeDynamicErrorMessage(error),
+      })
       setWithdrawalApprovalError(safeMessage)
       if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana")) {
         setWithdrawalAuthorizationRecoveryOpen(true)

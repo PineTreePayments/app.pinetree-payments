@@ -166,6 +166,6 @@ describe("Speed wallet adapter normalization", () => {
     await expect(speedWalletAdapter.createWithdrawal!(
       { merchantId: "m1", providerAccountId: "acct_1" },
       { asset: "SATS", amountBaseUnits: BigInt(1000), destination: "merchant@speed.app", idempotencyKey: "key" }
-    )).rejects.toMatchObject({ code: "STATUS_UNKNOWN", retryable: true })
+    )).rejects.toMatchObject({ code: "STATUS_UNKNOWN", retryable: false })
   })
 })

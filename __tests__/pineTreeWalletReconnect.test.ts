@@ -164,7 +164,7 @@ describe("PineTree Wallet reconnect flow", () => {
     // a Solana rail - findDynamicWalletForSource can never resolve it as a signer.
     expect(sendFn).toContain("getDynamicWalletSearchList(wallets as unknown[], primaryWallet, prepared.rail)")
     expect(sendFn).toContain('if (!hasAnyDynamicWallet && prepared.rail === "solana") {')
-    expect(sendFn).toContain('throw new Error("Reconnect your Solana wallet session before approving this withdrawal.")')
+    expect(sendFn).toContain('throw makeDynamicPostPrepareError("No Dynamic Solana wallet matched the prepared source address.", "WALLET_NOT_CONNECTED")')
     expect(page).toContain("solanaWithdrawalReconnectMessage")
   })
 
@@ -202,7 +202,7 @@ describe("PineTree Wallet reconnect flow", () => {
     const btcLogIndex = sendFn.indexOf("logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)", evmLogIndex + 1)
     const btcCallIndex = sendFn.indexOf("const signed = await wallet.signPsbt?.(psbtRequest)")
     const solanaCallbackIndex = sendFn.indexOf("logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)", btcLogIndex + 1)
-    const solanaCallIndex = sendFn.indexOf("return signDynamicSolanaTransactionWithActiveAccount(")
+    const solanaCallIndex = sendFn.indexOf("const result = await signDynamicSolanaTransactionWithActiveAccount(")
     expect(page).toContain('console.error("[pinetree-withdrawals] ABOUT_TO_OPEN_DYNAMIC_MODAL"')
     expect(evmLogIndex).toBeGreaterThan(-1)
     expect(evmCallIndex).toBeGreaterThan(evmLogIndex)

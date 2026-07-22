@@ -74,6 +74,12 @@ export type WalletAdapterWriteInput = {
   note?: string
   idempotencyKey: string
   correlationId?: string | null
+  diagnostics?: WalletAdapterWriteDiagnostics
+}
+
+export type WalletAdapterWriteDiagnostics = {
+  setSubstage?: (substage: string) => void
+  setProviderAccountId?: (providerAccountId: string | null | undefined) => void
 }
 
 export type WalletAdapterOperationResult = {

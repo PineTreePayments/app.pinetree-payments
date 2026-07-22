@@ -310,6 +310,10 @@ export type CreateWalletWithdrawalOrPayoutInput = {
   note?: string
   idempotencyKey: string
   correlationId?: string | null
+  diagnostics?: {
+    setSubstage?: (substage: string) => void
+    setProviderAccountId?: (providerAccountId: string | null | undefined) => void
+  }
 }
 
 function validateWriteInput(input: CreateWalletWithdrawalOrPayoutInput): {
@@ -387,8 +391,12 @@ async function createWalletWrite(
     resolution: Awaited<ReturnType<typeof resolveMerchantWalletProvider>>
   ) => Promise<WalletAdapterOperationResult> | undefined
 ): Promise<PineTreeWalletWriteResult> {
+  input.diagnostics?.setSubstage?.("provider_resolution")
   const resolution = await resolveMerchantWalletProvider(merchantId)
+  input.diagnostics?.setProviderAccountId?.(resolution.context.providerAccountId)
+  input.diagnostics?.setSubstage?.("context_resolution")
 
+  input.diagnostics?.setSubstage?.("operation_persistence")
   const { operation, created } = await createWalletOperation({
     merchantId,
     provider: resolution.provider,
@@ -454,6 +462,7 @@ async function createWalletWrite(
     }
     let balances
     try {
+      input.diagnostics?.setSubstage?.("balance_retrieval")
       balances = await resolution.adapter.getBalances(resolution.context)
       console.info("[pinetree-withdrawals] SPEED_BALANCE_CONFIRMED", {
         correlationId: input.correlationId || null,
@@ -469,6 +478,7 @@ async function createWalletWrite(
       })
       throw error
     }
+    input.diagnostics?.setSubstage?.("balance_validation")
     const requestedBalanceAsset = input.asset === "SATS" ? "BTC" : input.asset
     const available = balances.find((balance) =>
       canonicalWalletBalanceIdentity(balance.asset, balance.network).asset === requestedBalanceAsset
@@ -490,6 +500,7 @@ async function createWalletWrite(
     })
   }
 
+  input.diagnostics?.setSubstage?.("send_request")
   const call = adapterCall(resolution)
   if (!call) {
     const failed = await failOperationAsCapabilityUnavailable(
@@ -503,6 +514,7 @@ async function createWalletWrite(
   await updateWalletOperation(merchantId, operation.id, { status: "PROCESSING" })
   try {
     const result = await call
+    input.diagnostics?.setSubstage?.("operation_persistence")
     const reconciled = await reconcileOperationWithAdapterResult(
       merchantId,
       operation.id,
@@ -536,6 +548,7 @@ export async function createWalletWithdrawal(
   merchantId: string,
   input: CreateWalletWithdrawalOrPayoutInput
 ): Promise<PineTreeWalletWriteResult> {
+  input.diagnostics?.setSubstage?.("amount_validation")
   const validated = validateWriteInput(input)
   const adapterInput: WalletAdapterWriteInput = {
     asset: validated.asset,
@@ -544,8 +557,12 @@ export async function createWalletWithdrawal(
     note: input.note,
     idempotencyKey: input.idempotencyKey,
     correlationId: input.correlationId,
+    diagnostics: input.diagnostics,
   }
+  input.diagnostics?.setSubstage?.("provider_resolution")
   const resolution = await resolveMerchantWalletProvider(merchantId)
+  input.diagnostics?.setProviderAccountId?.(resolution.context.providerAccountId)
+  input.diagnostics?.setSubstage?.("destination_classification")
   resolution.adapter.validateWithdrawal?.(adapterInput)
   return createWalletWrite(merchantId, "WITHDRAWAL", adapterInput, maskDestination(validated.destination), (resolution) =>
     resolution.adapter.createWithdrawal?.(resolution.context, adapterInput)

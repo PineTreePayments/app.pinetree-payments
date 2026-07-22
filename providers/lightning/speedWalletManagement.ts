@@ -19,7 +19,7 @@ import {
   type SpeedWalletCapabilityKey,
   type SpeedWalletCapabilityReason,
 } from "./speedWalletCapabilities"
-import { SpeedApiError, SpeedTransportError, speedRequest } from "./speedClient"
+import { SpeedApiError, SpeedTransportError, speedRequest, speedRequestWithStatus } from "./speedClient"
 
 export class SpeedWalletCapabilityUnavailableError extends Error {
   readonly capability: SpeedWalletCapabilityKey
@@ -334,6 +334,10 @@ export type CreateConnectedWithdrawalInput = ConnectedAccountContext & {
   note?: string
   idempotencyKey: string
   correlationId?: string | null
+  diagnostics?: {
+    setSubstage?: (substage: string) => void
+    setProviderAccountId?: (providerAccountId: string | null | undefined) => void
+  }
 }
 
 export async function createConnectedAccountWithdrawal(
@@ -358,25 +362,64 @@ export async function createConnectedAccountWithdrawal(
       currency: input.currency,
       routeStage: "send_requested",
     })
-    const response = await speedRequest<SpeedInstantSendObject>("/send", {
+    input.diagnostics?.setSubstage?.("send_request")
+    const response = await speedRequestWithStatus<SpeedInstantSendObject>("/send", {
       method: "POST",
       body: JSON.stringify(body),
       merchantContext: merchantContext(input, "instant_send.create"),
     })
-    const validated = validateInstantSend(response)
-    console.info("[pinetree-withdrawals] SPEED_SEND_RESPONSE", {
+    console.info("[pinetree-withdrawals] SPEED_SEND_HTTP_RESPONSE", {
       correlationId: input.correlationId || null,
       merchantId: input.merchantId,
       providerAccountSuffix: accountSuffix(input.speedAccountId),
+      endpointPath: "/send",
+      destinationMethod: input.withdrawMethod === "onchain" ? "onchain" : "lightning",
+      amountSats: input.amount,
+      httpStatus: response.status,
+      speedRequestId: response.requestId,
+      routeStage: "send_http_response",
+    })
+    input.diagnostics?.setSubstage?.("provider_response_parse")
+    const validated = validateInstantSend(response.data)
+    console.info("[pinetree-withdrawals] SPEED_SEND_SUCCEEDED", {
+      correlationId: input.correlationId || null,
+      merchantId: input.merchantId,
+      providerAccountSuffix: accountSuffix(input.speedAccountId),
+      endpointPath: "/send",
       destinationMethod: input.withdrawMethod === "onchain" ? "onchain" : "lightning",
       amountSats: input.amount,
       status: validated.status,
       providerReferencePresent: Boolean(validated.id),
-      routeStage: "send_response",
+      speedRequestId: response.requestId,
+      routeStage: "send_succeeded",
     })
     return validated
   } catch (error) {
     const diagnostic = speedProviderFailureDiagnostic(error)
+    const sendStage = error instanceof SpeedTransportError && error.timedOut
+      ? "SPEED_SEND_TIMEOUT"
+      : error instanceof SpeedApiError
+        ? "SPEED_SEND_PROVIDER_REJECTED"
+        : diagnostic.normalizedErrorCode === "malformed_response"
+          ? "SPEED_SEND_PARSE_FAILED"
+          : "SPEED_SEND_FAILED"
+    if (sendStage === "SPEED_SEND_TIMEOUT") input.diagnostics?.setSubstage?.("send_timeout")
+    else if (sendStage === "SPEED_SEND_PROVIDER_REJECTED") input.diagnostics?.setSubstage?.("provider_rejected")
+    else if (sendStage === "SPEED_SEND_PARSE_FAILED") input.diagnostics?.setSubstage?.("provider_response_parse")
+    console.warn(`[pinetree-withdrawals] ${sendStage}`, {
+      correlationId: input.correlationId || null,
+      merchantId: input.merchantId,
+      providerAccountSuffix: accountSuffix(input.speedAccountId),
+      endpointPath: "/send",
+      destinationMethod: input.withdrawMethod === "onchain" ? "onchain" : "lightning",
+      amountSats: input.amount,
+      httpStatus: diagnostic.httpStatus,
+      speedRequestId: diagnostic.speedRequestId,
+      normalizedErrorCode: diagnostic.normalizedErrorCode,
+      providerErrorCategory: diagnostic.category,
+      retryable: diagnostic.retryable,
+      routeStage: sendStage.toLowerCase().replace(/^speed_/, ""),
+    })
     console.warn("[pinetree-withdrawals] SPEED_SEND_FAILED", {
       correlationId: input.correlationId || null,
       merchantId: input.merchantId,

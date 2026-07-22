@@ -1618,7 +1618,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("dynamicApprovalAvailableForWithdrawal")
     expect(page).toContain("findDynamicApprovalWalletForSource")
     expect(page).toContain("dynamicWalletSupportsRail")
-    expect(dynamicSignerLookup).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
+    expect(dynamicSignerLookup).toContain("resolveDynamicSolanaSignAndSendCapability")
     expect(page).toContain("signAndSendTransaction")
     expect(page).toContain("signPsbt")
     expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare")
@@ -1855,7 +1855,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(submitHandler.indexOf("wallet_withdrawal_prepare_requested")).toBeLessThan(
       submitHandler.indexOf("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse")
     )
-    expect(submitHandler).toContain('emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", { correlationId, stage: "dynamic_submit" })')
+    expect(submitHandler).toContain('stage: "dynamic_post_prepare"')
 
     // handleReviewWithdrawal's own Dynamic-signer pre-check + fetch must
     // likewise be wrapped so an uncaught throw shows a visible error instead
@@ -1979,8 +1979,8 @@ describe("PineTree embedded wallet setup", () => {
   it("Solana Dynamic approval remains reachable and unavailable Solana fails without signing", () => {
     expect(page).toContain("dynamicApprovalAvailableForWithdrawal")
     expect(page).toContain("kind: \"solana_transaction\"")
-    expect(page).toContain("prepared.payload.transactionBase64")
-    expect(dynamicSignerLookup).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
+    expect(page).toContain("transactionBase64")
+    expect(dynamicSignerLookup).toContain("resolveDynamicSolanaSignAndSendCapability")
     expect(page).toContain("const dynamicSubmission = await sendDynamicPreparedWithdrawal")
     expect(page).toContain("if (review.review.approvalMethod === \"dynamic_browser\")")
     expect(page).toContain("Unable to sign this withdrawal. Please try again.")
@@ -2443,11 +2443,11 @@ describe("PineTree embedded wallet setup", () => {
   it("Solana prepared transaction calls Dynamic signAndSendTransaction", () => {
     // sendDynamicPreparedWithdrawal handles the solana_transaction payload kind
     expect(page).toContain("signAndSendTransaction")
-    expect(page).toContain("prepared.payload.transactionBase64")
+    expect(page).toContain("transactionBase64")
     expect(page).toContain("kind: \"solana_transaction\"")
-    expect(dynamicSignerLookup).toContain("wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction")
+    expect(dynamicSignerLookup).toContain("resolveDynamicSolanaSignAndSendCapability")
     // The transaction bytes are deserialised from the server-built base64 payload
-    expect(page).toContain("Transaction.from(base64ToBytes(prepared.payload.transactionBase64))")
+    expect(page).toContain("deserializePreparedSolanaTransaction(prepared)")
   })
 
   it("returned tx hash from signing is sent to the submit route", () => {
@@ -2616,8 +2616,8 @@ describe("PineTree embedded wallet setup", () => {
     // signAndSendTransaction on TurnkeySolanaWalletConnector calls this.walletUiUtils, so
     // 'this' must remain the connector object — inline ?. calls guarantee that.
     expect(page).toContain("signDynamicSolanaTransactionWithActiveAccount(")
-    expect(dynamicSignerLookup).toContain("wallet.signAndSendTransaction(transaction, signOptions)")
-    expect(dynamicSignerLookup).toContain("wallet.connector?.signAndSendTransaction?.(transaction, signOptions)")
+    expect(dynamicSignerLookup).toContain("capability.signAndSendTransaction(transaction, signOptions)")
+    expect(dynamicSignerLookup).toContain("resolveDynamicSolanaSignAndSendCapability(wallet)")
     expect(dynamicSignerLookup).toContain("const txResult = await withTimeout(")
     expect(page).not.toContain("const signAndSendTransaction = wallet.signAndSendTransaction")
   })

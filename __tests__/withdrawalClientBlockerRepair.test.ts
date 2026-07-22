@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { WalletApiRouteError } from "@/engine/wallet/walletErrors"
 
 /**
  * 2026-07-21 production incident: Vercel logs proved a Solana review POST
@@ -149,5 +150,46 @@ describe("withdrawal route response shapes match the client's expectations", () 
 
     expect(body.ok).toBe(true)
     expect(body.data.operation).toEqual(expect.objectContaining({ id: "op-1", status: "PROCESSING" }))
+  })
+
+  it("the Bitcoin/Speed route emits SPEED_ROUTE_FAILED with the propagated substage before returning an error envelope", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    createWalletWithdrawal.mockImplementation(async (_merchantId, input) => {
+      input.diagnostics.setSubstage("send_request")
+      input.diagnostics.setProviderAccountId("acct_live_abc123")
+      throw new WalletApiRouteError("INVALID_DESTINATION", "Enter a valid Bitcoin destination.", false)
+    })
+
+    const { POST } = await import("@/app/api/wallets/withdrawals/route")
+    const req = new Request("http://localhost/api/wallets/withdrawals", {
+      method: "POST",
+      headers: {
+        "idempotency-key": "idem-1",
+        "x-pinetree-withdrawal-correlation": "corr-1",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ asset: "SATS", amount_decimal: "1000", destination: "merchant@example.com" }),
+    })
+    const res = await POST(req as never)
+    const body = await res.json()
+
+    expect(res.status).toBe(400)
+    expect(body).toEqual(expect.objectContaining({
+      ok: false,
+      correlationId: "corr-1",
+      error: expect.objectContaining({ code: "INVALID_DESTINATION", retryable: false }),
+    }))
+    expect(warn).toHaveBeenCalledWith(
+      "[pinetree-withdrawals] SPEED_ROUTE_FAILED",
+      expect.objectContaining({
+        correlationId: "corr-1",
+        merchantId: "merchant_1",
+        substage: "send_request",
+        normalizedErrorCode: "INVALID_DESTINATION",
+        httpStatus: 400,
+        providerAccountSuffix: "abc123",
+      })
+    )
+    warn.mockRestore()
   })
 })

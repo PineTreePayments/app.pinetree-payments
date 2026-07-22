@@ -1,4 +1,6 @@
 export type DynamicSignerRail = "base" | "solana" | "bitcoin"
+import bs58 from "bs58"
+
 export type DynamicWalletChain = "solana" | "evm" | "bitcoin" | "unknown"
 
 export type DynamicWalletLike = {
@@ -23,6 +25,7 @@ export type DynamicWalletLike = {
   additionalAddresses?: Array<{ address?: string | null; chain?: unknown; chainName?: unknown; network?: unknown }>
   signAndSendTransaction?: (...args: unknown[]) => Promise<unknown>
   signPsbt?: (request: { unsignedPsbtBase64: string }) => Promise<{ signedPsbt?: string } | undefined>
+  getSigner?: () => unknown | Promise<unknown>
   connector?: {
     key?: string
     name?: string
@@ -41,6 +44,7 @@ export type DynamicWalletLike = {
     getAddress?: () => string | undefined | Promise<string | undefined>
     getWalletClientByAddress?: (request: { accountAddress: string }) => unknown
     getWalletClient?: (chainId?: string | number) => unknown | Promise<unknown>
+    getSigner?: () => unknown | Promise<unknown>
     signAndSendTransaction?: (...args: unknown[]) => Promise<unknown>
     signPsbt?: (request: { unsignedPsbtBase64: string }) => Promise<{ signedPsbt?: string } | undefined>
   }
@@ -71,6 +75,14 @@ export type DynamicSolanaSignerDiagnostics = {
   activeAccountAddress: string | null
   activeAccountMatchesSource: boolean
   hasSignAndSendTransaction: boolean
+}
+
+export type DynamicSolanaSignAndSendCapability = {
+  connectorKey: string | null
+  connectorName: string | null
+  connectorType: string | null
+  hasSignAndSendTransaction: boolean
+  signAndSendTransaction: (transaction: unknown, signOptions: Record<string, string>) => Promise<unknown>
 }
 
 export const DYNAMIC_SOLANA_SIGN_TIMEOUT_MS = 45_000
@@ -357,7 +369,7 @@ export function dynamicWalletSupportsRail(wallet: DynamicWalletLike, rail: Dynam
   const expectedChain = expectedChainForRail(rail)
   if (expectedChain && classifyDynamicWalletChain(wallet) !== expectedChain) return false
   if (rail === "base") return Boolean(wallet.getWalletClient || wallet.connector?.getWalletClient)
-  if (rail === "solana") return Boolean(wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction)
+  if (rail === "solana") return resolveDynamicSolanaSignAndSendCapability(wallet).hasSignAndSendTransaction
   return Boolean(wallet.signPsbt || wallet.connector?.signPsbt)
 }
 
@@ -416,8 +428,13 @@ function readStringField(record: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
+function isUint8ArrayLike(value: unknown): value is Uint8Array {
+  return value instanceof Uint8Array
+}
+
 export function normalizeDynamicSolanaSignature(value: unknown): string | null {
   if (typeof value === "string") return value.trim() || null
+  if (isUint8ArrayLike(value)) return value.length > 0 ? bs58.encode(value) : null
   if (!value || typeof value !== "object") return null
   if (Array.isArray(value)) {
     for (const item of value) {
@@ -453,6 +470,106 @@ export function normalizeDynamicSolanaSignature(value: unknown): string | null {
   return null
 }
 
+function maskSignature(value: string | null) {
+  if (!value) return null
+  return value.length <= 12 ? value : `${value.slice(0, 6)}...${value.slice(-6)}`
+}
+
+function signerMethod(candidate: unknown) {
+  if (!candidate || typeof candidate !== "object") return null
+  const method = (candidate as { signAndSendTransaction?: unknown }).signAndSendTransaction
+  return typeof method === "function" ? method as (...args: unknown[]) => Promise<unknown> : null
+}
+
+function candidateConnectorType(value: unknown) {
+  if (!value || typeof value !== "object") return null
+  const record = value as Record<string, unknown>
+  return [
+    record.key,
+    record.name,
+    record.chain,
+    record.chainName,
+    record.connectedChain,
+    record.overrideKey,
+  ].map((entry) => String(entry || "").trim()).filter(Boolean).join(":").slice(0, 80) || null
+}
+
+export function resolveDynamicSolanaSignAndSendCapability(
+  wallet: DynamicWalletLike
+): DynamicSolanaSignAndSendCapability {
+  const connectorInfo = getDynamicWalletConnectorInfo(wallet)
+  const walletMethod = signerMethod(wallet)
+  if (walletMethod) {
+    return {
+      ...connectorInfo,
+      connectorType: candidateConnectorType(wallet.connector ?? wallet.walletConnector ?? wallet),
+      hasSignAndSendTransaction: true,
+      signAndSendTransaction: (transaction, signOptions) =>
+        wallet.signAndSendTransaction!(transaction, signOptions),
+    }
+  }
+
+  const connectorMethod = signerMethod(wallet.connector)
+  if (connectorMethod) {
+    return {
+      ...connectorInfo,
+      connectorType: candidateConnectorType(wallet.connector),
+      hasSignAndSendTransaction: true,
+      signAndSendTransaction: (transaction, signOptions) =>
+        wallet.connector!.signAndSendTransaction!(transaction, signOptions),
+    }
+  }
+
+  const signerFactory = wallet.getSigner ?? wallet.connector?.getSigner
+  if (typeof signerFactory === "function") {
+    return {
+      ...connectorInfo,
+      connectorType: candidateConnectorType(wallet.connector ?? wallet),
+      hasSignAndSendTransaction: true,
+      signAndSendTransaction: async (transaction, signOptions) => {
+        const signer = await signerFactory.call(wallet.getSigner ? wallet : wallet.connector)
+        const method = signerMethod(signer)
+        if (!method) {
+          throw Object.assign(new Error("Dynamic wallet does not expose signAndSendTransaction."), {
+            code: "SIGNER_NOT_AVAILABLE",
+          })
+        }
+        return method.call(signer, transaction, signOptions)
+      },
+    }
+  }
+
+  const walletClientFactory = wallet.getWalletClient ?? wallet.connector?.getWalletClient
+  if (typeof walletClientFactory === "function") {
+    return {
+      ...connectorInfo,
+      connectorType: candidateConnectorType(wallet.connector ?? wallet),
+      hasSignAndSendTransaction: true,
+      signAndSendTransaction: async (transaction, signOptions) => {
+        const client = await walletClientFactory.call(wallet.getWalletClient ? wallet : wallet.connector, "solana")
+        const method = signerMethod(client)
+        if (!method) {
+          throw Object.assign(new Error("Dynamic wallet does not expose signAndSendTransaction."), {
+            code: "SIGNER_NOT_AVAILABLE",
+          })
+        }
+        return method.call(client, transaction, signOptions)
+      },
+    }
+  }
+
+  return {
+    ...connectorInfo,
+    connectorType: candidateConnectorType(wallet.connector ?? wallet.walletConnector ?? wallet),
+    hasSignAndSendTransaction: false,
+    signAndSendTransaction: async () => {
+      throw Object.assign(new Error("Dynamic wallet does not expose signAndSendTransaction."), {
+        code: "SIGNER_NOT_AVAILABLE",
+      })
+    },
+  }
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null
   const timeout = new Promise<never>((_, reject) => {
@@ -474,9 +591,8 @@ export async function signDynamicSolanaTransactionWithActiveAccount(
 ) {
   assertDynamicWalletChain(wallet, "solana")
   const { activeAccountAddress, extractedAddressFields } = await extractDynamicActiveWalletAddress(wallet)
-  const hasSignAndSendTransaction = Boolean(
-    wallet.signAndSendTransaction || wallet.connector?.signAndSendTransaction
-  )
+  const capability = resolveDynamicSolanaSignAndSendCapability(wallet)
+  const hasSignAndSendTransaction = capability.hasSignAndSendTransaction
   const activeAccountMatchesSource = dynamicWalletAddressesMatch(
     activeAccountAddress,
     sourceAddress,
@@ -509,13 +625,12 @@ export async function signDynamicSolanaTransactionWithActiveAccount(
     publicKey: activeAccountAddress,
   }
   onBeforeDynamicModal?.()
-  const signPromise =
-    wallet.signAndSendTransaction
-      ? wallet.signAndSendTransaction(transaction, signOptions)
-      : wallet.connector?.signAndSendTransaction?.(transaction, signOptions)
-  if (!signPromise) {
-    throw new Error("Unable to sign this withdrawal. Please try again.")
+  if (!capability.hasSignAndSendTransaction) {
+    throw Object.assign(new Error("Dynamic wallet does not expose signAndSendTransaction."), {
+      code: "SIGNER_NOT_AVAILABLE",
+    })
   }
+  const signPromise = capability.signAndSendTransaction(transaction, signOptions)
   const txResult = await withTimeout(
     signPromise,
     DYNAMIC_SOLANA_SIGN_TIMEOUT_MS,
@@ -525,14 +640,16 @@ export async function signDynamicSolanaTransactionWithActiveAccount(
   console.info("[pinetree-withdrawals] dynamic_solana_sign_result", {
     returned: summarizeDynamicSolanaSignResult(txResult),
     signaturePresent: Boolean(txHash),
-    signature: txHash,
+    signature: maskSignature(txHash),
     resultType: txResult === null ? "null" : Array.isArray(txResult) ? "array" : typeof txResult,
+    connectorKey: capability.connectorKey,
+    connectorType: capability.connectorType,
   })
   if (!txResult) {
-    throw new Error("Unable to sign this withdrawal. Please try again.")
+    throw Object.assign(new Error("Dynamic returned no transaction signature."), { code: "SIGNATURE_MISSING" })
   }
   if (!txHash) {
-    throw new Error("Unable to sign this withdrawal. Please try again.")
+    throw Object.assign(new Error("Dynamic returned no transaction signature."), { code: "SIGNATURE_MISSING" })
   }
   return { txHash, providerReference: txHash, activeAccountAddress }
 }

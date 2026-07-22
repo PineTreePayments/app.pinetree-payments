@@ -86,7 +86,7 @@ function translateSpeedWalletError(error: unknown): never {
       code === "WALLET_VALIDATION_ERROR"
         ? "Your wallet provider could not complete this request. Please try again."
         : WITHDRAWAL_ERROR_MESSAGES[code],
-      error.retryable
+      code === "STATUS_UNKNOWN" ? false : error.retryable
     )
   }
   if (error instanceof WalletApiRouteError) throw error
@@ -302,6 +302,7 @@ export const speedWalletAdapter: WalletProviderAdapter = {
 
   async createWithdrawal(context: WalletAdapterContext, input: WalletAdapterWriteInput) {
     return withTranslatedErrors(async () => {
+      input.diagnostics?.setSubstage?.("destination_classification")
       const classified = classifyBitcoinWithdrawalDestination(input.destination)
       if (!classified.valid) {
         throw new WalletApiRouteError(
@@ -309,6 +310,7 @@ export const speedWalletAdapter: WalletProviderAdapter = {
           "Enter a valid Bitcoin address, Lightning Address, or Lightning invoice."
         )
       }
+      input.diagnostics?.setSubstage?.("send_request")
       const payment = await createConnectedAccountWithdrawal({
         merchantId: context.merchantId,
         speedAccountId: context.providerAccountId,
@@ -319,6 +321,7 @@ export const speedWalletAdapter: WalletProviderAdapter = {
         note: input.note,
         idempotencyKey: input.idempotencyKey,
         correlationId: input.correlationId,
+        diagnostics: input.diagnostics,
       })
       return toAdapterOperationResult(payment)
     })
