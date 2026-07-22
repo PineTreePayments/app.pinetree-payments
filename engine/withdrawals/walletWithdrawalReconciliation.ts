@@ -4,7 +4,10 @@ import {
   updateWalletWithdrawalRequest,
   type WalletWithdrawalRequestRecord,
 } from "@/database/walletWithdrawalRequests"
-import { listProcessingWalletOperationsForReconciliation } from "@/database/merchantWalletOperations"
+import {
+  listProcessingWalletOperationsForReconciliation,
+  listProcessingWalletOperationsMissingProviderReferences,
+} from "@/database/merchantWalletOperations"
 import { insertWithdrawalAuditEvent } from "@/database/merchantAuditEvents"
 import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
 import { getConnectedAccountSendStatus } from "@/providers/lightning/speedWalletManagement"
@@ -12,11 +15,15 @@ import { getWalletWithdrawal } from "@/engine/wallet/walletOperations"
 import { syncPineTreeWalletBalances } from "@/engine/pineTreeWalletSync"
 
 export type ReconciliationResult = {
+  candidates: number
   checked: number
+  missingProviderReference: number
   confirmed: number
   failed: number
+  stillProcessing: number
   still_processing: number
   skipped: number
+  errors: number
 }
 
 type OnChainStatus = "confirmed" | "failed" | "pending"
@@ -169,7 +176,7 @@ async function checkSpeedInstantSend(merchantId: string, providerSendId: string)
 
 async function reconcileOne(
   withdrawal: WalletWithdrawalRequestRecord
-): Promise<"confirmed" | "failed" | "pending" | "skipped"> {
+): Promise<{ outcome: "confirmed" | "failed" | "pending" | "skipped"; reason?: string }> {
   const { id, merchant_id, rail, asset, tx_hash, provider_reference } = withdrawal
 
   let onChainStatus: OnChainStatus
@@ -208,7 +215,7 @@ async function reconcileOne(
       ...details,
       reason: "missing_provider_reference",
     })
-    return "skipped"
+    return { outcome: "skipped", reason: "missing_provider_reference" }
   }
 
   if (onChainStatus === "pending") {
@@ -216,7 +223,7 @@ async function reconcileOne(
       ...details,
       reason: "provider_pending",
     })
-    return "pending"
+    return { outcome: "pending" }
   }
 
   const newStatus = onChainStatus === "confirmed" ? "confirmed" : "failed"
@@ -254,7 +261,7 @@ async function reconcileOne(
     table: "wallet_withdrawal_requests",
     id,
   })
-  return onChainStatus
+  return { outcome: onChainStatus }
 }
 
 /**
@@ -271,20 +278,48 @@ async function reconcileOne(
  * persists the result - this just needs to be called on a schedule.
  */
 async function reconcileProcessingWalletOperations(limit: number, merchantId?: string): Promise<{
+  candidates: number
   checked: number
   confirmed: number
   failed: number
   still_processing: number
+  missingProviderReference: number
   skipped: number
+  errors: number
 }> {
-  const operations = await listProcessingWalletOperationsForReconciliation(limit, merchantId)
-  const result = { checked: operations.length, confirmed: 0, failed: 0, still_processing: 0, skipped: 0 }
+  const [operations, missingProviderReferences] = await Promise.all([
+    listProcessingWalletOperationsForReconciliation(limit, merchantId),
+    listProcessingWalletOperationsMissingProviderReferences(limit, merchantId),
+  ])
+  const result = {
+    candidates: operations.length + missingProviderReferences.length,
+    checked: operations.length,
+    confirmed: 0,
+    failed: 0,
+    still_processing: 0,
+    missingProviderReference: missingProviderReferences.length,
+    skipped: missingProviderReferences.length,
+    errors: 0,
+  }
   reconcileLog("WALLET_OPERATION_RECONCILE_SELECTED", {
     table: "merchant_wallet_operations",
     count: operations.length,
+    missingProviderReference: missingProviderReferences.length,
     limit,
     merchantScoped: Boolean(merchantId),
   })
+
+  for (const operation of missingProviderReferences) {
+    reconcileLog("WALLET_OPERATION_RECONCILE_SKIPPED", {
+      table: "merchant_wallet_operations",
+      merchantId: operation.merchant_id,
+      operationId: operation.id,
+      provider: operation.provider,
+      providerAccountIdPresent: Boolean(operation.provider_account_id || operation.raw_provider_status?.providerAccountId),
+      idempotencyKey: operation.idempotency_key,
+      reason: "missing_provider_reference",
+    })
+  }
 
   for (const operation of operations) {
     try {
@@ -382,6 +417,7 @@ async function reconcileProcessingWalletOperations(limit: number, merchantId?: s
         reason: "provider_lookup_failed",
       })
       result.skipped++
+      result.errors++
     }
   }
 
@@ -416,19 +452,28 @@ export async function reconcileProcessingWithdrawals(options: {
   })
 
   const result: ReconciliationResult = {
+    candidates: withdrawals.length + walletOperations.candidates,
     checked: withdrawals.length + walletOperations.checked,
+    missingProviderReference: walletOperations.missingProviderReference,
     confirmed: walletOperations.confirmed,
     failed: walletOperations.failed,
+    stillProcessing: walletOperations.still_processing,
     still_processing: walletOperations.still_processing,
     skipped: walletOperations.skipped,
+    errors: walletOperations.errors,
   }
 
   for (const withdrawal of withdrawals) {
-    const outcome = await reconcileOne(withdrawal)
+    const { outcome, reason } = await reconcileOne(withdrawal)
     if (outcome === "confirmed") result.confirmed++
     else if (outcome === "failed") result.failed++
-    else if (outcome === "pending") result.still_processing++
-    else result.skipped++
+    else if (outcome === "pending") {
+      result.still_processing++
+      result.stillProcessing++
+    } else {
+      result.skipped++
+      if (reason === "missing_provider_reference") result.missingProviderReference++
+    }
   }
 
   console.log("[reconcile-withdrawals] complete", result)

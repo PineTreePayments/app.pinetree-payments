@@ -83,7 +83,8 @@ describe("Speed wallet adapter normalization", () => {
     mocks.withdrawal.mockResolvedValue({
       id: "is_1", status: "unpaid", withdraw_id: "wi_1", amount: 1000, currency: "SATS",
       target_amount: 1000, target_currency: "SATS", fees: 3, withdraw_method: "lightning",
-      withdraw_type: "lightning_invoice", created: 1, modified: 1,
+      withdraw_type: "lightning_invoice", explorer_link: "https://mempool.space/tx/abc",
+      created: 1721732656358, modified: 1721732658859,
     })
     const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
     const result = await speedWalletAdapter.createWithdrawal!(
@@ -92,9 +93,19 @@ describe("Speed wallet adapter normalization", () => {
     )
     expect(result).toMatchObject({
       providerReference: "is_1",
+      providerTransactionId: "is_1",
       providerSecondaryReference: "wi_1",
-      status: "PENDING",
+      providerStatus: "unpaid",
+      status: "PROCESSING",
+      explorerUrl: "https://mempool.space/tx/abc",
+      providerCreatedAt: "2024-07-23T11:04:16.358Z",
       feeBaseUnits: BigInt(3),
+      rawProviderStatus: expect.objectContaining({
+        id: "is_1",
+        status: "unpaid",
+        withdraw_id: "wi_1",
+        created: 1721732656358,
+      }),
     })
   })
 

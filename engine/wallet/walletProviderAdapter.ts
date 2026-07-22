@@ -84,12 +84,14 @@ export type WalletAdapterWriteDiagnostics = {
 
 export type WalletAdapterOperationResult = {
   providerReference: string | null
+  providerTransactionId?: string | null
   providerStatus: string | null
   status: WalletOperationStatus
   txHash?: string | null
   explorerUrl?: string | null
   feeBaseUnits?: bigint | null
   providerSecondaryReference?: string | null
+  providerCreatedAt?: string | null
   rawProviderStatus?: Record<string, unknown> | null
 }
 

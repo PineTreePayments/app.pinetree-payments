@@ -363,16 +363,27 @@ async function reconcileOperationWithAdapterResult(
     providerAccountId,
     status: result.status,
     providerReference: result.providerReference,
+    providerTransactionId: result.providerTransactionId ?? null,
     providerStatus: result.providerStatus,
     providerSecondaryReference: result.providerSecondaryReference,
+    providerCreatedAt: result.providerCreatedAt ?? null,
     rawProviderStatus: result.rawProviderStatus,
     txHash: result.txHash ?? undefined,
     explorerUrl: result.explorerUrl ?? undefined,
     feeBaseUnits: result.feeBaseUnits ?? undefined,
+    submittedAt: now,
     completedAt: result.status === "COMPLETED" ? now : undefined,
     confirmedAt: result.status === "COMPLETED" ? now : undefined,
     failedAt: result.status === "FAILED" || result.status === "EXPIRED" ? now : undefined,
   })
+}
+
+function hasProviderReconciliationIdentifier(result: WalletAdapterOperationResult): boolean {
+  return Boolean(
+    String(result.providerReference || "").trim()
+    || String(result.providerTransactionId || "").trim()
+    || String(result.txHash || "").trim()
+  )
 }
 
 async function failOperationAsCapabilityUnavailable(
@@ -562,19 +573,54 @@ async function createWalletWrite(
     return { operation: toPineTreeWalletOperation(failed), capabilityAvailable: false }
   }
 
-  await updateWalletOperation(merchantId, operation.id, {
-    status: "PROCESSING",
-    submittedAt: new Date().toISOString(),
-  })
   try {
     const result = await call
+    if (result.status === "PROCESSING" && !hasProviderReconciliationIdentifier(result)) {
+      console.error("[wallet-operations] provider accepted withdrawal without reconciliation identifier", {
+        merchantId,
+        provider: resolution.provider,
+        operationType,
+        operationId: operation.id,
+        idempotencyKey: input.idempotencyKey,
+        providerAccountId: resolution.context.providerAccountId,
+        providerStatus: result.providerStatus ?? null,
+        rawProviderStatus: result.rawProviderStatus ?? null,
+      })
+      throw new WalletApiRouteError(
+        "STATUS_UNKNOWN",
+        "Your wallet provider accepted the request, but did not return a reconciliation reference.",
+        false
+      )
+    }
     input.diagnostics?.setSubstage?.("operation_persistence")
-    const reconciled = await reconcileOperationWithAdapterResult(
-      merchantId,
-      operation.id,
-      resolution.context.providerAccountId,
-      result
-    )
+    let reconciled: MerchantWalletOperation
+    try {
+      reconciled = await reconcileOperationWithAdapterResult(
+        merchantId,
+        operation.id,
+        resolution.context.providerAccountId,
+        result
+      )
+    } catch (error) {
+      console.error("[wallet-operations] provider withdrawal accepted but persistence failed", {
+        merchantId,
+        provider: resolution.provider,
+        operationType,
+        operationId: operation.id,
+        idempotencyKey: input.idempotencyKey,
+        providerAccountId: resolution.context.providerAccountId,
+        providerReference: result.providerReference ?? null,
+        providerTransactionId: result.providerTransactionId ?? null,
+        providerSecondaryReference: result.providerSecondaryReference ?? null,
+        providerStatus: result.providerStatus ?? null,
+        providerCreatedAt: result.providerCreatedAt ?? null,
+        txHash: result.txHash ?? null,
+        explorerUrl: result.explorerUrl ?? null,
+        rawProviderStatus: result.rawProviderStatus ?? null,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
     if (operationType === "WITHDRAWAL" && resolution.provider === "speed") {
       console.info("[pinetree-withdrawals] SPEED_OPERATION_PERSISTED", {
         correlationId: input.correlationId || null,
@@ -661,11 +707,12 @@ async function refreshWriteOperationStatus(
   ) {
     throw new WalletApiRouteError("WALLET_OPERATION_NOT_FOUND", "Wallet operation not found.")
   }
-  if (!operation.provider_reference) {
+  const providerLookupReference = String(operation.provider_reference || operation.provider_transaction_id || "").trim()
+  if (!providerLookupReference) {
     return toPineTreeWalletOperation(operation)
   }
 
-  const call = statusCall(resolution, operation.provider_reference)
+  const call = statusCall(resolution, providerLookupReference)
   if (!call) return toPineTreeWalletOperation(operation)
 
   const result = await call

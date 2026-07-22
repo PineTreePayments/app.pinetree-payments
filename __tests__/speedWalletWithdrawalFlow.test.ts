@@ -40,15 +40,16 @@ describe("account-scoped withdrawal safeguards", () => {
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({
       resolveMerchantWalletProvider: vi.fn().mockResolvedValue({ provider: "speed", adapter, context: { merchantId: "merchant-1", providerAccountId: "acct_1" } }),
     }))
+    const createWalletOperation = vi.fn().mockResolvedValue({ operation: operation(), created: true })
     const updateWalletOperation = vi.fn().mockImplementation(async (_merchant, _id, patch) => operation(patch.status || "CREATED"))
     vi.doMock("@/database/merchantWalletOperations", () => ({
-      createWalletOperation: vi.fn().mockResolvedValue({ operation: operation(), created: true }),
+      createWalletOperation,
       updateWalletOperation,
       getWalletOperationForMerchant: vi.fn(), listWalletOperations: vi.fn(),
       upsertWalletOperationFromProviderActivity: vi.fn(),
     }))
     vi.doMock("@/database/merchantWalletBalanceSnapshots", () => ({ listWalletBalanceSnapshots: vi.fn(), upsertWalletBalanceSnapshot: vi.fn() }))
-    return { adapter, createWithdrawal, updateWalletOperation }
+    return { adapter, createWithdrawal, createWalletOperation, updateWalletOperation }
   }
 
   it("persists a failed operation and never dispatches when fresh balance is insufficient", async () => {
@@ -61,18 +62,110 @@ describe("account-scoped withdrawal safeguards", () => {
     expect(arranged.updateWalletOperation).toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ status: "FAILED", failureCode: "INSUFFICIENT_BALANCE" }))
   })
 
-  it("keeps an uncertain dispatched operation processing and does not mark it failed", async () => {
+  it("does not move an uncertain send timeout to PROCESSING without a provider reference", async () => {
     const createWithdrawal = vi.fn().mockRejectedValue(new WalletApiRouteError("WALLET_PROVIDER_TIMEOUT", "Provider timeout.", true))
     const arranged = await arrange(BigInt(2000), createWithdrawal)
     const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
     await expect(createWalletWithdrawal("merchant-1", {
       asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
     })).rejects.toMatchObject({ code: "WALLET_PROVIDER_TIMEOUT", retryable: true })
+    expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({ status: "PROCESSING" })
+    )
+    expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ status: "FAILED" }))
+  })
+
+  it("persists Speed provider identifiers and PROCESSING in the same successful write", async () => {
+    const createWithdrawal = vi.fn().mockResolvedValue({
+      providerReference: "is_123",
+      providerTransactionId: "is_123",
+      providerSecondaryReference: "wi_123",
+      providerStatus: "unpaid",
+      providerCreatedAt: "2026-07-22T07:12:49.000Z",
+      status: "PROCESSING",
+      feeBaseUnits: BigInt(4),
+      txHash: "tx_abc",
+      explorerUrl: "https://mempool.space/tx/tx_abc",
+      rawProviderStatus: { id: "is_123", withdraw_id: "wi_123", status: "unpaid" },
+    })
+    const arranged = await arrange(BigInt(2000), createWithdrawal)
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })
+
+    expect(arranged.updateWalletOperation).toHaveBeenCalledTimes(1)
     expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
       "merchant-1",
       "op-1",
-      expect.objectContaining({ status: "PROCESSING", submittedAt: expect.any(String) })
+      expect.objectContaining({
+        status: "PROCESSING",
+        providerReference: "is_123",
+        providerTransactionId: "is_123",
+        providerSecondaryReference: "wi_123",
+        providerStatus: "unpaid",
+        providerCreatedAt: "2026-07-22T07:12:49.000Z",
+        submittedAt: expect.any(String),
+        txHash: "tx_abc",
+        explorerUrl: "https://mempool.space/tx/tx_abc",
+        rawProviderStatus: expect.objectContaining({ id: "is_123", withdraw_id: "wi_123" }),
+      })
     )
-    expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ status: "FAILED" }))
+  })
+
+  it("does not write PROCESSING when a provider result lacks any reconciliation identifier", async () => {
+    const createWithdrawal = vi.fn().mockResolvedValue({
+      providerReference: null,
+      providerTransactionId: null,
+      providerSecondaryReference: null,
+      providerStatus: "unpaid",
+      status: "PROCESSING",
+      rawProviderStatus: { status: "unpaid" },
+    })
+    const arranged = await arrange(BigInt(2000), createWithdrawal)
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await expect(createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })).rejects.toMatchObject({ code: "STATUS_UNKNOWN", retryable: false })
+
+    expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({ status: "PROCESSING" })
+    )
+  })
+
+  it("does not dispatch a duplicate withdrawal after provider acceptance when persistence fails", async () => {
+    const createWithdrawal = vi.fn().mockResolvedValue({
+      providerReference: "is_accepted",
+      providerTransactionId: "is_accepted",
+      providerSecondaryReference: "wi_accepted",
+      providerStatus: "unpaid",
+      status: "PROCESSING",
+      rawProviderStatus: { id: "is_accepted", withdraw_id: "wi_accepted", status: "unpaid" },
+    })
+    const arranged = await arrange(BigInt(2000), createWithdrawal)
+    arranged.updateWalletOperation.mockRejectedValueOnce(new Error("database unavailable"))
+    arranged.createWalletOperation
+      .mockResolvedValueOnce({ operation: operation(), created: true })
+      .mockResolvedValueOnce({
+        operation: { ...operation("CREATED"), destination_summary: "lnbc1q...qqqq" },
+        created: false,
+      })
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await expect(createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })).rejects.toThrow("database unavailable")
+    const retry = await createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })
+
+    expect(retry.operation.id).toBe("op-1")
+    expect(createWithdrawal).toHaveBeenCalledTimes(1)
   })
 })

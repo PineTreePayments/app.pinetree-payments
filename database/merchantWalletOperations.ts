@@ -352,16 +352,65 @@ export async function listProcessingWalletOperationsForReconciliation(
   let query = supabase
     .from(TABLE)
     .select("*")
+    .eq("provider", "speed")
     .eq("status", "PROCESSING")
     .eq("operation_type", "WITHDRAWAL")
-    .not("provider_reference", "is", null)
+    .or("provider_reference.not.is.null,provider_transaction_id.not.is.null")
     .order("created_at", { ascending: true })
     .limit(limit)
 
   if (merchantId) query = query.eq("merchant_id", merchantId)
 
-  const { data, error } = await query
+  let { data, error } = await query
+  if (isMissingOperationColumn(error)) {
+    query = supabase
+      .from(TABLE)
+      .select("*")
+      .eq("provider", "speed")
+      .eq("status", "PROCESSING")
+      .eq("operation_type", "WITHDRAWAL")
+      .not("provider_reference", "is", null)
+      .order("created_at", { ascending: true })
+      .limit(limit)
+    if (merchantId) query = query.eq("merchant_id", merchantId)
+    ;({ data, error } = await query)
+  }
   if (error) throw new Error(`Failed to list processing wallet operations for reconciliation: ${error.message}`)
+  return (data || []) as MerchantWalletOperation[]
+}
+
+export async function listProcessingWalletOperationsMissingProviderReferences(
+  limit: number,
+  merchantId?: string
+): Promise<MerchantWalletOperation[]> {
+  let query = supabase
+    .from(TABLE)
+    .select("*")
+    .eq("provider", "speed")
+    .eq("status", "PROCESSING")
+    .eq("operation_type", "WITHDRAWAL")
+    .is("provider_reference", null)
+    .is("provider_transaction_id", null)
+    .order("created_at", { ascending: true })
+    .limit(limit)
+
+  if (merchantId) query = query.eq("merchant_id", merchantId)
+
+  let { data, error } = await query
+  if (isMissingOperationColumn(error)) {
+    query = supabase
+      .from(TABLE)
+      .select("*")
+      .eq("provider", "speed")
+      .eq("status", "PROCESSING")
+      .eq("operation_type", "WITHDRAWAL")
+      .is("provider_reference", null)
+      .order("created_at", { ascending: true })
+      .limit(limit)
+    if (merchantId) query = query.eq("merchant_id", merchantId)
+    ;({ data, error } = await query)
+  }
+  if (error) throw new Error(`Failed to list processing wallet operations missing provider references: ${error.message}`)
   return (data || []) as MerchantWalletOperation[]
 }
 

@@ -27,7 +27,15 @@ describe("POST /api/internal/wallets/pinetree/reconcile-withdrawals", () => {
     process.env.INTERNAL_API_SECRET = "test-internal-secret"
     delete process.env.CRON_SECRET
     mocks.reconcileProcessingWithdrawals.mockResolvedValue({
-      checked: 1, confirmed: 1, failed: 0, still_processing: 0, skipped: 0,
+      candidates: 1,
+      checked: 1,
+      missingProviderReference: 0,
+      confirmed: 1,
+      failed: 0,
+      stillProcessing: 0,
+      still_processing: 0,
+      skipped: 0,
+      errors: 0,
     })
   })
 
@@ -43,7 +51,11 @@ describe("POST /api/internal/wallets/pinetree/reconcile-withdrawals", () => {
     const body = await res.json()
 
     expect(res.status).toBe(200)
+    expect(body.candidates).toBe(1)
     expect(body.confirmed).toBe(1)
+    expect(body.missingProviderReference).toBe(0)
+    expect(body.stillProcessing).toBe(0)
+    expect(body.errors).toBe(0)
     expect(mocks.reconcileProcessingWithdrawals).toHaveBeenCalledWith({ limit: 50, merchantId: undefined })
   })
 

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getMerchantLightningProfile: vi.fn(),
   getConnectedAccountSendStatus: vi.fn(),
   listProcessingWalletOperationsForReconciliation: vi.fn(),
+  listProcessingWalletOperationsMissingProviderReferences: vi.fn(),
   getWalletWithdrawal: vi.fn(),
   syncPineTreeWalletBalances: vi.fn(),
   fetch: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("@/providers/lightning/speedWalletManagement", () => ({
 
 vi.mock("@/database/merchantWalletOperations", () => ({
   listProcessingWalletOperationsForReconciliation: mocks.listProcessingWalletOperationsForReconciliation,
+  listProcessingWalletOperationsMissingProviderReferences: mocks.listProcessingWalletOperationsMissingProviderReferences,
 }))
 
 vi.mock("@/engine/wallet/walletOperations", () => ({
@@ -127,6 +129,7 @@ describe("reconcileProcessingWithdrawals", () => {
     mocks.listProcessingWithdrawalsForReconciliation.mockResolvedValue([])
     mocks.listProcessingBitcoinWithdrawalsForReconciliation.mockResolvedValue([])
     mocks.listProcessingWalletOperationsForReconciliation.mockResolvedValue([])
+    mocks.listProcessingWalletOperationsMissingProviderReferences.mockResolvedValue([])
     mocks.syncPineTreeWalletBalances.mockResolvedValue({})
     // Clear any env vars that would affect Base RPC
     process.env.BASE_RPC_URL = "https://base-rpc.example.com"
@@ -139,11 +142,15 @@ describe("reconcileProcessingWithdrawals", () => {
     const result = await reconcileProcessingWithdrawals({})
 
     expect(result).toEqual({
+      candidates: 0,
       checked: 0,
+      missingProviderReference: 0,
       confirmed: 0,
       failed: 0,
+      stillProcessing: 0,
       still_processing: 0,
       skipped: 0,
+      errors: 0,
     })
     expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
     expect(mocks.insertWithdrawalAuditEvent).not.toHaveBeenCalled()
@@ -371,6 +378,7 @@ describe("reconcileProcessingWithdrawals", () => {
     expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(10, undefined)
     expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(10, undefined)
     expect(mocks.listProcessingWalletOperationsForReconciliation).toHaveBeenCalledWith(10, undefined)
+    expect(mocks.listProcessingWalletOperationsMissingProviderReferences).toHaveBeenCalledWith(10, undefined)
   })
 
   it("defaults limit to 50 when not provided", async () => {
@@ -379,6 +387,7 @@ describe("reconcileProcessingWithdrawals", () => {
     expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(50, undefined)
     expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(50, undefined)
     expect(mocks.listProcessingWalletOperationsForReconciliation).toHaveBeenCalledWith(50, undefined)
+    expect(mocks.listProcessingWalletOperationsMissingProviderReferences).toHaveBeenCalledWith(50, undefined)
   })
 
   it("scopes every underlying reconciliation query to a single merchant when merchantId is provided", async () => {
@@ -387,6 +396,7 @@ describe("reconcileProcessingWithdrawals", () => {
     expect(mocks.listProcessingWithdrawalsForReconciliation).toHaveBeenCalledWith(10, "merch-scoped")
     expect(mocks.listProcessingBitcoinWithdrawalsForReconciliation).toHaveBeenCalledWith(10, "merch-scoped")
     expect(mocks.listProcessingWalletOperationsForReconciliation).toHaveBeenCalledWith(10, "merch-scoped")
+    expect(mocks.listProcessingWalletOperationsMissingProviderReferences).toHaveBeenCalledWith(10, "merch-scoped")
   })
 
   // Bitcoin withdrawals actually submitted through the live UI write to
@@ -437,6 +447,7 @@ describe("reconcileProcessingWithdrawals", () => {
       const result = await reconcileProcessingWithdrawals({})
 
       expect(result.still_processing).toBe(1)
+      expect(result.stillProcessing).toBe(1)
     })
 
     it("skips one merchant's failed provider/account resolution without blocking the batch", async () => {
@@ -452,8 +463,23 @@ describe("reconcileProcessingWithdrawals", () => {
       const result = await reconcileProcessingWithdrawals({})
 
       expect(result.skipped).toBe(1)
+      expect(result.errors).toBe(1)
       expect(result.confirmed).toBe(1)
       expect(result.checked).toBe(2)
+    })
+
+    it("reports legacy Speed processing rows missing provider references instead of silently omitting them", async () => {
+      mocks.listProcessingWalletOperationsMissingProviderReferences.mockResolvedValue([
+        makeOperation({ id: "op-missing", provider_reference: null, provider_transaction_id: null }),
+      ])
+
+      const result = await reconcileProcessingWithdrawals({})
+
+      expect(result.candidates).toBe(1)
+      expect(result.checked).toBe(0)
+      expect(result.missingProviderReference).toBe(1)
+      expect(result.skipped).toBe(1)
+      expect(mocks.getWalletWithdrawal).not.toHaveBeenCalled()
     })
   })
 })

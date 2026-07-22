@@ -101,24 +101,76 @@ function mapSpeedStatusToOperationStatus(status: string | null | undefined): Wal
   if (normalized === "failed") return "FAILED"
   if (normalized === "expired") return "EXPIRED"
   if (normalized === "canceled" || normalized === "cancelled") return "CANCELED"
-  if (normalized === "pending" || normalized === "unpaid") return "PENDING"
+  if (normalized === "pending" || normalized === "unpaid") return "PROCESSING"
   if (!normalized) return "PROCESSING"
   return "PROCESSING"
 }
 
+function stringField(input: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = input[key]
+    if (typeof value === "string" && value.trim()) return value.trim()
+    if (typeof value === "number" && Number.isFinite(value)) return String(value)
+  }
+  return null
+}
+
+function speedTimestampToIso(value: unknown): string | null {
+  const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN
+  if (!Number.isFinite(numeric) || numeric <= 0) return null
+  const date = new Date(numeric)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null
+}
+
+function maskProviderDestination(value: unknown): unknown {
+  if (typeof value !== "string") return value
+  const trimmed = value.trim()
+  if (trimmed.length <= 16) return trimmed
+  return `${trimmed.slice(0, 8)}...${trimmed.slice(-6)}`
+}
+
+function sanitizeSpeedInstantSendResponse(payment: SpeedInstantSendObject): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(payment as Record<string, unknown>).map(([key, value]) => {
+      if (key === "withdraw_request") return [key, maskProviderDestination(value)]
+      if (key === "note") return [key, typeof value === "string" && value ? "[redacted]" : value]
+      return [key, value]
+    })
+  )
+}
+
 function toAdapterOperationResult(payment: SpeedInstantSendObject): WalletAdapterOperationResult {
   const fee = decimalToBaseUnits(payment.fees, payment.currency)
+  const rawPayment = payment as Record<string, unknown>
+  const instantSendId = stringField(rawPayment, ["id"])
+  const withdrawId = stringField(rawPayment, ["withdraw_id", "withdrawId", "withdrawal_id", "withdrawalId"])
+  const providerTransactionId =
+    stringField(rawPayment, [
+      "transaction_id",
+      "transactionId",
+      "payment_id",
+      "paymentId",
+      "transfer_id",
+      "transferId",
+      "request_id",
+      "requestId",
+      "tx_id",
+      "txid",
+      "balance_transaction_id",
+      "balanceTransactionId",
+    ]) || instantSendId
+  const txHash = stringField(rawPayment, ["tx_hash", "txHash", "transaction_hash", "transactionHash", "hash"])
   return {
-    providerReference: payment.id ?? null,
+    providerReference: instantSendId,
+    providerTransactionId,
     providerStatus: payment.status ?? null,
     status: mapSpeedStatusToOperationStatus(payment.status),
-    explorerUrl: payment.explorer_link ?? null,
+    txHash,
+    explorerUrl: stringField(rawPayment, ["explorer_link", "explorerLink", "explorer_url", "explorerUrl"]) ?? null,
     feeBaseUnits: fee,
-    providerSecondaryReference: payment.withdraw_id ?? null,
-    rawProviderStatus: {
-      ...(payment.withdraw_id ? { withdrawId: payment.withdraw_id } : {}),
-      ...(payment.failure_reason ? { failureReason: payment.failure_reason } : {}),
-    },
+    providerSecondaryReference: withdrawId,
+    providerCreatedAt: speedTimestampToIso(rawPayment.created),
+    rawProviderStatus: sanitizeSpeedInstantSendResponse(payment),
   }
 }
 
