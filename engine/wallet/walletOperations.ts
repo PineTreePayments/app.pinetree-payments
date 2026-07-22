@@ -63,7 +63,9 @@ function toPineTreeWalletOperation(row: MerchantWalletOperation): PineTreeWallet
     submittedAt: row.submitted_at,
   })
     ? "INCOMPLETE"
-    : row.status
+    : row.status === "REQUIRES_ACTION"
+      ? "ACTION_REQUIRED"
+      : row.status
 
   return {
     id: row.id,
@@ -387,6 +389,11 @@ async function reconcileOperationWithAdapterResult(
     completedAt: result.status === "COMPLETED" ? now : undefined,
     confirmedAt: result.status === "COMPLETED" ? now : undefined,
     failedAt: result.status === "FAILED" || result.status === "EXPIRED" ? now : undefined,
+    dispatchCompletedAt: now,
+    providerResponseReceived: true,
+    providerAcceptanceKnown: result.status !== "FAILED" && result.status !== "EXPIRED",
+    providerAcceptanceUnknown: false,
+    persistenceAfterAcceptanceFailed: false,
   })
 }
 
@@ -457,11 +464,14 @@ async function markOperationFailedBeforeProviderAcceptance(input: {
       status: "REQUIRES_ACTION",
       failureCode: failure.code,
       failureReason: safeFailureReason(failure.reason || "Provider submission status is unknown."),
+      providerAcceptanceUnknown: true,
       rawProviderStatus: {
         providerAccountId: input.providerAccountId,
         failureCode: failure.code,
         failureStage: input.stage,
         recoveryRequired: true,
+        responseMissing: input.stage === "provider_submission_timeout" || input.stage === "provider_submission_status_unknown",
+        staleCreatedAmbiguous: input.stage === "stale_created_ambiguous",
       },
     }).catch((updateError) => {
       console.error("[wallet-operations] failed to mark ambiguous withdrawal for recovery", {
@@ -478,11 +488,16 @@ async function markOperationFailedBeforeProviderAcceptance(input: {
     status: "FAILED",
     failureCode: failure.code,
     failureReason: safeFailureReason(failure.reason),
+    providerRequestAttempted: false,
+    providerAcceptanceKnown: false,
+    providerAcceptanceUnknown: false,
     rawProviderStatus: {
       providerAccountId: input.providerAccountId,
       failureCode: failure.code,
       failureStage: input.stage,
       retryable: failure.retryable,
+      dispatchNotStarted: true,
+      staleCreatedProvenPreDispatchFailure: input.stage === "stale_created_proven_pre_dispatch_failure",
     },
     failedAt: new Date().toISOString(),
   }).catch((updateError) => {
@@ -705,16 +720,118 @@ async function createWalletWrite(
 
   input.diagnostics?.setSubstage?.("send_request")
   let call: Promise<WalletAdapterOperationResult> | undefined
+  const providerRequestKey = `${resolution.provider}:${resolution.context.providerAccountId}:${operationType.toLowerCase()}:${input.idempotencyKey}`
+  let dispatchStarted = false
+  let providerResponseReceived = false
+  let providerResponseMissing = false
+  let providerRejected = false
+  const upstreamDiagnostics = input.diagnostics
+  input.diagnostics = {
+    ...upstreamDiagnostics,
+    async markDispatchStarted() {
+      if (dispatchStarted) return
+      dispatchStarted = true
+      const dispatchStartedAt = new Date().toISOString()
+      await updateWalletOperation(merchantId, operation.id, {
+        dispatchStartedAt,
+        providerRequestKey,
+        providerRequestAttempted: true,
+        providerResponseReceived: false,
+        providerAcceptanceKnown: false,
+        providerAcceptanceUnknown: true,
+        rawProviderStatus: {
+          providerAccountId: resolution.context.providerAccountId,
+          providerRequestKey,
+          dispatchStarted: true,
+          dispatchStartedAt,
+          dispatchStage: "dispatchStarted",
+        },
+      })
+    },
+    async markProviderResponseReceived(evidence) {
+      providerResponseReceived = true
+      const dispatchCompletedAt = new Date().toISOString()
+      await updateWalletOperation(merchantId, operation.id, {
+        dispatchCompletedAt,
+        providerResponseReceived: true,
+        providerAcceptanceUnknown: true,
+        rawProviderStatus: {
+          providerAccountId: resolution.context.providerAccountId,
+          providerRequestKey,
+          responseReceived: true,
+          dispatchCompletedAt,
+          ...(evidence || {}),
+        },
+      })
+    },
+    async markProviderResponseMissing(evidence) {
+      providerResponseMissing = true
+      await updateWalletOperation(merchantId, operation.id, {
+        status: "REQUIRES_ACTION",
+        failureCode: "STATUS_UNKNOWN",
+        failureReason: "The provider request was dispatched, but PineTree did not receive a definitive response.",
+        providerResponseReceived: false,
+        providerAcceptanceKnown: false,
+        providerAcceptanceUnknown: true,
+        rawProviderStatus: {
+          providerAccountId: resolution.context.providerAccountId,
+          providerRequestKey,
+          responseMissing: true,
+          failureCode: "STATUS_UNKNOWN",
+          failureStage: "provider_response_missing",
+          recoveryRequired: true,
+          ...(evidence || {}),
+        },
+      })
+    },
+    async markProviderRejected(evidence) {
+      providerRejected = true
+      providerResponseReceived = true
+      const dispatchCompletedAt = new Date().toISOString()
+      await updateWalletOperation(merchantId, operation.id, {
+        dispatchCompletedAt,
+        providerResponseReceived: true,
+        providerAcceptanceKnown: false,
+        providerAcceptanceUnknown: false,
+        rawProviderStatus: {
+          providerAccountId: resolution.context.providerAccountId,
+          providerRequestKey,
+          responseReceived: true,
+          explicitProviderRejection: true,
+          dispatchCompletedAt,
+          ...(evidence || {}),
+        },
+      })
+    },
+  }
   try {
     call = adapterCall(resolution)
   } catch (error) {
-    await markOperationFailedBeforeProviderAcceptance({
-      merchantId,
-      operationId: operation.id,
-      providerAccountId: resolution.context.providerAccountId,
-      error,
-      stage: "provider_adapter_start",
-    })
+    if (dispatchStarted) {
+      await updateWalletOperation(merchantId, operation.id, {
+        status: "REQUIRES_ACTION",
+        failureCode: "STATUS_UNKNOWN",
+        failureReason: safeFailureReason(error instanceof Error ? error.message : "Provider dispatch state is unknown."),
+        providerAcceptanceUnknown: true,
+        rawProviderStatus: {
+          providerAccountId: resolution.context.providerAccountId,
+          providerRequestKey,
+          failureCode: "STATUS_UNKNOWN",
+          failureStage: "provider_adapter_start",
+          dispatchStarted: true,
+          responseMissing: true,
+          recoveryRequired: true,
+        },
+      })
+    } else {
+      await markOperationFailedBeforeProviderAcceptance({
+        merchantId,
+        operationId: operation.id,
+        providerAccountId: resolution.context.providerAccountId,
+        error,
+        stage: "provider_adapter_start",
+      })
+    }
     throw error
   }
   if (!call) {
@@ -746,11 +863,17 @@ async function createWalletWrite(
         status: "REQUIRES_ACTION",
         failureCode: "STATUS_UNKNOWN",
         failureReason: "Your wallet provider accepted the request, but did not return a reconciliation reference.",
+        dispatchCompletedAt: new Date().toISOString(),
+        providerResponseReceived: true,
+        providerAcceptanceKnown: false,
+        providerAcceptanceUnknown: true,
         rawProviderStatus: {
           ...(result.rawProviderStatus || {}),
           providerAccountId: resolution.context.providerAccountId,
+          providerRequestKey,
           failureCode: "STATUS_UNKNOWN",
           failureStage: "provider_response_parse",
+          acceptedReferenceMissing: true,
           recoveryRequired: true,
         },
       }).then(() => {
@@ -795,6 +918,30 @@ async function createWalletWrite(
         rawProviderStatus: result.rawProviderStatus ?? null,
         error: error instanceof Error ? error.message : String(error),
       })
+      await updateWalletOperation(merchantId, operation.id, {
+        status: "REQUIRES_ACTION",
+        failureCode: "STATUS_UNKNOWN",
+        failureReason: "The provider accepted the withdrawal, but PineTree could not persist the provider response.",
+        providerResponseReceived: true,
+        providerAcceptanceKnown: true,
+        providerAcceptanceUnknown: true,
+        persistenceAfterAcceptanceFailed: true,
+        rawProviderStatus: {
+          ...(result.rawProviderStatus || {}),
+          providerAccountId: resolution.context.providerAccountId,
+          providerRequestKey,
+          failureCode: "STATUS_UNKNOWN",
+          failureStage: "provider_acceptance_persistence",
+          persistenceFailedAfterAcceptance: true,
+          recoveryRequired: true,
+        },
+      }).catch((updateError) => {
+        console.error("[wallet-operations] failed to persist provider acceptance recovery state", {
+          merchantId,
+          operationId: operation.id,
+          updateError: updateError instanceof Error ? updateError.message : String(updateError),
+        })
+      })
       throw error
     }
     if (operationType === "WITHDRAWAL" && resolution.provider === "speed") {
@@ -828,19 +975,60 @@ async function createWalletWrite(
           error,
           stage: "provider_submission_timeout",
         })
+      } else if (dispatchStarted && !providerResponseReceived && !providerRejected) {
+        await markOperationFailedBeforeProviderAcceptance({
+          merchantId,
+          operationId: operation.id,
+          providerAccountId: resolution.context.providerAccountId,
+          error: new WalletApiRouteError(
+            "STATUS_UNKNOWN",
+            providerResponseMissing
+              ? "The provider request was dispatched, but PineTree did not receive a definitive response."
+              : "Provider dispatch started, but PineTree could not confirm the provider response.",
+            false
+          ),
+          stage: providerResponseMissing ? "provider_response_missing" : "provider_submission_status_unknown",
+        })
       } else {
         await updateWalletOperation(merchantId, operation.id, {
           status: "FAILED",
           failureCode: error.code,
           failureReason: error.message,
           failedAt: new Date().toISOString(),
+          dispatchCompletedAt: new Date().toISOString(),
+          providerResponseReceived: true,
+          providerAcceptanceKnown: false,
+          providerAcceptanceUnknown: false,
           rawProviderStatus: {
             providerAccountId: resolution.context.providerAccountId,
+            providerRequestKey,
             failureCode: error.code,
             failureStage: "provider_submission",
+            dispatchStarted,
+            explicitProviderRejection: true,
           },
         })
       }
+    } else if (providerRejected) {
+      const failure = walletErrorFromUnknown(error)
+      await updateWalletOperation(merchantId, operation.id, {
+        status: "FAILED",
+        failureCode: failure.code,
+        failureReason: safeFailureReason(failure.reason),
+        failedAt: new Date().toISOString(),
+        dispatchCompletedAt: new Date().toISOString(),
+        providerResponseReceived: true,
+        providerAcceptanceKnown: false,
+        providerAcceptanceUnknown: false,
+        rawProviderStatus: {
+          providerAccountId: resolution.context.providerAccountId,
+          providerRequestKey,
+          failureCode: failure.code,
+          failureStage: "provider_submission",
+          dispatchStarted,
+          explicitProviderRejection: true,
+        },
+      })
     } else if (providerAcceptanceReturned) {
       await markOperationFailedBeforeProviderAcceptance({
         merchantId,
@@ -852,6 +1040,20 @@ async function createWalletWrite(
           false
         ),
         stage: "provider_acceptance_persistence",
+      })
+    } else if (dispatchStarted) {
+      await markOperationFailedBeforeProviderAcceptance({
+        merchantId,
+        operationId: operation.id,
+        providerAccountId: resolution.context.providerAccountId,
+        error: new WalletApiRouteError(
+          "STATUS_UNKNOWN",
+          providerResponseReceived
+            ? "PineTree received a provider response but could not parse or persist the result."
+            : "Provider dispatch started, but PineTree could not confirm the provider response.",
+          false
+        ),
+        stage: providerResponseReceived ? "provider_response_parse" : "provider_submission_status_unknown",
       })
     } else {
       await markOperationFailedBeforeProviderAcceptance({

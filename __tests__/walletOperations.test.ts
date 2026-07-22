@@ -32,6 +32,14 @@ function operationRow(overrides: Record<string, unknown> = {}) {
     submitted_at: null,
     confirmed_at: null,
     failed_at: null,
+    dispatch_started_at: null,
+    dispatch_completed_at: null,
+    provider_request_key: null,
+    provider_request_attempted: null,
+    provider_response_received: null,
+    provider_acceptance_known: null,
+    provider_acceptance_unknown: null,
+    persistence_after_acceptance_failed: null,
     ...overrides,
   }
 }
@@ -447,6 +455,24 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
 
     expect(activity.operations[0].status).toBe("INCOMPLETE")
     expect(operation.status).toBe("INCOMPLETE")
+  })
+
+  it("normalizes REQUIRES_ACTION to ACTION_REQUIRED for wallet operation display", async () => {
+    const adapter = fakeAdapter()
+    const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "fake-provider", adapter, context: fakeContext })
+    const row = operationRow({ status: "REQUIRES_ACTION", failure_code: "STATUS_UNKNOWN" })
+    vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
+    vi.doMock("@/database/merchantWalletOperations", () => ({
+      createWalletOperation: vi.fn(),
+      updateWalletOperation: vi.fn(),
+      getWalletOperationForMerchant: vi.fn().mockResolvedValue(row),
+      listWalletOperations: vi.fn().mockResolvedValue({ operations: [row], nextCursor: null }),
+    }))
+
+    const { getWalletActivity } = await import("@/engine/wallet/walletOperations")
+    const activity = await getWalletActivity("merchant-1", {})
+
+    expect(activity.operations[0].status).toBe("ACTION_REQUIRED")
   })
 })
 

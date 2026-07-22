@@ -1,14 +1,9 @@
--- Finalize abandoned wallet withdrawal lifecycle states.
+-- Prevent false-failure cleanup for ambiguous Speed withdrawals.
 --
--- This migration intentionally does not touch legacy PROCESSING rows with
--- missing provider references. Those remain diagnostic/manual-recovery only.
--- A stale CREATED row with no provider reference is ambiguous unless explicit
--- pre-dispatch evidence exists; ambiguity must not be classified as FAILED.
-
-UPDATE public.merchant_wallet_operations
-SET failed_at = COALESCE(failed_at, updated_at, now())
-WHERE status = 'FAILED'
-  AND failed_at IS NULL;
+-- Production evidence showed a stale CREATED row with no provider reference
+-- can still correspond to a provider-completed withdrawal. From this point
+-- forward cleanup must classify unknown dispatch state as REQUIRES_ACTION,
+-- never FAILED, unless PineTree has explicit pre-dispatch failure evidence.
 
 ALTER TABLE public.merchant_wallet_operations
   ADD COLUMN IF NOT EXISTS dispatch_started_at TIMESTAMPTZ,
@@ -19,6 +14,32 @@ ALTER TABLE public.merchant_wallet_operations
   ADD COLUMN IF NOT EXISTS provider_acceptance_known BOOLEAN,
   ADD COLUMN IF NOT EXISTS provider_acceptance_unknown BOOLEAN,
   ADD COLUMN IF NOT EXISTS persistence_after_acceptance_failed BOOLEAN;
+
+COMMENT ON COLUMN public.merchant_wallet_operations.dispatch_started_at IS
+  'Set immediately before PineTree dispatches a wallet operation request to the provider.';
+COMMENT ON COLUMN public.merchant_wallet_operations.dispatch_completed_at IS
+  'Set when PineTree receives a provider HTTP response or otherwise finishes the dispatch attempt.';
+COMMENT ON COLUMN public.merchant_wallet_operations.provider_request_key IS
+  'PineTree-generated provider request correlation key, normally provider:account:operation:idempotency_key.';
+COMMENT ON COLUMN public.merchant_wallet_operations.provider_request_attempted IS
+  'True only when PineTree has positive evidence that provider dispatch started.';
+COMMENT ON COLUMN public.merchant_wallet_operations.provider_response_received IS
+  'True when PineTree received a provider response for the dispatch attempt.';
+COMMENT ON COLUMN public.merchant_wallet_operations.provider_acceptance_known IS
+  'True when PineTree knows the provider accepted the operation.';
+COMMENT ON COLUMN public.merchant_wallet_operations.provider_acceptance_unknown IS
+  'True when duplicate-risk manual recovery is required because provider acceptance is unknown.';
+COMMENT ON COLUMN public.merchant_wallet_operations.persistence_after_acceptance_failed IS
+  'True when the provider accepted the operation but PineTree failed to persist the accepted response.';
+
+CREATE INDEX IF NOT EXISTS merchant_wallet_operations_dispatch_review_idx
+  ON public.merchant_wallet_operations (provider, operation_type, status, created_at)
+  WHERE operation_type = 'WITHDRAWAL'
+    AND (
+      provider_acceptance_unknown IS TRUE
+      OR persistence_after_acceptance_failed IS TRUE
+      OR raw_provider_status @> '{"failureStage":"abandoned_created_cleanup"}'::jsonb
+    );
 
 CREATE OR REPLACE FUNCTION public.repair_abandoned_created_wallet_withdrawals(
   p_cutoff TIMESTAMPTZ DEFAULT now() - INTERVAL '15 minutes'
@@ -52,8 +73,6 @@ BEGIN
       AND mwo.submitted_at IS NULL
       AND mwo.tx_hash IS NULL
       AND mwo.explorer_url IS NULL
-      AND mwo.failure_code IS NULL
-      AND mwo.failure_reason IS NULL
       AND NOT (
         COALESCE(mwo.raw_provider_status, '{}'::jsonb) ?| ARRAY[
           'id',
@@ -93,6 +112,10 @@ BEGIN
         WHEN candidates.proven_pre_dispatch_failure THEN COALESCE(mwo.failed_at, now())
         ELSE NULL
       END,
+      provider_acceptance_known = CASE
+        WHEN candidates.proven_pre_dispatch_failure THEN false
+        ELSE COALESCE(mwo.provider_acceptance_known, false)
+      END,
       provider_acceptance_unknown = CASE
         WHEN candidates.proven_pre_dispatch_failure THEN false
         ELSE true
@@ -128,7 +151,4 @@ REVOKE ALL ON FUNCTION public.repair_abandoned_created_wallet_withdrawals(TIMEST
   FROM PUBLIC;
 
 COMMENT ON FUNCTION public.repair_abandoned_created_wallet_withdrawals(TIMESTAMPTZ) IS
-  'Safely classifies abandoned Speed CREATED withdrawal rows. Ambiguous dispatch state becomes REQUIRES_ACTION, not FAILED. Does not modify PROCESSING rows.';
-
-SELECT *
-FROM public.repair_abandoned_created_wallet_withdrawals(now() - INTERVAL '15 minutes');
+  'Conservatively classifies abandoned Speed CREATED withdrawals. Ambiguous dispatch state becomes REQUIRES_ACTION and requires manual recovery; only explicit pre-dispatch evidence can become FAILED.';

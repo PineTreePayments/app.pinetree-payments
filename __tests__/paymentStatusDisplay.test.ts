@@ -14,6 +14,8 @@ describe("shared payment status display", () => {
     ["CONFIRMED",  "Confirmed",  "confirmed",  "check-circle"],
     ["FAILED",     "Failed",     "failed",     "x-circle"],
     ["INCOMPLETE", "Incomplete", "incomplete", "alert-triangle"],
+    ["ACTION_REQUIRED", "Action required", "incomplete", "alert-triangle"],
+    ["REQUIRES_ACTION", "Action required", "incomplete", "alert-triangle"],
     ["EXPIRED",    "Expired",    "expired",    "alert-triangle"],
     ["CANCELED",   "Canceled",   "canceled",   "x-circle"],
     ["REFUNDED",   "Refunded",   "refunded",   "refund"],

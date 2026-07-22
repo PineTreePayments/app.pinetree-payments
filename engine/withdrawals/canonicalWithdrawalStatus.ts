@@ -83,7 +83,7 @@ const OPERATION_STATUS_TO_ACTIVITY: Record<WalletOperationStatus, CanonicalWithd
   PROCESSING: "sent",
   PENDING: "pending",
   CREATED: "pending",
-  REQUIRES_ACTION: "pending",
+  REQUIRES_ACTION: "blocked",
 }
 
 export function mapWalletOperationStatusToActivity(

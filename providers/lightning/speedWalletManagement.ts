@@ -401,6 +401,10 @@ export type CreateConnectedWithdrawalInput = ConnectedAccountContext & {
   diagnostics?: {
     setSubstage?: (substage: string) => void
     setProviderAccountId?: (providerAccountId: string | null | undefined) => void
+    markDispatchStarted?: () => Promise<void>
+    markProviderResponseReceived?: (evidence?: Record<string, unknown>) => Promise<void>
+    markProviderResponseMissing?: (evidence?: Record<string, unknown>) => Promise<void>
+    markProviderRejected?: (evidence?: Record<string, unknown>) => Promise<void>
   }
 }
 
@@ -427,10 +431,16 @@ export async function createConnectedAccountWithdrawal(
       routeStage: "send_requested",
     })
     input.diagnostics?.setSubstage?.("send_request")
+    await input.diagnostics?.markDispatchStarted?.()
     const response = await speedRequestWithStatus<SpeedInstantSendObject>("/send", {
       method: "POST",
       body: JSON.stringify(body),
       merchantContext: merchantContext(input, "instant_send.create"),
+    })
+    await input.diagnostics?.markProviderResponseReceived?.({
+      endpointPath: "/send",
+      httpStatus: response.status,
+      speedRequestId: response.requestId,
     })
     console.info("[pinetree-withdrawals] SPEED_SEND_HTTP_RESPONSE", {
       correlationId: input.correlationId || null,
@@ -472,6 +482,21 @@ export async function createConnectedAccountWithdrawal(
     return validated
   } catch (error) {
     const diagnostic = speedProviderFailureDiagnostic(error)
+    if (error instanceof SpeedTransportError) {
+      await input.diagnostics?.markProviderResponseMissing?.({
+        endpointPath: "/send",
+        timedOut: error.timedOut,
+        normalizedErrorCode: diagnostic.normalizedErrorCode,
+      })
+    } else if (error instanceof SpeedApiError) {
+      await input.diagnostics?.markProviderRejected?.({
+        endpointPath: "/send",
+        httpStatus: diagnostic.httpStatus,
+        speedRequestId: diagnostic.speedRequestId,
+        normalizedErrorCode: diagnostic.normalizedErrorCode,
+        providerErrorCategory: diagnostic.category,
+      })
+    }
     const sendStage = error instanceof SpeedTransportError && error.timedOut
       ? "SPEED_SEND_TIMEOUT"
       : error instanceof SpeedApiError

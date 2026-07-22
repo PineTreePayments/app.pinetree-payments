@@ -40,7 +40,7 @@ describe("canonicalWithdrawalStatus", () => {
         ["PROCESSING", "sent"],
         ["PENDING", "pending"],
         ["CREATED", "pending"],
-        ["REQUIRES_ACTION", "pending"],
+        ["REQUIRES_ACTION", "blocked"],
       ]
       for (const [raw, expected] of cases) {
         expect(mapWalletOperationStatusToActivity(raw)).toBe(expected)

@@ -16,7 +16,7 @@ import type {
 } from "@/database/merchantWalletOperations"
 import type { AutoPayoutSchedule, AutoSwapStatus } from "@/database/merchantWalletPreferences"
 
-export type PineTreeWalletOperationStatus = WalletOperationStatus | "INCOMPLETE"
+export type PineTreeWalletOperationStatus = WalletOperationStatus | "INCOMPLETE" | "ACTION_REQUIRED"
 
 export type PineTreeWalletCapabilities = {
   balances: boolean

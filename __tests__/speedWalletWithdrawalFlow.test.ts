@@ -12,6 +12,10 @@ function operation(status = "CREATED") {
     failure_reason: null, idempotency_key: "key-1", created_at: "2026-07-19T00:00:00.000Z",
     updated_at: "2026-07-19T00:00:00.000Z", completed_at: null, submitted_at: null,
     confirmed_at: null, failed_at: null,
+    dispatch_started_at: null, dispatch_completed_at: null, provider_request_key: null,
+    provider_request_attempted: null, provider_response_received: null,
+    provider_acceptance_known: null, provider_acceptance_unknown: null,
+    persistence_after_acceptance_failed: null,
   }
 }
 
@@ -143,8 +147,38 @@ describe("account-scoped withdrawal safeguards", () => {
     )
   })
 
-  it("does not move an uncertain send timeout to PROCESSING or dispatch again on retry", async () => {
-    const createWithdrawal = vi.fn().mockRejectedValue(new WalletApiRouteError("WALLET_PROVIDER_TIMEOUT", "Provider timeout.", true))
+  it("marks an explicit provider rejection FAILED after a provider response", async () => {
+    const createWithdrawal = vi.fn(async (_context, input) => {
+      await input.diagnostics?.markDispatchStarted?.()
+      await input.diagnostics?.markProviderRejected?.({ httpStatus: 400, speedRequestId: "req_rejected" })
+      throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Provider rejected this withdrawal.", false)
+    })
+    const arranged = await arrange(BigInt(2000), createWithdrawal)
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await expect(createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })).rejects.toMatchObject({ code: "WALLET_VALIDATION_ERROR" })
+
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "FAILED",
+        failureCode: "WALLET_VALIDATION_ERROR",
+        providerResponseReceived: true,
+        providerAcceptanceKnown: false,
+        providerAcceptanceUnknown: false,
+      })
+    )
+  })
+
+  it("does not move an uncertain send timeout after dispatch to PROCESSING or dispatch again on retry", async () => {
+    const createWithdrawal = vi.fn(async (_context, input) => {
+      await input.diagnostics?.markDispatchStarted?.()
+      await input.diagnostics?.markProviderResponseMissing?.({ timedOut: true })
+      throw new WalletApiRouteError("STATUS_UNKNOWN", "Provider timeout.", false)
+    })
     const arranged = await arrange(BigInt(2000), createWithdrawal)
     arranged.createWalletOperation
       .mockResolvedValueOnce({ operation: operation(), created: true })
@@ -155,7 +189,7 @@ describe("account-scoped withdrawal safeguards", () => {
     const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
     await expect(createWalletWithdrawal("merchant-1", {
       asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
-    })).rejects.toMatchObject({ code: "WALLET_PROVIDER_TIMEOUT", retryable: true })
+    })).rejects.toMatchObject({ code: "STATUS_UNKNOWN", retryable: false })
     expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith(
       "merchant-1",
       "op-1",
@@ -166,7 +200,7 @@ describe("account-scoped withdrawal safeguards", () => {
       "op-1",
       expect.objectContaining({
         status: "REQUIRES_ACTION",
-        failureCode: "WALLET_PROVIDER_TIMEOUT",
+        failureCode: "STATUS_UNKNOWN",
         rawProviderStatus: expect.objectContaining({ recoveryRequired: true }),
       })
     )
@@ -174,7 +208,7 @@ describe("account-scoped withdrawal safeguards", () => {
     const retry = await createWalletWithdrawal("merchant-1", {
       asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
     })
-    expect(retry.operation.status).toBe("REQUIRES_ACTION")
+    expect(retry.operation.status).toBe("ACTION_REQUIRED")
     expect(createWithdrawal).toHaveBeenCalledTimes(1)
   })
 
@@ -213,6 +247,36 @@ describe("account-scoped withdrawal safeguards", () => {
         txHash: "tx_abc",
         explorerUrl: "https://mempool.space/tx/tx_abc",
         rawProviderStatus: expect.objectContaining({ id: "is_123", withdraw_id: "wi_123" }),
+      })
+    )
+  })
+
+  it("persists a completed Speed withdrawal as COMPLETED with terminal timestamps", async () => {
+    const createWithdrawal = vi.fn().mockResolvedValue({
+      providerReference: "is_done",
+      providerTransactionId: "is_done",
+      providerSecondaryReference: "wi_done",
+      providerStatus: "completed",
+      status: "COMPLETED",
+      feeBaseUnits: BigInt(5),
+      rawProviderStatus: { id: "is_done", withdraw_id: "wi_done", status: "completed" },
+    })
+    const arranged = await arrange(BigInt(2000), createWithdrawal)
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })
+
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "COMPLETED",
+        providerReference: "is_done",
+        providerSecondaryReference: "wi_done",
+        completedAt: expect.any(String),
+        confirmedAt: expect.any(String),
       })
     )
   })
@@ -260,7 +324,10 @@ describe("account-scoped withdrawal safeguards", () => {
       rawProviderStatus: { id: "is_accepted", withdraw_id: "wi_accepted", status: "unpaid" },
     })
     const arranged = await arrange(BigInt(2000), createWithdrawal)
-    arranged.updateWalletOperation.mockRejectedValueOnce(new Error("database unavailable"))
+    arranged.updateWalletOperation.mockImplementation(async (_merchant, _id, patch) => {
+      if (patch.providerReference === "is_accepted") throw new Error("database unavailable")
+      return operation(patch.status || "CREATED")
+    })
     arranged.createWalletOperation
       .mockResolvedValueOnce({ operation: operation(), created: true })
       .mockResolvedValueOnce({
@@ -278,5 +345,14 @@ describe("account-scoped withdrawal safeguards", () => {
 
     expect(retry.operation.id).toBe("op-1")
     expect(createWithdrawal).toHaveBeenCalledTimes(1)
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "REQUIRES_ACTION",
+        failureCode: "STATUS_UNKNOWN",
+        persistenceAfterAcceptanceFailed: true,
+      })
+    )
   })
 })

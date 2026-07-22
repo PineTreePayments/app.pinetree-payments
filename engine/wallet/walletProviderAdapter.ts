@@ -80,6 +80,10 @@ export type WalletAdapterWriteInput = {
 export type WalletAdapterWriteDiagnostics = {
   setSubstage?: (substage: string) => void
   setProviderAccountId?: (providerAccountId: string | null | undefined) => void
+  markDispatchStarted?: () => Promise<void>
+  markProviderResponseReceived?: (evidence?: Record<string, unknown>) => Promise<void>
+  markProviderResponseMissing?: (evidence?: Record<string, unknown>) => Promise<void>
+  markProviderRejected?: (evidence?: Record<string, unknown>) => Promise<void>
 }
 
 export type WalletAdapterOperationResult = {

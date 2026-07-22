@@ -22,7 +22,7 @@ export type PaymentStatusIcon = "clock" | "spinner" | "check-circle" | "x-circle
 
 export type PaymentDisplayStatus = {
   status: string
-  label: "Waiting" | "Processing" | "Confirmed" | "Failed" | "Incomplete" | "Expired" | "Canceled" | "Refunded" | "Disputed" | "Unknown"
+  label: "Waiting" | "Processing" | "Confirmed" | "Failed" | "Incomplete" | "Action required" | "Expired" | "Canceled" | "Refunded" | "Disputed" | "Unknown"
   message: string
   tone: PaymentStatusTone
   icon: PaymentStatusIcon
@@ -129,7 +129,7 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
 function displayToneForStatus(normalizedStatus: string): PaymentStatusTone {
   if ([
     "CREATED", "PENDING", "WAITING", "AWAITING_CUSTOMER", "DRAFT",
-    "AWAITING_CONFIRMATION", "AWAITING_APPROVAL", "REQUIRES_ACTION", "REVIEW_REQUIRED"
+    "AWAITING_CONFIRMATION", "AWAITING_APPROVAL", "REVIEW_REQUIRED"
   ].includes(normalizedStatus)) {
     return "waiting"
   }
@@ -145,7 +145,7 @@ function displayToneForStatus(normalizedStatus: string): PaymentStatusTone {
   if (["FAILED", "ERROR", "REJECTED", "DECLINED", "DENIED", "VALIDATION_FAILED", "BLOCKED"].includes(normalizedStatus)) {
     return "failed"
   }
-  if (["INCOMPLETE", "ABANDONED"].includes(normalizedStatus)) {
+  if (["INCOMPLETE", "ABANDONED", "REQUIRES_ACTION", "ACTION_REQUIRED"].includes(normalizedStatus)) {
     return "incomplete"
   }
   if (["CANCELED", "CANCELLED"].includes(normalizedStatus)) return "canceled"
@@ -160,6 +160,14 @@ function displayToneForStatus(normalizedStatus: string): PaymentStatusTone {
 export function getPaymentDisplayStatus(status: string | null | undefined): PaymentDisplayStatus {
   const normalizedStatus = String(status || "UNKNOWN").trim().toUpperCase().replace(/[\s-]+/g, "_")
   const config = STATUS_DISPLAY[displayToneForStatus(normalizedStatus)]
+  if (normalizedStatus === "REQUIRES_ACTION" || normalizedStatus === "ACTION_REQUIRED") {
+    return {
+      status: normalizedStatus,
+      ...config,
+      label: "Action required",
+      message: "Manual review is needed before this wallet operation can be retried.",
+    }
+  }
   return { status: normalizedStatus, ...config }
 }
 

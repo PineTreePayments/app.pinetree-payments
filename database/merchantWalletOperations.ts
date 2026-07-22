@@ -5,7 +5,14 @@ const supabase = supabaseAdmin || supabaseAnon
 const TABLE = "merchant_wallet_operations"
 
 function isMissingOperationColumn(error: { code?: string; message?: string } | null): boolean {
-  return Boolean(error && (error.code === "PGRST204" || /provider_(account|transaction|secondary|created)/i.test(error.message || "")))
+  return Boolean(
+    error && (
+      error.code === "PGRST204"
+      || /provider_(account|transaction|secondary|created|request)/i.test(error.message || "")
+      || /dispatch_(started|completed)/i.test(error.message || "")
+      || /provider_(response|acceptance)|persistence_after_acceptance/i.test(error.message || "")
+    )
+  )
 }
 
 function compatibilityProviderStatus(input: {
@@ -14,6 +21,14 @@ function compatibilityProviderStatus(input: {
   providerTransactionId?: string | null
   providerSecondaryReference?: string | null
   providerCreatedAt?: string | null
+  dispatchStartedAt?: string | null
+  dispatchCompletedAt?: string | null
+  providerRequestKey?: string | null
+  providerRequestAttempted?: boolean | null
+  providerResponseReceived?: boolean | null
+  providerAcceptanceKnown?: boolean | null
+  providerAcceptanceUnknown?: boolean | null
+  persistenceAfterAcceptanceFailed?: boolean | null
 }): Record<string, unknown> | null {
   const value = {
     ...(input.rawProviderStatus || {}),
@@ -21,6 +36,14 @@ function compatibilityProviderStatus(input: {
     ...(input.providerTransactionId ? { providerTransactionId: input.providerTransactionId } : {}),
     ...(input.providerSecondaryReference ? { providerSecondaryReference: input.providerSecondaryReference } : {}),
     ...(input.providerCreatedAt ? { providerCreatedAt: input.providerCreatedAt } : {}),
+    ...(input.dispatchStartedAt ? { dispatchStartedAt: input.dispatchStartedAt, dispatchStarted: true } : {}),
+    ...(input.dispatchCompletedAt ? { dispatchCompletedAt: input.dispatchCompletedAt } : {}),
+    ...(input.providerRequestKey ? { providerRequestKey: input.providerRequestKey } : {}),
+    ...(input.providerRequestAttempted !== undefined ? { providerRequestAttempted: input.providerRequestAttempted } : {}),
+    ...(input.providerResponseReceived !== undefined ? { providerResponseReceived: input.providerResponseReceived } : {}),
+    ...(input.providerAcceptanceKnown !== undefined ? { providerAcceptanceKnown: input.providerAcceptanceKnown } : {}),
+    ...(input.providerAcceptanceUnknown !== undefined ? { providerAcceptanceUnknown: input.providerAcceptanceUnknown } : {}),
+    ...(input.persistenceAfterAcceptanceFailed !== undefined ? { persistenceAfterAcceptanceFailed: input.persistenceAfterAcceptanceFailed } : {}),
   }
   return Object.keys(value).length ? value : null
 }
@@ -82,6 +105,14 @@ export type MerchantWalletOperation = {
   submitted_at?: string | null
   confirmed_at?: string | null
   failed_at?: string | null
+  dispatch_started_at?: string | null
+  dispatch_completed_at?: string | null
+  provider_request_key?: string | null
+  provider_request_attempted?: boolean | null
+  provider_response_received?: boolean | null
+  provider_acceptance_known?: boolean | null
+  provider_acceptance_unknown?: boolean | null
+  persistence_after_acceptance_failed?: boolean | null
 }
 
 export type CreateWalletOperationInput = {
@@ -123,6 +154,14 @@ export type UpdateWalletOperationInput = {
   submittedAt?: string | null
   confirmedAt?: string | null
   failedAt?: string | null
+  dispatchStartedAt?: string | null
+  dispatchCompletedAt?: string | null
+  providerRequestKey?: string | null
+  providerRequestAttempted?: boolean | null
+  providerResponseReceived?: boolean | null
+  providerAcceptanceKnown?: boolean | null
+  providerAcceptanceUnknown?: boolean | null
+  persistenceAfterAcceptanceFailed?: boolean | null
 }
 
 const TERMINAL_STATUSES: WalletOperationStatus[] = ["COMPLETED", "FAILED", "CANCELED", "EXPIRED"]
@@ -237,6 +276,16 @@ export async function updateWalletOperation(
   if (input.submittedAt !== undefined) patch.submitted_at = input.submittedAt
   if (input.confirmedAt !== undefined) patch.confirmed_at = input.confirmedAt
   if (input.failedAt !== undefined) patch.failed_at = input.failedAt
+  if (input.dispatchStartedAt !== undefined) patch.dispatch_started_at = input.dispatchStartedAt
+  if (input.dispatchCompletedAt !== undefined) patch.dispatch_completed_at = input.dispatchCompletedAt
+  if (input.providerRequestKey !== undefined) patch.provider_request_key = input.providerRequestKey
+  if (input.providerRequestAttempted !== undefined) patch.provider_request_attempted = input.providerRequestAttempted
+  if (input.providerResponseReceived !== undefined) patch.provider_response_received = input.providerResponseReceived
+  if (input.providerAcceptanceKnown !== undefined) patch.provider_acceptance_known = input.providerAcceptanceKnown
+  if (input.providerAcceptanceUnknown !== undefined) patch.provider_acceptance_unknown = input.providerAcceptanceUnknown
+  if (input.persistenceAfterAcceptanceFailed !== undefined) {
+    patch.persistence_after_acceptance_failed = input.persistenceAfterAcceptanceFailed
+  }
 
   const terminalTimestamp = new Date().toISOString()
   if (patch.status === "FAILED" && patch.failed_at === undefined) {
@@ -264,6 +313,14 @@ export async function updateWalletOperation(
     delete fallbackPatch.submitted_at
     delete fallbackPatch.confirmed_at
     delete fallbackPatch.failed_at
+    delete fallbackPatch.dispatch_started_at
+    delete fallbackPatch.dispatch_completed_at
+    delete fallbackPatch.provider_request_key
+    delete fallbackPatch.provider_request_attempted
+    delete fallbackPatch.provider_response_received
+    delete fallbackPatch.provider_acceptance_known
+    delete fallbackPatch.provider_acceptance_unknown
+    delete fallbackPatch.persistence_after_acceptance_failed
     const compatibility = compatibilityProviderStatus(input)
     if (compatibility) fallbackPatch.raw_provider_status = compatibility
     ;({ data, error } = await supabase
