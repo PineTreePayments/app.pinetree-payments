@@ -211,7 +211,8 @@ describe("syncProfileFromDynamic BTC address safety", () => {
   const page = read("app/dashboard/wallet-setup/page.tsx")
 
   it("does not include BTC address fields in the Dynamic profile sync body", () => {
-    expect(page).toContain("dynamic_user_id: dynamicExternalUserId")
+    expect(page).toContain("dynamic_user_id: user.userId")
+    expect(page).toContain("dynamic_external_user_id: dynamicExternalUserId")
     expect(page).toContain("base_address: baseAddress")
     expect(page).toContain("solana_address: solanaAddress")
     expect(page).not.toContain("btc_address: bitcoinAddress")

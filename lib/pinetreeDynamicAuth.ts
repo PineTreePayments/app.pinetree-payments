@@ -17,6 +17,7 @@ export type PineTreeDynamicExternalJwtClaimsDiagnostics = {
   audienceMatch: boolean
   subjectPresent: boolean
   environmentIdPresent: boolean
+  emailClaimIncluded: boolean
 }
 
 export type PineTreeDynamicExternalJwtPayload = {

@@ -240,9 +240,9 @@ describe("runDynamicExternalJwtContractCheck (server key/JWKS parity)", () => {
     })
   })
 
-  it("external JWT identity excludes email claims while preserving subject binding", async () => {
+  it("external JWT identity can include historical email hints while preserving subject binding", async () => {
     const { publicJwk } = await setupSigningEnv()
-    const signed = await signDynamicExternalJwt({ merchantId })
+    const signed = await signDynamicExternalJwt({ merchantId, email: "merchant@example.com" })
     const verificationKey = await importJWK({ ...publicJwk, kid: "pinetree-test-kid", alg: "RS256", use: "sig" }, "RS256")
     const verified = await jwtVerify(signed.externalJwt, verificationKey, {
       issuer: "https://app.pinetree-payments.com",
@@ -252,9 +252,11 @@ describe("runDynamicExternalJwtContractCheck (server key/JWKS parity)", () => {
 
     expect(signed.subject).toBe(merchantId)
     expect(verified.payload.sub).toBe(signed.subject)
-    expect(verified.payload).not.toHaveProperty("email")
-    expect(verified.payload).not.toHaveProperty("emailVerified")
+    expect(verified.payload.email).toBe("merchant@example.com")
+    expect(verified.payload.emailVerified).toBe(true)
     expect(verified.payload).not.toHaveProperty("email_verified")
+    expect(verified.payload.merchant_id).toBe(merchantId)
+    expect(signed.claims.emailClaimIncluded).toBe(true)
   })
 
   it("detects changing private key material while reusing the same kid", async () => {
@@ -377,7 +379,7 @@ describe("Wallet setup page - external JWT contract wiring", () => {
     expect(rejectedBlock).toContain('emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_suppressed"')
     expect(rejectedBlock).toContain('emitWalletSetupDebugEvent("wallet_dynamic_external_identity_conflict_suspected"')
     expect(rejectedBlock).toContain("jwtContractValid: true")
-    expect(rejectedBlock).toContain("emailClaimIncluded: false")
+    expect(rejectedBlock).toContain("emailClaimIncluded")
     expect(rejectedBlock).toContain("externalUserBindingValid: true")
     expect(rejectedBlock).toContain("dynamicRejected: true")
     expect(rejectedBlock).not.toContain("setShowAuthFlow(true)")

@@ -27,6 +27,7 @@ export type DynamicJwtClaimsDiagnostics = {
   audienceMatch: boolean
   subjectPresent: boolean
   environmentIdPresent: boolean
+  emailClaimIncluded: boolean
 }
 
 export type DynamicExternalJwtPublicJwk = {
@@ -70,6 +71,7 @@ export function getDynamicJwtClaimsDiagnostics(input: {
   issuer: string
   audience: string | undefined
   subject: string | null | undefined
+  emailClaimIncluded?: boolean
 }): DynamicJwtClaimsDiagnostics {
   const environmentId = process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()
   return {
@@ -77,6 +79,7 @@ export function getDynamicJwtClaimsDiagnostics(input: {
     audienceMatch: Boolean(input.audience && environmentId && input.audience === environmentId),
     subjectPresent: Boolean(input.subject),
     environmentIdPresent: Boolean(environmentId),
+    emailClaimIncluded: Boolean(input.emailClaimIncluded),
   }
 }
 
@@ -141,6 +144,7 @@ export type SignedDynamicExternalJwt = {
 
 export async function signDynamicExternalJwt(input: {
   merchantId: string
+  email?: string | null
 }): Promise<SignedDynamicExternalJwt> {
   const issuer = getDynamicExternalJwtIssuer()
   const audience = resolveDynamicJwtAudience()
@@ -161,10 +165,13 @@ export async function signDynamicExternalJwt(input: {
     kidPresent: Boolean(keyId),
     algRs256: true,
     subjectPresent: Boolean(input.merchantId),
-    emailPresent: false,
+    emailPresent: Boolean(input.email),
   })
 
-  let jwt = new SignJWT({})
+  let jwt = new SignJWT({
+    ...(input.email ? { email: input.email, emailVerified: true } : {}),
+    merchant_id: input.merchantId,
+  })
     .setProtectedHeader({
       alg: "RS256",
       kid: keyId,
@@ -190,7 +197,12 @@ export async function signDynamicExternalJwt(input: {
     audience,
     keyId,
     subject: input.merchantId,
-    claims: getDynamicJwtClaimsDiagnostics({ issuer, audience, subject: input.merchantId }),
+    claims: getDynamicJwtClaimsDiagnostics({
+      issuer,
+      audience,
+      subject: input.merchantId,
+      emailClaimIncluded: Boolean(input.email),
+    }),
   }
 }
 

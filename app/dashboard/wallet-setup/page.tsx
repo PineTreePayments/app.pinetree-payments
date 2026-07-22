@@ -61,6 +61,10 @@ import {
   walletProvisioningTimeoutSuppressionReason,
 } from "@/lib/pinetreeWalletSetupResume"
 import { dynamicSessionBoundToMerchant, getDynamicExternalUserId } from "@/lib/wallets/dynamicExternalIdentity"
+import {
+  resolveDynamicWalletOwnership,
+  type DynamicWalletOwnershipResolution,
+} from "@/lib/wallets/dynamicWalletOwnership"
 import { formatWalletTotalBalance } from "@/lib/pinetreeWalletDisplay"
 import {
   classifyWaasWalletChain,
@@ -615,8 +619,11 @@ type DynamicSigningPreflightContext = {
 type DynamicWalletRuntimeFailureCode =
   | "DYNAMIC_SDK_NOT_READY"
   | "DYNAMIC_NOT_AUTHENTICATED"
+  | "DYNAMIC_USER_NOT_FOUND"
   | "DYNAMIC_WALLETS_HYDRATING"
+  | "DYNAMIC_WALLETS_MISSING"
   | "DYNAMIC_IDENTITY_MISMATCH"
+  | "DYNAMIC_ENVIRONMENT_MISMATCH"
   | "WALLET_NOT_CONNECTED"
 
 type DynamicWalletRuntimeSnapshot = {
@@ -631,6 +638,7 @@ type DynamicWalletRuntimeSnapshot = {
   identityMatches: boolean
   environmentIdSuffix: string | null
   failureCode: DynamicWalletRuntimeFailureCode | null
+  ownership: DynamicWalletOwnershipResolution
 }
 
 function dynamicWalletConnectorValue(wallet: DynamicWalletLike, key: "key" | "name") {
@@ -811,6 +819,10 @@ function maskDiagnosticValue(value: string | null | undefined) {
   const normalized = String(value || "").trim()
   if (!normalized) return null
   return normalized.length <= 14 ? normalized : `${normalized.slice(0, 7)}...${normalized.slice(-7)}`
+}
+
+function dynamicWalletDiagnosticList(values: string[]) {
+  return values.length > 0 ? values.join(",") : null
 }
 
 function safeDynamicErrorName(error: unknown) {
@@ -4568,6 +4580,7 @@ function PineTreeWalletRuntime() {
               audienceMatch: issuedClaims?.audienceMatch ?? false,
               subjectPresent: issuedClaims?.subjectPresent ?? false,
               environmentIdPresent: issuedClaims?.environmentIdPresent ?? false,
+              emailClaimIncluded: issuedClaims?.emailClaimIncluded ?? emailClaimIncluded,
             })
           }
           setProfileSyncDiagnostics((prev) => ({
@@ -4711,14 +4724,13 @@ function PineTreeWalletRuntime() {
                 jwtSelfVerificationPassed &&
                 jwtHeaderKidMatchesJwks &&
                 signingPublicKeyMatchesJwks &&
-                algorithmRs256 &&
-                !emailClaimIncluded
+                algorithmRs256
             )
             const externalUserBindingValid = Boolean(clientExternalUserIdMatchesSubject)
             if (jwtContractValid && externalUserBindingValid) {
               emitWalletSetupDebugEvent("wallet_dynamic_external_identity_conflict_suspected", {
                 jwtContractValid: true,
-                emailClaimIncluded: false,
+                emailClaimIncluded,
                 externalUserBindingValid: true,
                 dynamicRejected: true,
               })
@@ -5810,23 +5822,38 @@ function PineTreeWalletRuntime() {
       ? findDynamicApprovalWalletForSource(snapshotWallets, primaryWallet, "solana", profile.solana_address)
       : null
     const profileDynamicUserId = String(profile?.dynamic_user_id || "").trim()
-    const identityMatches = !profileDynamicUserId
-      || profileDynamicUserId === dynamicExternalUserId
-      || profileDynamicUserId === dynamicUserId
     const hasStoredWalletAddresses = Boolean(profile?.base_address || profile?.solana_address)
     const environmentId = String(process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID || "").trim()
     const walletCount = snapshotWallets.length
+    const hydratedWalletAddresses = snapshotWallets.flatMap((wallet) => getDynamicWalletAddresses(wallet))
+    const ownership = resolveDynamicWalletOwnership({
+      pineTreeMerchantId: merchantId,
+      currentDynamicUserId: dynamicUserId,
+      storedDynamicUserId: profileDynamicUserId,
+      externalUserId: dynamicExternalUserId,
+      authenticated,
+      sdkLoaded: sdkHasLoaded,
+      walletCount,
+      storedWalletAddresses: [profile?.base_address, profile?.solana_address],
+      hydratedWalletAddresses,
+      expectedEnvironmentId: environmentId,
+      currentEnvironmentId: environmentId,
+    })
+    const identityMatches = ownership.failureReason !== "DYNAMIC_IDENTITY_MISMATCH"
+      && ownership.failureReason !== "DYNAMIC_ENVIRONMENT_MISMATCH"
     const failureCode: DynamicWalletRuntimeFailureCode | null =
       !sdkHasLoaded
         ? "DYNAMIC_SDK_NOT_READY"
         : !authenticated
           ? "DYNAMIC_NOT_AUTHENTICATED"
+          : !dynamicUserId
+            ? "DYNAMIC_USER_NOT_FOUND"
           : !identityMatches
-            ? "DYNAMIC_IDENTITY_MISMATCH"
+            ? ownership.failureReason
             : walletCount === 0 && hasStoredWalletAddresses
               ? "DYNAMIC_IDENTITY_MISMATCH"
               : walletCount === 0
-                ? "DYNAMIC_WALLETS_HYDRATING"
+                ? "DYNAMIC_WALLETS_MISSING"
                 : null
 
     return {
@@ -5841,8 +5868,9 @@ function PineTreeWalletRuntime() {
       identityMatches,
       environmentIdSuffix: environmentId ? environmentId.slice(-6) : null,
       failureCode,
+      ownership,
     }
-  }, [collectDynamicRuntimeWalletSnapshot, dynamicExternalUserId, primaryWallet, profileState, sdkHasLoaded, user])
+  }, [collectDynamicRuntimeWalletSnapshot, dynamicExternalUserId, merchantId, primaryWallet, profileState, sdkHasLoaded, user])
 
   const emitDynamicRuntimeStage = useCallback((event: string, details?: WalletSetupDebugDetails) => {
     emitWalletSetupDebugEvent(event, details)
@@ -5909,6 +5937,11 @@ function PineTreeWalletRuntime() {
         asset: prepared.asset,
         walletCount: beforeRefresh.walletCount,
         dynamicUserIdSuffix: String(beforeRefresh.dynamicUserId || "").slice(-6) || null,
+        currentDynamicUserIdSuffix: beforeRefresh.ownership.currentDynamicUserIdSuffix,
+        storedDynamicUserIdSuffix: beforeRefresh.ownership.storedDynamicUserIdSuffix,
+        storedWalletAddresses: dynamicWalletDiagnosticList(beforeRefresh.ownership.storedWalletAddresses),
+        hydratedWalletAddresses: dynamicWalletDiagnosticList(beforeRefresh.ownership.hydratedWalletAddresses),
+        failureReason: beforeRefresh.ownership.failureReason,
       })
       throw makeDynamicPostPrepareError(
         "PineTree found your wallet profile, but the active wallet session does not match the wallet owner. Reconnect the original PineTree Wallet session.",
@@ -5922,6 +5955,8 @@ function PineTreeWalletRuntime() {
       asset: prepared.asset,
       walletCount: beforeRefresh.walletCount,
       environmentIdSuffix: beforeRefresh.environmentIdSuffix,
+      currentDynamicUserIdSuffix: beforeRefresh.ownership.currentDynamicUserIdSuffix,
+      storedDynamicUserIdSuffix: beforeRefresh.ownership.storedDynamicUserIdSuffix,
     })
 
     emitDynamicRuntimeStage("DYNAMIC_WALLETS_HYDRATION_STARTED", {
@@ -5942,6 +5977,11 @@ function PineTreeWalletRuntime() {
       walletCount: snapshot.walletCount,
       matchingBaseWallet: Boolean(snapshot.matchingBaseWallet),
       matchingSolanaWallet: Boolean(snapshot.matchingSolanaWallet),
+      currentDynamicUserIdSuffix: snapshot.ownership.currentDynamicUserIdSuffix,
+      storedDynamicUserIdSuffix: snapshot.ownership.storedDynamicUserIdSuffix,
+      storedWalletAddresses: dynamicWalletDiagnosticList(snapshot.ownership.storedWalletAddresses),
+      hydratedWalletAddresses: dynamicWalletDiagnosticList(snapshot.ownership.hydratedWalletAddresses),
+      ownershipFailureReason: snapshot.ownership.failureReason,
     })
 
     if (snapshot.failureCode === "DYNAMIC_IDENTITY_MISMATCH") {
@@ -5952,6 +5992,11 @@ function PineTreeWalletRuntime() {
         asset: prepared.asset,
         walletCount: snapshot.walletCount,
         dynamicUserIdSuffix: String(snapshot.dynamicUserId || "").slice(-6) || null,
+        currentDynamicUserIdSuffix: snapshot.ownership.currentDynamicUserIdSuffix,
+        storedDynamicUserIdSuffix: snapshot.ownership.storedDynamicUserIdSuffix,
+        storedWalletAddresses: dynamicWalletDiagnosticList(snapshot.ownership.storedWalletAddresses),
+        hydratedWalletAddresses: dynamicWalletDiagnosticList(snapshot.ownership.hydratedWalletAddresses),
+        failureReason: snapshot.ownership.failureReason,
       })
       throw makeDynamicPostPrepareError(
         "PineTree found your wallet profile, but the active wallet session does not match the wallet owner. Reconnect the original PineTree Wallet session.",
@@ -5959,7 +6004,12 @@ function PineTreeWalletRuntime() {
       )
     }
     if (snapshot.failureCode) {
-      throw makeDynamicPostPrepareError("Dynamic wallets are still hydrating. Reopen PineTree Wallet and try again.", snapshot.failureCode)
+      throw makeDynamicPostPrepareError(
+        snapshot.failureCode === "DYNAMIC_WALLETS_MISSING"
+          ? "Dynamic wallets are not available for this PineTree Wallet session. Reopen PineTree Wallet and try again."
+          : "Dynamic wallets are still hydrating. Reopen PineTree Wallet and try again.",
+        snapshot.failureCode
+      )
     }
 
     const matchingPreparedWallet = findDynamicApprovalWalletForSource(
@@ -6268,13 +6318,15 @@ function PineTreeWalletRuntime() {
         return null
       }
       const body: Record<string, unknown> = {
-        dynamic_user_id: dynamicExternalUserId,
+        dynamic_user_id: user.userId,
+        dynamic_external_user_id: dynamicExternalUserId,
         dynamic_email: dynamicUserEmail,
         merchant_email: merchantEmail,
         base_address: baseAddress,
         solana_address: solanaAddress,
       }
       const profilePostKey = [
+        user.userId || "",
         dynamicExternalUserId || "",
         dynamicUserEmail || "",
         merchantEmail || "",

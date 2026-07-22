@@ -125,7 +125,12 @@ function toAdapterOperationResult(payment: SpeedInstantSendObject): WalletAdapte
 function decimalToBaseUnits(value: number | string, asset: string): bigint {
   const text = String(value).trim()
   if (!/^\d+(?:\.\d+)?$/.test(text)) throw new Error("Invalid provider amount")
-  const decimals = asset.toUpperCase() === "SATS" ? 0 : 6
+  if (asset.toUpperCase() === "SATS") {
+    const [whole, fraction = ""] = text.split(".")
+    if (!fraction) return BigInt(whole)
+    return fraction[0] >= "5" ? BigInt(whole) + BigInt(1) : BigInt(whole)
+  }
+  const decimals = 6
   const [whole, fraction = ""] = text.split(".")
   if (fraction.length > decimals && /[1-9]/.test(fraction.slice(decimals))) {
     throw new Error("Provider amount exceeds supported precision")

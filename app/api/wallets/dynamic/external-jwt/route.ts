@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { getMerchantById } from "@/database/merchants"
 import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import {
   getDynamicExternalJwtIssuer,
@@ -32,6 +33,7 @@ async function logExternalJwtContractDiagnostic() {
 type AuthenticatedMerchant = {
   merchantId: string
   userId: string
+  email: string | null
 }
 
 type ExternalJwtRouteStatus =
@@ -97,6 +99,7 @@ async function requireSupabaseMerchant(req: NextRequest): Promise<AuthenticatedM
   return {
     merchantId: user.id,
     userId: user.id,
+    email: String((await getMerchantById(user.id))?.email || user.email || "").trim().toLowerCase() || null,
   }
 }
 
@@ -171,7 +174,7 @@ export async function POST(req: NextRequest) {
       environmentIdPresent: Boolean(process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID?.trim()),
       subjectPresent: Boolean(auth.merchantId),
     })
-    const signed = await signDynamicExternalJwt({ merchantId: auth.merchantId })
+    const signed = await signDynamicExternalJwt({ merchantId: auth.merchantId, email: auth.email })
     const jwksKey = await deriveDynamicExternalJwtPublicJwk()
     const verification = await verifySignedDynamicExternalJwtAgainstJwks({
       externalJwt: signed.externalJwt,
@@ -200,8 +203,8 @@ export async function POST(req: NextRequest) {
     console.info("[pinetree-wallets] wallet_dynamic_jwt_auth_success", { ...signed.claims })
     await logExternalJwtContractDiagnostic()
     console.info("[pinetree-wallets] dynamic_external_jwt_issued", {
-      emailPresent: false,
-      emailClaimIncluded: false,
+      emailPresent: Boolean(auth.email),
+      emailClaimIncluded: signed.claims.emailClaimIncluded,
       issuerMatch: signed.claims.issuerMatch,
       audienceMatch: signed.claims.audienceMatch,
       environmentIdMatch: signed.claims.environmentIdPresent && signed.claims.audienceMatch,
@@ -245,6 +248,7 @@ export async function POST(req: NextRequest) {
         issuer: getDynamicExternalJwtIssuer(),
         audience: resolveDynamicJwtAudience(),
         subject,
+        emailClaimIncluded: false,
       }),
       status,
       code,

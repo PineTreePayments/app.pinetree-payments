@@ -182,6 +182,39 @@ function accountSuffix(accountId: string): string {
   return String(accountId || "").trim().slice(-6)
 }
 
+function speedBalanceFailureDiagnostic(error: unknown): {
+  httpStatus: number | null
+  normalizedErrorCode: string
+  retryable: boolean | null
+} {
+  if (error instanceof SpeedApiError) {
+    return {
+      httpStatus: error.status,
+      normalizedErrorCode: error.providerCode || `speed_http_${error.status}`,
+      retryable: error.retryable,
+    }
+  }
+  if (error instanceof SpeedTransportError) {
+    return {
+      httpStatus: null,
+      normalizedErrorCode: error.timedOut ? "timeout" : "transport_error",
+      retryable: true,
+    }
+  }
+  if (error instanceof SpeedWalletProviderError) {
+    return {
+      httpStatus: error.httpStatus,
+      normalizedErrorCode: error.providerCode || error.category,
+      retryable: error.retryable,
+    }
+  }
+  return {
+    httpStatus: null,
+    normalizedErrorCode: "malformed_response",
+    retryable: true,
+  }
+}
+
 function merchantContext(context: ConnectedAccountContext, operation: string) {
   const connectedAccountId = String(context.speedAccountId || "").trim()
   if (!connectedAccountId) {
@@ -224,10 +257,30 @@ export async function getConnectedAccountBalances(
   context: ConnectedAccountContext
 ): Promise<SpeedBalanceObject> {
   requireCapability("balances")
+  console.info("[pinetree-withdrawals] SPEED_BALANCE_CONTEXT_READY", {
+    merchantId: context.merchantId,
+    providerAccountSuffix: accountSuffix(context.speedAccountId),
+    operation: "balance.retrieve",
+    routeStage: "balance_context_ready",
+  })
   try {
+    console.info("[pinetree-withdrawals] SPEED_BALANCE_REQUEST_STARTED", {
+      merchantId: context.merchantId,
+      providerAccountSuffix: accountSuffix(context.speedAccountId),
+      operation: "balance.retrieve",
+      routeStage: "balance_request_started",
+    })
     const response = await speedRequest<SpeedBalanceObject>("/balances", {
       method: "GET",
       merchantContext: merchantContext(context, "balance.retrieve"),
+    })
+    console.info("[pinetree-withdrawals] SPEED_BALANCE_RESPONSE_RECEIVED", {
+      merchantId: context.merchantId,
+      providerAccountSuffix: accountSuffix(context.speedAccountId),
+      operation: "balance.retrieve",
+      httpStatus: 200,
+      currencyCount: Array.isArray(response?.available) ? response.available.length : 0,
+      routeStage: "balance_response_received",
     })
     if (response?.object !== "balance" || !Array.isArray(response.available) || response.available.length === 0) {
       throw new Error("Malformed balance")
@@ -238,6 +291,16 @@ export async function getConnectedAccountBalances(
     }
     return response
   } catch (error) {
+    const diagnostic = speedBalanceFailureDiagnostic(error)
+    console.warn("[pinetree-withdrawals] SPEED_BALANCE_REQUEST_FAILED", {
+      merchantId: context.merchantId,
+      providerAccountSuffix: accountSuffix(context.speedAccountId),
+      operation: "balance.retrieve",
+      httpStatus: diagnostic.httpStatus,
+      normalizedErrorCode: diagnostic.normalizedErrorCode,
+      retryable: diagnostic.retryable,
+      routeStage: "balance_request_failed",
+    })
     providerError(error)
   }
 }

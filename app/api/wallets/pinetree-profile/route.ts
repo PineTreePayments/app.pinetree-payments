@@ -129,10 +129,11 @@ function scheduleWalletReadiness(profile: Awaited<ReturnType<typeof upsertPineTr
 /**
  * POST /api/wallets/pinetree-profile
  * Creates or updates the PineTree Wallet profile for the authenticated merchant.
- * Only the addresses/dynamic_user_id provided in the body are written; omitted fields keep their value.
+ * Only the wallet owner/address fields provided in the body are written; omitted fields keep their value.
  *
  * Body (all optional):
- *   dynamic_user_id        string | null
+ *   dynamic_user_id             string | null   Dynamic user id that owns embedded wallets
+ *   dynamic_external_user_id    string | null   PineTree merchant id from the Dynamic external-user credential
  *   base_address           string | null
  *   solana_address         string | null
  *   bitcoin_lightning_address  string | null
@@ -153,10 +154,15 @@ export async function POST(req: NextRequest) {
     const merchantId = resolved.merchantId
     const syncsDynamicProfile =
       "dynamic_user_id" in body ||
+      "dynamic_external_user_id" in body ||
       "dynamic_email" in body ||
       "base_address" in body ||
       "solana_address" in body
-    const dynamicExternalUserId = syncsDynamicProfile ? normalizedString(body.dynamic_user_id) : null
+    const dynamicUserId = syncsDynamicProfile ? normalizedString(body.dynamic_user_id) : null
+    const legacyExternalUserId = dynamicUserId && dynamicUserId === merchantId ? dynamicUserId : null
+    const dynamicExternalUserId = syncsDynamicProfile
+      ? normalizedString(body.dynamic_external_user_id) || legacyExternalUserId
+      : null
     const baseIdentityDiagnostics = {
       authUserPresent: Boolean(authUserId),
       merchantResolved: Boolean(merchantId),
@@ -183,6 +189,7 @@ export async function POST(req: NextRequest) {
     console.info("[pinetree-wallets] profile_route_post_received", {
       merchantId,
       dynamicUserIdPresent: Boolean(body.dynamic_user_id),
+      dynamicExternalUserIdPresent: Boolean(dynamicExternalUserId),
       baseAddressPresent: Boolean(body.base_address),
       solanaAddressPresent: Boolean(body.solana_address),
       btcAddressInputPresent: "btc_address" in body || "bitcoin_onchain_address" in body,
@@ -258,6 +265,19 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         )
       }
+      if (!dynamicUserId) {
+        console.warn("[pinetree-wallets] wallet_profile_identity_check_failed", {
+          reason: "dynamic_user_missing",
+          ...profileIdentityDiagnostics(baseIdentityDiagnostics),
+        })
+        return NextResponse.json(
+          {
+            error: "dynamic_user_missing",
+            retryable: true,
+          },
+          { status: 400 }
+        )
+      }
     }
 
     const hasBtcAddressInput = "btc_address" in body || "bitcoin_onchain_address" in body
@@ -285,8 +305,8 @@ export async function POST(req: NextRequest) {
       const solanaAddressOwnedByAnotherMerchant = Boolean(solanaProfile && solanaProfile.merchant_id !== merchantId)
       const dynamicUserMatchesExistingProfile = Boolean(
         existingProfile?.dynamic_user_id &&
-          body.dynamic_user_id &&
-          existingProfile.dynamic_user_id === body.dynamic_user_id
+          dynamicUserId &&
+          existingProfile.dynamic_user_id === dynamicUserId
       )
       const existingProfileProtected = await pineTreeWalletProfileHasProtectedHistory(existingProfile?.id)
       const existingProfileRepairable = Boolean(existingProfile && !existingProfileProtected)
@@ -390,7 +410,7 @@ export async function POST(req: NextRequest) {
     const profileSaveStartedAt = Date.now()
     const profile = await upsertPineTreeWalletProfile({
       merchantId,
-      dynamicUserId: "dynamic_user_id" in body ? dynamicExternalUserId : undefined,
+      dynamicUserId: "dynamic_user_id" in body ? dynamicUserId : undefined,
       dynamicEmail: "dynamic_email" in body ? (body.dynamic_email as string | null) : undefined,
       baseAddress: "base_address" in body ? (body.base_address as string | null) : undefined,
       solanaAddress: "solana_address" in body ? (body.solana_address as string | null) : undefined,

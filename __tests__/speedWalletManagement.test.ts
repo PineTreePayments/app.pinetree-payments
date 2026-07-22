@@ -111,6 +111,34 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     expect(JSON.stringify(init?.headers)).not.toContain("sk_test_secret")
   })
 
+  it("logs safe balance request diagnostics with the connected account suffix", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined)
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      object: "balance",
+      available: [{ amount: 1596.27, target_currency: "SATS" }],
+    }), { status: 200 }))
+    const { getConnectedAccountBalances } = await import("@/providers/lightning/speedWalletManagement")
+    await getConnectedAccountBalances(context)
+
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[pinetree-withdrawals] SPEED_BALANCE_CONTEXT_READY",
+      expect.objectContaining({
+        merchantId: "merchant-1",
+        providerAccountSuffix: "hant_1",
+        operation: "balance.retrieve",
+      })
+    )
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[pinetree-withdrawals] SPEED_BALANCE_RESPONSE_RECEIVED",
+      expect.objectContaining({
+        merchantId: "merchant-1",
+        providerAccountSuffix: "hant_1",
+        operation: "balance.retrieve",
+        httpStatus: 200,
+      })
+    )
+  })
+
   it("accepts an unambiguous true zero without fabricating missing fields", async () => {
     vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
       object: "balance",

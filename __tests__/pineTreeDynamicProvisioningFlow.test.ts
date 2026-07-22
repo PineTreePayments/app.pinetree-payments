@@ -34,11 +34,13 @@ describe("PineTree Dynamic provisioning flow", () => {
   })
 
   it("Dynamic provisioning saves externalUser merchant binding plus Base and Solana addresses", () => {
-    expect(page).toContain("dynamic_user_id: dynamicExternalUserId")
+    expect(page).toContain("dynamic_user_id: user.userId")
+    expect(page).toContain("dynamic_external_user_id: dynamicExternalUserId")
     expect(page).toContain("dynamic_email: dynamicUserEmail")
     expect(page).toContain("merchant_email: merchantEmail")
     expect(page).toContain("base_address: baseAddress")
     expect(page).toContain("solana_address: solanaAddress")
+    expect(profileRoute).toContain("normalizedString(body.dynamic_external_user_id)")
     expect(profileRoute).toContain('dynamicUserId: "dynamic_user_id" in body')
     expect(profileRoute).toContain('dynamicEmail: "dynamic_email" in body')
     expect(profileRoute).toContain('baseAddress: "base_address" in body')

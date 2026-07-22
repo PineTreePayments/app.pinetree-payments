@@ -35,7 +35,7 @@ describe("Speed wallet adapter normalization", () => {
     mocks.balances.mockResolvedValue({
       object: "balance",
       available: [
-        { amount: 2217713, target_currency: "SATS" },
+        { amount: 2217713.49, target_currency: "SATS" },
         { amount: "3.125001", target_currency: "USDC" },
       ],
     })
@@ -45,6 +45,21 @@ describe("Speed wallet adapter normalization", () => {
       expect.objectContaining({ asset: "BTC", availableBaseUnits: BigInt(2217713), network: "bitcoin_lightning" }),
       expect.objectContaining({ asset: "USDC", availableBaseUnits: BigInt(3125001), network: null }),
     ])
+  })
+
+  it("rounds fractional SATS balances from Speed instead of failing withdrawal balance retrieval", async () => {
+    mocks.balances.mockResolvedValue({
+      object: "balance",
+      available: [{ amount: 1596.5, target_currency: "SATS" }],
+    })
+    const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
+    const balances = await speedWalletAdapter.getBalances!({ merchantId: "m1", providerAccountId: "acct_1" })
+    expect(balances[0]).toEqual(expect.objectContaining({
+      asset: "BTC",
+      availableBaseUnits: BigInt(1597),
+      totalBaseUnits: BigInt(1597),
+      network: "bitcoin_lightning",
+    }))
   })
 
   it("normalizes incoming, outgoing, and unknown provider transaction categories", async () => {

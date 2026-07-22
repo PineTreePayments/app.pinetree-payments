@@ -195,7 +195,10 @@ describe("PineTree embedded wallet setup", () => {
 
   it("compares Dynamic externalUserId to merchant id and keeps identity errors distinct from address conflicts", () => {
     expect(page).toContain("getDynamicExternalUserId(user)")
-    expect(page).toContain("dynamic_user_id: dynamicExternalUserId")
+    expect(page).toContain("dynamic_user_id: user.userId")
+    expect(page).toContain("dynamic_external_user_id: dynamicExternalUserId")
+    expect(apiRoute).toContain("normalizedString(body.dynamic_external_user_id)")
+    expect(apiRoute).toContain("dynamicUserId: \"dynamic_user_id\" in body ? dynamicUserId : undefined")
     expect(apiRoute).toContain("dynamicExternalUserId !== merchantId")
     expect(apiRoute).toContain('error: "merchant_not_resolved"')
     expect(apiRoute).toContain('error: reason')
@@ -815,7 +818,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(branch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_external_jwt_rejected", {})')
     expect(branch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_external_identity_conflict_suspected"')
     expect(branch).toContain("jwtContractValid: true")
-    expect(branch).toContain("emailClaimIncluded: false")
+    expect(branch).toContain("emailClaimIncluded")
     expect(branch).toContain("externalUserBindingValid: true")
     expect(branch).toContain("dynamicRejected: true")
     expect(branch).toContain('emitWalletSetupDebugEvent("wallet_dynamic_native_fallback_suppressed"')
@@ -1024,7 +1027,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("getDynamicWalletSearchList(wallets as unknown[], primaryWallet)")
     // POST to pinetree-profile route includes dynamic_user_id to lock the profile to this session
     expect(page).toContain("dynamic_user_id")
-    expect(page).toContain("dynamic_user_id: dynamicExternalUserId")
+    expect(page).toContain("dynamic_user_id: user.userId")
     // Core profile sync does not start a second client-side Lightning provisioning request.
     expect(page).not.toContain("autoEnableLightning")
     expect(page).not.toContain("syncPineTreeManagedLightning")
@@ -1434,7 +1437,7 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("Dynamic profile sync sends only Dynamic user, Base, and Solana addresses", () => {
-    expect(page).toContain("dynamic_user_id: dynamicExternalUserId")
+    expect(page).toContain("dynamic_user_id: user.userId")
     expect(page).toContain("base_address: baseAddress")
     expect(page).toContain("solana_address: solanaAddress")
     expect(page).not.toContain("btc_address: bitcoinAddress")
