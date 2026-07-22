@@ -10,7 +10,8 @@ function operation(status = "CREATED") {
     explorer_url: null, provider_reference: null, provider_transaction_id: null, provider_secondary_reference: null,
     provider_created_at: null, provider_status: null, raw_provider_status: null, failure_code: null,
     failure_reason: null, idempotency_key: "key-1", created_at: "2026-07-19T00:00:00.000Z",
-    updated_at: "2026-07-19T00:00:00.000Z", completed_at: null,
+    updated_at: "2026-07-19T00:00:00.000Z", completed_at: null, submitted_at: null,
+    confirmed_at: null, failed_at: null,
   }
 }
 
@@ -23,18 +24,25 @@ describe("account-scoped withdrawal safeguards", () => {
     vi.doUnmock("@/database/merchantWalletBalanceSnapshots")
   })
 
-  async function arrange(available: bigint, createWithdrawal = vi.fn()) {
+  async function arrange(
+    available: bigint,
+    createWithdrawal = vi.fn(),
+    overrides: {
+      getBalances?: ReturnType<typeof vi.fn>
+      validateWithdrawal?: ReturnType<typeof vi.fn>
+    } = {}
+  ) {
     const adapter = {
       provider: "speed",
       providerDisplayName: "Speed",
       requiresFreshBalanceForWithdrawal: true,
       resolveContext: vi.fn(),
-      validateWithdrawal: vi.fn(),
+      validateWithdrawal: overrides.validateWithdrawal ?? vi.fn(),
       getCapabilities: vi.fn().mockResolvedValue({
         balances: true, withdrawals: true, payouts: false, swaps: false,
         automaticPayouts: false, automaticConversion: false,
       }),
-      getBalances: vi.fn().mockResolvedValue([{ asset: "SATS", availableBaseUnits: available, pendingBaseUnits: BigInt(0), totalBaseUnits: available, network: "bitcoin_lightning", providerUpdatedAt: null }]),
+      getBalances: overrides.getBalances ?? vi.fn().mockResolvedValue([{ asset: "SATS", availableBaseUnits: available, pendingBaseUnits: BigInt(0), totalBaseUnits: available, network: "bitcoin_lightning", providerUpdatedAt: null }]),
       createWithdrawal,
     } as WalletProviderAdapter
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({
@@ -60,11 +68,90 @@ describe("account-scoped withdrawal safeguards", () => {
     })).rejects.toMatchObject({ code: "INSUFFICIENT_BALANCE" })
     expect(arranged.createWithdrawal).not.toHaveBeenCalled()
     expect(arranged.updateWalletOperation).toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ status: "FAILED", failureCode: "INSUFFICIENT_BALANCE" }))
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ failedAt: expect.any(String) }))
   })
 
-  it("does not move an uncertain send timeout to PROCESSING without a provider reference", async () => {
+  it("marks an adapter validation failure FAILED with failedAt and never dispatches", async () => {
+    const createWithdrawal = vi.fn()
+    const validateWithdrawal = vi.fn(() => {
+      throw new WalletApiRouteError("WALLET_PROVIDER_UNAVAILABLE", "Connected account is not ready.", false)
+    })
+    const arranged = await arrange(BigInt(2000), createWithdrawal, { validateWithdrawal })
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await expect(createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })).rejects.toMatchObject({ code: "WALLET_PROVIDER_UNAVAILABLE" })
+
+    expect(createWithdrawal).not.toHaveBeenCalled()
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "FAILED",
+        failureCode: "WALLET_PROVIDER_UNAVAILABLE",
+        failedAt: expect.any(String),
+        rawProviderStatus: expect.objectContaining({ failureStage: "provider_account_validation" }),
+      })
+    )
+  })
+
+  it("marks balance verification failure FAILED with failedAt before dispatch", async () => {
+    const createWithdrawal = vi.fn()
+    const arranged = await arrange(BigInt(2000), createWithdrawal, {
+      getBalances: vi.fn().mockRejectedValue(new Error("balance read failed")),
+    })
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await expect(createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })).rejects.toThrow("balance read failed")
+
+    expect(createWithdrawal).not.toHaveBeenCalled()
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "FAILED",
+        failureCode: "WALLET_PROVIDER_UNAVAILABLE",
+        failedAt: expect.any(String),
+        rawProviderStatus: expect.objectContaining({ failureStage: "balance_retrieval" }),
+      })
+    )
+  })
+
+  it("marks a Speed client error before acceptance FAILED with failedAt", async () => {
+    const createWithdrawal = vi.fn().mockRejectedValue(
+      new WalletApiRouteError("WALLET_PROVIDER_UNAVAILABLE", "Speed client rejected the request before submission.", false)
+    )
+    const arranged = await arrange(BigInt(2000), createWithdrawal)
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await expect(createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })).rejects.toMatchObject({ code: "WALLET_PROVIDER_UNAVAILABLE" })
+
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "FAILED",
+        failureCode: "WALLET_PROVIDER_UNAVAILABLE",
+        failedAt: expect.any(String),
+        rawProviderStatus: expect.objectContaining({ failureStage: "provider_submission" }),
+      })
+    )
+  })
+
+  it("does not move an uncertain send timeout to PROCESSING or dispatch again on retry", async () => {
     const createWithdrawal = vi.fn().mockRejectedValue(new WalletApiRouteError("WALLET_PROVIDER_TIMEOUT", "Provider timeout.", true))
     const arranged = await arrange(BigInt(2000), createWithdrawal)
+    arranged.createWalletOperation
+      .mockResolvedValueOnce({ operation: operation(), created: true })
+      .mockResolvedValueOnce({
+        operation: { ...operation("REQUIRES_ACTION"), destination_summary: "lnbc1q...qqqq", failure_code: "WALLET_PROVIDER_TIMEOUT" },
+        created: false,
+      })
     const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
     await expect(createWalletWithdrawal("merchant-1", {
       asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
@@ -74,7 +161,21 @@ describe("account-scoped withdrawal safeguards", () => {
       "op-1",
       expect.objectContaining({ status: "PROCESSING" })
     )
-    expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ status: "FAILED" }))
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "REQUIRES_ACTION",
+        failureCode: "WALLET_PROVIDER_TIMEOUT",
+        rawProviderStatus: expect.objectContaining({ recoveryRequired: true }),
+      })
+    )
+
+    const retry = await createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })
+    expect(retry.operation.status).toBe("REQUIRES_ACTION")
+    expect(createWithdrawal).toHaveBeenCalledTimes(1)
   })
 
   it("persists Speed provider identifiers and PROCESSING in the same successful write", async () => {
@@ -137,6 +238,16 @@ describe("account-scoped withdrawal safeguards", () => {
       "op-1",
       expect.objectContaining({ status: "PROCESSING" })
     )
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "REQUIRES_ACTION",
+        failureCode: "STATUS_UNKNOWN",
+        rawProviderStatus: expect.objectContaining({ recoveryRequired: true }),
+      })
+    )
+    expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ status: "FAILED" }))
   })
 
   it("does not dispatch a duplicate withdrawal after provider acceptance when persistence fails", async () => {

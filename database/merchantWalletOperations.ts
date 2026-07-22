@@ -238,6 +238,15 @@ export async function updateWalletOperation(
   if (input.confirmedAt !== undefined) patch.confirmed_at = input.confirmedAt
   if (input.failedAt !== undefined) patch.failed_at = input.failedAt
 
+  const terminalTimestamp = new Date().toISOString()
+  if (patch.status === "FAILED" && patch.failed_at === undefined) {
+    patch.failed_at = terminalTimestamp
+  }
+  if (patch.status === "COMPLETED") {
+    if (patch.completed_at === undefined) patch.completed_at = terminalTimestamp
+    if (patch.confirmed_at === undefined) patch.confirmed_at = terminalTimestamp
+  }
+
   let { data, error } = await supabase
     .from(TABLE)
     .update(patch)

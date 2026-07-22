@@ -10,7 +10,7 @@
  */
 
 import { resolveMerchantWalletProvider, tryResolveMerchantWalletProvider } from "./walletProviderResolution"
-import { WalletApiRouteError } from "./walletErrors"
+import { WalletApiRouteError, type WalletApiErrorCode } from "./walletErrors"
 import {
   getWalletAssetDecimals,
   isSupportedWalletAsset,
@@ -40,6 +40,7 @@ import {
 import { listWalletBalanceSnapshots, upsertWalletBalanceSnapshot } from "@/database/merchantWalletBalanceSnapshots"
 import { classifyBitcoinWithdrawalDestination } from "@/providers/wallets/bitcoinWithdrawalDestination"
 import { speedAmountFitsAvailable } from "@/engine/withdrawals/speedWithdrawalQuote"
+import { isAbandonedCreatedWalletOperation } from "@/engine/withdrawals/canonicalWithdrawalStatus"
 
 export const STALE_BALANCE_THRESHOLD_MS = 15 * 60 * 1000
 
@@ -53,12 +54,23 @@ function canonicalWalletBalanceIdentity(asset: string, network: string | null | 
 }
 
 function toPineTreeWalletOperation(row: MerchantWalletOperation): PineTreeWalletOperation {
+  const status = isAbandonedCreatedWalletOperation({
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    providerReference: row.provider_reference,
+    providerTransactionId: row.provider_transaction_id,
+    submittedAt: row.submitted_at,
+  })
+    ? "INCOMPLETE"
+    : row.status
+
   return {
     id: row.id,
     provider: row.provider,
     operationType: row.operation_type,
     direction: row.direction,
-    status: row.status,
+    status,
     asset: row.asset,
     network: row.network || null,
     amountBaseUnits: row.amount_base_units,
@@ -395,6 +407,91 @@ async function failOperationAsCapabilityUnavailable(
     status: "FAILED",
     failureCode: "WALLET_CAPABILITY_UNAVAILABLE",
     failureReason: reason,
+    failedAt: new Date().toISOString(),
+  })
+}
+
+function walletErrorFromUnknown(error: unknown): {
+  code: WalletApiErrorCode
+  reason: string
+  retryable: boolean
+  statusUnknown: boolean
+} {
+  if (error instanceof WalletApiRouteError) {
+    return {
+      code: error.code,
+      reason: error.message,
+      retryable: error.retryable,
+      statusUnknown: error.code === "STATUS_UNKNOWN" || error.code === "WALLET_PROVIDER_TIMEOUT",
+    }
+  }
+  const structuralCode = error && typeof error === "object" && "code" in error
+    ? String((error as { code?: unknown }).code || "")
+    : ""
+  const code = structuralCode ? structuralCode as WalletApiErrorCode : "INTERNAL_ERROR"
+  return {
+    code,
+    reason: error instanceof Error ? error.message : "Wallet withdrawal failed.",
+    retryable: Boolean(error && typeof error === "object" && (error as { retryable?: unknown }).retryable),
+    statusUnknown: code === "STATUS_UNKNOWN" || code === "WALLET_PROVIDER_TIMEOUT",
+  }
+}
+
+function safeFailureReason(value: string): string {
+  return String(value || "Wallet withdrawal failed.")
+    .replace(/(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(/[A-Za-z0-9+/=]{120,}/g, "[redacted-payload]")
+    .slice(0, 240)
+}
+
+async function markOperationFailedBeforeProviderAcceptance(input: {
+  merchantId: string
+  operationId: string
+  providerAccountId: string
+  error: unknown
+  stage: string
+}): Promise<void> {
+  const failure = walletErrorFromUnknown(input.error)
+  if (failure.statusUnknown) {
+    await updateWalletOperation(input.merchantId, input.operationId, {
+      status: "REQUIRES_ACTION",
+      failureCode: failure.code,
+      failureReason: safeFailureReason(failure.reason || "Provider submission status is unknown."),
+      rawProviderStatus: {
+        providerAccountId: input.providerAccountId,
+        failureCode: failure.code,
+        failureStage: input.stage,
+        recoveryRequired: true,
+      },
+    }).catch((updateError) => {
+      console.error("[wallet-operations] failed to mark ambiguous withdrawal for recovery", {
+        merchantId: input.merchantId,
+        operationId: input.operationId,
+        failureCode: failure.code,
+        updateError: updateError instanceof Error ? updateError.message : String(updateError),
+      })
+    })
+    return
+  }
+
+  await updateWalletOperation(input.merchantId, input.operationId, {
+    status: "FAILED",
+    failureCode: failure.code,
+    failureReason: safeFailureReason(failure.reason),
+    rawProviderStatus: {
+      providerAccountId: input.providerAccountId,
+      failureCode: failure.code,
+      failureStage: input.stage,
+      retryable: failure.retryable,
+    },
+    failedAt: new Date().toISOString(),
+  }).catch((updateError) => {
+    console.error("[wallet-operations] failed to mark withdrawal failed", {
+      merchantId: input.merchantId,
+      operationId: input.operationId,
+      failureCode: failure.code,
+      updateError: updateError instanceof Error ? updateError.message : String(updateError),
+    })
   })
 }
 
@@ -405,7 +502,8 @@ async function createWalletWrite(
   destinationSummary: string,
   adapterCall: (
     resolution: Awaited<ReturnType<typeof resolveMerchantWalletProvider>>
-  ) => Promise<WalletAdapterOperationResult> | undefined
+  ) => Promise<WalletAdapterOperationResult> | undefined,
+  validateBeforeSubmission?: (resolution: Awaited<ReturnType<typeof resolveMerchantWalletProvider>>) => void
 ): Promise<PineTreeWalletWriteResult> {
   input.diagnostics?.setSubstage?.("provider_resolution")
   const resolution = await resolveMerchantWalletProvider(merchantId)
@@ -450,7 +548,32 @@ async function createWalletWrite(
     return { operation: toPineTreeWalletOperation(operation), capabilityAvailable }
   }
 
-  const capabilities = await resolution.adapter.getCapabilities(resolution.context)
+  try {
+    validateBeforeSubmission?.(resolution)
+  } catch (error) {
+    await markOperationFailedBeforeProviderAcceptance({
+      merchantId,
+      operationId: operation.id,
+      providerAccountId: resolution.context.providerAccountId,
+      error,
+      stage: "provider_account_validation",
+    })
+    throw error
+  }
+
+  let capabilities: Awaited<ReturnType<typeof resolution.adapter.getCapabilities>>
+  try {
+    capabilities = await resolution.adapter.getCapabilities(resolution.context)
+  } catch (error) {
+    await markOperationFailedBeforeProviderAcceptance({
+      merchantId,
+      operationId: operation.id,
+      providerAccountId: resolution.context.providerAccountId,
+      error,
+      stage: "capability_check",
+    })
+    throw error
+  }
   const capabilityAvailable =
     operationType === "WITHDRAWAL"
       ? capabilities.withdrawals
@@ -473,6 +596,7 @@ async function createWalletWrite(
         status: "FAILED",
         failureCode: "WALLET_CAPABILITY_UNAVAILABLE",
         failureReason: "A current available balance is required before withdrawal.",
+        failedAt: new Date().toISOString(),
       })
       return { operation: toPineTreeWalletOperation(failed), capabilityAvailable: false }
     }
@@ -497,6 +621,12 @@ async function createWalletWrite(
         status: "FAILED",
         failureCode: "WALLET_PROVIDER_UNAVAILABLE",
         failureReason: "The current available balance could not be verified.",
+        failedAt: new Date().toISOString(),
+        rawProviderStatus: {
+          providerAccountId: resolution.context.providerAccountId,
+          failureCode: "WALLET_PROVIDER_UNAVAILABLE",
+          failureStage: "balance_retrieval",
+        },
       })
       throw error
     }
@@ -537,6 +667,17 @@ async function createWalletWrite(
         failureReason: speedQuote
           ? "The available balance is insufficient for this withdrawal and estimated provider/network fee."
           : "The available balance is insufficient for this withdrawal.",
+        failedAt: new Date().toISOString(),
+        rawProviderStatus: {
+          providerAccountId: resolution.context.providerAccountId,
+          failureCode: "INSUFFICIENT_BALANCE",
+          failureStage: "balance_validation",
+          ...(speedQuote ? {
+            totalAvailableSats: speedQuote.totalAvailableSats.toString(),
+            estimatedFeeSats: speedQuote.estimatedFeeSats.toString(),
+            maximumSendableSats: speedQuote.maximumSendableSats.toString(),
+          } : {}),
+        },
       })
       throw new WalletApiRouteError(
         "INSUFFICIENT_BALANCE",
@@ -563,7 +704,19 @@ async function createWalletWrite(
   }
 
   input.diagnostics?.setSubstage?.("send_request")
-  const call = adapterCall(resolution)
+  let call: Promise<WalletAdapterOperationResult> | undefined
+  try {
+    call = adapterCall(resolution)
+  } catch (error) {
+    await markOperationFailedBeforeProviderAcceptance({
+      merchantId,
+      operationId: operation.id,
+      providerAccountId: resolution.context.providerAccountId,
+      error,
+      stage: "provider_adapter_start",
+    })
+    throw error
+  }
   if (!call) {
     const failed = await failOperationAsCapabilityUnavailable(
       merchantId,
@@ -573,8 +726,11 @@ async function createWalletWrite(
     return { operation: toPineTreeWalletOperation(failed), capabilityAvailable: false }
   }
 
+  let providerAcceptanceReturned = false
+  let referenceFreeRecoveryMarked = false
   try {
     const result = await call
+    providerAcceptanceReturned = true
     if (result.status === "PROCESSING" && !hasProviderReconciliationIdentifier(result)) {
       console.error("[wallet-operations] provider accepted withdrawal without reconciliation identifier", {
         merchantId,
@@ -585,6 +741,26 @@ async function createWalletWrite(
         providerAccountId: resolution.context.providerAccountId,
         providerStatus: result.providerStatus ?? null,
         rawProviderStatus: result.rawProviderStatus ?? null,
+      })
+      await updateWalletOperation(merchantId, operation.id, {
+        status: "REQUIRES_ACTION",
+        failureCode: "STATUS_UNKNOWN",
+        failureReason: "Your wallet provider accepted the request, but did not return a reconciliation reference.",
+        rawProviderStatus: {
+          ...(result.rawProviderStatus || {}),
+          providerAccountId: resolution.context.providerAccountId,
+          failureCode: "STATUS_UNKNOWN",
+          failureStage: "provider_response_parse",
+          recoveryRequired: true,
+        },
+      }).then(() => {
+        referenceFreeRecoveryMarked = true
+      }).catch((updateError) => {
+        console.error("[wallet-operations] failed to mark reference-free accepted withdrawal for recovery", {
+          merchantId,
+          operationId: operation.id,
+          updateError: updateError instanceof Error ? updateError.message : String(updateError),
+        })
       })
       throw new WalletApiRouteError(
         "STATUS_UNKNOWN",
@@ -633,11 +809,57 @@ async function createWalletWrite(
     }
     return { operation: toPineTreeWalletOperation(reconciled), capabilityAvailable: true }
   } catch (error) {
-    if (error instanceof WalletApiRouteError && !error.retryable) {
-      await updateWalletOperation(merchantId, operation.id, {
-        status: "FAILED",
-        failureCode: error.code,
-        failureReason: error.message,
+    if (error instanceof WalletApiRouteError) {
+      if (error.code === "STATUS_UNKNOWN") {
+        if (!referenceFreeRecoveryMarked) {
+          await markOperationFailedBeforeProviderAcceptance({
+            merchantId,
+            operationId: operation.id,
+            providerAccountId: resolution.context.providerAccountId,
+            error,
+            stage: "provider_submission_status_unknown",
+          })
+        }
+      } else if (error.code === "WALLET_PROVIDER_TIMEOUT") {
+        await markOperationFailedBeforeProviderAcceptance({
+          merchantId,
+          operationId: operation.id,
+          providerAccountId: resolution.context.providerAccountId,
+          error,
+          stage: "provider_submission_timeout",
+        })
+      } else {
+        await updateWalletOperation(merchantId, operation.id, {
+          status: "FAILED",
+          failureCode: error.code,
+          failureReason: error.message,
+          failedAt: new Date().toISOString(),
+          rawProviderStatus: {
+            providerAccountId: resolution.context.providerAccountId,
+            failureCode: error.code,
+            failureStage: "provider_submission",
+          },
+        })
+      }
+    } else if (providerAcceptanceReturned) {
+      await markOperationFailedBeforeProviderAcceptance({
+        merchantId,
+        operationId: operation.id,
+        providerAccountId: resolution.context.providerAccountId,
+        error: new WalletApiRouteError(
+          "STATUS_UNKNOWN",
+          "The provider accepted the withdrawal, but PineTree could not persist the provider response.",
+          false
+        ),
+        stage: "provider_acceptance_persistence",
+      })
+    } else {
+      await markOperationFailedBeforeProviderAcceptance({
+        merchantId,
+        operationId: operation.id,
+        providerAccountId: resolution.context.providerAccountId,
+        error,
+        stage: "provider_submission",
       })
     }
     throw error
@@ -659,13 +881,16 @@ export async function createWalletWithdrawal(
     correlationId: input.correlationId,
     diagnostics: input.diagnostics,
   }
-  input.diagnostics?.setSubstage?.("provider_resolution")
-  const resolution = await resolveMerchantWalletProvider(merchantId)
-  input.diagnostics?.setProviderAccountId?.(resolution.context.providerAccountId)
-  input.diagnostics?.setSubstage?.("destination_classification")
-  resolution.adapter.validateWithdrawal?.(adapterInput)
-  return createWalletWrite(merchantId, "WITHDRAWAL", adapterInput, maskDestination(validated.destination), (resolution) =>
-    resolution.adapter.createWithdrawal?.(resolution.context, adapterInput)
+  return createWalletWrite(
+    merchantId,
+    "WITHDRAWAL",
+    adapterInput,
+    maskDestination(validated.destination),
+    (resolution) => resolution.adapter.createWithdrawal?.(resolution.context, adapterInput),
+    (resolution) => {
+      input.diagnostics?.setSubstage?.("destination_classification")
+      resolution.adapter.validateWithdrawal?.(adapterInput)
+    }
   )
 }
 

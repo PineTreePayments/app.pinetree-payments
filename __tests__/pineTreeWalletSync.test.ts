@@ -383,6 +383,30 @@ describe("PineTree Wallet balance sync", () => {
     })
   })
 
+  it("an abandoned CREATED Bitcoin/Speed withdrawal renders as incomplete, not pending", async () => {
+    mocks.listRecentWalletOperationsForActivity.mockResolvedValue([
+      {
+        id: "op-abandoned-created-1",
+        merchant_id: "merchant_1",
+        status: "CREATED",
+        amount_base_units: "100000",
+        source: "manual",
+        created_at: "2000-01-01T00:00:00.000Z",
+        updated_at: "2000-01-01T00:00:00.000Z",
+        provider_reference: null,
+        provider_transaction_id: null,
+        submitted_at: null,
+      },
+    ])
+
+    const result = await getPineTreeWalletBalanceSnapshot("merchant_1")
+
+    expect(result.recentActivity[0]).toMatchObject({
+      id: "op-abandoned-created-1",
+      status: "incomplete",
+    })
+  })
+
   it("returns a normalized provider-agnostic rail contract with an explicit stale BTC balance", async () => {
     storedRows = [
       {

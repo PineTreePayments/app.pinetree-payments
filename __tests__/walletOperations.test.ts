@@ -6,6 +6,7 @@ function operationRow(overrides: Record<string, unknown> = {}) {
     id: "op-1",
     merchant_id: "merchant-1",
     provider: "speed",
+    provider_account_id: "acct_fake_1",
     operation_type: "WITHDRAWAL",
     direction: "debit",
     status: "CREATED",
@@ -17,6 +18,9 @@ function operationRow(overrides: Record<string, unknown> = {}) {
     tx_hash: null,
     explorer_url: null,
     provider_reference: null,
+    provider_transaction_id: null,
+    provider_secondary_reference: null,
+    provider_created_at: null,
     provider_status: null,
     raw_provider_status: null,
     failure_code: null,
@@ -25,6 +29,9 @@ function operationRow(overrides: Record<string, unknown> = {}) {
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     completed_at: null,
+    submitted_at: null,
+    confirmed_at: null,
+    failed_at: null,
     ...overrides,
   }
 }
@@ -413,6 +420,33 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     expect(operation).not.toHaveProperty("rawProviderStatus")
     expect(JSON.stringify(operation)).not.toContain("fake_ref_secret")
     expect(JSON.stringify(operation)).not.toContain("sensitive")
+  })
+
+  it("normalizes abandoned CREATED withdrawals to INCOMPLETE for the wallet activity API", async () => {
+    const adapter = fakeAdapter()
+    const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "fake-provider", adapter, context: fakeContext })
+    const row = operationRow({
+      status: "CREATED",
+      created_at: "2000-01-01T00:00:00.000Z",
+      updated_at: "2000-01-01T00:00:00.000Z",
+      provider_reference: null,
+      provider_transaction_id: null,
+      submitted_at: null,
+    })
+    vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
+    vi.doMock("@/database/merchantWalletOperations", () => ({
+      createWalletOperation: vi.fn(),
+      updateWalletOperation: vi.fn(),
+      getWalletOperationForMerchant: vi.fn().mockResolvedValue(row),
+      listWalletOperations: vi.fn().mockResolvedValue({ operations: [row], nextCursor: null }),
+    }))
+
+    const { getWalletActivity, getWalletOperation } = await import("@/engine/wallet/walletOperations")
+    const activity = await getWalletActivity("merchant-1", {})
+    const operation = await getWalletOperation("merchant-1", "op-1")
+
+    expect(activity.operations[0].status).toBe("INCOMPLETE")
+    expect(operation.status).toBe("INCOMPLETE")
   })
 })
 

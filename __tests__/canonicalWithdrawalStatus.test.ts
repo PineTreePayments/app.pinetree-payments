@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  isAbandonedCreatedWalletOperation,
   mapWalletOperationStatusToActivity,
   mapWalletWithdrawalRequestStatusToActivity,
   mapWalletWithdrawalRequestStatusToMerchantLabel,
@@ -54,6 +55,47 @@ describe("canonicalWithdrawalStatus", () => {
       expect(mapWalletOperationStatusToActivity("COMPLETED")).toBe(
         mapWalletWithdrawalRequestStatusToActivity("confirmed", false)
       )
+    })
+
+    it("maps stale evidence-free CREATED wallet operations to incomplete instead of pending", () => {
+      const nowMs = new Date("2026-07-22T12:10:00.000Z").getTime()
+
+      expect(isAbandonedCreatedWalletOperation({
+        status: "CREATED",
+        createdAt: "2026-07-22T12:00:00.000Z",
+        updatedAt: "2026-07-22T12:00:00.000Z",
+        providerReference: null,
+        providerTransactionId: null,
+        submittedAt: null,
+      }, nowMs)).toBe(true)
+      expect(mapWalletOperationStatusToActivity("CREATED", {
+        createdAt: "2000-01-01T00:00:00.000Z",
+        updatedAt: "2000-01-01T00:00:00.000Z",
+        providerReference: null,
+        providerTransactionId: null,
+        submittedAt: null,
+      })).toBe("incomplete")
+    })
+
+    it("keeps fresh or provider-evidenced CREATED wallet operations pending", () => {
+      const nowMs = new Date("2026-07-22T12:03:00.000Z").getTime()
+
+      expect(isAbandonedCreatedWalletOperation({
+        status: "CREATED",
+        createdAt: "2026-07-22T12:00:00.000Z",
+        updatedAt: "2026-07-22T12:00:00.000Z",
+        providerReference: null,
+        providerTransactionId: null,
+        submittedAt: null,
+      }, nowMs)).toBe(false)
+      expect(isAbandonedCreatedWalletOperation({
+        status: "CREATED",
+        createdAt: "2026-07-22T11:00:00.000Z",
+        updatedAt: "2026-07-22T11:00:00.000Z",
+        providerReference: "is_123",
+        providerTransactionId: null,
+        submittedAt: null,
+      }, nowMs)).toBe(false)
     })
   })
 

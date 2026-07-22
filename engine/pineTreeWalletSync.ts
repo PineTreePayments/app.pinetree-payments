@@ -641,7 +641,13 @@ export async function getPineTreeWalletBalanceSnapshot(
     id: op.id,
     label: `${op.source === "automatic_sweep" ? "Auto-swept" : "Sent"} ${satsToBtcDecimal(op.amount_base_units) ?? "0"} BTC`,
     rail: "bitcoin" as const,
-    status: mapWalletOperationStatusToActivity(op.status),
+    status: mapWalletOperationStatusToActivity(op.status, {
+      createdAt: op.created_at,
+      updatedAt: op.updated_at,
+      providerReference: op.provider_reference,
+      providerTransactionId: op.provider_transaction_id,
+      submittedAt: op.submitted_at,
+    }),
     createdAt: op.created_at,
     source: op.source,
   }))

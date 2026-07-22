@@ -17,6 +17,7 @@ export type CanonicalWithdrawalActivityStatus =
   | "sent"
   | "confirmed"
   | "failed"
+  | "incomplete"
   | "canceled"
   | "blocked"
 
@@ -54,6 +55,26 @@ export function mapWalletWithdrawalRequestStatusToActivity(
   }
 }
 
+export const WALLET_OPERATION_ACTIVE_CREATED_WINDOW_MS = 5 * 60 * 1000
+
+export function isAbandonedCreatedWalletOperation(input: {
+  status: string
+  createdAt?: string | null
+  updatedAt?: string | null
+  providerReference?: string | null
+  providerTransactionId?: string | null
+  submittedAt?: string | null
+}, nowMs = Date.now()): boolean {
+  if (input.status !== "CREATED") return false
+  if (String(input.providerReference || input.providerTransactionId || input.submittedAt || "").trim()) return false
+  const latestKnownWrite = [input.createdAt, input.updatedAt]
+    .map((value) => new Date(String(value || "")).getTime())
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => b - a)[0]
+  if (!Number.isFinite(latestKnownWrite)) return false
+  return nowMs - latestKnownWrite > WALLET_OPERATION_ACTIVE_CREATED_WINDOW_MS
+}
+
 const OPERATION_STATUS_TO_ACTIVITY: Record<WalletOperationStatus, CanonicalWithdrawalActivityStatus> = {
   COMPLETED: "confirmed",
   FAILED: "failed",
@@ -66,8 +87,16 @@ const OPERATION_STATUS_TO_ACTIVITY: Record<WalletOperationStatus, CanonicalWithd
 }
 
 export function mapWalletOperationStatusToActivity(
-  status: WalletOperationStatus
+  status: WalletOperationStatus,
+  operation?: {
+    createdAt?: string | null
+    updatedAt?: string | null
+    providerReference?: string | null
+    providerTransactionId?: string | null
+    submittedAt?: string | null
+  }
 ): CanonicalWithdrawalActivityStatus {
+  if (operation && isAbandonedCreatedWalletOperation({ status, ...operation })) return "incomplete"
   return OPERATION_STATUS_TO_ACTIVITY[status] ?? "pending"
 }
 
