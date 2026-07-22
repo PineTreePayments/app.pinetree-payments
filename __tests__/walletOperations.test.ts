@@ -276,7 +276,9 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
         status: "COMPLETED",
         completedAt: expect.any(String),
         confirmedAt: expect.any(String),
-        failedAt: undefined,
+        failureCode: null,
+        failureReason: null,
+        failedAt: null,
       })
     )
   })

@@ -1677,6 +1677,15 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("Withdrawal outcome pending")
   })
 
+  it("keeps accepted Speed processing withdrawals on the normal submitted screen", () => {
+    expect(page).toContain('merchantStatus: "Processing"')
+    expect(page).toContain("Your Bitcoin Lightning withdrawal was submitted.")
+    expect(page).toContain('setWithdrawalScreen("submitted")')
+    expect(page.indexOf('["REQUIRES_ACTION", "ACTION_REQUIRED"].includes')).toBeLessThan(
+      page.indexOf("Your Bitcoin Lightning withdrawal was submitted.")
+    )
+  })
+
   it("routes non-Dynamic wallet sends to a signer-unavailable failure instead of manual review", () => {
     expect(page).toContain("Submit withdrawal request")
     expect(page).toContain("if (review.review.approvalMethod === \"dynamic_browser\")")

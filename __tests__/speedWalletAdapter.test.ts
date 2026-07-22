@@ -109,6 +109,87 @@ describe("Speed wallet adapter normalization", () => {
     })
   })
 
+  it("maps HTTP 201 creation-shaped unpaid Instant Send responses to PROCESSING without requiring final fee or explorer", async () => {
+    mocks.withdrawal.mockResolvedValue({
+      id: "is_mrwnlysi8R99Tzf5",
+      object: "instant_send",
+      status: "unpaid",
+      withdraw_id: "wi_mrwnlytyBh32rmJL",
+      amount: 1000,
+      currency: "SATS",
+      target_amount: 1000,
+      target_currency: "SATS",
+      fees: null,
+      speed_fee: { percentage: 0.5, amount: 5, fixed_amount: 0, total_fee: 5 },
+      withdraw_method: "onchain",
+      withdraw_type: "onchain_address",
+      explorer_link: null,
+      created: 1784759306850,
+      modified: 1784759307215,
+    })
+    const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
+    const result = await speedWalletAdapter.createWithdrawal!(
+      { merchantId: "m1", providerAccountId: "acct_1" },
+      { asset: "SATS", amountBaseUnits: BigInt(1000), destination: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq", idempotencyKey: "key" }
+    )
+
+    expect(result).toMatchObject({
+      providerReference: "is_mrwnlysi8R99Tzf5",
+      providerTransactionId: "is_mrwnlysi8R99Tzf5",
+      providerSecondaryReference: "wi_mrwnlytyBh32rmJL",
+      providerStatus: "unpaid",
+      status: "PROCESSING",
+      explorerUrl: null,
+      feeBaseUnits: null,
+      providerCreatedAt: "2026-07-22T22:28:26.850Z",
+    })
+  })
+
+  it("maps paid Instant Send status to COMPLETED with final fee evidence", async () => {
+    mocks.withdrawal.mockResolvedValue({
+      id: "is_paid", object: "instant_send", status: "paid", withdraw_id: "wi_paid",
+      amount: 1000, currency: "SATS", target_amount: 1000, target_currency: "SATS",
+      fees: 805, withdraw_method: "onchain", withdraw_type: "onchain_address",
+      explorer_link: "https://mempool.space/tx/abc", created: 1784759306850, modified: 1784759308271,
+    })
+    const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
+    const result = await speedWalletAdapter.createWithdrawal!(
+      { merchantId: "m1", providerAccountId: "acct_1" },
+      { asset: "SATS", amountBaseUnits: BigInt(1000), destination: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq", idempotencyKey: "key" }
+    )
+
+    expect(result).toMatchObject({
+      providerReference: "is_paid",
+      providerSecondaryReference: "wi_paid",
+      providerStatus: "paid",
+      status: "COMPLETED",
+      feeBaseUnits: BigInt(805),
+      explorerUrl: "https://mempool.space/tx/abc",
+    })
+  })
+
+  it("polls reconciliation status using the stored Instant Send identifier", async () => {
+    mocks.status.mockResolvedValue({
+      id: "is_mrwnlysi8R99Tzf5", object: "instant_send", status: "paid", withdraw_id: "wi_mrwnlytyBh32rmJL",
+      amount: 1000, currency: "SATS", target_amount: 1000, target_currency: "SATS",
+      fees: 805, withdraw_method: "onchain", withdraw_type: "onchain_address",
+      explorer_link: "https://mempool.space/tx/ff38", created: 1784759306850, modified: 1784759308271,
+    })
+    const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
+    const result = await speedWalletAdapter.getWithdrawalStatus!(
+      { merchantId: "m1", providerAccountId: "acct_1" },
+      "is_mrwnlysi8R99Tzf5"
+    )
+
+    expect(mocks.status).toHaveBeenCalledWith({
+      merchantId: "m1",
+      speedAccountId: "acct_1",
+      providerSendId: "is_mrwnlysi8R99Tzf5",
+    })
+    expect(result.status).toBe("COMPLETED")
+    expect(result.providerSecondaryReference).toBe("wi_mrwnlytyBh32rmJL")
+  })
+
   it("rejects non-Lightning assets and malformed destinations before provider submission", async () => {
     const { speedWalletAdapter } = await import("@/providers/lightning/speedWalletAdapter")
     // Sharpened from the generic WALLET_VALIDATION_ERROR to specific, normalized

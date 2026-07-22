@@ -140,7 +140,7 @@ function sanitizeSpeedInstantSendResponse(payment: SpeedInstantSendObject): Reco
 }
 
 function toAdapterOperationResult(payment: SpeedInstantSendObject): WalletAdapterOperationResult {
-  const fee = decimalToBaseUnits(payment.fees, payment.currency)
+  const fee = payment.fees != null ? decimalToBaseUnits(payment.fees, payment.currency) : null
   const rawPayment = payment as Record<string, unknown>
   const instantSendId = stringField(rawPayment, ["id"])
   const withdrawId = stringField(rawPayment, ["withdraw_id", "withdrawId", "withdrawal_id", "withdrawalId"])

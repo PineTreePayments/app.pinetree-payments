@@ -367,10 +367,10 @@ describe("account-scoped withdrawal safeguards", () => {
       providerStatus: "unpaid",
       providerCreatedAt: "2026-07-22T07:12:49.000Z",
       status: "PROCESSING",
-      feeBaseUnits: BigInt(4),
-      txHash: "tx_abc",
-      explorerUrl: "https://mempool.space/tx/tx_abc",
-      rawProviderStatus: { id: "is_123", withdraw_id: "wi_123", status: "unpaid" },
+      feeBaseUnits: null,
+      txHash: null,
+      explorerUrl: null,
+      rawProviderStatus: { id: "is_123", withdraw_id: "wi_123", status: "unpaid", fees: null, explorer_link: null },
     })
     const arranged = await arrange(BigInt(2000), createWithdrawal)
     const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
@@ -390,9 +390,14 @@ describe("account-scoped withdrawal safeguards", () => {
         providerSecondaryReference: "wi_123",
         providerStatus: "unpaid",
         providerCreatedAt: "2026-07-22T07:12:49.000Z",
-        submittedAt: expect.any(String),
-        txHash: "tx_abc",
-        explorerUrl: "https://mempool.space/tx/tx_abc",
+        submittedAt: "2026-07-22T07:12:49.000Z",
+        failureCode: null,
+        failureReason: null,
+        failedAt: null,
+        providerResponseReceived: true,
+        providerAcceptanceKnown: true,
+        providerAcceptanceUnknown: false,
+        persistenceAfterAcceptanceFailed: false,
         rawProviderStatus: expect.objectContaining({ id: "is_123", withdraw_id: "wi_123" }),
       })
     )

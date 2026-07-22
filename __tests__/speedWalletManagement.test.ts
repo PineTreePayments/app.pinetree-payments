@@ -306,6 +306,95 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     }))
   })
 
+  it("accepts the production HTTP 201 Instant Send creation shape with null fees and explorer link", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      id: "is_mrwnlysi8R99Tzf5",
+      object: "instant_send",
+      status: "unpaid",
+      withdraw_id: "wi_mrwnlytyBh32rmJL",
+      amount: 1000,
+      currency: "SATS",
+      target_amount: 1000,
+      target_currency: "SATS",
+      fees: null,
+      speed_fee: { percentage: 0.5, amount: 5, fixed_amount: 0, total_fee: 5 },
+      exchange_rate: 1,
+      conversion: 1,
+      withdraw_method: "onchain",
+      withdraw_request: "bc1qaad23h6e20cej2rrj6vppz47nxdw30chpgyp62",
+      withdraw_type: "onchain_address",
+      failure_reason: null,
+      explorer_link: null,
+      created: 1784759306850,
+      modified: 1784759307215,
+    }), { status: 201, headers: { "content-type": "application/json", "speed-request-id": "req_send_201" } }))
+    const markProviderResponseReceived = vi.fn()
+    const { createConnectedAccountWithdrawal } = await import("@/providers/lightning/speedWalletManagement")
+    const result = await createConnectedAccountWithdrawal({
+      ...context,
+      amount: 1000,
+      currency: "SATS",
+      withdrawMethod: "onchain",
+      withdrawRequest: "bc1qaad23h6e20cej2rrj6vppz47nxdw30chpgyp62",
+      idempotencyKey: "local-key",
+      diagnostics: { markProviderResponseReceived },
+    })
+
+    expect(result).toMatchObject({
+      id: "is_mrwnlysi8R99Tzf5",
+      object: "instant_send",
+      status: "unpaid",
+      withdraw_id: "wi_mrwnlytyBh32rmJL",
+      fees: null,
+      explorer_link: null,
+    })
+    expect(markProviderResponseReceived).toHaveBeenCalledWith(expect.objectContaining({
+      httpStatus: 201,
+      instantSendIdFound: true,
+      withdrawalIdFound: true,
+      responseBodyJsonParsed: true,
+      responseParseSucceeded: true,
+    }))
+  })
+
+  it("keeps malformed HTTP 201 Instant Send bodies without provider IDs ambiguous", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      object: "instant_send",
+      status: "unpaid",
+      amount: 1000,
+      currency: "SATS",
+      target_amount: 1000,
+      target_currency: "SATS",
+      fees: null,
+      failure_reason: null,
+      created: 1784759306850,
+      modified: 1784759307215,
+    }), { status: 201, headers: { "content-type": "application/json", "speed-request-id": "req_send_bad_201" } }))
+    const markProviderResponseReceived = vi.fn()
+    const markProviderRejected = vi.fn()
+    const { createConnectedAccountWithdrawal } = await import("@/providers/lightning/speedWalletManagement")
+    await expect(createConnectedAccountWithdrawal({
+      ...context,
+      amount: 1000,
+      currency: "SATS",
+      withdrawMethod: "onchain",
+      withdrawRequest: "bc1qaad23h6e20cej2rrj6vppz47nxdw30chpgyp62",
+      idempotencyKey: "local-key",
+      diagnostics: { markProviderResponseReceived, markProviderRejected },
+    })).rejects.toMatchObject({
+      category: "provider_unavailable",
+      providerCode: "malformed_response",
+    })
+
+    expect(markProviderResponseReceived).toHaveBeenCalledWith(expect.objectContaining({
+      httpStatus: 201,
+      instantSendIdFound: false,
+      withdrawalIdFound: false,
+      responseBodyJsonParsed: true,
+    }))
+    expect(markProviderRejected).not.toHaveBeenCalled()
+  })
+
   it("logs a safe failed-send diagnostic and preserves provider 400 classification", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({

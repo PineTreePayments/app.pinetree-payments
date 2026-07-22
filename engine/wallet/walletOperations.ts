@@ -373,6 +373,7 @@ async function reconcileOperationWithAdapterResult(
   result: WalletAdapterOperationResult
 ): Promise<MerchantWalletOperation> {
   const now = new Date().toISOString()
+  const submittedAt = result.providerCreatedAt ?? now
   return updateWalletOperation(merchantId, operationId, {
     providerAccountId,
     status: result.status,
@@ -385,10 +386,12 @@ async function reconcileOperationWithAdapterResult(
     txHash: result.txHash ?? undefined,
     explorerUrl: result.explorerUrl ?? undefined,
     feeBaseUnits: result.feeBaseUnits ?? undefined,
-    submittedAt: now,
+    failureCode: result.status === "FAILED" || result.status === "EXPIRED" ? undefined : null,
+    failureReason: result.status === "FAILED" || result.status === "EXPIRED" ? undefined : null,
+    submittedAt,
     completedAt: result.status === "COMPLETED" ? now : undefined,
     confirmedAt: result.status === "COMPLETED" ? now : undefined,
-    failedAt: result.status === "FAILED" || result.status === "EXPIRED" ? now : undefined,
+    failedAt: result.status === "FAILED" || result.status === "EXPIRED" ? now : null,
     dispatchCompletedAt: now,
     providerResponseReceived: true,
     providerAcceptanceKnown: result.status !== "FAILED" && result.status !== "EXPIRED",

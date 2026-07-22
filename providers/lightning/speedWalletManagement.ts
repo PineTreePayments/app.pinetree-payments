@@ -419,8 +419,8 @@ export type SpeedInstantSendObject = {
   currency: string
   target_amount: number | string
   target_currency: string
-  fees: number | string
-  speed_fee?: { percentage?: number | string; amount?: number | string }
+  fees?: number | string | null
+  speed_fee?: { percentage?: number | string; amount?: number | string; fixed_amount?: number | string; total_fee?: number | string }
   withdraw_method: string
   withdraw_type: string
   withdraw_request?: string
@@ -662,11 +662,20 @@ export async function getConnectedAccountSendStatus(
 }
 
 function validateInstantSend(response: SpeedInstantSendObject): SpeedInstantSendObject {
-  if (!response || !String(response.id || "").trim() || !String(response.status || "").trim()) {
+  const instantSendId = String(response?.id || "").trim()
+  const withdrawId = String(response?.withdraw_id || "").trim()
+  if (
+    !response ||
+    response.object !== "instant_send" ||
+    !instantSendId.startsWith("is_") ||
+    !withdrawId.startsWith("wi_") ||
+    !String(response.status || "").trim() ||
+    response.failure_reason
+  ) {
     throw new Error("Malformed Instant Send response")
   }
   assertNonNegativeAmount(response.amount, "Instant Send amount")
-  assertNonNegativeAmount(response.fees, "Instant Send fee")
+  if (response.fees != null) assertNonNegativeAmount(response.fees, "Instant Send fee")
   if (!String(response.currency || "").trim()) throw new Error("Missing Instant Send currency")
   return response
 }
