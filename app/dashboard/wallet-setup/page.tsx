@@ -612,6 +612,27 @@ type DynamicSigningPreflightContext = {
   emitDynamicStage?: (event: string, details?: WalletSetupDebugDetails) => void
 }
 
+type DynamicWalletRuntimeFailureCode =
+  | "DYNAMIC_SDK_NOT_READY"
+  | "DYNAMIC_NOT_AUTHENTICATED"
+  | "DYNAMIC_WALLETS_HYDRATING"
+  | "DYNAMIC_IDENTITY_MISMATCH"
+  | "WALLET_NOT_CONNECTED"
+
+type DynamicWalletRuntimeSnapshot = {
+  authenticated: boolean
+  dynamicUserId: string | null
+  sdkLoaded: boolean
+  wallets: DynamicWalletLike[]
+  primaryWallet: unknown
+  walletCount: number
+  matchingBaseWallet: DynamicWalletLike | null
+  matchingSolanaWallet: DynamicWalletLike | null
+  identityMatches: boolean
+  environmentIdSuffix: string | null
+  failureCode: DynamicWalletRuntimeFailureCode | null
+}
+
 function dynamicWalletConnectorValue(wallet: DynamicWalletLike, key: "key" | "name") {
   return wallet.connector?.[key] ?? wallet.walletConnector?.[key] ?? null
 }
@@ -991,6 +1012,11 @@ async function sendDynamicPreparedWithdrawal(
 
   if (!wallet) {
     const hasAnyDynamicWallet = walletsToCheck.length > 0
+    const missingWalletMessage = prepared.rail === "solana"
+      ? "No Dynamic Solana wallet matched the prepared source address."
+      : prepared.rail === "base"
+        ? "No Dynamic Base wallet matched the prepared source address."
+        : "No Dynamic wallet matched the prepared source address."
     console.info("[pinetree-withdrawals] signer_not_found", {
       payloadKind: prepared.payload.kind,
       sourceAddressPresent: Boolean(prepared.sourceAddress),
@@ -1001,15 +1027,12 @@ async function sendDynamicPreparedWithdrawal(
     // No wallet classified for this rail at all - do not fall back to primaryWallet or
     // any other chain's signer. Solana gets its own explicit copy per rail; Base/Bitcoin
     // fall back to the existing generic reconnect copy.
-    if (!hasAnyDynamicWallet && prepared.rail === "solana") {
-      throw makeDynamicPostPrepareError("No Dynamic Solana wallet matched the prepared source address.", "WALLET_NOT_CONNECTED")
-    }
     if (hasAnyDynamicWallet) {
       // Wallets are loaded but none match the saved DB address - different account/session.
-      throw makeDynamicPostPrepareError("No Dynamic Solana wallet matched the prepared source address.", "WALLET_NOT_CONNECTED")
+      throw makeDynamicPostPrepareError(missingWalletMessage, "WALLET_NOT_CONNECTED")
     }
     // No Dynamic wallets present at all - session expired or SDK not yet loaded.
-    throw makeDynamicPostPrepareError("No Dynamic Solana wallet matched the prepared source address.", "WALLET_NOT_CONNECTED")
+    throw makeDynamicPostPrepareError(missingWalletMessage, "WALLET_NOT_CONNECTED")
   }
   const solanaCapability = prepared.rail === "solana" ? resolveDynamicSolanaSignAndSendCapability(wallet) : null
   matchingWalletFound = true
@@ -1748,6 +1771,14 @@ const PRODUCTION_WALLET_WITHDRAWAL_DEBUG_EVENTS = new Set([
   "DYNAMIC_SIGNATURE_NORMALIZED",
   "DYNAMIC_SUBMIT_REQUESTED",
   "DYNAMIC_POST_PREPARE_FAILED",
+  "DYNAMIC_AUTH_CHECK_STARTED",
+  "DYNAMIC_AUTH_RESTORED",
+  "DYNAMIC_USER_RESOLVED",
+  "DYNAMIC_IDENTITY_MATCHED",
+  "DYNAMIC_IDENTITY_MISMATCH",
+  "DYNAMIC_WALLETS_HYDRATION_STARTED",
+  "DYNAMIC_WALLETS_HYDRATED",
+  "DYNAMIC_MATCHING_WALLET_FOUND",
 ])
 
 function isProductionWalletWithdrawalDebugEvent(event: string) {
@@ -5728,6 +5759,241 @@ function PineTreeWalletRuntime() {
     return runPromise
   }, [refreshDynamicWalletRuntimeImpl, sdkHasLoaded, user])
 
+  const collectDynamicRuntimeWalletSnapshot = useCallback((): DynamicWalletLike[] => {
+    let runtimeWaasWallets: unknown[] = []
+    let credentialSignerWallets: DynamicWalletLike[] = []
+    if (dynamicWaasIsEnabled) {
+      try {
+        runtimeWaasWallets = getWaasWallets() as unknown[]
+      } catch {
+        runtimeWaasWallets = []
+      }
+      try {
+        credentialSignerWallets = getWaasWalletsByCredentials().flatMap((credential) => {
+          const row = credential as unknown as Record<string, unknown>
+          const chain = String(row.chain || "").toUpperCase()
+          const connectorChain = chain === "EVM" || chain.includes("ETH") ? "EVM" : chain === "SOL" || chain === "SVM" ? "SOL" : null
+          if (!connectorChain) return []
+          const connector = getWaasWalletConnector(connectorChain)
+          if (!connector) return []
+          return [{
+            id: safeString(row.id) ?? undefined,
+            key: safeString(row.walletName) ?? undefined,
+            chain: connectorChain,
+            address: safeString(row.address) ?? undefined,
+            connector: connector as unknown as DynamicWalletLike["connector"],
+          } satisfies DynamicWalletLike]
+        })
+      } catch {
+        credentialSignerWallets = []
+      }
+    }
+    return getDynamicWalletSearchList(
+      [...(wallets as unknown[]), ...runtimeWaasWallets, ...credentialSignerWallets],
+      primaryWallet
+    )
+  }, [dynamicWaasIsEnabled, getWaasWalletConnector, getWaasWallets, getWaasWalletsByCredentials, primaryWallet, wallets])
+
+  const buildDynamicWalletRuntimeSnapshot = useCallback((
+    runtimeWallets?: DynamicWalletLike[],
+    authenticatedOverride?: boolean,
+    dynamicUserIdOverride?: string | null
+  ): DynamicWalletRuntimeSnapshot => {
+    const profile = profileState.kind === "loaded" ? profileState.profile : null
+    const snapshotWallets = runtimeWallets ?? collectDynamicRuntimeWalletSnapshot()
+    const authenticated = authenticatedOverride ?? Boolean(user)
+    const dynamicUserId = dynamicUserIdOverride ?? user?.userId ?? null
+    const matchingBaseWallet = profile?.base_address
+      ? findDynamicApprovalWalletForSource(snapshotWallets, primaryWallet, "base", profile.base_address)
+      : null
+    const matchingSolanaWallet = profile?.solana_address
+      ? findDynamicApprovalWalletForSource(snapshotWallets, primaryWallet, "solana", profile.solana_address)
+      : null
+    const profileDynamicUserId = String(profile?.dynamic_user_id || "").trim()
+    const identityMatches = !profileDynamicUserId
+      || profileDynamicUserId === dynamicExternalUserId
+      || profileDynamicUserId === dynamicUserId
+    const hasStoredWalletAddresses = Boolean(profile?.base_address || profile?.solana_address)
+    const environmentId = String(process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID || "").trim()
+    const walletCount = snapshotWallets.length
+    const failureCode: DynamicWalletRuntimeFailureCode | null =
+      !sdkHasLoaded
+        ? "DYNAMIC_SDK_NOT_READY"
+        : !authenticated
+          ? "DYNAMIC_NOT_AUTHENTICATED"
+          : !identityMatches
+            ? "DYNAMIC_IDENTITY_MISMATCH"
+            : walletCount === 0 && hasStoredWalletAddresses
+              ? "DYNAMIC_IDENTITY_MISMATCH"
+              : walletCount === 0
+                ? "DYNAMIC_WALLETS_HYDRATING"
+                : null
+
+    return {
+      authenticated,
+      dynamicUserId,
+      sdkLoaded: sdkHasLoaded,
+      wallets: snapshotWallets,
+      primaryWallet,
+      walletCount,
+      matchingBaseWallet,
+      matchingSolanaWallet,
+      identityMatches,
+      environmentIdSuffix: environmentId ? environmentId.slice(-6) : null,
+      failureCode,
+    }
+  }, [collectDynamicRuntimeWalletSnapshot, dynamicExternalUserId, primaryWallet, profileState, sdkHasLoaded, user])
+
+  const emitDynamicRuntimeStage = useCallback((event: string, details?: WalletSetupDebugDetails) => {
+    emitWalletSetupDebugEvent(event, details)
+  }, [])
+
+  const ensureDynamicWalletRuntimeReady = useCallback(async (
+    prepared: WithdrawalPrepareResponse,
+    correlationId: string | null,
+    requestId: string
+  ): Promise<DynamicWalletRuntimeSnapshot> => {
+    emitDynamicRuntimeStage("DYNAMIC_AUTH_CHECK_STARTED", {
+      correlationId: correlationId || "none",
+      requestId,
+      rail: prepared.rail,
+      asset: prepared.asset,
+      sdkLoaded: sdkHasLoaded,
+      dynamicAuthenticated: Boolean(user),
+    })
+    if (!sdkHasLoaded) {
+      throw makeDynamicPostPrepareError("Dynamic wallet SDK is still loading.", "DYNAMIC_SDK_NOT_READY")
+    }
+
+    let runtimeUserPresent = Boolean(user)
+    let runtimeDynamicUserId = user?.userId ?? null
+    if (!runtimeUserPresent && pineTreeControlledDynamicAuthAvailable) {
+      const token = accessTokenRef.current
+      if (token && typeof signInWithExternalJwt === "function") {
+        const payload = await requestPineTreeDynamicExternalJwtAuth(token, { walletDebug: walletSyncDebugQueryEnabled })
+        const dynamicProfile = await signInWithExternalJwt({
+          externalJwt: payload.externalJwt,
+          externalUserId: payload.externalUserId,
+        })
+        runtimeUserPresent = Boolean(dynamicProfile)
+        runtimeDynamicUserId = dynamicProfile?.userId ?? runtimeDynamicUserId
+        await refreshDynamicUser().catch(() => undefined)
+        emitDynamicRuntimeStage("DYNAMIC_AUTH_RESTORED", {
+          correlationId: correlationId || "none",
+          requestId,
+          rail: prepared.rail,
+          asset: prepared.asset,
+          dynamicAuthenticated: runtimeUserPresent,
+        })
+      }
+    }
+
+    if (!runtimeUserPresent) {
+      throw makeDynamicPostPrepareError("PineTree Wallet access is not authenticated.", "DYNAMIC_NOT_AUTHENTICATED")
+    }
+
+    emitDynamicRuntimeStage("DYNAMIC_USER_RESOLVED", {
+      correlationId: correlationId || "none",
+      requestId,
+      rail: prepared.rail,
+      asset: prepared.asset,
+      dynamicUserIdSuffix: String(runtimeDynamicUserId || "").slice(-6) || null,
+    })
+
+    const beforeRefresh = buildDynamicWalletRuntimeSnapshot(undefined, runtimeUserPresent, runtimeDynamicUserId)
+    if (!beforeRefresh.identityMatches) {
+      emitDynamicRuntimeStage("DYNAMIC_IDENTITY_MISMATCH", {
+        correlationId: correlationId || "none",
+        requestId,
+        rail: prepared.rail,
+        asset: prepared.asset,
+        walletCount: beforeRefresh.walletCount,
+        dynamicUserIdSuffix: String(beforeRefresh.dynamicUserId || "").slice(-6) || null,
+      })
+      throw makeDynamicPostPrepareError(
+        "PineTree found your wallet profile, but the active wallet session does not match the wallet owner. Reconnect the original PineTree Wallet session.",
+        "DYNAMIC_IDENTITY_MISMATCH"
+      )
+    }
+    emitDynamicRuntimeStage("DYNAMIC_IDENTITY_MATCHED", {
+      correlationId: correlationId || "none",
+      requestId,
+      rail: prepared.rail,
+      asset: prepared.asset,
+      walletCount: beforeRefresh.walletCount,
+      environmentIdSuffix: beforeRefresh.environmentIdSuffix,
+    })
+
+    emitDynamicRuntimeStage("DYNAMIC_WALLETS_HYDRATION_STARTED", {
+      correlationId: correlationId || "none",
+      requestId,
+      rail: prepared.rail,
+      asset: prepared.asset,
+      walletCount: beforeRefresh.walletCount,
+    })
+    await refreshDynamicWalletRuntime("withdrawal_approval_runtime_ready", { requireApprovalWallet: true })
+    const runtimeWallets = collectDynamicRuntimeWalletSnapshot()
+    const snapshot = buildDynamicWalletRuntimeSnapshot(runtimeWallets, runtimeUserPresent, runtimeDynamicUserId)
+    emitDynamicRuntimeStage("DYNAMIC_WALLETS_HYDRATED", {
+      correlationId: correlationId || "none",
+      requestId,
+      rail: prepared.rail,
+      asset: prepared.asset,
+      walletCount: snapshot.walletCount,
+      matchingBaseWallet: Boolean(snapshot.matchingBaseWallet),
+      matchingSolanaWallet: Boolean(snapshot.matchingSolanaWallet),
+    })
+
+    if (snapshot.failureCode === "DYNAMIC_IDENTITY_MISMATCH") {
+      emitDynamicRuntimeStage("DYNAMIC_IDENTITY_MISMATCH", {
+        correlationId: correlationId || "none",
+        requestId,
+        rail: prepared.rail,
+        asset: prepared.asset,
+        walletCount: snapshot.walletCount,
+        dynamicUserIdSuffix: String(snapshot.dynamicUserId || "").slice(-6) || null,
+      })
+      throw makeDynamicPostPrepareError(
+        "PineTree found your wallet profile, but the active wallet session does not match the wallet owner. Reconnect the original PineTree Wallet session.",
+        "DYNAMIC_IDENTITY_MISMATCH"
+      )
+    }
+    if (snapshot.failureCode) {
+      throw makeDynamicPostPrepareError("Dynamic wallets are still hydrating. Reopen PineTree Wallet and try again.", snapshot.failureCode)
+    }
+
+    const matchingPreparedWallet = findDynamicApprovalWalletForSource(
+      snapshot.wallets,
+      snapshot.primaryWallet,
+      prepared.rail,
+      prepared.sourceAddress
+    )
+    if (matchingPreparedWallet) {
+      emitDynamicRuntimeStage("DYNAMIC_MATCHING_WALLET_FOUND", {
+        correlationId: correlationId || "none",
+        requestId,
+        rail: prepared.rail,
+        asset: prepared.asset,
+        walletCount: snapshot.walletCount,
+        sourceAddress: maskDiagnosticValue(prepared.sourceAddress),
+      })
+      return snapshot
+    }
+
+    throw makeDynamicPostPrepareError("No Dynamic wallet matched the prepared source address.", "WALLET_NOT_CONNECTED")
+  }, [
+    buildDynamicWalletRuntimeSnapshot,
+    collectDynamicRuntimeWalletSnapshot,
+    emitDynamicRuntimeStage,
+    pineTreeControlledDynamicAuthAvailable,
+    refreshDynamicUser,
+    refreshDynamicWalletRuntime,
+    sdkHasLoaded,
+    signInWithExternalJwt,
+    user,
+    walletSyncDebugQueryEnabled,
+  ])
+
   useEffect(() => {
     if (!sdkHasLoaded || !user || profileState.kind !== "loaded") return
     if (dynamicWalletRuntimeCount > 0) return
@@ -8804,18 +9070,23 @@ function PineTreeWalletRuntime() {
           return
         }
 
+        const dynamicRuntime = await ensureDynamicWalletRuntimeReady(
+          prepared as WithdrawalPrepareResponse,
+          correlationId,
+          withdrawalId
+        )
+
         // Same staleness hazard as the pre-flight checks above, but for the
-        // actual signing call: refreshDynamicWalletRuntime (called just above,
-        // before this prepare/submit block) may have hydrated the wallet list
-        // mid-execution of this handler, which this closure's own
-        // `wallets`/`primaryWallet` bindings never observe. Read the refs.
+        // actual signing call: the runtime readiness helper returns the wallet
+        // snapshot it just hydrated so this closure does not depend on a future
+        // React render to observe refreshed Dynamic wallets.
         emitWalletSetupDebugEvent("wallet_withdrawal_signature_started", { correlationId, requestId: withdrawalId })
-        const dynamicSubmission = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, walletsRef.current, primaryWalletRef.current, {
+        const dynamicSubmission = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, dynamicRuntime.wallets, dynamicRuntime.primaryWallet, {
           selectedRail: withdrawalRail,
           selectedAsset: withdrawalAsset,
           destinationAddress: withdrawalReview?.review.destinationAddress ?? withdrawalDestination,
           pineTreeProfileSolanaAddress: profile?.solana_address ?? null,
-          primaryWallet: primaryWalletRef.current,
+          primaryWallet: dynamicRuntime.primaryWallet,
           switchDynamicWallet,
           requestId: withdrawalId,
           correlationId,

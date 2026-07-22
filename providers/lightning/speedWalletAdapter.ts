@@ -12,8 +12,10 @@
  * types out (and back).
  */
 
-import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
-import { resolveSpeedHeaderAccountId } from "./speedHeaderAccountResolver"
+import {
+  SpeedConnectedAccountContextError,
+  resolveSpeedConnectedAccountContext,
+} from "./speedConnectedAccountContext"
 import { classifyBitcoinWithdrawalDestination } from "@/providers/wallets/bitcoinWithdrawalDestination"
 import { getSpeedWalletCapabilities } from "./speedWalletCapabilities"
 import {
@@ -175,23 +177,15 @@ function toWalletSwapQuote(input: {
 }
 
 async function resolveContext(merchantId: string): Promise<WalletAdapterResolution> {
-  const profile = await getMerchantLightningProfile(merchantId)
-  if (!profile) {
-    return { configured: false, reason: "No Speed Custom Connect profile exists for this merchant." }
-  }
-
-  if (profile.status !== "ready") {
-    return { configured: true, ready: false, reason: "Speed Custom Connect setup is not complete yet." }
-  }
-
-  let providerAccountId: string
   try {
-    providerAccountId = resolveSpeedHeaderAccountId(profile)
-  } catch {
+    const context = await resolveSpeedConnectedAccountContext(merchantId)
+    return { configured: true, ready: true, context: { merchantId, providerAccountId: context.connectedAccountId } }
+  } catch (error) {
+    if (error instanceof SpeedConnectedAccountContextError && error.code === "SPEED_PROFILE_MISSING") {
+      return { configured: false, reason: "No Speed Custom Connect profile exists for this merchant." }
+    }
     return { configured: true, ready: false, reason: "Speed connected-account identity is not configured safely." }
   }
-
-  return { configured: true, ready: true, context: { merchantId, providerAccountId } }
 }
 
 async function withTranslatedErrors<T>(fn: () => Promise<T>): Promise<T> {

@@ -51,12 +51,38 @@ describe("Dynamic embedded wallet hydration", () => {
 
   it("Approve withdrawal prepares before matching the Dynamic runtime signer", () => {
     expect(page).toContain("wallet_withdrawal_prepare_requested")
-    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, walletsRef.current, primaryWalletRef.current, {")
+    expect(page).toContain("const dynamicRuntime = await ensureDynamicWalletRuntimeReady(")
+    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, dynamicRuntime.wallets, dynamicRuntime.primaryWallet, {")
     expect(page.indexOf("wallet_withdrawal_prepare_requested")).toBeLessThan(
+      page.indexOf("ensureDynamicWalletRuntimeReady(")
+    )
+    expect(page.indexOf("ensureDynamicWalletRuntimeReady(")).toBeLessThan(
       page.indexOf("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse")
     )
     expect(page).toContain("Reconnect PineTree Wallet to verify secure signing access.")
     expect(page).toContain('setWithdrawalScreen("failed")')
+  })
+
+  it("withdrawal approval uses a canonical Dynamic runtime readiness helper", () => {
+    const helper = page.slice(
+      page.indexOf("const ensureDynamicWalletRuntimeReady = useCallback(async ("),
+      page.indexOf("useEffect(() => {", page.indexOf("const ensureDynamicWalletRuntimeReady = useCallback(async ("))
+    )
+    expect(helper).toContain("DYNAMIC_AUTH_CHECK_STARTED")
+    expect(helper).toContain("DYNAMIC_AUTH_RESTORED")
+    expect(helper).toContain("DYNAMIC_USER_RESOLVED")
+    expect(helper).toContain("DYNAMIC_IDENTITY_MATCHED")
+    expect(helper).toContain("DYNAMIC_IDENTITY_MISMATCH")
+    expect(helper).toContain("DYNAMIC_WALLETS_HYDRATION_STARTED")
+    expect(helper).toContain("DYNAMIC_WALLETS_HYDRATED")
+    expect(helper).toContain("DYNAMIC_MATCHING_WALLET_FOUND")
+    expect(helper).toContain("requestPineTreeDynamicExternalJwtAuth")
+    expect(helper).toContain("signInWithExternalJwt")
+    expect(helper).toContain('throw makeDynamicPostPrepareError("Dynamic wallet SDK is still loading.", "DYNAMIC_SDK_NOT_READY")')
+    expect(helper).toContain('throw makeDynamicPostPrepareError("PineTree Wallet access is not authenticated.", "DYNAMIC_NOT_AUTHENTICATED")')
+    expect(helper).toContain("PineTree found your wallet profile, but the active wallet session does not match the wallet owner.")
+    expect(helper).toContain("const runtimeWallets = collectDynamicRuntimeWalletSnapshot()")
+    expect(helper).toContain("return snapshot")
   })
 
   it("ready DB profile with zero Dynamic wallets still maps to Connected for viewing", () => {

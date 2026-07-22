@@ -90,9 +90,17 @@ export async function POST(req: NextRequest) {
       routeStage: "submit_received",
     })
 
-    // Saved-address withdrawals route through the canonical dispatcher, which
-    // may execute through the same payout provider from engine/withdrawals/*
-    // rather than the generic walletOperations adapter path below.
+    const diagnostics = {
+      setSubstage(nextSubstage: string) {
+        substage = nextSubstage
+      },
+      setProviderAccountId(nextProviderAccountId: string | null | undefined) {
+        providerAccountId = String(nextProviderAccountId || "").trim() || null
+      },
+    }
+
+    // Saved-address withdrawals route through the canonical dispatcher while
+    // carrying the same provider-context diagnostics as manual withdrawals.
     if (destinationId) {
       substage = "canonical_withdrawal_execution"
       const canonical = await submitCanonicalWithdrawal({
@@ -103,6 +111,8 @@ export async function POST(req: NextRequest) {
         source: "saved_address",
         idempotencyKey,
         destinationId,
+        correlationId,
+        diagnostics,
       })
       const write = canonical.kind === "executed" ? canonical.write : canonical
       console.info("[pinetree-withdrawals] SPEED_SUBMIT_RETURNED", {
@@ -129,15 +139,6 @@ export async function POST(req: NextRequest) {
       destinationMethod: classifiedDestination.valid ? classifiedDestination.method : "invalid",
       destinationType: classifiedDestination.valid ? classifiedDestination.kind : "invalid",
     })
-
-    const diagnostics = {
-      setSubstage(nextSubstage: string) {
-        substage = nextSubstage
-      },
-      setProviderAccountId(nextProviderAccountId: string | null | undefined) {
-        providerAccountId = String(nextProviderAccountId || "").trim() || null
-      },
-    }
 
     const result = await createWalletWithdrawal(merchantId, {
       asset: String(body.asset || ""),

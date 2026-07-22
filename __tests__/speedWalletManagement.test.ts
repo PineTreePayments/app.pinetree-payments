@@ -282,6 +282,60 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     expect(new Headers(fetchSpy.mock.calls[0][1]?.headers).get("speed-account")).toBe("acct_merchant_1")
   })
 
+  it("uses the exact same connected account header for balances, transactions, payments, and Instant Send", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url)
+      if (path.includes("/balances")) {
+        return new Response(JSON.stringify({ object: "balance", available: [{ amount: 0, target_currency: "SATS" }] }), { status: 200 })
+      }
+      if (path.includes("/balance-transactions")) {
+        return new Response(JSON.stringify({ object: "list", has_more: false, data: [] }), { status: 200 })
+      }
+      if (path.includes("/payments")) {
+        return new Response(JSON.stringify({ id: "pay_1", status: "unpaid", payment_request: "lnbc1paymentrequest" }), { status: 200 })
+      }
+      if (path.includes("/send")) {
+        return new Response(JSON.stringify({
+          id: "is_1", object: "instant_send", status: "unpaid", withdraw_id: "wi_1", amount: 1000,
+          currency: "SATS", target_amount: 1000, target_currency: "SATS", fees: 1,
+          withdraw_method: "lightning", withdraw_type: "lightning_invoice", withdraw_request: "lnbc1invoice",
+          created: 1721732656358, modified: 1721732656358,
+        }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    })
+    const {
+      getConnectedAccountBalances,
+      listConnectedAccountTransactions,
+      createConnectedAccountWithdrawal,
+    } = await import("@/providers/lightning/speedWalletManagement")
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+
+    await getConnectedAccountBalances(context)
+    await listConnectedAccountTransactions(context)
+    await createSpeedLightningPayment({
+      amount: 10, currency: "USD", merchantAmount: 9, pineTreeFeeAmount: 1,
+      merchantSpeedAccountId: "acct_merchant_1", pineTreePaymentId: "payment-1",
+      merchantId: "merchant-1", settlementMode: "speed_connect_split",
+    })
+    await createConnectedAccountWithdrawal({
+      ...context, amount: 1000, currency: "SATS", withdrawMethod: "lightning",
+      withdrawRequest: "lnbc1invoice", idempotencyKey: "local-key",
+    })
+
+    expect(fetchSpy.mock.calls.map((call) => ({
+      path: String(call[0]).replace(/^https:\/\/api\.tryspeed\.com/, ""),
+      speedAccount: new Headers(call[1]?.headers).get("speed-account"),
+    }))).toEqual([
+      { path: "/balances", speedAccount: "acct_merchant_1" },
+      { path: "/balance-transactions?limit=50", speedAccount: "acct_merchant_1" },
+      { path: "/payments", speedAccount: "acct_merchant_1" },
+      { path: "/send", speedAccount: "acct_merchant_1" },
+    ])
+    expect(fetchSpy.mock.calls.map((call) => new Headers(call[1]?.headers).get("speed-account")))
+      .not.toContain("ca_relationship_1")
+  })
+
   it("fails closed on a missing connected account before fetch and never uses the root account", async () => {
     const fetchSpy = vi.spyOn(global, "fetch")
     const { getConnectedAccountBalances } = await import("@/providers/lightning/speedWalletManagement")

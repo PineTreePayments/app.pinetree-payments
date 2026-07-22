@@ -7,8 +7,8 @@ import { findInFlightOrCompletedWithdrawalForDestination } from "@/database/wall
 import { isBitcoinWithdrawalExecutionConfigured, parseBtcToSats } from "@/providers/wallets/bitcoinNetworkProvider"
 import { classifyBitcoinWithdrawalDestination } from "@/providers/wallets/bitcoinWithdrawalDestination"
 import { isDynamicBtcLegacyEnabled } from "@/lib/pinetreeDynamicBtcLegacy"
-import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
 import { createConnectedAccountWithdrawal } from "@/providers/lightning/speedWalletManagement"
+import { resolveSpeedConnectedAccountContext } from "@/providers/lightning/speedConnectedAccountContext"
 
 export type WithdrawalSignerInput = {
   merchantId: string
@@ -102,10 +102,11 @@ export function dynamicBrowserWithdrawalSigner(): WithdrawalSigner {
 }
 
 async function resolveReadySpeedAccountId(merchantId: string): Promise<string | null> {
-  const profile = await getMerchantLightningProfile(merchantId).catch(() => null)
-  const accountId = String(profile?.speed_account_id || "").trim()
-  if (profile?.status !== "ready" || !accountId.startsWith("acct_")) return null
-  return accountId
+  try {
+    return (await resolveSpeedConnectedAccountContext(merchantId)).connectedAccountId
+  } catch {
+    return null
+  }
 }
 
 /**

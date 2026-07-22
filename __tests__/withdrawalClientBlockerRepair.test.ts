@@ -192,4 +192,47 @@ describe("withdrawal route response shapes match the client's expectations", () 
     )
     warn.mockRestore()
   })
+
+  it("the saved-destination Bitcoin/Speed route passes correlation and diagnostics into canonical withdrawal", async () => {
+    submitCanonicalWithdrawal.mockImplementation(async (input) => {
+      input.diagnostics.setSubstage("send_request")
+      input.diagnostics.setProviderAccountId("acct_live_saved123")
+      return {
+        kind: "executed",
+        write: {
+          operation: { id: "op_saved", status: "PROCESSING", txHash: null },
+          capabilityAvailable: true,
+        },
+      }
+    })
+
+    const { POST } = await import("@/app/api/wallets/withdrawals/route")
+    const req = new Request("http://localhost/api/wallets/withdrawals", {
+      method: "POST",
+      headers: {
+        "idempotency-key": "idem-saved-1",
+        "x-pinetree-withdrawal-correlation": "corr-saved-1",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ asset: "SATS", amount_decimal: "1000", destination_id: "dest_btc_1" }),
+    })
+    const res = await POST(req as never)
+    const body = await res.json()
+
+    expect(body.ok).toBe(true)
+    expect(submitCanonicalWithdrawal).toHaveBeenCalledWith(expect.objectContaining({
+      merchantId: "merchant_1",
+      rail: "bitcoin",
+      asset: "BTC",
+      amountDecimal: "1000",
+      source: "saved_address",
+      idempotencyKey: "idem-saved-1",
+      destinationId: "dest_btc_1",
+      correlationId: "corr-saved-1",
+      diagnostics: expect.objectContaining({
+        setSubstage: expect.any(Function),
+        setProviderAccountId: expect.any(Function),
+      }),
+    }))
+  })
 })

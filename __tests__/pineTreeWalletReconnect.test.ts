@@ -83,9 +83,10 @@ describe("PineTree Wallet reconnect flow", () => {
 
   it("approve withdrawal prepares before signer lookup/signing", () => {
     expect(page).toContain("wallet_withdrawal_prepare_requested")
-    // Signs with walletsRef.current/primaryWalletRef.current, not the
-    // closed-over wallets/primaryWallet.
-    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, walletsRef.current, primaryWalletRef.current, {")
+    // Signs with the freshly hydrated runtime snapshot, not a closed-over
+    // wallets/primaryWallet render value.
+    expect(page).toContain("const dynamicRuntime = await ensureDynamicWalletRuntimeReady(")
+    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, dynamicRuntime.wallets, dynamicRuntime.primaryWallet, {")
   })
 
   it("blocks selected signer and asset rail mismatches before Dynamic approval opens", () => {
@@ -163,8 +164,9 @@ describe("PineTree Wallet reconnect flow", () => {
     // address match is attempted, so a Bitcoin primaryWallet is excluded outright for
     // a Solana rail - findDynamicWalletForSource can never resolve it as a signer.
     expect(sendFn).toContain("getDynamicWalletSearchList(wallets as unknown[], primaryWallet, prepared.rail)")
-    expect(sendFn).toContain('if (!hasAnyDynamicWallet && prepared.rail === "solana") {')
-    expect(sendFn).toContain('throw makeDynamicPostPrepareError("No Dynamic Solana wallet matched the prepared source address.", "WALLET_NOT_CONNECTED")')
+    expect(sendFn).toContain('const missingWalletMessage = prepared.rail === "solana"')
+    expect(sendFn).toContain('"No Dynamic Solana wallet matched the prepared source address."')
+    expect(sendFn).toContain('throw makeDynamicPostPrepareError(missingWalletMessage, "WALLET_NOT_CONNECTED")')
     expect(page).toContain("solanaWithdrawalReconnectMessage")
   })
 

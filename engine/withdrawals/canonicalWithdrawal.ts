@@ -18,6 +18,7 @@ import {
   type CreateWalletWithdrawalReviewResult,
 } from "@/engine/withdrawals/walletWithdrawals"
 import { createWalletWithdrawal as createBitcoinWalletWithdrawal } from "@/engine/wallet/walletOperations"
+import type { WalletAdapterWriteDiagnostics } from "@/engine/wallet/walletProviderAdapter"
 import type { PineTreeWalletWriteResult } from "@/engine/wallet/walletTypes"
 import {
   updateWalletWithdrawalRequestCanonicalFields,
@@ -46,6 +47,8 @@ export type SubmitCanonicalWithdrawalInput = {
   /** Exactly one of destinationId / destinationAddress must be provided. */
   destinationId?: string
   destinationAddress?: string
+  correlationId?: string | null
+  diagnostics?: WalletAdapterWriteDiagnostics
 }
 
 // Base/Solana: nothing has executed yet - this is a two-phase review, same
@@ -155,6 +158,8 @@ export async function submitCanonicalWithdrawal(
       amountDecimal: input.amountDecimal,
       destination: address,
       idempotencyKey,
+      correlationId: input.correlationId,
+      diagnostics: input.diagnostics,
     })
     await updateWalletOperationCanonicalFields(input.merchantId, write.operation.id, {
       source: input.source,

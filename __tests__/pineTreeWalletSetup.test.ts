@@ -283,7 +283,8 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("withdrawal signing still requires restored Dynamic signer access", () => {
-    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, walletsRef.current, primaryWalletRef.current, {")
+    expect(page).toContain("const dynamicRuntime = await ensureDynamicWalletRuntimeReady(")
+    expect(page).toContain("sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, dynamicRuntime.wallets, dynamicRuntime.primaryWallet, {")
     expect(page).toContain("findDynamicWalletForSource(wallets, primaryWallet, prepared.sourceAddress, prepared.rail)")
     expect(page).toContain("pineTreeSignerReconnectMessage")
     expect(page).toContain("Reconnect PineTree Wallet to verify secure signing access.")

@@ -231,4 +231,47 @@ describe("submitCanonicalWithdrawal", () => {
     )
     expect(mocks.markWithdrawalDestinationUsed).toHaveBeenCalledWith("merchant_1", "dest_btc")
   })
+
+  it("preserves Speed context diagnostics through saved-destination Bitcoin execution", async () => {
+    const diagnostics = {
+      setSubstage: vi.fn(),
+      setProviderAccountId: vi.fn(),
+    }
+    mocks.createBitcoinWalletWithdrawal.mockResolvedValue({
+      operation: { id: "op_1", status: "PROCESSING" },
+      capabilityAvailable: true,
+    })
+    mocks.getWithdrawalDestination.mockResolvedValue({
+      ...CONFIRMED_DESTINATION,
+      id: "dest_btc",
+      rail: "bitcoin",
+      asset: "BTC",
+      method: "lightning",
+      destination_address: "lnbc10u1p3xnhl2sp5jctpcz4nkfjzaqwsjssjfw0abcdefghijklmnopqrstuvwxyz",
+    })
+
+    await submitCanonicalWithdrawal({
+      merchantId: "merchant_1",
+      rail: "bitcoin",
+      asset: "BTC",
+      amountDecimal: "0.00025",
+      source: "saved_address",
+      idempotencyKey: "saved-withdrawal-1",
+      destinationId: "dest_btc",
+      correlationId: "corr-1",
+      diagnostics,
+    })
+
+    expect(mocks.createBitcoinWalletWithdrawal).toHaveBeenCalledWith(
+      "merchant_1",
+      expect.objectContaining({
+        asset: "SATS",
+        amountDecimal: "0.00025",
+        destination: "lnbc10u1p3xnhl2sp5jctpcz4nkfjzaqwsjssjfw0abcdefghijklmnopqrstuvwxyz",
+        idempotencyKey: "saved-withdrawal-1",
+        correlationId: "corr-1",
+        diagnostics,
+      })
+    )
+  })
 })
