@@ -373,6 +373,9 @@ export class SpeedApiError extends Error {
   requestId: string | null
   retryable: boolean
   retryAfterMs: number | null
+  responseContentType: string | null
+  responseBodySummary: string | null
+  responseBodyJsonParsed: boolean
   readonly outcomeUncertain = false
 
   constructor(
@@ -382,7 +385,8 @@ export class SpeedApiError extends Error {
     fieldErrors: SpeedFieldError[],
     providerMessage: string | null = null,
     requestId: string | null = null,
-    retryAfterMs: number | null = null
+    retryAfterMs: number | null = null,
+    responseDiagnostics: SpeedResponseDiagnostics | null = null
   ) {
     super(message)
     this.name = "SpeedApiError"
@@ -393,6 +397,9 @@ export class SpeedApiError extends Error {
     this.requestId = requestId
     this.retryable = [408, 429, 500, 502, 503, 504].includes(status)
     this.retryAfterMs = retryAfterMs
+    this.responseContentType = responseDiagnostics?.contentType ?? null
+    this.responseBodySummary = responseDiagnostics?.bodySummary ?? null
+    this.responseBodyJsonParsed = responseDiagnostics?.jsonParsed ?? false
   }
 }
 
@@ -408,18 +415,38 @@ export type SpeedRequestResult<T> = {
   data: T
   status: number
   requestId: string | null
+  contentType: string | null
+  responseBodySummary: string | null
+  responseBodyJsonParsed: boolean
+}
+
+export type SpeedResponseDiagnostics = {
+  contentType: string | null
+  bodySummary: string | null
+  jsonParsed: boolean
 }
 
 export class SpeedTransportError extends Error {
   readonly retryable = true
   readonly timedOut: boolean
   readonly outcomeUncertain: boolean
+  readonly responseContentType: string | null
+  readonly responseBodySummary: string | null
+  readonly responseBodyJsonParsed: boolean
 
-  constructor(message: string, timedOut: boolean, outcomeUncertain = timedOut) {
+  constructor(
+    message: string,
+    timedOut: boolean,
+    outcomeUncertain = timedOut,
+    responseDiagnostics: SpeedResponseDiagnostics | null = null
+  ) {
     super(message)
     this.name = "SpeedTransportError"
     this.timedOut = timedOut
     this.outcomeUncertain = outcomeUncertain
+    this.responseContentType = responseDiagnostics?.contentType ?? null
+    this.responseBodySummary = responseDiagnostics?.bodySummary ?? null
+    this.responseBodyJsonParsed = responseDiagnostics?.jsonParsed ?? false
   }
 }
 
@@ -724,12 +751,27 @@ function speedRetryAfterMs(response: Response): number | null {
   return Number.isFinite(dateMs) ? Math.min(10_000, Math.max(0, dateMs - Date.now())) : null
 }
 
-function parseSpeedSuccessBody<T>(body: string): T {
-  if (!body.trim()) return undefined as T
+function parseSpeedSuccessBody<T>(body: string, diagnostics: SpeedResponseDiagnostics): T {
+  if (!body.trim()) {
+    diagnostics.jsonParsed = true
+    return undefined as T
+  }
   try {
-    return JSON.parse(body) as T
+    const parsed = JSON.parse(body) as T
+    diagnostics.jsonParsed = true
+    return parsed
   } catch {
-    throw new SpeedTransportError("Speed API returned a malformed JSON response.", false)
+    throw new SpeedTransportError("Speed API returned a malformed JSON response.", false, true, diagnostics)
+  }
+}
+
+function speedBodyParsesAsJson(body: string): boolean {
+  if (!body.trim()) return true
+  try {
+    JSON.parse(body)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -801,7 +843,13 @@ export async function speedRequestWithStatus<T>(
 
   const requestId = speedRequestId(response)
   const retryAfterMs = speedRetryAfterMs(response)
+  const contentType = response.headers?.get("content-type") || null
   const body = await response.text().catch(() => "")
+  const responseDiagnostics: SpeedResponseDiagnostics = {
+    contentType,
+    bodySummary: safeSpeedDiagnosticText(body),
+    jsonParsed: false,
+  }
   if (operation === "balance.retrieve" || path === "/balances") {
     console.warn("[pinetree-withdrawals] SPEED_BALANCE_PROVIDER_RESPONSE_RAW", {
       requestUrl,
@@ -823,6 +871,7 @@ export async function speedRequestWithStatus<T>(
 
   if (!response.ok) {
     const { providerCode, fieldErrors } = parseSpeedErrorBody(body)
+    responseDiagnostics.jsonParsed = speedBodyParsesAsJson(body)
     console.error("[speed] API request failed", {
       merchantId,
       providerAccountId: providerAccountId || null,
@@ -863,10 +912,10 @@ export async function speedRequestWithStatus<T>(
       : response.status === 403
         ? "Speed denied this operation."
         : `Speed API returned ${response.status}`
-    throw new SpeedApiError(safeMessage, response.status, providerCode, fieldErrors, null, requestId, retryAfterMs)
+    throw new SpeedApiError(safeMessage, response.status, providerCode, fieldErrors, null, requestId, retryAfterMs, responseDiagnostics)
   }
 
-  const data = parseSpeedSuccessBody<T>(body)
+  const data = parseSpeedSuccessBody<T>(body, responseDiagnostics)
   console.info("[speed] request_succeeded", {
     merchantId,
     providerAccountId: providerAccountId || null,
@@ -877,7 +926,14 @@ export async function speedRequestWithStatus<T>(
     requestId,
     elapsedMs: Date.now() - startedAt,
   })
-  return { data, status: response.status, requestId }
+  return {
+    data,
+    status: response.status,
+    requestId,
+    contentType,
+    responseBodySummary: responseDiagnostics.bodySummary,
+    responseBodyJsonParsed: responseDiagnostics.jsonParsed,
+  }
 }
 
 export async function speedRequest<T>(

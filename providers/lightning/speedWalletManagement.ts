@@ -133,6 +133,9 @@ function speedProviderFailureDiagnostic(error: unknown): {
   normalizedErrorCode: string
   category: SpeedWalletErrorCategory
   retryable: boolean
+  responseContentType: string | null
+  responseBodySummary: string | null
+  responseBodyJsonParsed: boolean
 } {
   if (error instanceof SpeedApiError) {
     const category: SpeedWalletErrorCategory = error.status === 401
@@ -150,6 +153,9 @@ function speedProviderFailureDiagnostic(error: unknown): {
       normalizedErrorCode: error.providerCode || `speed_http_${error.status}`,
       category,
       retryable: error.retryable,
+      responseContentType: error.responseContentType,
+      responseBodySummary: error.responseBodySummary,
+      responseBodyJsonParsed: error.responseBodyJsonParsed,
     }
   }
   if (error instanceof SpeedTransportError) {
@@ -159,6 +165,9 @@ function speedProviderFailureDiagnostic(error: unknown): {
       normalizedErrorCode: error.timedOut ? "timeout" : "transport_error",
       category: "provider_unavailable",
       retryable: true,
+      responseContentType: error.responseContentType,
+      responseBodySummary: error.responseBodySummary,
+      responseBodyJsonParsed: error.responseBodyJsonParsed,
     }
   }
   if (error instanceof SpeedWalletProviderError) {
@@ -168,6 +177,9 @@ function speedProviderFailureDiagnostic(error: unknown): {
       normalizedErrorCode: error.providerCode || error.category,
       category: error.category,
       retryable: error.retryable,
+      responseContentType: null,
+      responseBodySummary: null,
+      responseBodyJsonParsed: false,
     }
   }
   return {
@@ -176,7 +188,35 @@ function speedProviderFailureDiagnostic(error: unknown): {
     normalizedErrorCode: "malformed_response",
     category: "provider_unavailable",
     retryable: true,
+    responseContentType: null,
+    responseBodySummary: null,
+    responseBodyJsonParsed: false,
   }
+}
+
+function speedInstantSendIdFound(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" && (value as { id: string }).id.trim().startsWith("is_"))
+}
+
+function speedWithdrawalIdFound(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && typeof (value as { withdraw_id?: unknown }).withdraw_id === "string" && (value as { withdraw_id: string }).withdraw_id.trim().startsWith("wi_"))
+}
+
+function speedApiErrorHasExplicitWithdrawalRejectionEvidence(error: SpeedApiError): boolean {
+  if (error.retryable || error.status === 408 || error.status === 429 || error.status >= 500) return false
+  const providerCode = String(error.providerCode || "").trim().toLowerCase()
+  const errorText = [
+    providerCode,
+    error.providerMessage,
+    ...error.fieldErrors.map((fieldError) => [
+      fieldError.field,
+      fieldError.message,
+      fieldError.validationCode,
+      fieldError.validationRule,
+    ].filter(Boolean).join(" ")),
+  ].filter(Boolean).join(" ").toLowerCase()
+  if (!errorText) return false
+  return /insufficient|balance|invalid|destination|address|invoice|amount|minimum|maximum|limit|unsupported|permission|forbidden|denied|blocked|not_allowed|account/.test(errorText)
 }
 
 function accountSuffix(accountId: string): string {
@@ -441,6 +481,13 @@ export async function createConnectedAccountWithdrawal(
       endpointPath: "/send",
       httpStatus: response.status,
       speedRequestId: response.requestId,
+      responseContentType: response.contentType,
+      responseBodySummary: response.responseBodySummary,
+      responseBodyJsonParsed: response.responseBodyJsonParsed,
+      responseParseSucceeded: response.responseBodyJsonParsed,
+      instantSendIdFound: speedInstantSendIdFound(response.data),
+      withdrawalIdFound: speedWithdrawalIdFound(response.data),
+      classificationReason: "speed_send_http_response_received",
     })
     console.info("[pinetree-withdrawals] SPEED_SEND_HTTP_RESPONSE", {
       correlationId: input.correlationId || null,
@@ -482,30 +529,58 @@ export async function createConnectedAccountWithdrawal(
     return validated
   } catch (error) {
     const diagnostic = speedProviderFailureDiagnostic(error)
+    const explicitSpeedApiRejection = error instanceof SpeedApiError && speedApiErrorHasExplicitWithdrawalRejectionEvidence(error)
     if (error instanceof SpeedTransportError) {
       await input.diagnostics?.markProviderResponseMissing?.({
         endpointPath: "/send",
         timedOut: error.timedOut,
         normalizedErrorCode: diagnostic.normalizedErrorCode,
+        responseContentType: diagnostic.responseContentType,
+        responseBodySummary: diagnostic.responseBodySummary,
+        responseBodyJsonParsed: diagnostic.responseBodyJsonParsed,
+        responseParseSucceeded: diagnostic.responseBodyJsonParsed,
+        instantSendIdFound: false,
+        withdrawalIdFound: false,
+        classificationReason: error.timedOut ? "speed_send_timeout_after_dispatch" : "speed_send_transport_failure_after_dispatch",
       })
     } else if (error instanceof SpeedApiError) {
-      await input.diagnostics?.markProviderRejected?.({
+      const responseEvidence = {
         endpointPath: "/send",
         httpStatus: diagnostic.httpStatus,
         speedRequestId: diagnostic.speedRequestId,
         normalizedErrorCode: diagnostic.normalizedErrorCode,
         providerErrorCategory: diagnostic.category,
-      })
+        responseContentType: diagnostic.responseContentType,
+        responseBodySummary: diagnostic.responseBodySummary,
+        responseBodyJsonParsed: diagnostic.responseBodyJsonParsed,
+        responseParseSucceeded: diagnostic.responseBodyJsonParsed,
+        instantSendIdFound: false,
+        withdrawalIdFound: false,
+        classificationReason: explicitSpeedApiRejection
+          ? "speed_send_explicit_rejection_evidence"
+          : "speed_send_non_2xx_without_rejection_evidence",
+      }
+      if (explicitSpeedApiRejection) {
+        await input.diagnostics?.markProviderRejected?.({
+          ...responseEvidence,
+          providerRejectionEvidence: true,
+        })
+      } else {
+        await input.diagnostics?.markProviderResponseReceived?.(responseEvidence)
+      }
     }
     const sendStage = error instanceof SpeedTransportError && error.timedOut
       ? "SPEED_SEND_TIMEOUT"
       : error instanceof SpeedApiError
-        ? "SPEED_SEND_PROVIDER_REJECTED"
+        ? explicitSpeedApiRejection
+          ? "SPEED_SEND_PROVIDER_REJECTED"
+          : "SPEED_SEND_RESPONSE_UNCONFIRMED"
         : diagnostic.normalizedErrorCode === "malformed_response"
           ? "SPEED_SEND_PARSE_FAILED"
           : "SPEED_SEND_FAILED"
     if (sendStage === "SPEED_SEND_TIMEOUT") input.diagnostics?.setSubstage?.("send_timeout")
     else if (sendStage === "SPEED_SEND_PROVIDER_REJECTED") input.diagnostics?.setSubstage?.("provider_rejected")
+    else if (sendStage === "SPEED_SEND_RESPONSE_UNCONFIRMED") input.diagnostics?.setSubstage?.("provider_response_unconfirmed")
     else if (sendStage === "SPEED_SEND_PARSE_FAILED") input.diagnostics?.setSubstage?.("provider_response_parse")
     console.warn(`[pinetree-withdrawals] ${sendStage}`, {
       correlationId: input.correlationId || null,
@@ -534,7 +609,7 @@ export async function createConnectedAccountWithdrawal(
       retryable: diagnostic.retryable,
       routeStage: "send_failed",
     })
-    console.warn("[pinetree-withdrawals] SPEED_SEND_REJECTED", {
+    console.warn(`[pinetree-withdrawals] ${explicitSpeedApiRejection ? "SPEED_SEND_REJECTED" : "SPEED_SEND_OUTCOME_UNKNOWN"}`, {
       correlationId: input.correlationId || null,
       merchantId: input.merchantId,
       providerAccountSuffix: accountSuffix(input.speedAccountId),
@@ -545,7 +620,7 @@ export async function createConnectedAccountWithdrawal(
       normalizedErrorCode: diagnostic.normalizedErrorCode,
       providerErrorCategory: diagnostic.category,
       retryable: diagnostic.retryable,
-      routeStage: "speed_send_rejected",
+      routeStage: explicitSpeedApiRejection ? "speed_send_rejected" : "speed_send_outcome_unknown",
     })
     providerError(error)
   }

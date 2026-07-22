@@ -278,6 +278,34 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
+  it("persists successful /send response diagnostics before validation", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      id: "is_1", object: "instant_send", status: "unpaid", withdraw_id: "wi_1", amount: 1000,
+      currency: "SATS", target_amount: 1000, target_currency: "SATS", fees: 1,
+      withdraw_method: "lightning", withdraw_request: "lnbc1invoice", withdraw_type: "lightning_invoice",
+      created: 1721732656358, modified: 1721732656358,
+    }), { status: 200, headers: { "content-type": "application/json", "speed-request-id": "req_send_200" } }))
+    const markProviderResponseReceived = vi.fn()
+    const { createConnectedAccountWithdrawal } = await import("@/providers/lightning/speedWalletManagement")
+    await createConnectedAccountWithdrawal({
+      ...context, amount: 1000, currency: "SATS", withdrawMethod: "lightning",
+      withdrawRequest: "lnbc1invoice", idempotencyKey: "local-key",
+      diagnostics: { markProviderResponseReceived },
+    })
+
+    expect(markProviderResponseReceived).toHaveBeenCalledWith(expect.objectContaining({
+      endpointPath: "/send",
+      httpStatus: 200,
+      speedRequestId: "req_send_200",
+      responseContentType: "application/json",
+      responseBodyJsonParsed: true,
+      responseParseSucceeded: true,
+      instantSendIdFound: true,
+      withdrawalIdFound: true,
+      classificationReason: "speed_send_http_response_received",
+    }))
+  })
+
   it("logs a safe failed-send diagnostic and preserves provider 400 classification", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
@@ -315,6 +343,67 @@ describe("Speed connected-account wallet HTTP boundary", () => {
         retryable: false,
       })
     )
+  })
+
+  it("marks parsed /send validation errors as explicit provider rejection evidence", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      error: { code: "unsupported_destination", message: "destination is not supported" },
+    }), { status: 400, headers: { "content-type": "application/json", "speed-request-id": "req_send_400" } }))
+    const markProviderRejected = vi.fn()
+    const markProviderResponseReceived = vi.fn()
+    const { createConnectedAccountWithdrawal } = await import("@/providers/lightning/speedWalletManagement")
+    await expect(createConnectedAccountWithdrawal({
+      ...context,
+      amount: 1000,
+      currency: "SATS",
+      withdrawMethod: "onchain",
+      withdrawRequest: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+      idempotencyKey: "local-key",
+      diagnostics: { markProviderRejected, markProviderResponseReceived },
+    })).rejects.toMatchObject({ category: "validation", httpStatus: 400 })
+
+    expect(markProviderRejected).toHaveBeenCalledWith(expect.objectContaining({
+      httpStatus: 400,
+      speedRequestId: "req_send_400",
+      normalizedErrorCode: "unsupported_destination",
+      providerErrorCategory: "validation",
+      providerRejectionEvidence: true,
+      responseBodyJsonParsed: true,
+      instantSendIdFound: false,
+      withdrawalIdFound: false,
+      classificationReason: "speed_send_explicit_rejection_evidence",
+    }))
+    expect(markProviderResponseReceived).not.toHaveBeenCalled()
+  })
+
+  it("does not mark non-2xx /send responses as rejected without concrete rejection evidence", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      error: { code: "provider_unavailable", message: "temporarily unavailable" },
+    }), { status: 503, headers: { "content-type": "application/json", "speed-request-id": "req_send_503" } }))
+    const markProviderRejected = vi.fn()
+    const markProviderResponseReceived = vi.fn()
+    const { createConnectedAccountWithdrawal } = await import("@/providers/lightning/speedWalletManagement")
+    await expect(createConnectedAccountWithdrawal({
+      ...context,
+      amount: 1000,
+      currency: "SATS",
+      withdrawMethod: "lightning",
+      withdrawRequest: "lnbc1invoice",
+      idempotencyKey: "local-key",
+      diagnostics: { markProviderRejected, markProviderResponseReceived },
+    })).rejects.toMatchObject({ category: "provider_unavailable", httpStatus: 503 })
+
+    expect(markProviderRejected).not.toHaveBeenCalled()
+    expect(markProviderResponseReceived).toHaveBeenCalledWith(expect.objectContaining({
+      httpStatus: 503,
+      speedRequestId: "req_send_503",
+      normalizedErrorCode: "provider_unavailable",
+      providerErrorCategory: "provider_unavailable",
+      responseBodyJsonParsed: true,
+      instantSendIdFound: false,
+      withdrawalIdFound: false,
+      classificationReason: "speed_send_non_2xx_without_rejection_evidence",
+    }))
   })
 
   it("scopes connected-account payment creation with the same canonical header", async () => {

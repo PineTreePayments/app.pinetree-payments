@@ -150,7 +150,16 @@ describe("account-scoped withdrawal safeguards", () => {
   it("marks an explicit provider rejection FAILED after a provider response", async () => {
     const createWithdrawal = vi.fn(async (_context, input) => {
       await input.diagnostics?.markDispatchStarted?.()
-      await input.diagnostics?.markProviderRejected?.({ httpStatus: 400, speedRequestId: "req_rejected" })
+      await input.diagnostics?.markProviderRejected?.({
+        httpStatus: 400,
+        speedRequestId: "req_rejected",
+        normalizedErrorCode: "unsupported_destination",
+        providerErrorCategory: "validation",
+        providerRejectionEvidence: true,
+        responseBodySummary: '{"error":{"code":"unsupported_destination","message":"destination is not supported"}}',
+        responseBodyJsonParsed: true,
+        classificationReason: "speed_send_explicit_rejection_evidence",
+      })
       throw new WalletApiRouteError("WALLET_VALIDATION_ERROR", "Provider rejected this withdrawal.", false)
     })
     const arranged = await arrange(BigInt(2000), createWithdrawal)
@@ -169,8 +178,146 @@ describe("account-scoped withdrawal safeguards", () => {
         providerResponseReceived: true,
         providerAcceptanceKnown: false,
         providerAcceptanceUnknown: false,
+        rawProviderStatus: expect.objectContaining({
+          explicitProviderRejection: true,
+          providerRejectionEvidence: true,
+          normalizedErrorCode: "unsupported_destination",
+        }),
       })
     )
+  })
+
+  it("does not mark explicitProviderRejection when the callback lacks rejection evidence", async () => {
+    const createWithdrawal = vi.fn(async (_context, input) => {
+      await input.diagnostics?.markDispatchStarted?.()
+      await input.diagnostics?.markProviderRejected?.({ httpStatus: 503, speedRequestId: "req_503" })
+      throw new WalletApiRouteError("WALLET_PROVIDER_UNAVAILABLE", "Your wallet provider is temporarily unavailable.", true)
+    })
+    const arranged = await arrange(BigInt(2000), createWithdrawal)
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await expect(createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })).rejects.toMatchObject({ code: "WALLET_PROVIDER_UNAVAILABLE" })
+
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "REQUIRES_ACTION",
+        failureCode: "STATUS_UNKNOWN",
+        failedAt: null,
+        providerResponseReceived: true,
+        providerAcceptanceKnown: false,
+        providerAcceptanceUnknown: true,
+        rawProviderStatus: expect.objectContaining({
+          explicitProviderRejection: false,
+          providerRejectionCallbackWithoutEvidence: true,
+        }),
+      })
+    )
+    expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "FAILED",
+        rawProviderStatus: expect.objectContaining({ explicitProviderRejection: true }),
+      })
+    )
+  })
+
+  it("classifies post-dispatch provider unavailable with a received response as REQUIRES_ACTION", async () => {
+    const createWithdrawal = vi.fn(async (_context, input) => {
+      await input.diagnostics?.markDispatchStarted?.()
+      await input.diagnostics?.markProviderResponseReceived?.({
+        endpointPath: "/send",
+        httpStatus: 503,
+        speedRequestId: "req_503",
+        responseContentType: "application/json",
+        responseBodySummary: '{"error":{"code":"provider_unavailable"}}',
+        responseBodyJsonParsed: true,
+        responseParseSucceeded: true,
+        instantSendIdFound: false,
+        withdrawalIdFound: false,
+        classificationReason: "speed_send_non_2xx_without_rejection_evidence",
+      })
+      throw new WalletApiRouteError("WALLET_PROVIDER_UNAVAILABLE", "Your wallet provider is temporarily unavailable.", true)
+    })
+    const arranged = await arrange(BigInt(2000), createWithdrawal)
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await expect(createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })).rejects.toMatchObject({ code: "WALLET_PROVIDER_UNAVAILABLE" })
+
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "REQUIRES_ACTION",
+        failureCode: "STATUS_UNKNOWN",
+        failureReason: expect.stringContaining("outcome is still being verified"),
+        failedAt: null,
+        providerResponseReceived: true,
+        providerAcceptanceKnown: false,
+        providerAcceptanceUnknown: true,
+        rawProviderStatus: expect.objectContaining({
+          explicitProviderRejection: false,
+          httpStatus: 503,
+          responseBodyJsonParsed: true,
+          instantSendIdFound: false,
+          withdrawalIdFound: false,
+          classificationReason: "speed_send_non_2xx_without_rejection_evidence",
+        }),
+      })
+    )
+    expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ status: "FAILED" }))
+  })
+
+  it("classifies parse failure after a received Speed response as REQUIRES_ACTION", async () => {
+    const createWithdrawal = vi.fn(async (_context, input) => {
+      await input.diagnostics?.markDispatchStarted?.()
+      await input.diagnostics?.markProviderResponseReceived?.({
+        endpointPath: "/send",
+        httpStatus: 200,
+        speedRequestId: "req_bad_json",
+        responseContentType: "application/json",
+        responseBodySummary: "{bad json",
+        responseBodyJsonParsed: false,
+        responseParseSucceeded: false,
+        instantSendIdFound: false,
+        withdrawalIdFound: false,
+        classificationReason: "speed_send_http_response_received",
+      })
+      throw new Error("Malformed Instant Send response")
+    })
+    const arranged = await arrange(BigInt(2000), createWithdrawal)
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await expect(createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })).rejects.toThrow("Malformed Instant Send response")
+
+    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      "op-1",
+      expect.objectContaining({
+        status: "REQUIRES_ACTION",
+        failureCode: "STATUS_UNKNOWN",
+        failedAt: null,
+        providerResponseReceived: true,
+        providerAcceptanceKnown: false,
+        providerAcceptanceUnknown: true,
+        rawProviderStatus: expect.objectContaining({
+          explicitProviderRejection: false,
+          responseBodyJsonParsed: false,
+          responseParseSucceeded: false,
+          instantSendIdFound: false,
+          withdrawalIdFound: false,
+        }),
+      })
+    )
+    expect(arranged.updateWalletOperation).not.toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ status: "FAILED" }))
   })
 
   it("does not move an uncertain send timeout after dispatch to PROCESSING or dispatch again on retry", async () => {

@@ -1668,6 +1668,15 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('setWithdrawalScreen("failed")')
   })
 
+  it("blocks retry copy and CTA for unknown post-dispatch Bitcoin withdrawal outcomes", () => {
+    expect(page).toContain("Withdrawal outcome is being verified. Do not retry this withdrawal while PineTree reviews the provider result.")
+    expect(page).toContain("const withdrawalOutcomePending = approvalError === withdrawalStatusUnknownMessage")
+    expect(page).toContain('review && !withdrawalOutcomePending')
+    expect(page).toContain('presented.code === "STATUS_UNKNOWN" ? withdrawalStatusUnknownMessage : presented.message')
+    expect(page).toContain('["REQUIRES_ACTION", "ACTION_REQUIRED"].includes')
+    expect(page).toContain("Withdrawal outcome pending")
+  })
+
   it("routes non-Dynamic wallet sends to a signer-unavailable failure instead of manual review", () => {
     expect(page).toContain("Submit withdrawal request")
     expect(page).toContain("if (review.review.approvalMethod === \"dynamic_browser\")")

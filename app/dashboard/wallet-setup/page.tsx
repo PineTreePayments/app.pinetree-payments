@@ -1375,7 +1375,7 @@ const pineTreeSignerReconnectMessage = "Reconnect PineTree Wallet to verify secu
 // The provider's outcome is unknown (e.g. a submit request timed out mid-flight) - this is
 // distinct from a real failure: the withdrawal must never be treated as abandonable or
 // resubmittable from scratch while this is showing.
-const withdrawalStatusUnknownMessage = "Withdrawal approval is still pending. Check your wallet activity before trying again."
+const withdrawalStatusUnknownMessage = "Withdrawal outcome is being verified. Do not retry this withdrawal while PineTree reviews the provider result."
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -2575,11 +2575,17 @@ function WithdrawalFormShell({
       approvalError.includes("not active in this browser session") ||
       approvalError.includes("different PineTree Wallet session") ||
       approvalError === solanaWithdrawalReconnectMessage
+    const withdrawalOutcomePending = approvalError === withdrawalStatusUnknownMessage
     return (
       <div className="space-y-4">
-        <div className="rounded-[1.2rem] border border-red-200 bg-red-50 px-5 py-5">
-          <p className="text-base font-semibold text-red-900">Withdrawal failed</p>
-          <p className="mt-1 text-sm leading-6 text-red-800">
+        <div className={withdrawalOutcomePending
+          ? "rounded-[1.2rem] border border-amber-200 bg-amber-50 px-5 py-5"
+          : "rounded-[1.2rem] border border-red-200 bg-red-50 px-5 py-5"}
+        >
+          <p className={withdrawalOutcomePending ? "text-base font-semibold text-amber-950" : "text-base font-semibold text-red-900"}>
+            {withdrawalOutcomePending ? "Withdrawal outcome pending" : "Withdrawal failed"}
+          </p>
+          <p className={withdrawalOutcomePending ? "mt-1 text-sm leading-6 text-amber-900" : "mt-1 text-sm leading-6 text-red-800"}>
             {approvalError || error || submitResult?.request.error_message || "The withdrawal could not be completed. Review the details and try again."}
           </p>
         </div>
@@ -2592,7 +2598,7 @@ function WithdrawalFormShell({
             >
               Open PineTree Wallet
             </button>
-          ) : review ? (
+          ) : review && !withdrawalOutcomePending ? (
             <button
               type="button"
               onClick={() => onSubmit({ irreversibleAckChecked: true })}
@@ -9101,10 +9107,14 @@ function PineTreeWalletRuntime() {
             code: result.error?.code as WalletApiErrorCode | undefined,
             rawMessage: result.error?.message,
           })
-          setWithdrawalApprovalError(
-            presented.message
-          )
+          setWithdrawalApprovalError(presented.code === "STATUS_UNKNOWN" ? withdrawalStatusUnknownMessage : presented.message)
           setWithdrawalScreen(presented.code === "INSUFFICIENT_BALANCE" ? "review" : "failed")
+          void syncPineTreeWallet()
+          return
+        }
+        if (["REQUIRES_ACTION", "ACTION_REQUIRED"].includes(String(result.data.operation.status || "").toUpperCase())) {
+          setWithdrawalApprovalError(withdrawalStatusUnknownMessage)
+          setWithdrawalScreen("failed")
           void syncPineTreeWallet()
           return
         }

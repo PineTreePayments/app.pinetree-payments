@@ -45,7 +45,7 @@ export const WITHDRAWAL_ERROR_MESSAGES: Record<WalletApiErrorCode, string> = {
   WALLET_NOT_CONNECTED: "PineTree Wallet is not connected in this browser session. Reconnect PineTree Wallet and try again.",
   SIGNER_NOT_AVAILABLE: "PineTree Wallet's secure signer is not available yet. Reconnect PineTree Wallet and try again.",
   AUTHORIZATION_REJECTED: "Withdrawal authorization was canceled. No funds were sent.",
-  STATUS_UNKNOWN: "We couldn't confirm the result of this withdrawal yet. Check Activity before trying again - do not resubmit.",
+  STATUS_UNKNOWN: "We couldn't confirm the result of this withdrawal yet. PineTree is verifying it; do not resubmit.",
   WITHDRAWAL_FAILED: "The withdrawal could not be completed. Review the details and try again.",
 }
 
