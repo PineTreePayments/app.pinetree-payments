@@ -309,10 +309,14 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
   })
 
   it("withdraw auto-selects first wallet-backed asset and clears review state on change", () => {
+    const withdrawableAssetOptionsSrc = walletPage.slice(
+      walletPage.indexOf("const withdrawalWalletRows = useMemo(() => ["),
+      walletPage.indexOf("}, [walletSync, withdrawalWalletRows])")
+    )
     expect(walletPage).toContain("withdrawableAssetOptions[0]")
     expect(walletPage).toContain("const withdrawalWalletRows = useMemo(() => [")
-    expect(walletPage).toContain(".filter((row) => row.configured)")
-    expect(walletPage).not.toContain(".filter((row) => row.configured && row.enabled)")
+    expect(withdrawableAssetOptionsSrc).toContain(".filter((row) => row.configured)")
+    expect(withdrawableAssetOptionsSrc).not.toContain(".filter((row) => row.configured && row.enabled)")
     expect(walletPage).toContain("handleWithdrawalAssetSelect")
     expect(walletPage).toContain("setWithdrawalReview(null)")
     expect(walletPage).toContain("setWithdrawalSubmitResult(null)")

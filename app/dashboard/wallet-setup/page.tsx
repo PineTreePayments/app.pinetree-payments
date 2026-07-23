@@ -33,10 +33,12 @@ import {
   type DynamicWalletLike,
 } from "@/lib/wallets/dynamicSignerLookup"
 import {
+  PineTreeInsightsCard,
   ProviderStatusPill,
   dashboardPageTitleClass,
   dashboardSectionLabelClass,
 } from "@/components/dashboard/DashboardPrimitives"
+import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import { presentWithdrawalError as presentWithdrawalErrorClient } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import type { WalletApiErrorCode } from "@/engine/wallet/walletErrors"
@@ -2975,6 +2977,53 @@ function walletRailStatusClasses(tone: "blue" | "default" | "amber") {
   return "bg-gray-100 text-gray-700"
 }
 
+function computeWalletInsights(rows: WalletRailRow[], sync: PineTreeWalletSyncResponse | null): string[] {
+  if (!sync) return []
+  const insights: string[] = []
+
+  const railTotals: Array<{ label: WalletRailRow["label"]; usd: number }> = [
+    { label: "Base", usd: sync.balances.base.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) },
+    { label: "Solana", usd: sync.balances.solana.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) },
+    { label: "Bitcoin", usd: sync.balances.bitcoin.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) },
+  ]
+
+  const totalUsd = sync.totalUsd ?? 0
+  if (totalUsd > 0) {
+    const largest = railTotals.reduce((best, rail) => (rail.usd > best.usd ? rail : best), railTotals[0])
+    if (largest.usd > 0) {
+      const share = Math.round((largest.usd / totalUsd) * 100)
+      insights.push(`${largest.label} holds your largest balance at ${formatUsd(largest.usd)} (${share}% of total).`)
+    }
+  }
+
+  const connectedRails = rows.filter((row) => row.configured && row.enabled)
+  const zeroBalanceRail = connectedRails.find((row) => {
+    const total = railTotals.find((rail) => rail.label === row.label)
+    return total ? total.usd === 0 : false
+  })
+  if (zeroBalanceRail && insights.length < 3) {
+    insights.push(`${zeroBalanceRail.label} is connected but currently has no balance.`)
+  }
+
+  const lastConfirmedWithdrawal = sync.recentActivity.find(
+    (item) => getPaymentDisplayStatus(item.status).tone === "confirmed"
+  )
+  if (lastConfirmedWithdrawal && insights.length < 3) {
+    const timestamp = formatActivityTimestamp(lastConfirmedWithdrawal.completedAt ?? lastConfirmedWithdrawal.createdAt)
+    insights.push(
+      timestamp
+        ? `Last successful withdrawal: ${activityAmountLabel(lastConfirmedWithdrawal)} on ${timestamp}.`
+        : `Last successful withdrawal: ${activityAmountLabel(lastConfirmedWithdrawal)}.`
+    )
+  }
+
+  if (insights.length < 3 && rows.length > 0) {
+    insights.push(`${connectedRails.length} of ${rows.length} wallet network${rows.length === 1 ? "" : "s"} connected.`)
+  }
+
+  return insights.slice(0, 3)
+}
+
 function WalletOverviewSummary({
   rows,
   sync,
@@ -2998,13 +3047,14 @@ function WalletOverviewSummary({
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
   const recentItems = (sync?.recentActivity ?? []).slice(0, 3)
   const hasSyncedOnce = Boolean(sync?.lastSyncedAt)
+  const walletInsights = hasSyncedOnce ? computeWalletInsights(rows, sync) : []
   return (
     <div className="space-y-5">
       <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_90%_8%,rgba(0,82,255,0.20),transparent_34%),linear-gradient(135deg,rgba(239,246,255,0.98),rgba(255,255,255,0.96))] px-5 py-5 shadow-[0_22px_50px_rgba(37,99,235,0.13)] sm:px-6 sm:py-6">
         <div className="relative">
           <p className={dashboardSectionLabelClass}>TOTAL BALANCE</p>
           <p className="mt-2 text-[2.35rem] font-semibold leading-none tracking-normal text-gray-950 sm:text-5xl">{formatWalletTotalBalance(sync?.totalUsd, syncing)}</p>
-          <p className="mt-3 text-xs leading-5 text-blue-700/80">
+          <p className="mt-3 text-xs leading-5 text-gray-500">
           {syncing ? "Syncing..." : lastSynced ? `Last synced ${lastSynced}` : "Pending sync"}
           </p>
         </div>
@@ -3065,6 +3115,14 @@ function WalletOverviewSummary({
           Manage rails in Providers
         </div>
       )}
+      <PineTreeInsightsCard
+        insights={walletInsights}
+        emptyText={
+          !hasSyncedOnce && syncing
+            ? "Loading wallet insights..."
+            : "Wallet insights will appear as your balances and activity grow."
+        }
+      />
       <div className="overflow-hidden rounded-[1.35rem] border border-blue-200/60 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.07)]">
         <div className="flex items-center justify-between gap-3 border-b border-blue-100/70 bg-blue-50/55 px-4 py-3 sm:px-5">
           <p className={dashboardSectionLabelClass}>RECENT WITHDRAWALS</p>
