@@ -130,11 +130,12 @@ describe("Mobile wallet workflow navigation stays contained", () => {
   it("workflow navigation reuses the shared segmented button component", () => {
     const navBlock = page.slice(
       page.indexOf('ariaLabel="Wallet workflows"') - 400,
-      page.indexOf('ariaLabel="Wallet workflows"') + 200
+      page.indexOf('ariaLabel="Wallet workflows"') + 500
     )
     expect(navBlock).toContain("<SegmentedButtons")
     expect(navBlock).toContain("walletWorkflowOptions")
-    expect(page).toContain('className="flex flex-wrap gap-1.5 pt-1"')
+    expect(page).toContain('className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"')
+    expect(page).toContain('rounded-2xl border border-gray-200/80 bg-white p-3 shadow-sm')
   })
 
   it("overview and address-book are not permanent navigation buttons", () => {
@@ -187,7 +188,7 @@ describe("Wallet dashboard page hierarchy matches Reports-style surfaces", () =>
       page.indexOf('aria-label="PineTree Wallet workspace"'),
       page.indexOf("activeView === null")
     )
-    expect(workspaceOpen).toContain('className="space-y-4 md:space-y-5"')
+    expect(workspaceOpen).toContain('className="space-y-5"')
     expect(workspaceOpen).not.toContain("max-w-[42rem]")
     expect(workspaceOpen).not.toContain("overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95")
     expect(workspaceOpen).not.toContain("shadow-[0_32px_100px")
@@ -197,8 +198,10 @@ describe("Wallet dashboard page hierarchy matches Reports-style surfaces", () =>
     const src = workspaceSrc()
     const overview = overviewSrc()
     expect(src).toContain("activeView === null")
-    expect(src.indexOf("<WalletOverviewSummary")).toBeLessThan(src.indexOf("<SegmentedButtons"))
-    expect(overview.indexOf("TOTAL BALANCE")).toBeLessThan(overview.indexOf("WALLET SUMMARY"))
+    expect(src).toContain("<WalletOverviewSummary")
+    expect(src).not.toContain('className="flex flex-wrap gap-1.5 pt-1"')
+    expect(overview.indexOf("TOTAL BALANCE")).toBeLessThan(overview.indexOf("<SegmentedButtons"))
+    expect(overview.indexOf("<SegmentedButtons")).toBeLessThan(overview.indexOf("WALLET SUMMARY"))
     expect(overview.indexOf("WALLET SUMMARY")).toBeLessThan(overview.indexOf("RECENT WITHDRAWALS"))
     expect(overview.indexOf("RECENT WITHDRAWALS")).toBeLessThan(overview.indexOf("AddressBookPreviewCard"))
     expect(src).not.toContain('aria-label="PineTree Wallet sections"')

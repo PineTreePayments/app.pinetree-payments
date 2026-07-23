@@ -3007,6 +3007,7 @@ function WalletOverviewSummary({
   syncing,
   addressBookDestinationCount,
   onSelectRail,
+  onOpenWithdraw,
   onViewAllActivity,
   onOpenAddressBook,
 }: {
@@ -3015,6 +3016,7 @@ function WalletOverviewSummary({
   syncing: boolean
   addressBookDestinationCount: number | null
   onSelectRail?: (rail: WithdrawalRail) => void
+  onOpenWithdraw: () => void
   onViewAllActivity?: () => void
   onOpenAddressBook: () => void
 }) {
@@ -3023,7 +3025,7 @@ function WalletOverviewSummary({
   const recentItems = (sync?.recentActivity ?? []).slice(0, 3)
   const hasSyncedOnce = Boolean(sync?.lastSyncedAt)
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_90%_8%,rgba(0,82,255,0.20),transparent_34%),linear-gradient(135deg,rgba(239,246,255,0.98),rgba(255,255,255,0.96))] px-5 py-5 shadow-[0_22px_50px_rgba(37,99,235,0.13)] sm:px-6 sm:py-6">
         <div className="relative">
           <p className={dashboardSectionLabelClass}>TOTAL BALANCE</p>
@@ -3032,6 +3034,18 @@ function WalletOverviewSummary({
           {syncing ? "Syncing..." : lastSynced ? `Last synced ${lastSynced}` : "Pending sync"}
           </p>
         </div>
+      </div>
+      <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-sm">
+        <SegmentedButtons
+          ariaLabel="Wallet workflows"
+          className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          value="none"
+          onChange={(value) => {
+            if (value === "withdraw") onOpenWithdraw()
+            if (value === "activity") onViewAllActivity?.()
+          }}
+          options={walletWorkflowOptions}
+        />
       </div>
       {visibleRows.length > 0 ? (
         <div className="overflow-hidden rounded-[1.35rem] border border-blue-200/60 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.07)]">
@@ -3368,7 +3382,7 @@ function WalletFloatingWorkspace({
     <section
       aria-label={title}
       data-pinetree-floating-workspace="true"
-      className="space-y-4"
+      className="space-y-3"
     >
       <header className="flex items-start justify-between gap-4">
         <h2 className="min-w-0 text-base font-semibold text-gray-950">{title}</h2>
@@ -10203,28 +10217,18 @@ function PineTreeWalletRuntime() {
       ) : null}
 
       {showWalletWorkspace ? (
-        <section aria-label="PineTree Wallet workspace" className="space-y-4 md:space-y-5">
+        <section aria-label="PineTree Wallet workspace" className="space-y-5">
           {activeView === null ? (
-            <>
-              <WalletOverviewSummary
-                rows={walletRailRows}
-                sync={walletSync}
-                syncing={walletSyncing}
-                addressBookDestinationCount={addressBookDestinationCount}
-                onSelectRail={handleOverviewRailSelect}
-                onViewAllActivity={() => setActiveView("activity")}
-                onOpenAddressBook={() => setActiveView("address-book")}
-              />
-              <SegmentedButtons
-                options={walletWorkflowOptions}
-                value="none"
-                onChange={(value) => {
-                  if (value !== "none") setActiveView(value)
-                }}
-                className="flex flex-wrap gap-1.5 pt-1"
-                ariaLabel="Wallet workflows"
-              />
-            </>
+            <WalletOverviewSummary
+              rows={walletRailRows}
+              sync={walletSync}
+              syncing={walletSyncing}
+              addressBookDestinationCount={addressBookDestinationCount}
+              onSelectRail={handleOverviewRailSelect}
+              onOpenWithdraw={() => setActiveView("withdraw")}
+              onViewAllActivity={() => setActiveView("activity")}
+              onOpenAddressBook={() => setActiveView("address-book")}
+            />
           ) : null}
 
           {activeView === "base-details" ? (
