@@ -502,15 +502,17 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     }), { status: 200 }))
     const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
     await createSpeedLightningPayment({
-      amount: 10, currency: "USD", merchantAmount: 9, pineTreeFeeAmount: 1, pineTreeFeeSats: 1500,
+      amount: 10, currency: "USD", merchantAmount: 9, pineTreeFeeAmount: 1,
+      pineTreeFeeSats: 1500, btcPriceUsdAtFeeQuote: 66_667,
       merchantSpeedAccountId: "acct_merchant_1", pineTreePaymentId: "payment-1",
       merchantId: "merchant-1", settlementMode: "speed_connect_split",
     })
     const init = fetchSpy.mock.calls[0][1]
     expect(new Headers(init?.headers).get("speed-account")).toBe("acct_merchant_1")
-    // application_fee is a fixed USD amount (never sats) per Speed's official
-    // Custom Connect API Documentation. See docs/environment/bitcoin-fee-settlement.md.
-    expect(JSON.parse(String(init?.body))).toMatchObject({ application_fee: 1 })
+    // application_fee is denominated in integer satoshis (target_currency),
+    // not the payment's own USD currency - confirmed by live ledger
+    // reconciliation. See docs/environment/bitcoin-fee-settlement.md.
+    expect(JSON.parse(String(init?.body))).toMatchObject({ application_fee: 1500 })
     expect(JSON.parse(String(init?.body))).not.toHaveProperty("application_fee_percentage")
     expect(JSON.parse(String(init?.body))).not.toHaveProperty("account_id")
   })

@@ -97,17 +97,18 @@ describe("Speed treasury-sweep invoice creation", () => {
     })
   })
 
-  it("creates connected-account payments with speed-account header AND a fixed-USD application_fee (confirmed against Speed's official docs)", async () => {
-    // Confirmed 2026-07-23 against Speed's official Custom Connect API
-    // Documentation: application_fee is a fixed amount in the payment's own
-    // `currency` (USD) - never sats, despite target_currency being "SATS".
-    // See docs/environment/bitcoin-fee-settlement.md.
+  it("creates connected-account payments with speed-account header AND an integer-satoshi application_fee (confirmed by live ledger reconciliation)", async () => {
+    // CORRECTED 2026-07-23: application_fee is denominated in the payment's
+    // target_currency (SATS), not its own `currency` (USD) - confirmed by a
+    // full chronological replay of PineTree's live platform Speed ledger
+    // matching the live balance to 14 significant digits. See
+    // docs/environment/bitcoin-fee-settlement.md.
     await createSpeedLightningPayment({
       amount: 10.25,
       currency: "USD",
       merchantAmount: 10,
       pineTreeFeeAmount: 0.25,
-      pineTreeFeeSats: 375, // internal bookkeeping/display only - must never reach application_fee
+      pineTreeFeeSats: 375,
       btcPriceUsdAtFeeQuote: 66_667,
       merchantSpeedAccountId: "acct_speed_merchant",
       pineTreePaymentId: "pay_1",
@@ -126,7 +127,7 @@ describe("Speed treasury-sweep invoice creation", () => {
       target_currency: "SATS",
       ttl: 300,
       statement_descriptor: "PineTree",
-      application_fee: 0.25,
+      application_fee: 375,
     })
     expect(body.metadata).toMatchObject({
       platform_fee_usd: 0.25,
@@ -139,7 +140,7 @@ describe("Speed treasury-sweep invoice creation", () => {
     expect(body.application_fee_percentage).toBeUndefined()
   })
 
-  it("succeeds even when no sats value is supplied at all - fee conversion is never required for payment creation", async () => {
+  it("succeeds when no sats value is supplied - fee conversion is never required for Bitcoin payment creation, but the fee itself is skipped rather than sent broken", async () => {
     await expect(createSpeedLightningPayment({
       amount: 10.25,
       currency: "USD",
@@ -149,7 +150,12 @@ describe("Speed treasury-sweep invoice creation", () => {
       pineTreePaymentId: "pay_1",
       merchantId: "merchant_1",
       settlementMode: "speed_merchant_account",
-    })).resolves.toMatchObject({ feeSettlementStatus: "transfer_created", applicationFeeRequested: 0.25 })
+    })).resolves.toMatchObject({ feeSettlementStatus: "missing", applicationFeeRequested: null, platformFeeSats: null })
+
+    const fetchMock = vi.mocked(fetch)
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init?.body || "{}"))
+    expect(body).not.toHaveProperty("application_fee")
   })
 
   it("creates a connected-account webhook registration with connect true", async () => {

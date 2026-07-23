@@ -60,7 +60,7 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
     }), { status: 200 })))
   }
 
-  it("1/2/3/4. sends a $10.15 gross payment with application_fee exactly 0.15 (fixed USD, not sats, no percentage)", async () => {
+  it("1/2/3/4. sends a $0.15 platform fee as its integer satoshi equivalent (232 sats at ~$64,708/BTC), never the raw USD float", async () => {
     mockSpeedPaymentResponse()
     const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
 
@@ -69,6 +69,8 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
       currency: "USD",
       merchantAmount: 10,
       pineTreeFeeAmount: 0.15,
+      pineTreeFeeSats: 232,
+      btcPriceUsdAtFeeQuote: 64_708,
       merchantSpeedAccountId: "acct_merchant_1",
       pineTreePaymentId: "pay-fee-test",
       merchantId: "merchant-1",
@@ -81,9 +83,30 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
 
     expect(body.amount).toBe(10.15)
     expect(body.currency).toBe("USD")
-    expect(body.application_fee).toBe(0.15)
+    expect(body.application_fee).toBe(232)
+    expect(Number.isInteger(body.application_fee)).toBe(true)
     expect(body).not.toHaveProperty("application_fee_percentage")
     expect(result.speedPaymentId).toBe("pi_test123")
+    expect(result.platformFeeSats).toBe(232)
+  })
+
+  it("refuses to create a connect-split payment when the merchant's connected account ID equals PineTree's own platform account ID", async () => {
+    process.env.SPEED_PLATFORM_ACCOUNT_ID = "acct_collision_test"
+    mockSpeedPaymentResponse()
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+
+    await expect(createSpeedLightningPayment({
+      amount: 10.15,
+      currency: "USD",
+      merchantAmount: 10,
+      pineTreeFeeAmount: 0.15,
+      merchantSpeedAccountId: "acct_collision_test",
+      pineTreePaymentId: "pay-fee-test-collision",
+      merchantId: "merchant-1",
+      settlementMode: "speed_connect_split",
+    })).rejects.toThrow(/cannot equal PineTree's platform account/)
+
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it("5. speed-account header carries the merchant connected account id, and the platform API key remains the auth credential", async () => {
@@ -109,8 +132,9 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
     expect(headers.get("authorization")).toBe(`Basic ${Buffer.from("sk_test_present:").toString("base64")}`)
   })
 
-  it("6. a missing/unverified BTC price does not block invoice creation (sats conversion is best-effort, never fatal)", async () => {
+  it("6. a missing/unverified BTC price does not block invoice creation, but skips the platform fee rather than ever sending a broken value", async () => {
     mockSpeedPaymentResponse({ id: "pi_test2" })
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
 
     const result = await createSpeedLightningPayment({
@@ -126,10 +150,20 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
 
     expect(result.speedPaymentId).toBe("pi_test2")
     expect(result.platformFeeSats).toBeNull()
-    expect(result.applicationFeeRequested).toBe(0.15)
+    expect(result.applicationFeeRequested).toBeNull()
+    expect(result.feeSettlementStatus).toBe("missing")
+
+    const fetchMock = vi.mocked(fetch)
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init?.body || "{}"))
+    expect(body).not.toHaveProperty("application_fee")
+
+    const skipCall = errorSpy.mock.calls.find(([label]) => label === "[speed] bitcoin_platform_fee_skipped_missing_sats_quote")
+    expect(skipCall).toBeTruthy()
+    errorSpy.mockRestore()
   })
 
-  it("does not send the previously-attempted sats-denominated fee, even when a caller still supplies pineTreeFeeSats", async () => {
+  it("sends the sats-denominated fee (not USD) even when the caller also supplies a fractional BTC/USD quote", async () => {
     mockSpeedPaymentResponse({ id: "pi_test3" })
     const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
 
@@ -138,7 +172,7 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
       currency: "USD",
       merchantAmount: 10,
       pineTreeFeeAmount: 0.15,
-      pineTreeFeeSats: 225, // the exact kind of value that triggered Speed's 400 in production
+      pineTreeFeeSats: 225,
       btcPriceUsdAtFeeQuote: 66_666.6667,
       merchantSpeedAccountId: "acct_merchant_1",
       pineTreePaymentId: "pay-fee-test-5",
@@ -149,11 +183,47 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
     const fetchMock = vi.mocked(fetch)
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String(init?.body || "{}"))
-    expect(body.application_fee).toBe(0.15)
+    expect(body.application_fee).toBe(225)
     expect(typeof body.application_fee).toBe("number")
-    // The sats value is still recorded internally (metadata) for display -
-    // just never sent as application_fee.
+    expect(Number.isInteger(body.application_fee)).toBe(true)
     expect(body.metadata).toMatchObject({ platform_fee_sats: 225 })
+  })
+
+  it("never sends a fractional-satoshi, zero, negative, or NaN application_fee", async () => {
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+
+    for (const badSats of [0.5, 0, -1, NaN, Infinity]) {
+      vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+        id: "pi_test123",
+        object: "payment",
+        status: "unpaid",
+        currency: "USD",
+        amount: 10.15,
+        target_currency: "SATS",
+        target_amount: 16200,
+        payment_method_options: {
+          lightning: { id: "lni_test", payment_request: "lntb162u1p4reuw2pp5test" },
+        },
+        transfers: [],
+        ttl: 300,
+      }), { status: 200 }))))
+      const result = await createSpeedLightningPayment({
+        amount: 10.15,
+        currency: "USD",
+        merchantAmount: 10,
+        pineTreeFeeAmount: 0.15,
+        pineTreeFeeSats: badSats,
+        btcPriceUsdAtFeeQuote: 64_708,
+        merchantSpeedAccountId: "acct_merchant_1",
+        pineTreePaymentId: "pay-fee-test-invalid-sats",
+        merchantId: "merchant-1",
+        settlementMode: "speed_connect_split",
+      })
+      const [, init] = vi.mocked(fetch).mock.calls[0]
+      const body = JSON.parse(String(init?.body || "{}"))
+      expect(body).not.toHaveProperty("application_fee")
+      expect(result.platformFeeSats).toBeNull()
+    }
   })
 
   it("no fee is requested (and no application_fee sent) when PineTree's fee is zero", async () => {
@@ -194,6 +264,8 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
       currency: "USD",
       merchantAmount: 10,
       pineTreeFeeAmount: 0.15,
+      pineTreeFeeSats: 232,
+      btcPriceUsdAtFeeQuote: 64_708,
       merchantSpeedAccountId: "acct_merchant_1",
       pineTreePaymentId: "pay-fee-test-6",
       merchantId: "merchant-1",
@@ -209,7 +281,9 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
       operation: "payment.create",
       settlementMode: "speed_connect_split",
       applicationFeePresent: true,
-      applicationFeeValue: 0.15,
+      applicationFeeValue: 232,
+      feeUsd: 0.15,
+      feeSats: 232,
       applicationFeePercentagePresent: false,
       speedAccountHeaderPresent: true,
       apiEnvironment: "test",
@@ -278,18 +352,29 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
   })
 
   it("11. parses an APPLICATION_FEE transfer from the create-payment response into 'transfer_created'", async () => {
-    mockSpeedPaymentResponse({ id: "pi_transfer_test" })
+    mockSpeedPaymentResponse({
+      id: "pi_transfer_test",
+      transfers: [
+        {
+          destination_account: "acct_platform_1",
+          fixed_amount: 232,
+          created_type: "APPLICATION_FEE",
+          description: "Application fee transfer",
+        },
+      ],
+    })
     const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
 
     const result = await createSpeedLightningPayment({
       amount: 10.15, currency: "USD", merchantAmount: 10, pineTreeFeeAmount: 0.15,
+      pineTreeFeeSats: 232, btcPriceUsdAtFeeQuote: 64_708,
       merchantSpeedAccountId: "acct_merchant_1", pineTreePaymentId: "pay-transfer-test",
       merchantId: "merchant-1", settlementMode: "speed_connect_split",
     })
 
     expect(result.feeSettlementStatus).toBe("transfer_created")
     expect(result.applicationFeeTransferDestinationAccount).toBe("acct_platform_1")
-    expect(result.applicationFeeTransferFixedAmount).toBe(0.15)
+    expect(result.applicationFeeTransferFixedAmount).toBe(232)
     expect(result.transfers.length).toBe(1)
   })
 })
@@ -398,6 +483,7 @@ describe("Root cause: floating-point amount precision (production 400 - 'Invalid
     const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
     await createSpeedLightningPayment({
       amount: 10.15, currency: "USD", merchantAmount: 10, pineTreeFeeAmount: 0.15,
+      pineTreeFeeSats: 232, btcPriceUsdAtFeeQuote: 64_708,
       merchantSpeedAccountId: "acct_merchant_1", pineTreePaymentId: "pay-summary-test",
       merchantId: "merchant-1", settlementMode: "speed_connect_split",
     })
@@ -410,7 +496,11 @@ describe("Root cause: floating-point amount precision (production 400 - 'Invalid
       amountDigitCount: 4,
       target_currency: "SATS",
       applicationFeePresent: true,
-      applicationFeeValue: 0.15,
+      applicationFeeValue: 232,
+      applicationFeeRequestValue: 232,
+      applicationFeeRequestCurrency: "SATS",
+      feeUsd: 0.15,
+      feeSats: 232,
       applicationFeePercentagePresent: false,
       speedAccountHeaderPresent: true,
       authorizationHeaderPresent: true,

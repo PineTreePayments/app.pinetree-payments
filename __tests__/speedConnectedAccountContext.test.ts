@@ -82,4 +82,18 @@ describe("resolveSpeedConnectedAccountContext", () => {
       merchantId: "merchant_1",
     })
   })
+
+  it("fails safely when a merchant's connected account ID collides with PineTree's own platform account ID", async () => {
+    mocks.getMerchantLightningProfile.mockResolvedValue(profile({
+      speed_account_id: "acct_platform_root",
+    }))
+
+    const error = await resolveSpeedConnectedAccountContext("merchant_1").catch((caught) => caught)
+
+    expect(error).toBeInstanceOf(SpeedConnectedAccountContextError)
+    expect(error).toMatchObject({
+      code: "SPEED_CONNECTED_ACCOUNT_EQUALS_PLATFORM_ACCOUNT",
+      merchantId: "merchant_1",
+    })
+  })
 })

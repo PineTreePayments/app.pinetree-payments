@@ -17,6 +17,7 @@ export type SpeedConnectedAccountContextFailureCode =
   | "SPEED_PROFILE_NOT_READY"
   | "SPEED_CONNECTED_ACCOUNT_MISSING"
   | "SPEED_CONNECTED_ACCOUNT_INVALID"
+  | "SPEED_CONNECTED_ACCOUNT_EQUALS_PLATFORM_ACCOUNT"
 
 export class SpeedConnectedAccountContextError extends Error {
   readonly code: SpeedConnectedAccountContextFailureCode
@@ -34,6 +35,9 @@ function speedConnectedAccountContextMessage(code: SpeedConnectedAccountContextF
   if (code === "SPEED_PROFILE_MISSING") return "Speed connected account profile is missing."
   if (code === "SPEED_PROFILE_NOT_READY") return "Speed connected account is not ready."
   if (code === "SPEED_CONNECTED_ACCOUNT_INVALID") return "Speed connected account ID is invalid."
+  if (code === "SPEED_CONNECTED_ACCOUNT_EQUALS_PLATFORM_ACCOUNT") {
+    return "Speed connected account cannot equal PineTree's platform account."
+  }
   return "Speed connected account ID is missing."
 }
 
@@ -102,11 +106,21 @@ export async function resolveSpeedConnectedAccountContext(
     throw new SpeedConnectedAccountContextError("SPEED_CONNECTED_ACCOUNT_INVALID", merchantId)
   }
 
+  const platformAccountId = platformAccountIdFromConfig()
+  if (platformAccountId && connectedAccountId === platformAccountId) {
+    console.error("[pinetree-withdrawals] SPEED_CONNECTED_ACCOUNT_EQUALS_PLATFORM_ACCOUNT", {
+      merchantId,
+      normalizedErrorCode: "SPEED_CONNECTED_ACCOUNT_EQUALS_PLATFORM_ACCOUNT",
+      routeStage: "speed_connected_account_platform_collision",
+    })
+    throw new SpeedConnectedAccountContextError("SPEED_CONNECTED_ACCOUNT_EQUALS_PLATFORM_ACCOUNT", merchantId)
+  }
+
   const context = {
     merchantId,
     connectedAccountId,
     connectedRelationshipId: profile.speed_connected_account_relationship_id || null,
-    platformAccountId: platformAccountIdFromConfig(),
+    platformAccountId,
     accountStatus: profile.speed_connected_account_status || null,
     providerReady: true,
     maskedAccountSuffix: speedAccountSuffix(connectedAccountId),

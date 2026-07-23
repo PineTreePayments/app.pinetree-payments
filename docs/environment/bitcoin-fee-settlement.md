@@ -1,12 +1,15 @@
 # Bitcoin platform fee settlement (Speed application_fee)
 
-## Confirmed contract (2026-07-23)
+## Confirmed contract (2026-07-23, corrected same day - see "History" below)
 
-Speed's official Custom Connect API Documentation (`POST /payments`) confirms:
-
-- `application_fee` is a **fixed amount in the payment's own `currency`**
-  (USD for PineTree) - **never** converted to sats, regardless of
-  `target_currency` being `"SATS"`.
+- `application_fee` is denominated in the payment's `target_currency`
+  (always `"SATS"` for PineTree Lightning payments) - **not** the payment's
+  own `currency` (USD). This is confirmed empirically, not from Speed's
+  documentation (see the third History entry below): a full chronological
+  replay of PineTree's live platform Speed `/balance-transactions` ledger
+  reproduced the live `/balances` figure to 14 significant digits when every
+  `"Application Fee In"`/`"Application Fee Out"` row's `net` value was
+  treated as already-in-sats.
 - `application_fee_percentage` is a separate, optional percentage-based fee.
   PineTree's platform fee is fixed ($0.15/transaction, `PINETREE_FEE` in
   `engine/config.ts`), so `application_fee_percentage` is never sent.
@@ -18,10 +21,15 @@ Speed's official Custom Connect API Documentation (`POST /payments`) confirms:
   in `speedRequestWithStatus` (`providers/lightning/speedClient.ts`) and was
   never the source of the regression below.
 
-`createSpeedLightningPayment` now sends `application_fee: <USD amount>` on
+`createSpeedLightningPayment` now sends `application_fee: <integer sats>` on
 every connect-split Bitcoin payment (never on treasury-sweep payments, which
 route the full gross amount to PineTree's own platform account directly and
-have no connected-account split to fee against).
+have no connected-account split to fee against), and only when a valid
+positive-integer sats quote is available - if the BTC/USD price feed was
+unavailable at invoice-creation time, the platform fee is skipped for that
+one payment (logged as `bitcoin_platform_fee_skipped_missing_sats_quote`)
+rather than ever sent as a broken value. Bitcoin payment creation itself is
+never blocked by this.
 
 ## History - two failed unit assumptions, in production, back to back
 
@@ -32,28 +40,52 @@ have no connected-account split to fee against).
    documentation shows this exact float format working end-to-end.
 2. **Pre-converted whole satoshis** (`application_fee: 225` or similar,
    derived from the live BTC/USD rate via `lib/bitcoin/feeConversion.ts`):
-   Speed's `POST /payments` **rejected this outright with an HTTP 400**,
-   breaking Bitcoin Lightning payment creation entirely in production. This
-   was the correct diagnosis: satoshis are the wrong unit for
-   `application_fee`. Sats are only ever `target_currency`/`target_amount` -
-   not the fee.
+   Speed's `POST /payments` **rejected this outright with an HTTP 400** at
+   the time. In hindsight (see #3 below) this was very likely a malformed
+   float-precision `amount` field colliding with this attempt, not proof
+   sats were the wrong unit for `application_fee` - the two bugs shipped
+   close together and were never isolated from each other at the time.
+3. **USD float, "confirmed against official documentation"** (2026-07-23,
+   same day as #1/#2): re-added `application_fee: <USD amount>` (e.g.
+   `0.15`) based on a reading of Speed's Custom Connect API Documentation.
+   Speed's `POST /payments` accepted this with a 200 and even echoed back a
+   `transfers[]` entry with `created_type: "APPLICATION_FEE"` - which is
+   exactly why this looked confirmed. It wasn't: live ledger reconciliation
+   the same day proved Speed silently interpreted `0.15` as **0.15
+   satoshis**, not $0.15. A fixed USD float is the wrong unit; `POST
+   /payments` simply doesn't reject it the way it rejected #2, so the bug
+   was invisible until the platform account's actual spendable balance was
+   checked against its own transaction ledger.
 
-Both attempts were guesses at Speed's unit contract, made without the
-official documentation in hand. The documentation resolves this: unit #1's
-format (USD float) was correct all along; only the concurrent removal of
-`application_fee` entirely (to unblock production) was the over-correction,
-and it is now reverted.
+Three attempts, three different failure modes: #1 silently under-collected
+(same underlying bug as #3, never proven at the time), #2 broke checkout
+outright, #3 silently under-collected by roughly three orders of magnitude
+while looking fully correct in every request/response log. None of them were
+caught by unit tests, because every test asserted the request shape PineTree
+*intended* to send, never cross-checked against Speed's actual realized
+ledger balance. The only test that would have caught this is exactly the
+kind added in `__tests__/bitcoinFeeSettlement.test.ts` for the corrected
+sats-based behavior: asserting the literal wire value, not just its
+presence.
 
 ## What actually happens today
 
-- `createSpeedLightningPayment` includes `application_fee: pineTreeFeeAmount`
-  (raw USD, e.g. `0.15`) in the request body whenever a connect-split fee
-  applies (`!useTreasurySweep && pineTreeFeeAmount > 0`). Never
-  `application_fee_percentage`. Never both.
-- `pineTreeFeeSats`/`btcPriceUsdAtFeeQuote` are still computed/persisted
-  best-effort (a missing/invalid BTC price is logged and simply omitted,
-  never a thrown error) purely for PineTree's own display/reconciliation -
-  they are never sent to Speed in any field.
+- `createSpeedLightningPayment` includes `application_fee: platformFeeSats`
+  (integer satoshis, e.g. `232` for a $0.15 fee at ~$64,708/BTC) in the
+  request body whenever a connect-split fee is owed
+  (`!useTreasurySweep && pineTreeFeeAmount > 0`) **and** a valid
+  positive-integer sats quote is available. Never `application_fee_percentage`.
+  Never both. Never a raw USD float.
+- `pineTreeFeeSats`/`btcPriceUsdAtFeeQuote` (computed via
+  `lib/bitcoin/feeConversion.ts#convertUsdFeeToSats` - always rounds up,
+  never collapses a nonzero fee to 0 sats) are still best-effort at the
+  invoice-creation call site (`providers/lightning/speedAdapter.ts`): a
+  missing/invalid BTC price is logged and the value stays `undefined`,
+  Bitcoin payment creation is never blocked. `createSpeedLightningPayment`
+  itself is the fail-safe boundary - if a fee is owed but no valid sats
+  quote arrived, it skips `application_fee` entirely for that one request
+  (logged as `bitcoin_platform_fee_skipped_missing_sats_quote`) rather than
+  ever sending a broken value.
 - `SpeedFeeSettlementStatus` (`providers/lightning/speedClient.ts`) now has 5
   honest states: `"not_applicable"` (no fee owed), `"retained_pending_sweep"`
   (treasury-sweep mode - no Speed-side split), `"transfer_created"` (the
@@ -94,10 +126,16 @@ expected a fee.
   on the invoice-creation request. This is where the *gross* customer payment
   settles.
 - **PineTree treasury/platform account**: the account that owns
-  `SPEED_API_KEY`. `application_fee` transfers to this account automatically,
-  per Speed's Custom Connect model - there is no separate "destination"
-  parameter in the request payload; Speed determines the platform account
-  from the API key making the request.
+  `SPEED_API_KEY`. `application_fee` (integer sats) transfers to this
+  account automatically, per Speed's Custom Connect model - there is no
+  separate "destination" parameter in the request payload; Speed determines
+  the platform account from the API key making the request. Confirmed live
+  (2026-07-23): this account's `/balance-transactions` ledger shows a
+  matched `"Application Fee In"` credit for every merchant-side
+  `"Application Fee Out"` debit, ~500ms apart, and its registered webhooks
+  (`livemode: true`, active, pointed at `app.pinetree-payments.com`) confirm
+  it is genuinely PineTree's production account, not a mislabeled connected
+  account.
 - `SPEED_PLATFORM_ACCOUNT_ID` exists in configuration only for
   diagnostics/config-status reporting (`getPineTreeSpeedConfigStatus`) - not
   wired into any request as a routing destination.
@@ -132,3 +170,17 @@ left untouched for support review.
 Historical "Application Fee In" records with `net`/`amount`/`fee` all zero
 predate this fix and must not be mutated retroactively. No retroactive
 merchant debit should be attempted without explicit finance/ops review.
+
+## Under-collected fees from the USD-float regression (2026-07-23)
+
+Every connect-split Lightning payment created between the USD-float
+regression shipping and this fix collected the platform fee as 0.15
+satoshis instead of the intended ~232 satoshis ($0.15) - confirmed by direct
+comparison of PineTree's `payments.metadata.pineTreeFeeAmount` (the intended
+USD fee) against the live Speed platform ledger's realized
+`Application Fee In` amount for the same `transfer_id`. These payments are
+**not** retroactively re-debited by this fix - `merchant_lightning_profiles`/
+`payments` records are left as-is. Any retroactive collection of the
+shortfall from already-settled merchant payments requires explicit
+finance/ops review and is out of scope here, per the same policy as the
+pre-existing zero-value records above.

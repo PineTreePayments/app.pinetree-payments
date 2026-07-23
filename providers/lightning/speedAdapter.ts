@@ -116,12 +116,16 @@ export const speedAdapter: ProviderAdapter = {
     const feeApplies = !treasurySweepEnabled && pineTreeFeeAmount > 0
     const btcPriceUsd = Number(input.btcPriceUsd)
 
-    // pineTreeFeeSats is internal bookkeeping/display only - Speed's
-    // application_fee (sent below, in USD, by createSpeedLightningPayment)
-    // is never expressed in sats. Bitcoin payment creation must never be
-    // blocked by fee-conversion availability, so this is best-effort - a
-    // missing/invalid BTC price simply means this record stays empty, never
-    // a thrown error.
+    // CORRECTED 2026-07-23: Speed's application_fee is denominated in
+    // integer satoshis (confirmed by live production ledger reconciliation -
+    // see providers/lightning/speedClient.ts and
+    // docs/environment/bitcoin-fee-settlement.md), so pineTreeFeeSats is now
+    // exactly what createSpeedLightningPayment sends as application_fee, not
+    // just internal bookkeeping. Bitcoin payment creation must still never
+    // be blocked by fee-conversion availability, so this remains best-effort
+    // here - a missing/invalid BTC price means createSpeedLightningPayment
+    // itself skips requesting the platform fee for this one payment (logged,
+    // never silently sent as a broken value) rather than failing checkout.
     let pineTreeFeeSats: number | undefined
     if (feeApplies && Number.isFinite(btcPriceUsd) && btcPriceUsd > 0) {
       try {
@@ -161,6 +165,11 @@ export const speedAdapter: ProviderAdapter = {
       merchantSpeedAccountSuffix: merchantSpeedAccountId ? merchantSpeedAccountId.slice(-6) : null,
       feeRequestAttempted: feeApplies,
       applicationFeeRequested: speedPayment.applicationFeeRequested,
+      // The literal value/unit actually sent on the wire as application_fee
+      // (integer satoshis) when a fee was requested this attempt - null when
+      // skipped (fee owed but no valid sats quote was available).
+      applicationFeeRequestValue: speedPayment.applicationFeeRequested != null ? speedPayment.platformFeeSats : null,
+      applicationFeeRequestCurrency: speedPayment.applicationFeeRequested != null ? "SATS" : null,
       feeApplies,
       providerFeeReferencePresent: Boolean(speedPayment.speedPaymentId),
       reconciliationState: speedPayment.feeSettlementStatus,
