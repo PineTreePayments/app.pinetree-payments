@@ -63,8 +63,8 @@ describe("No manual 'Set up Bitcoin' CTA competes with automatic provisioning", 
 
   it("does not render a second Business Profile banner inside the wallet modal", () => {
     const modalOverview = page.slice(
-      page.indexOf('{activeTab === "overview" ? ('),
-      page.indexOf("{activeTab === \"balances\" ? (")
+      page.indexOf("{activeView === null ? ("),
+      page.indexOf('{activeView === "base-details" ? (')
     )
     expect(page).toContain("BusinessProfileRequirementBanner")
     expect(modalOverview).not.toContain("BusinessProfileRequirementBanner")

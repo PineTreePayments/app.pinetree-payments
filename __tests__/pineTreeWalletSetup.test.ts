@@ -129,7 +129,7 @@ describe("PineTree embedded wallet setup", () => {
     const workspaceStart = page.indexOf('<section aria-label="PineTree Wallet workspace"')
     const workspaceLead = page.slice(
       workspaceStart,
-      page.indexOf("<nav", workspaceStart)
+      page.indexOf("activeView === null", workspaceStart)
     )
     expect(workspaceLead).not.toContain(">PineTree Wallet</h2>")
     expect(page).not.toContain("One merchant wallet profile")
@@ -1498,15 +1498,18 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("PineTree Solana Wallet")
   })
 
-  it("opens a PineTree wallet modal with wallet-style sections", () => {
+  it("opens PineTree Wallet with overview-first secondary workspaces", () => {
     expect(page).toContain("setWalletOpen(true)")
-    expect(page).toContain('role="dialog"')
-    expect(page).toContain('aria-modal="true"')
-    expect(page).toContain('label: "Overview"')
-    expect(page).toContain('label: "Balances"')
-    expect(page).toContain('label: "Withdraw"')
+    expect(page).toContain("const walletWorkflowOptions")
+    expect(page).toContain('value: "withdraw", label: "Withdraw"')
+    expect(page).toContain('value: "activity", label: "Activity"')
+    expect(page).toContain('activeView === "base-details"')
+    expect(page).toContain('activeView === "solana-details"')
+    expect(page).toContain('activeView === "bitcoin-details"')
+    expect(page).not.toContain('label: "Overview"')
+    expect(page).not.toContain('label: "Balances"')
+    expect(page).not.toContain('{ id: "address-book", label: "Address Book" }')
     expect(page).not.toContain('label: "Wallets"')
-    expect(page).toContain('label: "Activity"')
     expect(page).not.toContain('label: "Receive"')
   })
 
@@ -1577,7 +1580,7 @@ describe("PineTree embedded wallet setup", () => {
     const workspaceStart = page.indexOf('<section aria-label="PineTree Wallet workspace"')
     const workspaceLead = page.slice(
       workspaceStart,
-      page.indexOf("<nav", workspaceStart)
+      page.indexOf("activeView === null", workspaceStart)
     )
     expect(workspaceLead).not.toContain(">PineTree Wallet</h2>")
     expect(page).not.toContain("Create and open your merchant wallet.")
@@ -1606,7 +1609,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Balances will update as wallet activity is indexed.")
   })
 
-  it("balances tab uses a complete asset card list without fake unsynced zeroes", () => {
+  it("rail detail workspaces use a complete asset card list without fake unsynced zeroes", () => {
     expect(page).toContain("function BalanceRows")
     const balanceRowsSource = page.slice(
       page.indexOf("function BalanceRows("),
@@ -1618,7 +1621,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(balanceRowsSource).not.toContain("dropdownOptions")
     expect(page).toContain("balanceOptions")
     expect(page).not.toContain("allAssets.map((row, index)")
-    expect(page).not.toContain("ChevronRight")
+    expect(balanceRowsSource).not.toContain("ChevronRight")
     expect(page).toContain("Wallet address")
     expect(page).not.toContain('["Deposit", "Withdraw", "History"].map')
     expect(page).not.toContain("Managed by Speed")

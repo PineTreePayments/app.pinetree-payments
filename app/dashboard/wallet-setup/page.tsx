@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { ChainEnum, useDynamicContext, useDynamicEvents, useDynamicWaas, useEmbeddedWallet, useExternalAuth, useRefreshUser, useSwitchWallet, useUserWallets } from "@dynamic-labs/sdk-react-core"
 import { Transaction, VersionedTransaction } from "@solana/web3.js"
-import { AlertTriangle, CheckCircle2, ChevronDown, Copy, Loader2, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Copy, Loader2, X } from "lucide-react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import {
@@ -33,7 +33,6 @@ import {
   type DynamicWalletLike,
 } from "@/lib/wallets/dynamicSignerLookup"
 import {
-  ProviderStatusPill,
   dashboardPageTitleClass,
   dashboardSectionLabelClass,
 } from "@/components/dashboard/DashboardPrimitives"
@@ -83,7 +82,8 @@ import { runWithBoundedTimeout, type BoundedProviderCallSettlement } from "@/lib
 // Types
 // ---------------------------------------------------------------------------
 
-type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "address-book"
+type WalletSecondaryView = "withdraw" | "activity" | "address-book" | "base-details" | "solana-details" | "bitcoin-details"
+type WalletWorkflowView = "withdraw" | "activity" | "none"
 type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
@@ -539,12 +539,9 @@ type IdentityMismatchError = {
 // Constants
 // ---------------------------------------------------------------------------
 
-const walletTabs: Array<{ id: WalletTab; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "balances", label: "Balances" },
-  { id: "withdraw", label: "Withdraw" },
-  { id: "activity", label: "Activity" },
-  { id: "address-book", label: "Address Book" },
+const walletWorkflowOptions: Array<{ value: WalletWorkflowView; label: string }> = [
+  { value: "withdraw", label: "Withdraw" },
+  { value: "activity", label: "Activity" },
 ]
 
 const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
@@ -1430,6 +1427,7 @@ function WalletProfileShell({
   tone: "amber" | "blue"
   message: string
 }) {
+  const statusClasses = tone === "amber" ? "bg-amber-100 text-amber-800" : "bg-blue-50 text-blue-700"
   return (
     <article className="rounded-2xl border border-gray-200/80 bg-white/90 p-6 shadow-[0_14px_40px_rgba(15,23,42,0.07)] backdrop-blur sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1437,7 +1435,7 @@ function WalletProfileShell({
           <h2 className="text-base font-semibold text-gray-950">PineTree Wallet</h2>
           <p className="mt-1 text-sm leading-5 text-gray-600">{message}</p>
         </div>
-        <ProviderStatusPill label={status} tone={tone} />
+        <StatusBadge label={status} classes={statusClasses} showIcon={false} />
       </div>
     </article>
   )
@@ -2962,18 +2960,63 @@ function txHashFromExplorerUrl(value: string | null) {
   }
 }
 
+function walletRailDetailView(rail: WithdrawalRail): WalletSecondaryView {
+  if (rail === "base") return "base-details"
+  if (rail === "solana") return "solana-details"
+  return "bitcoin-details"
+}
+
+function walletRailStatusClasses(tone: "blue" | "default" | "amber") {
+  if (tone === "blue") return "bg-blue-50 text-blue-700"
+  if (tone === "amber") return "bg-amber-100 text-amber-800"
+  return "bg-gray-100 text-gray-700"
+}
+
+function AddressBookPreviewCard({
+  destinationCount,
+  onOpen,
+}: {
+  destinationCount: number | null
+  onOpen: () => void
+}) {
+  const countLabel = destinationCount === null
+    ? "Saved destinations"
+    : `${destinationCount} Saved ${destinationCount === 1 ? "Destination" : "Destinations"}`
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group flex w-full items-center justify-between gap-4 rounded-[1.35rem] border border-blue-200/60 bg-white px-4 py-4 text-left shadow-[0_18px_42px_rgba(15,23,42,0.07)] transition hover:border-blue-300 hover:bg-blue-50/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 sm:px-5"
+    >
+      <span className="min-w-0">
+        <span className={dashboardSectionLabelClass}>ADDRESS BOOK</span>
+        <span className="mt-2 block text-sm font-semibold text-gray-950">{countLabel}</span>
+      </span>
+      <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-blue-700 group-hover:text-blue-900">
+        Manage Address Book
+        <ChevronRight size={15} aria-hidden="true" />
+      </span>
+    </button>
+  )
+}
+
 function WalletOverviewSummary({
   rows,
   sync,
   syncing,
+  addressBookDestinationCount,
   onSelectRail,
   onViewAllActivity,
+  onOpenAddressBook,
 }: {
   rows: WalletRailRow[]
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
+  addressBookDestinationCount: number | null
   onSelectRail?: (rail: WithdrawalRail) => void
   onViewAllActivity?: () => void
+  onOpenAddressBook: () => void
 }) {
   const visibleRows = rows
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
@@ -3004,21 +3047,21 @@ function WalletOverviewSummary({
                   : sync?.balances.bitcoin.reduce((sum, item) => sum + Number(item.usdValue ?? 0), 0) ?? null
               const connected = row.configured && row.enabled
               const needsAttention = Boolean(row.needsAttentionMessage)
+              const statusLabel = needsAttention ? "Needs attention" : connected ? "Connected" : "Not connected"
+              const statusTone = needsAttention ? "amber" : connected ? "blue" : "default"
               return (
                 <div key={row.label} className="px-4 py-3.5 sm:px-5">
                   <button
                     type="button"
                     onClick={() => onSelectRail?.(row.rail)}
-                    className="grid w-full grid-cols-[minmax(0,1fr)_7.25rem_minmax(4.5rem,auto)] items-center gap-3 rounded-xl text-left transition hover:bg-blue-50/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)]"
+                    className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-3 rounded-xl px-2 py-1.5 text-left transition hover:bg-blue-50/45 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)_auto]"
                   >
                     <p className="min-w-0 text-sm font-semibold text-gray-900">{row.label}</p>
                     <span className="flex justify-center">
-                      <ProviderStatusPill
-                        label={needsAttention ? "Needs attention" : connected ? "Connected" : "Not connected"}
-                        tone={needsAttention ? "amber" : connected ? "blue" : "default"}
-                      />
+                      <StatusBadge label={statusLabel} classes={walletRailStatusClasses(statusTone)} showIcon={false} />
                     </span>
                     <span className="min-w-[72px] text-right text-sm font-semibold tabular-nums text-gray-950 sm:min-w-[92px]">{formatUsd(railUsd)}</span>
+                    <ChevronRight size={15} className="text-gray-400" aria-hidden="true" />
                   </button>
                   {needsAttention ? (
                     <p className="mt-1.5 text-xs leading-4 text-amber-700">{row.needsAttentionMessage}</p>
@@ -3035,30 +3078,35 @@ function WalletOverviewSummary({
       )}
       <div className="overflow-hidden rounded-[1.35rem] border border-blue-200/60 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.07)]">
         <div className="flex items-center justify-between gap-3 border-b border-blue-100/70 bg-blue-50/55 px-4 py-3 sm:px-5">
-          <p className={dashboardSectionLabelClass}>RECENT ACTIVITY</p>
+          <p className={dashboardSectionLabelClass}>RECENT WITHDRAWALS</p>
           {recentItems.length > 0 ? (
             <button
               type="button"
               onClick={onViewAllActivity}
               className="shrink-0 text-xs font-semibold text-blue-700 transition hover:text-blue-900"
             >
-              View All Activity
+              View All Withdrawals
             </button>
           ) : null}
         </div>
         {!hasSyncedOnce && syncing ? (
           <div className="flex items-center gap-1.5 px-4 py-5 sm:px-5">
             <Loader2 size={13} className="animate-spin text-blue-500" />
-            <p className="text-sm text-gray-500">Loading recent activity...</p>
+            <p className="text-sm text-gray-500">Loading recent withdrawals...</p>
           </div>
         ) : recentItems.length === 0 ? (
           <div className="px-4 py-5 sm:px-5">
-            <p className="text-sm text-gray-500">No wallet activity yet.</p>
+            <p className="text-sm text-gray-500">No recent withdrawals yet.</p>
           </div>
         ) : (
           <div className="divide-y divide-blue-50">
             {recentItems.map((item) => (
-              <div key={item.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3 sm:px-5">
+              <button
+                key={item.id}
+                type="button"
+                onClick={onViewAllActivity}
+                className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3 text-left transition hover:bg-blue-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-100 sm:px-5"
+              >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-gray-950">{activityAmountLabel(item)}</p>
                   <p className="mt-0.5 truncate text-xs text-gray-500">
@@ -3066,11 +3114,12 @@ function WalletOverviewSummary({
                   </p>
                 </div>
                 <ActivityStatusPill status={item.status} />
-              </div>
+              </button>
             ))}
           </div>
         )}
       </div>
+      <AddressBookPreviewCard destinationCount={addressBookDestinationCount} onOpen={onOpenAddressBook} />
     </div>
   )
 }
@@ -3172,6 +3221,7 @@ function AssetSelectDropdown({
 function BalanceRows({
   sync,
   syncing,
+  railFilter,
   profileAddresses,
   bitcoinReady,
   bitcoinPayoutEntries,
@@ -3180,6 +3230,7 @@ function BalanceRows({
 }: {
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
+  railFilter?: WithdrawalRail
   profileAddresses: Record<"base" | "solana" | "bitcoin", AddressEntry[]>
   bitcoinReady: boolean
   bitcoinPayoutEntries: AddressEntry[]
@@ -3194,13 +3245,14 @@ function BalanceRows({
     if (profileAddresses.solana.length > 0) rows.push(...(sync?.balances.solana ?? []))
     if (bitcoinReady) rows.push(...(sync?.balances.bitcoin ?? []))
     const visible = rows.filter((row) => {
+      if (railFilter && row.rail !== railFilter) return false
       if (row.rail === "bitcoin") return bitcoinReady
       if (row.rail === "base" && profileAddresses.base.length === 0) return false
       if (row.rail === "solana" && profileAddresses.solana.length === 0) return false
       return row.status === "synced" || row.balance !== null || row.usdValue !== null
     })
     return Array.from(new Map(visible.map((row) => [row.key, row])).values())
-  }, [bitcoinReady, profileAddresses.base.length, profileAddresses.solana.length, sync?.balances])
+  }, [bitcoinReady, profileAddresses.base.length, profileAddresses.solana.length, railFilter, sync?.balances])
 
   function walletAddressForAsset(row: SyncedBalanceAsset) {
     if (row.rail === "base") return profileAddresses.base[0]?.address ?? null
@@ -3244,7 +3296,11 @@ function BalanceRows({
             </div>
             <p className="text-right text-sm font-semibold text-gray-950">
               {row.status === "unavailable" || row.status === "stale" ? (
-                <ProviderStatusPill label={row.status === "stale" ? "Stale" : "Unavailable"} tone={row.status === "stale" ? "amber" : "default"} />
+                <StatusBadge
+                  label={row.status === "stale" ? "Stale" : "Unavailable"}
+                  classes={walletRailStatusClasses(row.status === "stale" ? "amber" : "default")}
+                  showIcon={false}
+                />
               ) : null}
             </p>
           </div>
@@ -3296,6 +3352,37 @@ function BalanceRows({
         )
       })}
     </div>
+  )
+}
+
+function WalletFloatingWorkspace({
+  title,
+  onClose,
+  children,
+}: {
+  title: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  return (
+    <section
+      aria-label={title}
+      data-pinetree-floating-workspace="true"
+      className="space-y-4"
+    >
+      <header className="flex items-start justify-between gap-4">
+        <h2 className="min-w-0 text-base font-semibold text-gray-950">{title}</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Return to Wallet Overview"
+          className={modalCloseButtonClass}
+        >
+          <X size={18} aria-hidden="true" />
+        </button>
+      </header>
+      {children}
+    </section>
   )
 }
 
@@ -3489,11 +3576,11 @@ function ActivityTab({
         {!hasSyncedOnce && syncing ? (
           <div className="flex items-center justify-center gap-1.5 px-4 py-6 text-center sm:px-5">
             <Loader2 size={13} className="animate-spin text-blue-500" />
-            <p className="text-sm text-gray-500">Loading activity...</p>
+            <p className="text-sm text-gray-500">Loading withdrawals...</p>
           </div>
         ) : items.length === 0 ? (
           <div className="px-4 py-6 text-center sm:px-5">
-            <p className="text-sm text-gray-500">No wallet activity yet.</p>
+            <p className="text-sm text-gray-500">No withdrawals yet.</p>
           </div>
         ) : (
           <div className="divide-y divide-blue-50">
@@ -3725,7 +3812,7 @@ function PineTreeWalletRuntime() {
   const [walletOpening, setWalletOpening] = useState(false)
   const [walletSetupOpeningAfterCreate, setWalletSetupOpeningAfterCreate] = useState(false)
   const [openWalletReconnectNeeded, setOpenWalletReconnectNeeded] = useState(false)
-  const [activeTab, setActiveTab] = useState<WalletTab>("overview")
+  const [activeView, setActiveView] = useState<WalletSecondaryView | null>(null)
   const directWalletOpenAttemptedRef = useRef(false)
   const [merchantId, setMerchantId] = useState<string | null>(null)
   const [merchantEmail, setMerchantEmail] = useState<string | null>(null)
@@ -3755,6 +3842,7 @@ function PineTreeWalletRuntime() {
   const [finalProvisioningRefreshAttempted, setFinalProvisioningRefreshAttempted] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [copiedAddress, setCopiedAddress] = useState("")
+  const [addressBookDestinationCount, setAddressBookDestinationCount] = useState<number | null>(null)
   const [enabledRails, setEnabledRails] = useState<EnabledRailState>(defaultEnabledRails)
   const [railReadiness, setRailReadiness] = useState<PineTreeRailReadinessMap | null>(null)
   const [walletSync, setWalletSync] = useState<PineTreeWalletSyncResponse>(defaultWalletSyncState)
@@ -4171,6 +4259,26 @@ function PineTreeWalletRuntime() {
     }
   }, [])
 
+  const fetchAddressBookPreview = useCallback(async (token: string | null = accessTokenRef.current) => {
+    if (!token) {
+      setAddressBookDestinationCount(null)
+      return
+    }
+    try {
+      const res = await fetch("/api/wallets/pinetree-wallet/withdrawal-destinations?include_disabled=true", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        setAddressBookDestinationCount(null)
+        return
+      }
+      const json = (await res.json()) as { destinations?: Array<{ archived_at?: string | null }> }
+      setAddressBookDestinationCount((json.destinations || []).filter((destination) => !destination.archived_at).length)
+    } catch {
+      setAddressBookDestinationCount(null)
+    }
+  }, [])
+
   // --- Load profiles and provider rail enablement from DB on mount ---
   const fetchAllProfiles = useCallback(async () => {
     setProfileState({ kind: "loading" })
@@ -4207,6 +4315,7 @@ function PineTreeWalletRuntime() {
         }),
       ])
       void fetchProviderRailState(token)
+      void fetchAddressBookPreview(token)
 
       let businessProfileCompleteForResume = false
       if (settingsRes.ok) {
@@ -4318,7 +4427,7 @@ function PineTreeWalletRuntime() {
       setBusinessProfileReadiness({ kind: "error" })
       setLightningProfileState({ kind: "none" })
     }
-  }, [fetchProviderRailState])
+  }, [fetchAddressBookPreview, fetchProviderRailState])
 
   useEffect(() => {
     void fetchAllProfiles()
@@ -7662,7 +7771,7 @@ function PineTreeWalletRuntime() {
         setWalletSetupStage("ready")
         clearWalletSetupInProgress()
         autoOpenWalletAfterCreateRef.current = false
-        setActiveTab("overview")
+        setActiveView(null)
         setWalletOpen(true)
         emitWalletSetupDebugEvent("wallet_wallet_page_opened_after_create", { existingProfile: true })
         return
@@ -8266,7 +8375,7 @@ function PineTreeWalletRuntime() {
     clearScheduledWalletOpenAfterCreate()
     walletModalOpenedForAttemptRef.current = true
     setWalletSetupOpeningAfterCreate(false)
-    setActiveTab("overview")
+    setActiveView(null)
     setWalletOpen(true)
     emitWalletSetupStageDiagnostic("wallet_create_modal_opened", stage)
     emitWalletSetupDebugEvent("wallet_wallet_page_opened_after_create", {})
@@ -8379,7 +8488,7 @@ function PineTreeWalletRuntime() {
     // An active or outcome-uncertain withdrawal must be resumed on reopen,
     // never buried back under "overview" - the merchant would otherwise have
     // no way to see whether it succeeded without hunting through tabs.
-    setActiveTab(isWithdrawalActivelyProcessing() ? "withdraw" : "overview")
+    setActiveView(isWithdrawalActivelyProcessing() ? "withdraw" : null)
     setWalletOpening(true)
     setOpenWalletReconnectNeeded(false)
     console.info("[pinetree-wallets] open_wallet_sync_requested", {
@@ -8590,7 +8699,7 @@ function PineTreeWalletRuntime() {
     // Save source address for the post-reconnect effect to check against loaded wallets.
     withdrawalReconnectSourceRef.current = sourceAddress
     setWithdrawalApprovalError("")
-    setActiveTab("withdraw")
+    setActiveView("withdraw")
     setWalletOpen(true)
     await refreshDynamicWalletRuntime("withdrawal_reconnect_before_lookup", { requireApprovalWallet: Boolean(withdrawalReview) })
 
@@ -8920,8 +9029,8 @@ function PineTreeWalletRuntime() {
     setMaxWarning("")
   }
 
-  const handleOverviewRailSelect = useCallback((_rail: WithdrawalRail) => {
-    setActiveTab("balances")
+  const handleOverviewRailSelect = useCallback((rail: WithdrawalRail) => {
+    setActiveView(walletRailDetailView(rail))
   }, [])
 
   function handleEditWithdrawal() {
@@ -8967,7 +9076,7 @@ function PineTreeWalletRuntime() {
 
   function handleDoneWithdrawal() {
     resetWithdrawalDraft()
-    setActiveTab("overview")
+    setActiveView(null)
   }
 
   // Address Book "Withdraw" shortcut: the merchant should never need to
@@ -8990,7 +9099,7 @@ function PineTreeWalletRuntime() {
     }
     setWithdrawalDestination(destination.destination_address)
     setWithdrawalSelectedDestinationId(destination.id)
-    setActiveTab("withdraw")
+    setActiveView("withdraw")
   }
 
   async function handleReviewWithdrawal() {
@@ -10095,151 +10204,180 @@ function PineTreeWalletRuntime() {
 
       {showWalletWorkspace ? (
         <section aria-label="PineTree Wallet workspace" className="space-y-4 md:space-y-5">
-          <nav
-            className="grid grid-cols-2 gap-2 rounded-2xl border border-gray-200/80 bg-white p-2 shadow-sm min-[420px]:grid-cols-3 sm:inline-grid sm:grid-cols-5 sm:gap-1.5"
-            aria-label="PineTree Wallet sections"
-          >
-            {walletTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`min-h-10 rounded-xl px-3 py-2 text-center text-xs font-semibold leading-tight transition sm:whitespace-nowrap sm:px-4 ${
-                  activeTab === tab.id
-                    ? "bg-[#0052FF] text-white"
-                    : "text-gray-600 hover:bg-blue-50 hover:text-blue-800"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </nav>
+          {activeView === null ? (
+            <>
+              <WalletOverviewSummary
+                rows={walletRailRows}
+                sync={walletSync}
+                syncing={walletSyncing}
+                addressBookDestinationCount={addressBookDestinationCount}
+                onSelectRail={handleOverviewRailSelect}
+                onViewAllActivity={() => setActiveView("activity")}
+                onOpenAddressBook={() => setActiveView("address-book")}
+              />
+              <SegmentedButtons
+                options={walletWorkflowOptions}
+                value="none"
+                onChange={(value) => {
+                  if (value !== "none") setActiveView(value)
+                }}
+                className="flex flex-wrap gap-1.5 pt-1"
+                ariaLabel="Wallet workflows"
+              />
+            </>
+          ) : null}
 
-          <div className="min-w-0">
+          {activeView === "base-details" ? (
+            <WalletFloatingWorkspace title="Base Details" onClose={() => setActiveView(null)}>
+              <BalanceRows
+                sync={walletSync}
+                syncing={walletSyncing}
+                railFilter="base"
+                profileAddresses={profileAddresses}
+                bitcoinReady={bitcoinReady}
+                bitcoinPayoutEntries={bitcoinPayoutEntries}
+                copiedAddress={copiedAddress}
+                onCopy={(a) => void copyAddress(a)}
+              />
+            </WalletFloatingWorkspace>
+          ) : null}
 
-            {activeTab === "overview" ? (
-                <>
-                  <WalletOverviewSummary
-                    rows={walletRailRows}
-                    sync={walletSync}
-                    syncing={walletSyncing}
-                    onSelectRail={handleOverviewRailSelect}
-                    onViewAllActivity={() => setActiveTab("activity")}
-                  />
-                </>
-              ) : null}
+          {activeView === "solana-details" ? (
+            <WalletFloatingWorkspace title="Solana Details" onClose={() => setActiveView(null)}>
+              <BalanceRows
+                sync={walletSync}
+                syncing={walletSyncing}
+                railFilter="solana"
+                profileAddresses={profileAddresses}
+                bitcoinReady={bitcoinReady}
+                bitcoinPayoutEntries={bitcoinPayoutEntries}
+                copiedAddress={copiedAddress}
+                onCopy={(a) => void copyAddress(a)}
+              />
+            </WalletFloatingWorkspace>
+          ) : null}
 
-              {activeTab === "balances" ? (
-                <div className="space-y-4">
-                  <BalanceRows
-                    sync={walletSync}
-                    syncing={walletSyncing}
-                    profileAddresses={profileAddresses}
-                    bitcoinReady={bitcoinReady}
-                    bitcoinPayoutEntries={bitcoinPayoutEntries}
-                    copiedAddress={copiedAddress}
-                    onCopy={(a) => void copyAddress(a)}
-                  />
-                </div>
-              ) : null}
+          {activeView === "bitcoin-details" ? (
+            <WalletFloatingWorkspace title="Bitcoin Details" onClose={() => setActiveView(null)}>
+              <BalanceRows
+                sync={walletSync}
+                syncing={walletSyncing}
+                railFilter="bitcoin"
+                profileAddresses={profileAddresses}
+                bitcoinReady={bitcoinReady}
+                bitcoinPayoutEntries={bitcoinPayoutEntries}
+                copiedAddress={copiedAddress}
+                onCopy={(a) => void copyAddress(a)}
+              />
+            </WalletFloatingWorkspace>
+          ) : null}
 
-              {activeTab === "withdraw" ? (
-                <section className="rounded-[1.35rem] border border-blue-200/60 bg-white px-4 py-4 shadow-[0_18px_42px_rgba(15,23,42,0.07)] sm:px-5 sm:py-5">
-                  <WithdrawalFormShell
-                    rail={withdrawalRail}
-                    asset={withdrawalAsset}
-                    assetOptions={withdrawableAssetOptions}
-                    bitcoinTransferType={withdrawalBitcoinTransferType}
-                    onBitcoinTransferTypeChange={(value) => {
-                      setWithdrawalBitcoinTransferType(value)
-                      // A saved destination or validation error from the previous transfer
-                      // type is never compatible with the new one - clear both, but never
-                      // touch Address Book (this only clears local form state).
-                      setWithdrawalSelectedDestinationId(null)
-                      setWithdrawalScreen("form")
-                      setWithdrawalReview(null)
-                      setWithdrawalSubmitResult(null)
-                      setWithdrawalError("")
-                      setWithdrawalApprovalError("")
-                      setInstantSendIdempotencyKey(null)
-                    }}
-                    destinationAddress={withdrawalDestination}
-                    selectedDestinationId={withdrawalSelectedDestinationId}
-                    amountDecimal={withdrawalAmount}
-                    screen={withdrawalScreen}
-                    review={withdrawalReview}
-                    error={withdrawalError}
-                    approvalError={withdrawalApprovalError}
-                    reviewing={reviewingWithdrawal}
-                    submitting={submittingWithdrawal}
-                    submitResult={withdrawalSubmitResult}
-                    selectedBalance={selectedWithdrawalBalance}
-                    diagnostics={withdrawalDiagnostics}
-                    debugEnabled={walletSyncDebugQueryEnabled}
-                    accessToken={accessTokenRef.current}
-                    maxEstimating={maxEstimating}
-                    maxWarning={maxWarning}
-                    onAssetSelect={handleWithdrawalAssetSelect}
-                    onDestinationChange={(value) => {
-                      setWithdrawalDestination(value)
-                      // A manual edit only clears which saved destination is
-                      // considered "selected" - it must never delete or modify
-                      // the saved destination itself.
-                      setWithdrawalSelectedDestinationId(null)
-                      setWithdrawalScreen("form")
-                      setWithdrawalReview(null)
-                      setWithdrawalSubmitResult(null)
-                      setWithdrawalError("")
-                      setWithdrawalApprovalError("")
-                      setInstantSendIdempotencyKey(null)
-                    }}
-                    onSelectDestination={(destination) => {
-                      if (!destination) {
-                        setWithdrawalSelectedDestinationId(null)
-                        return
-                      }
-                      setWithdrawalDestination(destination.destination_address)
-                      setWithdrawalSelectedDestinationId(destination.id)
-                      if (withdrawalRail === "bitcoin" && destination.method) {
-                        setWithdrawalBitcoinTransferType(destination.method)
-                      }
-                      setWithdrawalScreen("form")
-                      setWithdrawalReview(null)
-                      setWithdrawalSubmitResult(null)
-                      setWithdrawalError("")
-                      setWithdrawalApprovalError("")
-                      setInstantSendIdempotencyKey(null)
-                    }}
-                    onAmountChange={(value) => {
-                      setWithdrawalAmount(value)
-                      setWithdrawalScreen("form")
-                      setWithdrawalReview(null)
-                      setWithdrawalSubmitResult(null)
-                      setWithdrawalError("")
-                      setWithdrawalApprovalError("")
-                      setInstantSendIdempotencyKey(null)
-                    }}
-                    onMaxAmount={handleMaxWithdrawalAmount}
-                    onEdit={handleEditWithdrawal}
-                    onDone={handleDoneWithdrawal}
-                    onCancel={handleCancelWithdrawal}
-                    onReview={() => void handleReviewWithdrawal()}
-                    onSubmit={(context) => void handleSubmitWithdrawal(context)}
-                    onOpenWallet={handleWithdrawalReconnect}
-                    onOpenAddressBook={() => setActiveTab("address-book")}
-                    onFinishSetup={handleFinishWalletSetup}
-                  />
-                </section>
-              ) : null}
+          {activeView === "withdraw" ? (
+            <WalletFloatingWorkspace title="Withdraw" onClose={() => setActiveView(null)}>
+              <WithdrawalFormShell
+                rail={withdrawalRail}
+                asset={withdrawalAsset}
+                assetOptions={withdrawableAssetOptions}
+                bitcoinTransferType={withdrawalBitcoinTransferType}
+                onBitcoinTransferTypeChange={(value) => {
+                  setWithdrawalBitcoinTransferType(value)
+                  // A saved destination or validation error from the previous transfer
+                  // type is never compatible with the new one - clear both, but never
+                  // touch Address Book (this only clears local form state).
+                  setWithdrawalSelectedDestinationId(null)
+                  setWithdrawalScreen("form")
+                  setWithdrawalReview(null)
+                  setWithdrawalSubmitResult(null)
+                  setWithdrawalError("")
+                  setWithdrawalApprovalError("")
+                  setInstantSendIdempotencyKey(null)
+                }}
+                destinationAddress={withdrawalDestination}
+                selectedDestinationId={withdrawalSelectedDestinationId}
+                amountDecimal={withdrawalAmount}
+                screen={withdrawalScreen}
+                review={withdrawalReview}
+                error={withdrawalError}
+                approvalError={withdrawalApprovalError}
+                reviewing={reviewingWithdrawal}
+                submitting={submittingWithdrawal}
+                submitResult={withdrawalSubmitResult}
+                selectedBalance={selectedWithdrawalBalance}
+                diagnostics={withdrawalDiagnostics}
+                debugEnabled={walletSyncDebugQueryEnabled}
+                accessToken={accessTokenRef.current}
+                maxEstimating={maxEstimating}
+                maxWarning={maxWarning}
+                onAssetSelect={handleWithdrawalAssetSelect}
+                onDestinationChange={(value) => {
+                  setWithdrawalDestination(value)
+                  // A manual edit only clears which saved destination is
+                  // considered "selected" - it must never delete or modify
+                  // the saved destination itself.
+                  setWithdrawalSelectedDestinationId(null)
+                  setWithdrawalScreen("form")
+                  setWithdrawalReview(null)
+                  setWithdrawalSubmitResult(null)
+                  setWithdrawalError("")
+                  setWithdrawalApprovalError("")
+                  setInstantSendIdempotencyKey(null)
+                }}
+                onSelectDestination={(destination) => {
+                  if (!destination) {
+                    setWithdrawalSelectedDestinationId(null)
+                    return
+                  }
+                  setWithdrawalDestination(destination.destination_address)
+                  setWithdrawalSelectedDestinationId(destination.id)
+                  if (withdrawalRail === "bitcoin" && destination.method) {
+                    setWithdrawalBitcoinTransferType(destination.method)
+                  }
+                  setWithdrawalScreen("form")
+                  setWithdrawalReview(null)
+                  setWithdrawalSubmitResult(null)
+                  setWithdrawalError("")
+                  setWithdrawalApprovalError("")
+                  setInstantSendIdempotencyKey(null)
+                }}
+                onAmountChange={(value) => {
+                  setWithdrawalAmount(value)
+                  setWithdrawalScreen("form")
+                  setWithdrawalReview(null)
+                  setWithdrawalSubmitResult(null)
+                  setWithdrawalError("")
+                  setWithdrawalApprovalError("")
+                  setInstantSendIdempotencyKey(null)
+                }}
+                onMaxAmount={handleMaxWithdrawalAmount}
+                onEdit={handleEditWithdrawal}
+                onDone={handleDoneWithdrawal}
+                onCancel={handleCancelWithdrawal}
+                onReview={() => void handleReviewWithdrawal()}
+                onSubmit={(context) => void handleSubmitWithdrawal(context)}
+                onOpenWallet={handleWithdrawalReconnect}
+                onOpenAddressBook={() => setActiveView("address-book")}
+                onFinishSetup={handleFinishWalletSetup}
+              />
+            </WalletFloatingWorkspace>
+          ) : null}
 
-              {activeTab === "activity" ? (
-                <ActivityTab sync={walletSync} syncing={walletSyncing} accessToken={accessTokenRef.current} />
-              ) : null}
+          {activeView === "activity" ? (
+            <WalletFloatingWorkspace title="Activity" onClose={() => setActiveView(null)}>
+              <ActivityTab sync={walletSync} syncing={walletSyncing} accessToken={accessTokenRef.current} />
+            </WalletFloatingWorkspace>
+          ) : null}
 
-              {activeTab === "address-book" ? (
-                <AddressBookTab accessToken={accessTokenRef.current} onWithdraw={handleWithdrawShortcut} />
-              ) : null}
-          </div>
+          {activeView === "address-book" ? (
+            <WalletFloatingWorkspace
+              title="Address Book"
+              onClose={() => {
+                setActiveView(null)
+                void fetchAddressBookPreview()
+              }}
+            >
+              <AddressBookTab accessToken={accessTokenRef.current} onWithdraw={handleWithdrawShortcut} />
+            </WalletFloatingWorkspace>
+          ) : null}
         </section>
       ) : null}
     </>

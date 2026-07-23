@@ -58,13 +58,14 @@ describe("rail status vocabulary - Connected / Setup needed / Not connected", ()
   })
 })
 
-describe("Wallet modal tabs and rail state", () => {
-  it("modal tabs are Overview, Balances, and Withdraw only", () => {
-    expect(walletPage).toContain('{ id: "overview", label: "Overview" }')
-    expect(walletPage).toContain('{ id: "balances", label: "Balances" }')
-    expect(walletPage).toContain('{ id: "withdraw", label: "Withdraw" }')
+describe("Wallet workflow navigation and rail state", () => {
+  it("wallet navigation removes overview/balances/address-book tabs and keeps workflow actions", () => {
+    expect(walletPage).not.toContain('{ id: "overview", label: "Overview" }')
+    expect(walletPage).not.toContain('{ id: "balances", label: "Balances" }')
+    expect(walletPage).toContain('{ value: "withdraw", label: "Withdraw" }')
+    expect(walletPage).toContain('{ value: "activity", label: "Activity" }')
     expect(walletPage).not.toContain('label: "Wallets"')
-    expect(walletPage).not.toContain('activeTab === "wallets"')
+    expect(walletPage).not.toContain('activeView === "wallets"')
   })
 
   it("wallet rail chip requires both configured AND enabled to show as active", () => {
@@ -86,7 +87,7 @@ describe("Wallet modal tabs and rail state", () => {
   })
 })
 
-describe("Balances tab wallet details", () => {
+describe("Rail detail wallet details", () => {
   it("BalanceRows uses standalone asset cards with wallet address details", () => {
     const balanceRowsSrc = walletPage.slice(
       walletPage.indexOf("function BalanceRows("),

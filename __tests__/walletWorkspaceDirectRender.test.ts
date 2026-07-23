@@ -42,7 +42,7 @@ describe("PineTree Wallet workspace renders directly on the route, not behind a 
   it("page mode has no duplicate workspace header inside the wallet content", () => {
     const workspaceBlock = page.slice(
       page.indexOf('aria-label="PineTree Wallet workspace"'),
-      page.indexOf('aria-label="PineTree Wallet sections"')
+      page.indexOf("activeView === null")
     )
     const pageComponent = page.slice(page.indexOf("export default function PineTreeWalletPage()"))
     expect(pageComponent).toContain('<h1 className={dashboardPageTitleClass}>PineTree Wallet</h1>')
@@ -75,7 +75,7 @@ describe("PineTree Wallet workspace renders directly on the route, not behind a 
 })
 
 describe("Wallet workspace loading state is distinct from empty state", () => {
-  function overviewRecentActivitySrc() {
+  function overviewRecentWithdrawalsSrc() {
     return page.slice(
       page.indexOf("function WalletOverviewSummary("),
       page.indexOf("function AssetSelectDropdown(")
@@ -96,11 +96,11 @@ describe("Wallet workspace loading state is distinct from empty state", () => {
     )
   }
 
-  it("Overview's Recent Activity shows a loading state before the first sync, ahead of the empty-state text", () => {
-    const src = overviewRecentActivitySrc()
+  it("Overview's Recent Withdrawals shows a loading state before the first sync, ahead of the empty-state text", () => {
+    const src = overviewRecentWithdrawalsSrc()
     expect(src).toContain("const hasSyncedOnce = Boolean(sync?.lastSyncedAt)")
     const loadingIndex = src.indexOf("!hasSyncedOnce && syncing")
-    const emptyIndex = src.indexOf("No wallet activity yet.")
+    const emptyIndex = src.indexOf("No recent withdrawals yet.")
     expect(loadingIndex).toBeGreaterThan(-1)
     expect(emptyIndex).toBeGreaterThan(-1)
     expect(loadingIndex).toBeLessThan(emptyIndex)
@@ -110,7 +110,7 @@ describe("Wallet workspace loading state is distinct from empty state", () => {
     const src = activityTabSrc()
     expect(src).toContain("const hasSyncedOnce = Boolean(sync?.lastSyncedAt)")
     const loadingIndex = src.indexOf("!hasSyncedOnce && syncing")
-    const emptyIndex = src.indexOf("No wallet activity yet.")
+    const emptyIndex = src.indexOf("No withdrawals yet.")
     expect(loadingIndex).toBeGreaterThan(-1)
     expect(emptyIndex).toBeGreaterThan(-1)
     expect(loadingIndex).toBeLessThan(emptyIndex)
@@ -126,23 +126,21 @@ describe("Wallet workspace loading state is distinct from empty state", () => {
   })
 })
 
-describe("Mobile wallet workspace tabs stay contained (no full-page horizontal overflow)", () => {
-  it("the five-tab strip uses a wrapping responsive grid, not an unconstrained flex row", () => {
+describe("Mobile wallet workflow navigation stays contained", () => {
+  it("workflow navigation reuses the shared segmented button component", () => {
     const navBlock = page.slice(
-      page.indexOf('aria-label="PineTree Wallet sections"') - 200,
-      page.indexOf('aria-label="PineTree Wallet sections"') + 200
+      page.indexOf('ariaLabel="Wallet workflows"') - 400,
+      page.indexOf('ariaLabel="Wallet workflows"') + 200
     )
-    expect(navBlock).toContain("grid-cols-2")
-    expect(navBlock).toContain("min-[420px]:grid-cols-3")
-    expect(navBlock).toContain("sm:grid-cols-5")
+    expect(navBlock).toContain("<SegmentedButtons")
+    expect(navBlock).toContain("walletWorkflowOptions")
+    expect(page).toContain('className="flex flex-wrap gap-1.5 pt-1"')
   })
 
-  it("tab labels can wrap on narrow viewports instead of clipping or forcing overflow", () => {
-    const buttonClassIndex = page.indexOf("min-h-10 rounded-xl px-3 py-2 text-center text-xs font-semibold leading-tight")
-    expect(buttonClassIndex).toBeGreaterThan(-1)
-    const buttonClass = page.slice(buttonClassIndex - 40, buttonClassIndex + 150)
-    expect(buttonClass).not.toMatch(/(?<!sm:)whitespace-nowrap/)
-    expect(buttonClass).toContain("sm:whitespace-nowrap")
+  it("overview and address-book are not permanent navigation buttons", () => {
+    expect(page).not.toContain('{ id: "overview", label: "Overview" }')
+    expect(page).not.toContain('{ id: "balances", label: "Balances" }')
+    expect(page).not.toContain('{ id: "address-book", label: "Address Book" }')
   })
 })
 
@@ -177,10 +175,17 @@ describe("Wallet dashboard page hierarchy matches Reports-style surfaces", () =>
     )
   }
 
+  function overviewSrc() {
+    return page.slice(
+      page.indexOf("function WalletOverviewSummary("),
+      page.indexOf("function AssetSelectDropdown(")
+    )
+  }
+
   it("does not wrap the ready wallet route in a giant workspace card", () => {
     const workspaceOpen = page.slice(
       page.indexOf('aria-label="PineTree Wallet workspace"'),
-      page.indexOf('aria-label="PineTree Wallet sections"')
+      page.indexOf("activeView === null")
     )
     expect(workspaceOpen).toContain('className="space-y-4 md:space-y-5"')
     expect(workspaceOpen).not.toContain("max-w-[42rem]")
@@ -188,11 +193,17 @@ describe("Wallet dashboard page hierarchy matches Reports-style surfaces", () =>
     expect(workspaceOpen).not.toContain("shadow-[0_32px_100px")
   })
 
-  it("renders wallet tabs before content cards, outside the tab body", () => {
+  it("renders the overview directly with Total Balance as the first card", () => {
     const src = workspaceSrc()
-    expect(src.indexOf('aria-label="PineTree Wallet sections"')).toBeLessThan(src.indexOf('activeTab === "overview"'))
-    expect(src.indexOf('aria-label="PineTree Wallet sections"')).toBeLessThan(src.indexOf('activeTab === "balances"'))
-    expect(src).toContain('<div className="min-w-0">')
+    const overview = overviewSrc()
+    expect(src).toContain("activeView === null")
+    expect(src.indexOf("<WalletOverviewSummary")).toBeLessThan(src.indexOf("<SegmentedButtons"))
+    expect(overview.indexOf("TOTAL BALANCE")).toBeLessThan(overview.indexOf("WALLET SUMMARY"))
+    expect(overview.indexOf("WALLET SUMMARY")).toBeLessThan(overview.indexOf("RECENT WITHDRAWALS"))
+    expect(overview.indexOf("RECENT WITHDRAWALS")).toBeLessThan(overview.indexOf("AddressBookPreviewCard"))
+    expect(src).not.toContain('aria-label="PineTree Wallet sections"')
+    expect(src).not.toContain('activeTab === "overview"')
+    expect(src).not.toContain('activeTab === "balances"')
   })
 
   it("renders balances as a complete card list without selected dropdown state", () => {
@@ -213,6 +224,19 @@ describe("Wallet dashboard page hierarchy matches Reports-style surfaces", () =>
     expect(src).not.toContain("Provider Reference")
     expect(src).not.toContain("Raw provider status")
     expect(src).not.toContain("Settlement Reference")
+  })
+
+  it("secondary wallet views render as floating workspaces with the standard outlined X", () => {
+    const src = workspaceSrc()
+    expect(page).toContain("function WalletFloatingWorkspace")
+    expect(page).toContain("className={modalCloseButtonClass}")
+    expect(page).toContain('aria-label="Return to Wallet Overview"')
+    expect(src).toContain('activeView === "withdraw"')
+    expect(src).toContain('activeView === "activity"')
+    expect(src).toContain('activeView === "base-details"')
+    expect(src).toContain('activeView === "solana-details"')
+    expect(src).toContain('activeView === "bitcoin-details"')
+    expect(src).toContain('activeView === "address-book"')
   })
 
   it("wallet withdrawal status pills use the shared platform status component", () => {

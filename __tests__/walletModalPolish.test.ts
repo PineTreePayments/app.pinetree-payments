@@ -39,7 +39,7 @@ function runtimeSrc() {
   )
 }
 
-describe("Overview tab - polished PineTree summary", () => {
+describe("Wallet overview - polished PineTree summary", () => {
   it("renders total balance hero card with blue glow treatment", () => {
     const src = walletOverviewSrc()
     expect(src).toContain("TOTAL BALANCE")
@@ -69,31 +69,36 @@ describe("Overview tab - polished PineTree summary", () => {
 
   it("Wallet Summary rows keep rail, status, and amount aligned", () => {
     const src = walletOverviewSrc()
-    expect(src).toContain("grid-cols-[minmax(0,1fr)_7.25rem_minmax(4.5rem,auto)]")
-    expect(src).toContain("sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)]")
+    expect(src).toContain("grid-cols-[minmax(0,1fr)_auto_auto_auto]")
+    expect(src).toContain("sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)_auto]")
     expect(src).toContain("className=\"flex justify-center\"")
-    expect(src).toContain("ProviderStatusPill")
+    expect(src).toContain("StatusBadge")
+    expect(src).toContain("walletRailStatusClasses")
+    expect(src).toContain("<ChevronRight")
     expect(src).toContain("text-right")
   })
 
-  it("PineTree Wallet withdrawal statuses use the shared platform status badge", () => {
+  it("PineTree Wallet statuses use the shared platform status badge", () => {
     expect(walletPage).not.toContain("function WalletStatusPill")
     expect(walletPage).toContain("function ActivityStatusPill")
     expect(walletPage).toContain("<StatusBadge status={status} />")
     expect(walletPage).toContain('import StatusBadge from "@/components/ui/StatusBadge"')
     expect(walletOverviewSrc()).toContain("ActivityStatusPill")
+    expect(walletPage).not.toContain("ProviderStatusPill")
   })
 
-  it("Overview renders Total Balance, Wallet Summary, and compact Recent Activity only", () => {
+  it("Overview renders Total Balance, Wallet Summary, Recent Withdrawals, and Address Book", () => {
     const src = walletOverviewSrc()
     expect(src).toContain("TOTAL BALANCE")
     expect(src).toContain("WALLET SUMMARY")
-    expect(src).toContain("RECENT ACTIVITY")
+    expect(src).toContain("RECENT WITHDRAWALS")
     expect(src).toContain("recentItems")
     expect(src).toContain("slice(0, 3)")
-    expect(src).toContain("View All Activity")
+    expect(src).toContain("View All Withdrawals")
+    expect(src).toContain("AddressBookPreviewCard")
+    expect(walletPage).toContain("ADDRESS BOOK")
     expect(src).not.toContain("Bitcoin Lightning payout")
-    expect(src).not.toContain("RECENT WITHDRAWALS")
+    expect(src).not.toContain("RECENT ACTIVITY")
   })
 
   it("shows Last synced or Pending sync copy", () => {
@@ -114,7 +119,7 @@ describe("Overview tab - polished PineTree summary", () => {
   })
 })
 
-describe("Balances tab - complete standalone balance card list", () => {
+describe("Rail detail workspaces - complete standalone balance card list", () => {
   it("BalanceRows renders all live balance options as cards without a dropdown dependency", () => {
     const src = balanceRowsSrc()
     expect(src).toContain("balanceOptions")
@@ -197,10 +202,10 @@ describe("Balances tab - complete standalone balance card list", () => {
     expect(src).not.toContain("Speed")
   })
 
-  it("Balances tab does not render Lightning settlement UI", () => {
+  it("rail detail workspaces do not render Lightning settlement UI", () => {
     const balancesSection = walletPage.slice(
-      walletPage.indexOf('activeTab === "balances"'),
-      walletPage.indexOf('activeTab === "withdraw"')
+      walletPage.indexOf('activeView === "bitcoin-details"'),
+      walletPage.indexOf('activeView === "withdraw"')
     )
     expect(balancesSection).not.toContain("LightningSettlementPanel")
     expect(balanceRowsSrc()).not.toContain("Lightning settlement")
@@ -210,27 +215,26 @@ describe("Balances tab - complete standalone balance card list", () => {
 })
 
 describe("Provider-branded wallet tab removed", () => {
-  it("page tabs include exactly Overview, Balances, Withdraw, Activity, and Address Book", () => {
+  it("wallet navigation keeps only workflow actions and removes overview/balances/address-book tabs", () => {
     expect(walletPage).toContain(
-      'type WalletTab = "overview" | "balances" | "withdraw" | "activity" | "address-book"'
+      'type WalletSecondaryView = "withdraw" | "activity" | "address-book" | "base-details" | "solana-details" | "bitcoin-details"'
     )
-    expect(walletPage).toContain('{ id: "overview", label: "Overview" }')
-    expect(walletPage).toContain('{ id: "balances", label: "Balances" }')
-    expect(walletPage).toContain('{ id: "withdraw", label: "Withdraw" }')
-    expect(walletPage).toContain('{ id: "activity", label: "Activity" }')
-    expect(walletPage).toContain('{ id: "address-book", label: "Address Book" }')
+    expect(walletPage).toContain("const walletWorkflowOptions")
+    expect(walletPage).toContain('{ value: "withdraw", label: "Withdraw" }')
+    expect(walletPage).toContain('{ value: "activity", label: "Activity" }')
+    expect(walletPage).not.toContain('{ id: "overview", label: "Overview" }')
+    expect(walletPage).not.toContain('{ id: "balances", label: "Balances" }')
+    expect(walletPage).not.toContain('{ id: "address-book", label: "Address Book" }')
     expect(walletPage).not.toContain('{ id: "speed"')
     expect(walletPage).not.toContain("Speed Wallet")
     expect(walletPage).not.toContain('{ id: "automatic-settlement"')
-    expect(walletPage).toContain("grid-cols-2")
-    expect(walletPage).toContain("min-[420px]:grid-cols-3")
-    expect(walletPage).toContain("sm:grid-cols-5")
-    expect(walletPage).toContain("whitespace-nowrap")
+    expect(walletPage).toContain("<SegmentedButtons")
+    expect(walletPage).toContain('ariaLabel="Wallet workflows"')
     expect(walletPage).not.toContain("grid-cols-6")
     expect(walletPage).not.toContain('label: "Wallets"')
-    expect(walletPage).not.toContain('activeTab === "wallets"')
-    expect(walletPage).not.toContain('activeTab === "speed"')
-    expect(walletPage).toContain('activeTab === "address-book"')
+    expect(walletPage).not.toContain('activeView === "wallets"')
+    expect(walletPage).not.toContain('activeView === "speed"')
+    expect(walletPage).toContain('activeView === "address-book"')
   })
 
   it("old wallet-row and receive-row components are gone", () => {
@@ -252,17 +256,17 @@ describe("Provider-branded wallet tab removed", () => {
     expect(modalSrc).not.toMatch(/\bSpeed\b/)
   })
 
-  it("Bitcoin overview rows open the unified Balances tab without relying on a hidden selected balance", () => {
+  it("Bitcoin overview rows open rail detail workspaces without relying on a hidden selected balance", () => {
     const src = runtimeSrc()
     expect(src).toContain("handleOverviewRailSelect")
-    expect(src).toContain('setActiveTab("balances")')
+    expect(src).toContain("setActiveView(walletRailDetailView(rail))")
     expect(src).toContain("onSelectRail={handleOverviewRailSelect}")
     expect(walletOverviewSrc()).toContain("onClick={() => onSelectRail?.(row.rail)}")
     expect(balanceRowsSrc()).not.toContain("selectedKey")
     expect(balanceRowsSrc()).not.toContain("onSelectKey")
   })
 
-  it("Bitcoin appears in Overview, Balances, Withdraw, and Activity as a unified PineTree rail", () => {
+  it("Bitcoin appears in Overview, Details, Withdraw, and Activity as a unified PineTree rail", () => {
     expect(walletPage).toContain('label: "Bitcoin" as const')
     expect(walletPage).toContain('pendingBalance("BTC", "bitcoin", "BTC", "bitcoin_lightning", "speed", 8)')
     expect(walletPage).toContain('bitcoin: ["BTC"]')
@@ -480,7 +484,7 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
   it("wallet workspace has no duplicate internal title or page-level close control", () => {
     const workspaceLead = walletPage.slice(
       walletPage.indexOf('aria-label="PineTree Wallet workspace"'),
-      walletPage.indexOf('aria-label="PineTree Wallet sections"')
+      walletPage.indexOf("activeView === null")
     )
     const pageComponent = walletPage.slice(walletPage.indexOf("export default function PineTreeWalletPage()"))
     expect(pageComponent).toContain('<h1 className={dashboardPageTitleClass}>PineTree Wallet</h1>')
@@ -583,7 +587,7 @@ describe("Activity tab - recent withdrawal visibility", () => {
 
   it("Activity tab shows empty state when no activity exists", () => {
     const src = activityTabSrc()
-    expect(src).toContain("No wallet activity yet.")
+    expect(src).toContain("No withdrawals yet.")
     expect(src).toContain("items.length === 0")
   })
 
@@ -619,10 +623,10 @@ describe("Activity tab - recent withdrawal visibility", () => {
     expect(walletPage).toContain('import StatusBadge from "@/components/ui/StatusBadge"')
   })
 
-  it("Activity tab is wired to walletSync and walletSyncing props", () => {
+  it("Activity workspace is wired to walletSync and walletSyncing props", () => {
     const src = walletPage.slice(
-      walletPage.indexOf('activeTab === "activity"'),
-      walletPage.indexOf("activeTab === \"activity\"") + 200
+      walletPage.indexOf('activeView === "activity"'),
+      walletPage.indexOf('activeView === "address-book"')
     )
     expect(src).toContain("walletSync")
     expect(src).toContain("walletSyncing")
