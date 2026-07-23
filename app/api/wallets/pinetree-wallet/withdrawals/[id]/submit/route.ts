@@ -44,10 +44,27 @@ export async function POST(
       txHashPresent: Boolean(result.request.tx_hash),
       providerReferencePresent: Boolean(result.request.provider_reference),
     })
+    if (result.request.tx_hash) {
+      console.info("[pinetree-withdrawals] transaction_hash_persisted", {
+        correlationId,
+        merchantId,
+        requestId: id,
+        rail: result.request.rail,
+        asset: result.request.asset,
+        provider: "dynamic",
+        txHashSuffix: result.request.tx_hash.slice(-8),
+      })
+    }
     console.info("[pinetree-withdrawals] SUBMIT_RETURNED", {
       correlationId, merchantId, requestId: id, buildId, routeStage: "submit_returned", merchantStatus: result.merchantStatus,
     })
-    await syncPineTreeWalletBalances(merchantId).catch((syncError) => {
+    // Fire-and-forget: the transaction is already broadcast/persisted at this point
+    // (completeDynamicWalletWithdrawal above already succeeded), so the client must
+    // leave the "approving" screen now. A slow or hung Base/Solana RPC call inside
+    // this multi-rail balance resync must never block the submit response - it used
+    // to, which left the UI stuck on "Approving withdrawal" indefinitely even after
+    // Dynamic had already accepted the transaction.
+    void syncPineTreeWalletBalances(merchantId).catch((syncError) => {
       console.warn("[pinetree-balances] withdrawal_submit_balance_sync_failed", {
         merchantId,
         requestId: id,

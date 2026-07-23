@@ -43,7 +43,7 @@ describe("Bitcoin wallet visibility regressions", () => {
   })
 
   it("routes the main BTC withdrawal flow through generic Instant Send with exact sats", () => {
-    expect(wallet).toContain('fetch("/api/wallets/withdrawals"')
+    expect(wallet).toContain('fetchWithTimeout("/api/wallets/withdrawals"')
     expect(wallet).toContain('"Idempotency-Key": instantSendIdempotencyKey')
     expect(wallet).toContain('asset: "SATS"')
     expect(wallet).toContain("btcDecimalToSats")

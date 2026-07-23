@@ -136,7 +136,11 @@ export async function POST(req: NextRequest) {
         callGraph: "route->canonicalWithdrawal->provider",
         status,
       })
-      await refreshBalancesAfterWithdrawal(merchantId, {
+      // Fire-and-forget: the withdrawal already succeeded/failed at this point, so
+      // the client must not wait on a full multi-rail balance resync before it can
+      // leave the "approving" screen (a slow/hung provider or RPC call here used to
+      // freeze the whole response, leaving the UI stuck indefinitely).
+      void refreshBalancesAfterWithdrawal(merchantId, {
         rail: "bitcoin",
         asset: "BTC",
         status,
@@ -179,7 +183,18 @@ export async function POST(req: NextRequest) {
       callGraph: "route->createWalletWithdrawal->walletOperations->speedWalletAdapter->speedWalletManagement->speedRequest(/send)",
       status: result.operation.status,
     })
-    await refreshBalancesAfterWithdrawal(merchantId, {
+    if (result.operation.txHash) {
+      console.info("[pinetree-withdrawals] transaction_hash_persisted", {
+        correlationId,
+        merchantId,
+        requestId: result.operation.id,
+        rail: "bitcoin",
+        asset: "BTC",
+        provider: "wallet_provider",
+        txHashSuffix: result.operation.txHash.slice(-8),
+      })
+    }
+    void refreshBalancesAfterWithdrawal(merchantId, {
       rail: "bitcoin",
       asset: "BTC",
       status: result.operation.status,
@@ -189,7 +204,7 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     const failure = routeFailure(error)
-    await refreshBalancesAfterWithdrawal(merchantId, {
+    void refreshBalancesAfterWithdrawal(merchantId, {
       rail: "bitcoin",
       asset: "BTC",
       status: "failed",

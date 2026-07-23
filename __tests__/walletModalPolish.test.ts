@@ -32,6 +32,13 @@ function withdrawalFormSrc() {
   )
 }
 
+function withdrawalResultCardSrc() {
+  return walletPage.slice(
+    walletPage.indexOf("function WithdrawalResultCard("),
+    walletPage.indexOf("function WithdrawalFormShell(")
+  )
+}
+
 function runtimeSrc() {
   return walletPage.slice(
     walletPage.indexOf("function PineTreeWalletRuntime("),
@@ -323,17 +330,19 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(walletPage).toContain('setWithdrawalScreen("form")')
   })
 
-  it("withdraw tab uses isolated form, review, approving, submitted, and failed screens", () => {
+  it("withdraw tab uses isolated form/review screens plus one shared approving/submitted/failed result card", () => {
     const src = withdrawalFormSrc()
+    const resultCardSrc = withdrawalResultCardSrc()
     expect(walletPage).toContain('type WithdrawalScreen = "form" | "review" | "approving" | "submitted" | "failed"')
     expect(src).toContain('if (screen === "review" && review)')
-    expect(src).toContain('if (screen === "approving")')
-    expect(src).toContain('if (screen === "submitted" && submitResult)')
-    expect(src).toContain('if (screen === "failed")')
-    expect(src).toContain("Approving withdrawal")
-    expect(src).toContain("Confirm this withdrawal in PineTree Wallet.")
-    expect(src).toContain("Withdrawal failed")
-    expect(src).toContain("Done")
+    expect(src).toContain('if (screen === "approving" || screen === "failed" || (screen === "submitted" && submitResult))')
+    expect(src).toContain("<WithdrawalResultCard")
+    expect(resultCardSrc).toContain('if (kind === "authorizing")')
+    expect(resultCardSrc).toContain('if (kind === "submitted" && submitResult)')
+    expect(resultCardSrc).toContain("Authorizing withdrawal")
+    expect(resultCardSrc).toContain("Confirm this withdrawal in PineTree Wallet.")
+    expect(resultCardSrc).toContain("Withdrawal couldn't be completed")
+    expect(resultCardSrc).toContain("Done")
     expect(src).not.toContain("primaryActionLabel")
     expect(src).not.toContain("onClick={primaryAction}")
     expect(src).not.toContain("Wallet approval")
@@ -344,7 +353,7 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     const src = withdrawalFormSrc()
     const reviewScreen = src.slice(
       src.indexOf('if (screen === "review" && review)'),
-      src.indexOf('if (screen === "approving")')
+      src.indexOf('if (screen === "approving" || screen === "failed" || (screen === "submitted" && submitResult))')
     )
     expect(reviewScreen).toContain("rounded-[1.35rem]")
     expect(reviewScreen).toContain("border-blue-200/70")
@@ -362,7 +371,7 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     const src = withdrawalFormSrc().replace(/\r\n/g, "\n")
     const reviewScreen = src.slice(
       src.indexOf('if (screen === "review" && review)'),
-      src.indexOf('if (screen === "approving")')
+      src.indexOf('if (screen === "approving" || screen === "failed" || (screen === "submitted" && submitResult))')
     )
     expect(reviewScreen).toContain("{reviewActionLabel}")
     expect(reviewScreen).toContain(">\n            Back\n          </button>")

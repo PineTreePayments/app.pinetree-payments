@@ -1673,9 +1673,9 @@ describe("PineTree embedded wallet setup", () => {
   it("uses separate withdrawal screens instead of stacked review and submit panels", () => {
     expect(page).toContain('type WithdrawalScreen = "form" | "review" | "approving" | "submitted" | "failed"')
     expect(page).toContain('if (screen === "review" && review)')
-    expect(page).toContain('if (screen === "approving")')
-    expect(page).toContain('if (screen === "submitted" && submitResult)')
-    expect(page).toContain('if (screen === "failed")')
+    // approving/submitted/failed all render through the one shared WithdrawalResultCard.
+    expect(page).toContain('if (screen === "approving" || screen === "failed" || (screen === "submitted" && submitResult))')
+    expect(page).toContain("function WithdrawalResultCard({")
     expect(page).not.toContain("const primaryActionLabel")
     expect(page).not.toContain("onClick={primaryAction}")
   })
@@ -1683,9 +1683,9 @@ describe("PineTree embedded wallet setup", () => {
   it("withdrawal screen progresses through review, approving, submitted, and failed states", () => {
     expect(page).toContain("Review withdrawal")
     expect(page).toContain("\"Approve withdrawal\"")
-    expect(page).toContain("Approving withdrawal")
+    expect(page).toContain("Authorizing withdrawal")
     expect(page).toContain("Confirm this withdrawal in PineTree Wallet.")
-    expect(page).toContain("Withdrawal failed")
+    expect(page).toContain("Withdrawal couldn't be completed")
     expect(page).toContain("Done")
     expect(page).toContain("\"Processing\"")
     expect(page).toContain('setWithdrawalScreen("review")')
@@ -1721,9 +1721,9 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("hides the editable form and review screen after withdrawal submission", () => {
-    expect(page).toContain('if (screen === "submitted" && submitResult)')
+    expect(page).toContain('if (screen === "approving" || screen === "failed" || (screen === "submitted" && submitResult))')
     expect(page).toContain("Withdrawal submitted")
-    expect(page).toContain("Transaction reference:")
+    expect(page).toContain("View transaction")
     expect(page).toContain("Done")
     expect(page).not.toContain("{review && !submitResult ? (")
   })
@@ -2467,8 +2467,8 @@ describe("PineTree embedded wallet setup", () => {
   // -------------------------------------------------------------------------
 
   it("UI never renders both a withdrawal error and Approve withdrawal simultaneously", () => {
-    // Approval errors render on the failed screen, away from the review screen button.
-    expect(page).toContain('if (screen === "failed")')
+    // Approval errors render on the shared failed result card, away from the review screen button.
+    expect(page).toContain('if (screen === "approving" || screen === "failed" || (screen === "submitted" && submitResult))')
     expect(page).toContain("withdrawalApprovalError")
     expect(page).toContain('setWithdrawalScreen("failed")')
   })
@@ -2517,10 +2517,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(withdrawalEngine).not.toContain("status: \"confirmed\"")
   })
 
-  it("UI shows transaction reference after successful Dynamic approval", () => {
-    // After submit succeeds, the page renders the withdrawalSubmitResult with a reference
-    expect(page).toContain("Transaction reference:")
-    expect(page).toContain("submitResult.request.provider_reference")
+  it("UI shows a View transaction link built from the persisted tx hash after successful Dynamic approval", () => {
+    // After submit succeeds, the page renders the withdrawalSubmitResult through the
+    // shared WithdrawalResultCard, which links out to an explorer instead of printing
+    // the raw reference/hash as plain text.
+    expect(page).toContain("buildWithdrawalExplorerUrl(review?.review.rail, txHash)")
+    expect(page).toContain("View transaction")
     expect(page).toContain("Withdrawal submitted")
     expect(page).toContain("setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)")
   })

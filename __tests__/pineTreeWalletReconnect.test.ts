@@ -42,37 +42,37 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain('openDynamicEmailFallbackAuth("withdrawal_reconnect", {')
     expect(page).toContain("explicitUserAction: true")
     expect(page).toContain("signatureRequired: false")
-    expect(page).toContain('if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
+    expect(page).toContain('if (!isPostSignSubmissionTimeout && withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
   })
 
   it("keeps Bitcoin out of Dynamic authorization recovery", () => {
-    expect(page).toContain('if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
+    expect(page).toContain('if (!isPostSignSubmissionTimeout && withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
     expect(page).toContain("setWithdrawalAuthorizationRecoveryOpen(true)")
     expect(page).toContain("const usesDynamicSigner = dynamicSignerWithdrawalRails.includes(withdrawalRail)")
     expect(page).not.toContain('selectedRail: "bitcoin"')
   })
 
   it("shows PineTree-branded withdrawal authorization recovery without changing ready state", () => {
-    expect(page).toContain("We couldn't authorize this withdrawal")
-    expect(page).toContain("Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.")
-    expect(page).toContain("Try Again")
-    expect(page).toContain("Trying again...")
+    expect(page).toContain("Withdrawal needs your authorization")
+    expect(page).toContain("Confirm this withdrawal in PineTree Wallet to continue.")
+    expect(page).toContain("Authorize withdrawal")
+    expect(page).toContain("Authorizing...")
     expect(page).toContain("Cancel")
     expect(page).not.toContain("setWalletSetupPrimaryState")
   })
 
-  it("retryable authorization recovery enables Try Again whenever a review exists", () => {
+  it("retryable authorization recovery enables Authorize withdrawal whenever a review exists", () => {
     const modal = page.slice(
       page.indexOf("{withdrawalAuthorizationRecoveryOpen ? ("),
       page.indexOf("{showWalletWorkspace ? (")
     )
     expect(modal).toContain("{withdrawalReview ? (")
-    expect(modal).toContain("Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.")
+    expect(modal).toContain("Confirm this withdrawal in PineTree Wallet to continue.")
     expect(modal).toContain("Review the withdrawal details again before authorizing.")
     expect(modal).toContain("void handleSubmitWithdrawal({ irreversibleAckChecked: true })")
     expect(modal).toContain("disabled={submittingWithdrawal}")
     expect(modal).not.toContain("disabled={submittingWithdrawal || !withdrawalReview}")
-    expect(modal).toContain('{submittingWithdrawal ? "Trying again..." : "Try Again"}')
+    expect(modal).toContain('{submittingWithdrawal ? "Authorizing..." : "Authorize withdrawal"}')
   })
 
   it("reconnect and signing lookup use all Dynamic wallets plus primary wallet", () => {
@@ -261,10 +261,13 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(submitFn).toContain("void pollWithdrawalRequest(withdrawalId, submitted as WithdrawalSubmitResponse)")
   })
 
-  it("SOL success state says Withdrawal sent and does not leave approving visible", () => {
-    expect(page).toContain("Withdrawal sent")
-    expect(page).toContain("Your SOL withdrawal has been submitted.")
-    expect(page).toContain("isSolanaSolWithdrawal")
+  it("SOL success state uses the shared result copy (no rail-specific success layout) and does not leave approving visible", () => {
+    // The submitted/processing/confirmed result screen must be identical across every
+    // rail (Bitcoin, Base, Solana) - no per-asset "success" branch like the old
+    // isSolanaSolWithdrawal special case, which showed a different title/copy for SOL.
+    expect(page).not.toContain("isSolanaSolWithdrawal")
+    expect(page).toContain("Your withdrawal has been submitted and is being processed.")
+    expect(page).toContain('kind === "authorizing"')
   })
 
   it("Solana withdrawal path never calls signPsbt or uses Bitcoin primaryWallet as signer", () => {

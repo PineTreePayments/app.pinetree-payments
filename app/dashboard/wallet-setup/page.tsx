@@ -1169,12 +1169,14 @@ async function sendDynamicPreparedWithdrawal(
       throw new Error("Unable to sign this withdrawal. Please try again.")
     }
     logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)
+    emitDynamicPostPrepareStage(context, "dynamic_authorization_opened", { substage })
     const txHash = await client.sendTransaction({
       account: prepared.payload.from as `0x${string}`,
       to: prepared.payload.to as `0x${string}`,
       value: BigInt(prepared.payload.value),
       data: prepared.payload.data,
     })
+    emitDynamicPostPrepareStage(context, "dynamic_authorization_confirmed", { substage, signature: maskDiagnosticValue(String(txHash)) })
     return { txHash: String(txHash), providerReference: String(txHash) }
   }
 
@@ -1183,11 +1185,13 @@ async function sendDynamicPreparedWithdrawal(
     // Call signPsbt through the object to preserve 'this' binding.
     const psbtRequest = { unsignedPsbtBase64: prepared.payload.psbtBase64 }
     logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)
+    emitDynamicPostPrepareStage(context, "dynamic_authorization_opened", { substage })
     const signed = await wallet.signPsbt?.(psbtRequest)
       ?? await wallet.connector?.signPsbt?.(psbtRequest)
     if (!signed?.signedPsbt) {
       throw new Error("Unable to sign this withdrawal. Please try again.")
     }
+    emitDynamicPostPrepareStage(context, "dynamic_authorization_confirmed", { substage })
     return { signedPsbtBase64: signed.signedPsbt, providerReference: "dynamic:bitcoin-psbt" }
   }
 
@@ -1222,6 +1226,7 @@ async function sendDynamicPreparedWithdrawal(
     },
     () => {
       logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)
+      emitDynamicPostPrepareStage(context, "dynamic_authorization_opened", { substage })
     }
   )
   substage = "DYNAMIC_SIGNING_RETURNED"
@@ -1229,6 +1234,7 @@ async function sendDynamicPreparedWithdrawal(
     substage,
     hasSignAndSendTransaction: true,
   })
+  emitDynamicPostPrepareStage(context, "dynamic_authorization_confirmed", { substage })
   if (!result.txHash) {
     throw makeDynamicPostPrepareError("Dynamic returned no transaction signature.", "SIGNATURE_MISSING")
   }
@@ -1873,6 +1879,25 @@ const PRODUCTION_WALLET_WITHDRAWAL_DEBUG_EVENTS = new Set([
   "DYNAMIC_WALLETS_HYDRATION_STARTED",
   "DYNAMIC_WALLETS_HYDRATED",
   "DYNAMIC_MATCHING_WALLET_FOUND",
+  // Standardized cross-provider withdrawal lifecycle vocabulary (see
+  // emitWithdrawalLifecycleEvent) - a stable, provider-agnostic event set on top
+  // of the granular Dynamic-specific ones above, meant for lifecycle-level
+  // monitoring/alerting rather than deep step-by-step debugging.
+  "withdrawal_operation_created",
+  "dynamic_wallet_readiness_started",
+  "dynamic_wallet_ready",
+  "dynamic_authorization_requested",
+  "dynamic_authorization_opened",
+  "dynamic_authorization_confirmed",
+  "dynamic_authorization_cancelled",
+  "provider_submission_started",
+  "provider_submission_succeeded",
+  "provider_submission_failed",
+  "withdrawal_result_transition",
+  "withdrawal_reconciliation_started",
+  "withdrawal_confirmed",
+  "withdrawal_failed",
+  "withdrawal_requires_action",
 ])
 
 function isProductionWalletWithdrawalDebugEvent(event: string) {
@@ -2284,6 +2309,285 @@ function WalletDiagnosticsPanel({
   )
 }
 
+// Bounded timeout for the PineTree API round trip only (prepare/submit fetches) -
+// distinct from the Dynamic in-wallet signing wait, which must never be cut short
+// by a UI timer while the user is actively looking at an open confirmation modal.
+// A hung server-side call (e.g. a stalled RPC in a background balance resync) must
+// still surface as a recoverable "requires action" state instead of leaving the
+// merchant staring at "Approving withdrawal" forever.
+const WITHDRAWAL_PROVIDER_SUBMISSION_TIMEOUT_MS = 20_000
+const WITHDRAWAL_PROVIDER_SUBMISSION_TIMEOUT_MESSAGE = "PineTree did not respond in time. Your PineTree Wallet is still connected - please try again."
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number = WITHDRAWAL_PROVIDER_SUBMISSION_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw Object.assign(new Error(WITHDRAWAL_PROVIDER_SUBMISSION_TIMEOUT_MESSAGE), { code: "PROVIDER_SUBMISSION_TIMEOUT" })
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Active-withdrawal recovery marker
+//
+// A canonical operation is always persisted server-side before/at provider
+// submission (merchant_wallet_operations for Bitcoin, wallet_withdrawal_requests
+// for Base/Solana) - this marker only remembers *which* operation the current
+// browser tab was looking at, so a refresh, backgrounding, or Dynamic-modal
+// dismissal can resume showing its real status instead of silently losing
+// track of it and leaving the merchant on a blank form.
+// ---------------------------------------------------------------------------
+
+type ActiveWithdrawalMarker = {
+  kind: "dynamic" | "bitcoin"
+  id: string
+  rail: WithdrawalRail
+  asset: WithdrawalAsset
+  destinationAddress: string
+  amountDecimal: string
+}
+
+function activeWithdrawalStorageKey(merchantId: string) {
+  return `pinetree-wallet-active-withdrawal:${merchantId}`
+}
+
+function persistActiveWithdrawalMarker(merchantId: string | null, marker: ActiveWithdrawalMarker) {
+  if (!merchantId || typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(activeWithdrawalStorageKey(merchantId), JSON.stringify(marker))
+  } catch {
+    // Storage can be unavailable (private browsing, quota) - refresh recovery
+    // is a convenience on top of the already-persisted canonical operation,
+    // never a requirement for the withdrawal itself to succeed.
+  }
+}
+
+function readActiveWithdrawalMarker(merchantId: string | null): ActiveWithdrawalMarker | null {
+  if (!merchantId || typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(activeWithdrawalStorageKey(merchantId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<ActiveWithdrawalMarker> | null
+    if (!parsed || typeof parsed.id !== "string" || (parsed.kind !== "dynamic" && parsed.kind !== "bitcoin")) return null
+    return parsed as ActiveWithdrawalMarker
+  } catch {
+    return null
+  }
+}
+
+function clearActiveWithdrawalMarker(merchantId: string | null) {
+  if (!merchantId || typeof window === "undefined") return
+  try {
+    window.localStorage.removeItem(activeWithdrawalStorageKey(merchantId))
+  } catch {
+    // best-effort
+  }
+}
+
+type WithdrawalResultKind = "authorizing" | "submitted" | "failed"
+
+/**
+ * The one shared, provider-agnostic result screen for every withdrawal rail
+ * (Bitcoin Lightning via Speed, SOL/USDC/ETH via Dynamic). Neither the copy nor
+ * the layout ever branches on which provider executed the withdrawal - only on
+ * the withdrawal's own lifecycle state (authorizing / submitted / processing /
+ * confirmed / failed), so a merchant sees the exact same screen regardless of
+ * rail.
+ */
+function WithdrawalResultCard({
+  kind,
+  review,
+  submitResult,
+  approvalError,
+  error,
+  submitting,
+  onDone,
+  onEdit,
+  onCancel,
+  onSubmit,
+  onOpenWallet,
+}: {
+  kind: WithdrawalResultKind
+  review: WithdrawalReviewResponse | null
+  submitResult: WithdrawalSubmitResponse | null
+  approvalError: string
+  error: string
+  submitting: boolean
+  onDone: () => void
+  onEdit: () => void
+  onCancel: () => void
+  onSubmit: (context?: WithdrawalSubmitContext) => void
+  onOpenWallet?: () => void
+}) {
+  // Mutated inline during render (same established pattern as walletsRef/
+  // primaryWalletRef above) rather than in an effect: a poll tick calls
+  // setWithdrawalSubmitResult with a fresh object every ~1.6s while still
+  // processing, which re-renders this component with the *same* kind/status -
+  // counting those renders is what distinguishes "just submitted" from "still
+  // processing a little while later" without adding parent state that every
+  // draft-reset call site would need to remember to clear.
+  const stillProcessingRenderCountRef = useRef(0)
+  const merchantStatus = submitResult?.merchantStatus ?? null
+  if (kind === "submitted" && merchantStatus === "Processing") {
+    stillProcessingRenderCountRef.current += 1
+  } else {
+    stillProcessingRenderCountRef.current = 0
+  }
+
+  if (kind === "authorizing") {
+    return (
+      <div className="scroll-mt-24 rounded-[1.2rem] border border-blue-100/80 bg-blue-50/50 px-5 py-6 text-center">
+        <p className="text-base font-semibold text-gray-950">Authorizing withdrawal</p>
+        <p className="mt-2 text-sm leading-6 text-gray-600">Confirm this withdrawal in PineTree Wallet.</p>
+      </div>
+    )
+  }
+
+  if (kind === "submitted" && submitResult) {
+    const confirmed = merchantStatus === "Confirmed"
+    const stillProcessing = !confirmed && stillProcessingRenderCountRef.current > 1
+    const title = confirmed ? "Withdrawal complete" : "Withdrawal submitted"
+    const supportingCopy = confirmed
+      ? "Your withdrawal has been confirmed."
+      : stillProcessing
+        ? "Your withdrawal is still being processed. You can safely leave this screen."
+        : "Your withdrawal has been submitted and is being processed."
+    const txHash = submitResult.request.tx_hash || null
+    const explorerUrl = buildWithdrawalExplorerUrl(review?.review.rail, txHash)
+    const toneCardClass = confirmed
+      ? "rounded-[1.2rem] border border-emerald-200 bg-emerald-50/70 px-5 py-5"
+      : "rounded-[1.2rem] border border-blue-200 bg-blue-50/70 px-5 py-5"
+    const toneTitleClass = confirmed ? "text-base font-semibold text-emerald-950" : "text-base font-semibold text-blue-950"
+    const toneCopyClass = confirmed ? "mt-1 text-sm leading-6 text-emerald-900" : "mt-1 text-sm leading-6 text-blue-900"
+    return (
+      <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div className={toneCardClass}>
+          <p className={toneTitleClass}>{title}</p>
+          <p className={toneCopyClass}>{supportingCopy}</p>
+          {review ? (
+            <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+              <div className="rounded-lg bg-white/70 px-3 py-2">
+                <dt className="text-xs font-semibold text-gray-500">Asset</dt>
+                <dd className="mt-0.5 font-semibold text-gray-950">{review.review.asset}</dd>
+              </div>
+              <div className="rounded-lg bg-white/70 px-3 py-2">
+                <dt className="text-xs font-semibold text-gray-500">Network</dt>
+                <dd className="mt-0.5 font-semibold text-gray-950">{railDisplayName(review.review.rail)}</dd>
+              </div>
+              <div className="rounded-lg bg-white/70 px-3 py-2">
+                <dt className="text-xs font-semibold text-gray-500">Amount</dt>
+                <dd className="mt-0.5 font-semibold text-gray-950">{review.review.amountDecimal} {review.review.asset}</dd>
+              </div>
+              <div className="rounded-lg bg-white/70 px-3 py-2">
+                <dt className="text-xs font-semibold text-gray-500">Status</dt>
+                <dd className="mt-0.5 font-semibold text-gray-950">{confirmed ? "Confirmed" : "Processing"}</dd>
+              </div>
+              <div className="rounded-lg bg-white/70 px-3 py-2 sm:col-span-2">
+                <dt className="text-xs font-semibold text-gray-500">Destination</dt>
+                <dd className="mt-0.5 break-words [overflow-wrap:anywhere] font-mono text-xs text-gray-800">{review.review.destinationAddress}</dd>
+              </div>
+            </dl>
+          ) : null}
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={onDone}
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+          >
+            Done
+          </button>
+          {explorerUrl ? (
+            <a
+              href={explorerUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
+            >
+              View transaction
+            </a>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
+
+  // kind === "failed"
+  const isSignerSessionError =
+    approvalError.includes("not active in this browser session") ||
+    approvalError.includes("different PineTree Wallet session") ||
+    approvalError === solanaWithdrawalReconnectMessage
+  const withdrawalOutcomePending = approvalError === withdrawalStatusUnknownMessage
+  return (
+    <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className={withdrawalOutcomePending
+        ? "rounded-[1.2rem] border border-amber-200 bg-amber-50 px-5 py-5"
+        : "rounded-[1.2rem] border border-red-200 bg-red-50 px-5 py-5"}
+      >
+        <p className={withdrawalOutcomePending ? "text-base font-semibold text-amber-950" : "text-base font-semibold text-red-900"}>
+          {withdrawalOutcomePending ? "Withdrawal outcome pending" : "Withdrawal couldn't be completed"}
+        </p>
+        <p className={withdrawalOutcomePending ? "mt-1 text-sm leading-6 text-amber-900" : "mt-1 text-sm leading-6 text-red-800"}>
+          {approvalError || error || submitResult?.request.error_message || "The withdrawal could not be completed. Review the details and try again."}
+        </p>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        {isSignerSessionError && onOpenWallet ? (
+          <button
+            type="button"
+            onClick={onOpenWallet}
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+          >
+            Open PineTree Wallet
+          </button>
+        ) : review && !withdrawalOutcomePending ? (
+          <button
+            type="button"
+            onClick={() => onSubmit({ irreversibleAckChecked: true })}
+            disabled={submitting}
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
+          >
+            Try again
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={onDone}
+          className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
+        >
+          Done
+        </button>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
+        >
+          Edit withdrawal
+        </button>
+        {approvalError !== withdrawalStatusUnknownMessage ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-red-200 hover:text-red-600"
+          >
+            Cancel
+          </button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function WithdrawalFormShell({
   rail,
   asset,
@@ -2465,7 +2769,7 @@ function WithdrawalFormShell({
 
   if (screen === "review" && review) {
     return (
-      <div className="space-y-4">
+      <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <div className="rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.10),transparent_45%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.97))] px-4 py-4 shadow-[0_18px_42px_rgba(37,99,235,0.10)] sm:px-5 sm:py-5">
           <p className="text-base font-semibold text-gray-950">Review withdrawal</p>
           <p className="mt-1 text-xs leading-5 text-gray-500">Confirm the withdrawal details before approving.</p>
@@ -2488,7 +2792,7 @@ function WithdrawalFormShell({
             </div>
             <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5 sm:col-span-2">
               <dt className="text-xs font-semibold text-gray-500">Destination</dt>
-              <dd className="mt-1 break-all font-mono text-xs text-gray-800">{review.review.destinationAddress}</dd>
+              <dd className="mt-1 break-words [overflow-wrap:anywhere] font-mono text-xs text-gray-800">{review.review.destinationAddress}</dd>
             </div>
           </dl>
         </div>
@@ -2562,97 +2866,21 @@ function WithdrawalFormShell({
     )
   }
 
-  if (screen === "approving") {
+  if (screen === "approving" || screen === "failed" || (screen === "submitted" && submitResult)) {
     return (
-      <div className="rounded-[1.2rem] border border-blue-100/80 bg-blue-50/50 px-5 py-6 text-center">
-        <p className="text-base font-semibold text-gray-950">Approving withdrawal</p>
-        <p className="mt-2 text-sm leading-6 text-gray-600">Confirm this withdrawal in PineTree Wallet.</p>
-      </div>
-    )
-  }
-
-  if (screen === "submitted" && submitResult) {
-    const isSolanaSolWithdrawal = review?.review.rail === "solana" && review.review.asset === "SOL"
-    return (
-      <div className="space-y-4">
-        <div className="rounded-[1.2rem] border border-blue-200 bg-blue-50/70 px-5 py-5">
-          <p className="text-base font-semibold text-blue-950">{isSolanaSolWithdrawal ? "Withdrawal sent" : "Withdrawal submitted"}</p>
-          {isSolanaSolWithdrawal ? (
-            <p className="mt-2 text-sm leading-6 text-blue-900">Your SOL withdrawal has been submitted.</p>
-          ) : null}
-        {submitResult.request.provider_reference || submitResult.request.tx_hash ? (
-          <p className="mt-2 break-all text-xs leading-5 text-blue-900">
-            Transaction reference: {submitResult.request.tx_hash || submitResult.request.provider_reference}
-          </p>
-        ) : null}
-        </div>
-        <button
-          type="button"
-          onClick={onDone}
-          className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-        >
-          Done
-        </button>
-      </div>
-    )
-  }
-
-  if (screen === "failed") {
-    const isSignerSessionError =
-      approvalError.includes("not active in this browser session") ||
-      approvalError.includes("different PineTree Wallet session") ||
-      approvalError === solanaWithdrawalReconnectMessage
-    const withdrawalOutcomePending = approvalError === withdrawalStatusUnknownMessage
-    return (
-      <div className="space-y-4">
-        <div className={withdrawalOutcomePending
-          ? "rounded-[1.2rem] border border-amber-200 bg-amber-50 px-5 py-5"
-          : "rounded-[1.2rem] border border-red-200 bg-red-50 px-5 py-5"}
-        >
-          <p className={withdrawalOutcomePending ? "text-base font-semibold text-amber-950" : "text-base font-semibold text-red-900"}>
-            {withdrawalOutcomePending ? "Withdrawal outcome pending" : "Withdrawal failed"}
-          </p>
-          <p className={withdrawalOutcomePending ? "mt-1 text-sm leading-6 text-amber-900" : "mt-1 text-sm leading-6 text-red-800"}>
-            {approvalError || error || submitResult?.request.error_message || "The withdrawal could not be completed. Review the details and try again."}
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          {isSignerSessionError && onOpenWallet ? (
-            <button
-              type="button"
-              onClick={onOpenWallet}
-              className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-            >
-              Open PineTree Wallet
-            </button>
-          ) : review && !withdrawalOutcomePending ? (
-            <button
-              type="button"
-              onClick={() => onSubmit({ irreversibleAckChecked: true })}
-              disabled={submitting}
-              className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
-            >
-              {review.review.approvalMethod === "dynamic_browser" ? "Try approval again" : "Try Again"}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onEdit}
-            className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
-          >
-            Edit withdrawal
-          </button>
-          {approvalError !== withdrawalStatusUnknownMessage ? (
-            <button
-              type="button"
-              onClick={onCancel}
-              className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-red-200 hover:text-red-600"
-            >
-              Cancel
-            </button>
-          ) : null}
-        </div>
-      </div>
+      <WithdrawalResultCard
+        kind={screen === "approving" ? "authorizing" : screen === "submitted" ? "submitted" : "failed"}
+        review={review}
+        submitResult={submitResult}
+        approvalError={approvalError}
+        error={error}
+        submitting={submitting}
+        onDone={onDone}
+        onEdit={onEdit}
+        onCancel={onCancel}
+        onSubmit={onSubmit}
+        onOpenWallet={onOpenWallet}
+      />
     )
   }
 
@@ -2945,13 +3173,17 @@ function networkDisplayLabel(value: string | null | undefined, rail?: Withdrawal
   return rail ? railDisplayName(rail) : "PineTree Wallet"
 }
 
+function buildWithdrawalExplorerUrl(rail: WithdrawalRail | null | undefined, txHash: string | null | undefined) {
+  if (!txHash) return null
+  if (rail === "base") return `https://basescan.org/tx/${encodeURIComponent(txHash)}`
+  if (rail === "solana") return `https://solscan.io/tx/${encodeURIComponent(txHash)}`
+  if (rail === "bitcoin") return `https://mempool.space/tx/${encodeURIComponent(txHash)}`
+  return null
+}
+
 function explorerUrlForActivity(detail: WalletActivityDetail) {
   if (detail.explorerUrl) return detail.explorerUrl
-  if (!detail.txHash) return null
-  if (detail.rail === "base") return `https://basescan.org/tx/${encodeURIComponent(detail.txHash)}`
-  if (detail.rail === "solana") return `https://solscan.io/tx/${encodeURIComponent(detail.txHash)}`
-  if (detail.rail === "bitcoin") return `https://mempool.space/tx/${encodeURIComponent(detail.txHash)}`
-  return null
+  return buildWithdrawalExplorerUrl(detail.rail, detail.txHash)
 }
 
 function txHashFromExplorerUrl(value: string | null) {
@@ -3423,7 +3655,7 @@ function WalletFloatingWorkspace({
     <section
       aria-label={title}
       data-pinetree-floating-workspace="true"
-      className="space-y-3"
+      className="scroll-mt-24 space-y-3"
     >
       <header className="flex items-start justify-between gap-4">
         <h2 className={`min-w-0 ${dashboardSectionLabelClass}`}>{title.toUpperCase()}</h2>
@@ -4029,6 +4261,7 @@ function PineTreeWalletRuntime() {
   const [maxEstimating, setMaxEstimating] = useState(false)
   const [maxWarning, setMaxWarning] = useState("")
   const withdrawalReconnectSourceRef = useRef<string | null>(null)
+  const withdrawalRecoveryAttemptedRef = useRef(false)
   const dynamicHydrationAttemptRef = useRef<string | null>(null)
   const dynamicWalletRuntimeCountRef = useRef(0)
   const dynamicApprovalAvailableRef = useRef(false)
@@ -6457,11 +6690,21 @@ function PineTreeWalletRuntime() {
         credentialSignerWallets = []
       }
     }
+    // Read wallets/primaryWallet via the refs (updated synchronously every render,
+    // see walletsRef/primaryWalletRef above), not the closed-over hook values.
+    // This function is called from inside ensureDynamicWalletRuntimeReady's bounded
+    // hydration retry loop *after* an `await refreshDynamicWalletRuntime(...)` - if
+    // that refresh just hydrated the SDK's wallet list, only the refs reflect it
+    // immediately; the closed-over `wallets`/`primaryWallet` values stay frozen at
+    // whatever they were when this async call chain started, so the retry loop would
+    // keep re-checking a stale empty snapshot and exhaust its attempts even though the
+    // wallet is now actually ready - producing a false first-attempt authorization
+    // failure that only clears on the next click (a fresh render/closure).
     return getDynamicWalletSearchList(
-      [...(wallets as unknown[]), ...runtimeWaasWallets, ...credentialSignerWallets],
-      primaryWallet
+      [...(walletsRef.current), ...runtimeWaasWallets, ...credentialSignerWallets],
+      primaryWalletRef.current
     )
-  }, [dynamicWaasIsEnabled, getWaasWalletConnector, getWaasWallets, getWaasWalletsByCredentials, primaryWallet, wallets])
+  }, [dynamicWaasIsEnabled, getWaasWalletConnector, getWaasWallets, getWaasWalletsByCredentials])
 
   const buildDynamicWalletRuntimeSnapshot = useCallback((
     runtimeWallets?: DynamicWalletLike[],
@@ -6472,11 +6715,15 @@ function PineTreeWalletRuntime() {
     const snapshotWallets = runtimeWallets ?? collectDynamicRuntimeWalletSnapshot()
     const authenticated = authenticatedOverride ?? Boolean(user)
     const dynamicUserId = dynamicUserIdOverride ?? user?.userId ?? null
+    // Same staleness hazard as collectDynamicRuntimeWalletSnapshot above - read the
+    // ref, not the closed-over `primaryWallet`, so a snapshot built after an in-flight
+    // hydration refresh reflects the wallet that refresh just resolved.
+    const currentPrimaryWallet = primaryWalletRef.current
     const matchingBaseWallet = profile?.base_address
-      ? findDynamicApprovalWalletForSource(snapshotWallets, primaryWallet, "base", profile.base_address)
+      ? findDynamicApprovalWalletForSource(snapshotWallets, currentPrimaryWallet, "base", profile.base_address)
       : null
     const matchingSolanaWallet = profile?.solana_address
-      ? findDynamicApprovalWalletForSource(snapshotWallets, primaryWallet, "solana", profile.solana_address)
+      ? findDynamicApprovalWalletForSource(snapshotWallets, currentPrimaryWallet, "solana", profile.solana_address)
       : null
     const profileDynamicUserId = String(profile?.dynamic_user_id || "").trim()
     const environmentId = String(process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID || "").trim()
@@ -6511,7 +6758,7 @@ function PineTreeWalletRuntime() {
       dynamicUserId,
       sdkLoaded: sdkHasLoaded,
       wallets: snapshotWallets,
-      primaryWallet,
+      primaryWallet: currentPrimaryWallet,
       walletCount,
       matchingBaseWallet,
       matchingSolanaWallet,
@@ -6520,7 +6767,7 @@ function PineTreeWalletRuntime() {
       failureCode,
       ownership,
     }
-  }, [collectDynamicRuntimeWalletSnapshot, dynamicExternalUserId, merchantId, primaryWallet, profileState, sdkHasLoaded, user])
+  }, [collectDynamicRuntimeWalletSnapshot, dynamicExternalUserId, merchantId, profileState, sdkHasLoaded, user])
 
   const emitDynamicRuntimeStage = useCallback((event: string, details?: WalletSetupDebugDetails) => {
     emitWalletSetupDebugEvent(event, details)
@@ -6531,6 +6778,13 @@ function PineTreeWalletRuntime() {
     correlationId: string | null,
     requestId: string
   ): Promise<DynamicWalletRuntimeSnapshot> => {
+    emitDynamicRuntimeStage("dynamic_wallet_readiness_started", {
+      correlationId: correlationId || "none",
+      requestId,
+      rail: prepared.rail,
+      asset: prepared.asset,
+      sdkLoaded: sdkHasLoaded,
+    })
     emitDynamicRuntimeStage("DYNAMIC_AUTH_CHECK_STARTED", {
       correlationId: correlationId || "none",
       requestId,
@@ -6703,6 +6957,13 @@ function PineTreeWalletRuntime() {
         asset: prepared.asset,
         walletCount: snapshot.walletCount,
         sourceAddress: maskDiagnosticValue(prepared.sourceAddress),
+      })
+      emitDynamicRuntimeStage("dynamic_wallet_ready", {
+        correlationId: correlationId || "none",
+        requestId,
+        rail: prepared.rail,
+        asset: prepared.asset,
+        walletCount: snapshot.walletCount,
       })
       return snapshot
     }
@@ -9194,6 +9455,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalApprovalError("")
     setInstantSendIdempotencyKey(null)
     setMaxWarning("")
+    clearActiveWithdrawalMarker(merchantId)
   }
 
   function handleCancelWithdrawal() {
@@ -9205,6 +9467,122 @@ function PineTreeWalletRuntime() {
     resetWithdrawalDraft()
     setActiveView(null)
   }
+
+  // Recover an in-flight withdrawal after a page refresh, mobile Safari
+  // backgrounding, or a closed/dismissed Dynamic modal. Runs once per session as
+  // soon as a merchant/access token are available; a missing or stale marker is a
+  // silent no-op, leaving the merchant on the normal empty form exactly as before
+  // this existed.
+  useEffect(() => {
+    if (withdrawalRecoveryAttemptedRef.current) return
+    if (!merchantId || profileState.kind !== "loaded") return
+    const token = accessTokenRef.current
+    if (!token) return
+    withdrawalRecoveryAttemptedRef.current = true
+    const marker = readActiveWithdrawalMarker(merchantId)
+    if (!marker) return
+
+    void (async () => {
+      try {
+        if (marker.kind === "dynamic") {
+          const res = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(marker.id)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            credentials: "include",
+            cache: "no-store",
+          })
+          if (!res.ok) return
+          const json = (await res.json()) as { request?: WithdrawalReviewResponse["request"] }
+          const request = json.request
+          if (!request || !["processing", "confirmed", "failed"].includes(request.status)) {
+            // Never reached provider submission (still review_required/pending/draft/
+            // blocked/canceled) - nothing meaningful to resume; let it expire normally.
+            clearActiveWithdrawalMarker(merchantId)
+            return
+          }
+          const recoveredResult: WithdrawalSubmitResponse = {
+            request,
+            merchantStatus: request.status === "confirmed" ? "Confirmed" : request.status === "failed" ? "Withdrawal failed" : "Processing",
+            message: "Recovered withdrawal status.",
+          }
+          setWithdrawalRail(marker.rail)
+          setWithdrawalAsset(marker.asset)
+          setWithdrawalReview({
+            request,
+            review: {
+              rail: marker.rail,
+              asset: marker.asset,
+              destinationAddress: marker.destinationAddress,
+              amountDecimal: marker.amountDecimal,
+              estimatedStatus: "Processing",
+              approvalMethod: "dynamic_browser",
+              message: "",
+            },
+            canSubmit: false,
+          })
+          setWithdrawalSubmitResult(recoveredResult)
+          setWithdrawalScreen(request.status === "failed" ? "failed" : "submitted")
+          setActiveView("withdraw")
+          if (request.status === "confirmed" || request.status === "failed") {
+            clearActiveWithdrawalMarker(merchantId)
+          } else {
+            void pollWithdrawalRequest(marker.id, recoveredResult)
+          }
+        } else {
+          const res = await fetch(`/api/wallets/withdrawals/${encodeURIComponent(marker.id)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            credentials: "include",
+            cache: "no-store",
+          })
+          if (!res.ok) return
+          const json = (await res.json()) as { data?: { status?: string; txHash?: string | null } }
+          const operationStatus = String(json.data?.status || "").toUpperCase()
+          if (!operationStatus) return
+          if (["FAILED", "CANCELED", "EXPIRED"].includes(operationStatus)) {
+            clearActiveWithdrawalMarker(merchantId)
+            return
+          }
+          const confirmed = operationStatus === "COMPLETED"
+          const recoveredResult: WithdrawalSubmitResponse = {
+            request: {
+              id: marker.id,
+              status: confirmed ? "confirmed" : "processing",
+              provider_reference: null,
+              tx_hash: json.data?.txHash ?? null,
+              error_message: null,
+            },
+            merchantStatus: confirmed ? "Confirmed" : "Processing",
+            message: "Recovered withdrawal status.",
+          }
+          setWithdrawalRail("bitcoin")
+          setWithdrawalAsset("BTC")
+          setWithdrawalReview({
+            request: recoveredResult.request,
+            review: {
+              rail: "bitcoin",
+              asset: "BTC",
+              destinationAddress: marker.destinationAddress,
+              amountDecimal: marker.amountDecimal,
+              estimatedStatus: "Processing",
+              approvalMethod: "manual_review",
+              message: "",
+            },
+            canSubmit: false,
+          })
+          setWithdrawalSubmitResult(recoveredResult)
+          setWithdrawalScreen("submitted")
+          setActiveView("withdraw")
+          if (confirmed) {
+            clearActiveWithdrawalMarker(merchantId)
+          } else {
+            void pollBitcoinWithdrawalOperation(marker.id, recoveredResult)
+          }
+        }
+      } catch {
+        // Best-effort recovery only - never blocks or errors the normal page load.
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [merchantId, profileState.kind])
 
   // Address Book "Withdraw" shortcut: the merchant should never need to
   // reselect anything after picking a saved destination there. Destination
@@ -9468,6 +9846,13 @@ function PineTreeWalletRuntime() {
           canSubmit: typedJson.canSubmit,
           requestId: typedJson.request.id,
         })
+        emitWalletSetupDebugEvent("withdrawal_operation_created", {
+          correlationId,
+          requestId: typedJson.request.id,
+          rail: typedJson.review.rail,
+          asset: typedJson.review.asset,
+          provider: typedJson.review.approvalMethod === "dynamic_browser" ? "dynamic" : "speed",
+        })
         emitWalletSetupDebugEvent("wallet_withdrawal_review_screen_shown", {
           correlationId,
           rail: typedJson.review.rail,
@@ -9550,6 +9935,7 @@ function PineTreeWalletRuntime() {
   async function pollWithdrawalRequest(withdrawalId: string, initial: WithdrawalSubmitResponse) {
     const token = accessTokenRef.current
     if (!token) return
+    emitWalletSetupDebugEvent("withdrawal_reconciliation_started", { requestId: withdrawalId, provider: "dynamic" })
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 1600))
       try {
@@ -9575,7 +9961,69 @@ function PineTreeWalletRuntime() {
           merchantStatus: nextStatus,
         })
         if (nextStatus === "Withdrawal failed") setWithdrawalScreen("failed")
-        if (json.request.status === "processing" || json.request.status === "confirmed" || json.request.status === "failed") {
+        if (json.request.status === "confirmed" || json.request.status === "failed") {
+          emitWalletSetupDebugEvent(json.request.status === "confirmed" ? "withdrawal_confirmed" : "withdrawal_failed", {
+            requestId: withdrawalId,
+            provider: "dynamic",
+          })
+          // Terminal - nothing left to recover after a refresh.
+          clearActiveWithdrawalMarker(merchantId)
+          void syncPineTreeWallet()
+          return
+        }
+        if (json.request.status === "processing") {
+          void syncPineTreeWallet()
+          return
+        }
+      } catch {
+        return
+      }
+    }
+  }
+
+  /**
+   * Bitcoin/Speed counterpart to pollWithdrawalRequest above - the Dynamic rail
+   * polls wallet_withdrawal_requests, but a live Bitcoin withdrawal's canonical
+   * status lives in merchant_wallet_operations and is fetched through the
+   * existing /api/wallets/withdrawals/{operationId} route (which itself pulls a
+   * fresh Speed status on every call). Without this, a Bitcoin withdrawal could
+   * sit on the shared result card at "Processing" for the rest of the session
+   * even after it actually confirmed, since nothing else re-fetches it client-side.
+   */
+  async function pollBitcoinWithdrawalOperation(operationId: string, initial: WithdrawalSubmitResponse) {
+    const token = accessTokenRef.current
+    if (!token) return
+    emitWalletSetupDebugEvent("withdrawal_reconciliation_started", { requestId: operationId, provider: "speed" })
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1600))
+      try {
+        const res = await fetch(`/api/wallets/withdrawals/${encodeURIComponent(operationId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          credentials: "include",
+          cache: "no-store",
+        })
+        if (!res.ok) continue
+        const json = (await res.json()) as { ok?: boolean; data?: { status?: string; txHash?: string | null } }
+        const operationStatus = String(json.data?.status || "").toUpperCase()
+        if (!operationStatus) continue
+        const nextStatus =
+          operationStatus === "COMPLETED"
+            ? "Confirmed"
+            : operationStatus === "FAILED" || operationStatus === "CANCELED" || operationStatus === "EXPIRED"
+              ? "Withdrawal failed"
+              : initial.merchantStatus
+        setWithdrawalSubmitResult({
+          ...initial,
+          request: { ...initial.request, tx_hash: json.data?.txHash ?? initial.request.tx_hash },
+          merchantStatus: nextStatus,
+        })
+        if (nextStatus === "Withdrawal failed") setWithdrawalScreen("failed")
+        if (nextStatus === "Confirmed" || nextStatus === "Withdrawal failed") {
+          emitWalletSetupDebugEvent(nextStatus === "Confirmed" ? "withdrawal_confirmed" : "withdrawal_failed", {
+            requestId: operationId,
+            provider: "speed",
+          })
+          clearActiveWithdrawalMarker(merchantId)
           void syncPineTreeWallet()
           return
         }
@@ -9674,7 +10122,8 @@ function PineTreeWalletRuntime() {
       setWithdrawalScreen("approving")
       try {
         emitWalletSetupDebugEvent("wallet_withdrawal_speed_submit_requested", { correlationId })
-        const response = await fetch("/api/wallets/withdrawals", {
+        emitWalletSetupDebugEvent("provider_submission_started", { correlationId, rail: "bitcoin", asset: "BTC", provider: "speed" })
+        const response = await fetchWithTimeout("/api/wallets/withdrawals", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -9700,18 +10149,23 @@ function PineTreeWalletRuntime() {
             code: result.error?.code as WalletApiErrorCode | undefined,
             rawMessage: result.error?.message,
           })
+          emitWalletSetupDebugEvent("provider_submission_failed", { correlationId, rail: "bitcoin", asset: "BTC", provider: "speed", errorCode: presented.code || "UNKNOWN" })
           setWithdrawalApprovalError(presented.code === "STATUS_UNKNOWN" ? withdrawalStatusUnknownMessage : presented.message)
           setWithdrawalScreen(presented.code === "INSUFFICIENT_BALANCE" ? "review" : "failed")
           void syncPineTreeWallet()
           return
         }
         if (["REQUIRES_ACTION", "ACTION_REQUIRED"].includes(String(result.data.operation.status || "").toUpperCase())) {
+          emitWalletSetupDebugEvent("withdrawal_requires_action", { correlationId, requestId: result.data.operation.id, rail: "bitcoin", asset: "BTC", provider: "speed" })
           setWithdrawalApprovalError(withdrawalStatusUnknownMessage)
           setWithdrawalScreen("failed")
           void syncPineTreeWallet()
           return
         }
-        setWithdrawalSubmitResult({
+        emitWalletSetupDebugEvent("provider_submission_succeeded", { correlationId, requestId: result.data.operation.id, rail: "bitcoin", asset: "BTC", provider: "speed" })
+        emitWalletSetupDebugEvent("withdrawal_operation_created", { correlationId, requestId: result.data.operation.id, rail: "bitcoin", asset: "BTC", provider: "speed" })
+        emitWalletSetupDebugEvent("withdrawal_result_transition", { correlationId, requestId: result.data.operation.id, previousState: "approving", currentState: "submitted" })
+        const bitcoinSubmitResult: WithdrawalSubmitResponse = {
           request: {
             id: result.data.operation.id,
             status: "processing",
@@ -9721,16 +10175,33 @@ function PineTreeWalletRuntime() {
           },
           merchantStatus: "Processing",
           message: "Your Bitcoin Lightning withdrawal was submitted.",
-        })
+        }
+        setWithdrawalSubmitResult(bitcoinSubmitResult)
         setWithdrawalScreen("submitted")
+        persistActiveWithdrawalMarker(merchantId, {
+          kind: "bitcoin",
+          id: result.data.operation.id,
+          rail: "bitcoin",
+          asset: "BTC",
+          destinationAddress: review.review.destinationAddress,
+          amountDecimal: review.review.amountDecimal,
+        })
         void syncPineTreeWallet()
+        void pollBitcoinWithdrawalOperation(result.data.operation.id, bitcoinSubmitResult)
       } catch (error) {
+        const isProviderTimeout = Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "PROVIDER_SUBMISSION_TIMEOUT")
         console.warn("[pinetree-withdrawals] speed_submit_unhandled_error", {
           error: error instanceof Error ? error.message : "unknown",
+          isProviderTimeout,
         })
-        emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", { correlationId, stage: "speed_submit" })
-        setWithdrawalApprovalError("We couldn't submit this Bitcoin Lightning withdrawal. Please try again.")
+        emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", { correlationId, stage: "speed_submit", isProviderTimeout })
+        setWithdrawalApprovalError(
+          isProviderTimeout
+            ? withdrawalStatusUnknownMessage
+            : "We couldn't submit this Bitcoin Lightning withdrawal. Please try again."
+        )
         setWithdrawalScreen("failed")
+        void syncPineTreeWallet()
       } finally {
         setSubmittingWithdrawal(false)
       }
@@ -9774,6 +10245,12 @@ function PineTreeWalletRuntime() {
     setWithdrawalError("")
     setWithdrawalApprovalError("")
     setWithdrawalSubmitResult(null)
+    // Set once Dynamic has actually returned a signature/tx hash - if the /submit
+    // network call then fails or times out, the transaction has still genuinely
+    // been broadcast, so the catch block below must report "status unknown"
+    // rather than "authorization failed" (which would incorrectly imply nothing
+    // happened and could tempt a merchant into resubmitting).
+    let signedBeforeSubmitCall = false
     // Everything below performs real Dynamic SDK and network work - wrapped
     // top-to-bottom so an uncaught throw from the SDK's signing call or
     // anything else after prepare always clears loading state and shows a
@@ -9789,6 +10266,18 @@ function PineTreeWalletRuntime() {
       })
 
       setWithdrawalScreen("approving")
+      // withdrawalId already names a real wallet_withdrawal_requests row created at
+      // review time - persist it now so a refresh/backgrounding during the Dynamic
+      // authorization/signing/submission sequence below can recover this exact
+      // operation's status instead of losing track of it.
+      persistActiveWithdrawalMarker(merchantId, {
+        kind: "dynamic",
+        id: withdrawalId,
+        rail: review.review.rail,
+        asset: review.review.asset,
+        destinationAddress: review.review.destinationAddress,
+        amountDecimal: review.review.amountDecimal,
+      })
       // Route by the server's approvalMethod decision, not by client wallet-lookup state.
       // When the server says dynamic_browser, always use prepare -> sign -> complete. If the
       // Dynamic wallet is not found at signing time, the user gets a clear error to retry.
@@ -9800,7 +10289,14 @@ function PineTreeWalletRuntime() {
           asset: review.review.asset,
           requestId: withdrawalId,
         })
-        const prepareRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare`, {
+        emitWalletSetupDebugEvent("dynamic_authorization_requested", {
+          correlationId,
+          requestId: withdrawalId,
+          rail: review.review.rail,
+          asset: review.review.asset,
+          provider: "dynamic",
+        })
+        const prepareRes = await fetchWithTimeout(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/prepare`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -9868,6 +10364,7 @@ function PineTreeWalletRuntime() {
           hasTxHash: Boolean(dynamicSubmission.txHash),
           hasSignedPsbt: Boolean(dynamicSubmission.signedPsbtBase64),
         })
+        signedBeforeSubmitCall = Boolean(dynamicSubmission.txHash || dynamicSubmission.signedPsbtBase64)
         emitWalletSetupDebugEvent("DYNAMIC_SUBMIT_REQUESTED", {
           correlationId,
           requestId: withdrawalId,
@@ -9876,7 +10373,8 @@ function PineTreeWalletRuntime() {
           stage: "DYNAMIC_SUBMIT_REQUESTED",
         })
         emitWalletSetupDebugEvent("wallet_withdrawal_submit_requested", { correlationId, requestId: withdrawalId })
-        const submitRes = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit`, {
+        emitWalletSetupDebugEvent("provider_submission_started", { correlationId, requestId: withdrawalId, rail: review.review.rail, asset: review.review.asset, provider: "dynamic" })
+        const submitRes = await fetchWithTimeout(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -9900,6 +10398,7 @@ function PineTreeWalletRuntime() {
           ok: submitRes.ok,
         })
         if (!submitRes.ok) {
+          emitWalletSetupDebugEvent("provider_submission_failed", { correlationId, requestId: withdrawalId, rail: review.review.rail, asset: review.review.asset, provider: "dynamic" })
           // Clear stale review: status is no longer "review_required" after prepare
           // succeeded, so a retry would fail at prepare with "not ready".
           setWithdrawalReview(null)
@@ -9913,6 +10412,8 @@ function PineTreeWalletRuntime() {
           void syncPineTreeWallet()
           return
         }
+        emitWalletSetupDebugEvent("provider_submission_succeeded", { correlationId, requestId: withdrawalId, rail: review.review.rail, asset: review.review.asset, provider: "dynamic" })
+        emitWalletSetupDebugEvent("withdrawal_result_transition", { correlationId, requestId: withdrawalId, previousState: "approving", currentState: "submitted" })
         emitWalletSetupDebugEvent("DYNAMIC_SUBMIT_ACCEPTED", {
           correlationId,
           requestId: withdrawalId,
@@ -9942,10 +10443,22 @@ function PineTreeWalletRuntime() {
       setWithdrawalScreen("failed")
       return
     } catch (error) {
-      const safeMessage = sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined)
+      const errorCode = safeDynamicErrorCode(error)
+      // A timed-out /submit call after Dynamic already signed and returned a tx
+      // hash/signed PSBT means the transaction genuinely went out - the network
+      // call to persist it just didn't get an answer back in time. Telling the
+      // merchant "authorization failed" here would be wrong and could prompt a
+      // duplicate resubmission; report status-unknown instead (same safe,
+      // no-retry-suggested treatment already used for the Bitcoin rail).
+      const isPostSignSubmissionTimeout = signedBeforeSubmitCall && errorCode === "PROVIDER_SUBMISSION_TIMEOUT"
+      const safeMessage = isPostSignSubmissionTimeout
+        ? withdrawalStatusUnknownMessage
+        : sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined)
       console.warn("[pinetree-withdrawals] handleSubmitWithdrawal_unhandled_error", {
         rail: withdrawalReview?.review.rail,
         error: error instanceof Error ? error.message : "unknown",
+        signedBeforeSubmitCall,
+        isPostSignSubmissionTimeout,
       })
       emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", {
         correlationId,
@@ -9954,12 +10467,32 @@ function PineTreeWalletRuntime() {
         asset: review.review.asset,
         requestId: withdrawalId,
         errorName: safeDynamicErrorName(error),
-        errorCode: safeDynamicErrorCode(error) || "UNKNOWN_DYNAMIC_ERROR",
+        errorCode: errorCode || "UNKNOWN_DYNAMIC_ERROR",
         errorMessage: safeDynamicErrorMessage(error),
+        signedBeforeSubmitCall,
       })
+      // Only the classified rejection code (never the raw provider message) decides
+      // this - a genuine user cancellation in the Dynamic modal, distinct from a
+      // hydration/network/timeout failure.
+      if (errorCode === "DYNAMIC_SIGNING_REJECTED") {
+        emitWalletSetupDebugEvent("dynamic_authorization_cancelled", {
+          correlationId,
+          requestId: withdrawalId,
+          rail: review.review.rail,
+          asset: review.review.asset,
+        })
+      } else {
+        emitWalletSetupDebugEvent("provider_submission_failed", {
+          correlationId,
+          requestId: withdrawalId,
+          rail: review.review.rail,
+          asset: review.review.asset,
+          provider: "dynamic",
+        })
+      }
       setWithdrawalApprovalError(safeMessage)
       void syncPineTreeWallet()
-      if (withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana")) {
+      if (!isPostSignSubmissionTimeout && withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana")) {
         setWithdrawalAuthorizationRecoveryOpen(true)
       }
       setWithdrawalScreen("failed")
@@ -10292,11 +10825,11 @@ function PineTreeWalletRuntime() {
             className="w-full max-w-[26rem] rounded-[1.25rem] border border-white/70 bg-white px-5 py-5 shadow-[0_28px_80px_rgba(15,23,42,0.28)]"
           >
             <h2 id="pinetree-withdrawal-auth-recovery-title" className="text-base font-semibold text-gray-950">
-              {"We couldn't authorize this withdrawal"}
+              Withdrawal needs your authorization
             </h2>
             {withdrawalReview ? (
               <p className="mt-2 text-sm leading-6 text-gray-600">
-                Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.
+                Confirm this withdrawal in PineTree Wallet to continue.
               </p>
             ) : (
               <p className="mt-2 text-sm leading-6 text-gray-600">
@@ -10314,7 +10847,7 @@ function PineTreeWalletRuntime() {
                   disabled={submittingWithdrawal}
                   className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-2"
                 >
-                  {submittingWithdrawal ? "Trying again..." : "Try Again"}
+                  {submittingWithdrawal ? "Authorizing..." : "Authorize withdrawal"}
                 </button>
               ) : null}
               <button
