@@ -87,16 +87,17 @@ describe("Wallet overview - polished PineTree summary", () => {
     expect(walletPage).not.toContain("ProviderStatusPill")
   })
 
-  it("Overview renders Total Balance, Wallet Summary, Recent Withdrawals, and Address Book", () => {
+  it("Overview renders Total Balance, workflow navigation, Wallet Summary, and Recent Withdrawals only", () => {
     const src = walletOverviewSrc()
     expect(src).toContain("TOTAL BALANCE")
+    expect(src).toContain('ariaLabel="Wallet workflows"')
     expect(src).toContain("WALLET SUMMARY")
     expect(src).toContain("RECENT WITHDRAWALS")
     expect(src).toContain("recentItems")
     expect(src).toContain("slice(0, 3)")
     expect(src).toContain("View All Withdrawals")
-    expect(src).toContain("AddressBookPreviewCard")
-    expect(walletPage).toContain("ADDRESS BOOK")
+    expect(src).not.toContain("AddressBookPreviewCard")
+    expect(walletPage).not.toContain("function AddressBookPreviewCard")
     expect(src).not.toContain("Bitcoin Lightning payout")
     expect(src).not.toContain("RECENT ACTIVITY")
   })
@@ -215,16 +216,17 @@ describe("Rail detail workspaces - complete standalone balance card list", () =>
 })
 
 describe("Provider-branded wallet tab removed", () => {
-  it("wallet navigation keeps only workflow actions and removes overview/balances/address-book tabs", () => {
+  it("wallet navigation keeps workflow actions and removes overview/balances tabs", () => {
     expect(walletPage).toContain(
-      'type WalletSecondaryView = "withdraw" | "activity" | "address-book" | "base-details" | "solana-details" | "bitcoin-details"'
+      'type WalletSecondaryView = "withdraw" | "activity" | "address-book" | "settings" | "base-details" | "solana-details" | "bitcoin-details"'
     )
     expect(walletPage).toContain("const walletWorkflowOptions")
     expect(walletPage).toContain('{ value: "withdraw", label: "Withdraw" }')
     expect(walletPage).toContain('{ value: "activity", label: "Activity" }')
+    expect(walletPage).toContain('{ value: "address-book", label: "Address Book" }')
+    expect(walletPage).toContain('{ value: "settings", label: "Settings" }')
     expect(walletPage).not.toContain('{ id: "overview", label: "Overview" }')
     expect(walletPage).not.toContain('{ id: "balances", label: "Balances" }')
-    expect(walletPage).not.toContain('{ id: "address-book", label: "Address Book" }')
     expect(walletPage).not.toContain('{ id: "speed"')
     expect(walletPage).not.toContain("Speed Wallet")
     expect(walletPage).not.toContain('{ id: "automatic-settlement"')

@@ -100,7 +100,7 @@ describe("mobile dashboard hero cleanup", () => {
     const providers = read("app/dashboard/providers/page.tsx")
     const hero = providers.slice(
       providers.indexOf('eyebrow="PAYMENT INFRASTRUCTURE"'),
-      providers.indexOf('<DashboardSection title="Engine Settings"')
+      providers.indexOf('<p className={dashboardSectionLabelClass}>Payment Providers</p>')
     )
 
     expect(hero).toContain("Connected Providers")

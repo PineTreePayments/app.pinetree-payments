@@ -82,8 +82,8 @@ import { runWithBoundedTimeout, type BoundedProviderCallSettlement } from "@/lib
 // Types
 // ---------------------------------------------------------------------------
 
-type WalletSecondaryView = "withdraw" | "activity" | "address-book" | "base-details" | "solana-details" | "bitcoin-details"
-type WalletWorkflowView = "withdraw" | "activity" | "none"
+type WalletSecondaryView = "withdraw" | "activity" | "address-book" | "settings" | "base-details" | "solana-details" | "bitcoin-details"
+type WalletWorkflowView = "withdraw" | "activity" | "address-book" | "settings" | "none"
 type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
@@ -542,6 +542,8 @@ type IdentityMismatchError = {
 const walletWorkflowOptions: Array<{ value: WalletWorkflowView; label: string }> = [
   { value: "withdraw", label: "Withdraw" },
   { value: "activity", label: "Activity" },
+  { value: "address-book", label: "Address Book" },
+  { value: "settings", label: "Settings" },
 ]
 
 const defaultEnabledRails: EnabledRailState = { base: false, solana: false, bitcoin: false }
@@ -2972,53 +2974,24 @@ function walletRailStatusClasses(tone: "blue" | "default" | "amber") {
   return "bg-gray-100 text-gray-700"
 }
 
-function AddressBookPreviewCard({
-  destinationCount,
-  onOpen,
-}: {
-  destinationCount: number | null
-  onOpen: () => void
-}) {
-  const countLabel = destinationCount === null
-    ? "Saved destinations"
-    : `${destinationCount} Saved ${destinationCount === 1 ? "Destination" : "Destinations"}`
-
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group flex w-full items-center justify-between gap-4 rounded-[1.35rem] border border-blue-200/60 bg-white px-4 py-4 text-left shadow-[0_18px_42px_rgba(15,23,42,0.07)] transition hover:border-blue-300 hover:bg-blue-50/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-100 sm:px-5"
-    >
-      <span className="min-w-0">
-        <span className={dashboardSectionLabelClass}>ADDRESS BOOK</span>
-        <span className="mt-2 block text-sm font-semibold text-gray-950">{countLabel}</span>
-      </span>
-      <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-blue-700 group-hover:text-blue-900">
-        Manage Address Book
-        <ChevronRight size={15} aria-hidden="true" />
-      </span>
-    </button>
-  )
-}
-
 function WalletOverviewSummary({
   rows,
   sync,
   syncing,
-  addressBookDestinationCount,
   onSelectRail,
   onOpenWithdraw,
   onViewAllActivity,
   onOpenAddressBook,
+  onOpenSettings,
 }: {
   rows: WalletRailRow[]
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
-  addressBookDestinationCount: number | null
   onSelectRail?: (rail: WithdrawalRail) => void
   onOpenWithdraw: () => void
   onViewAllActivity?: () => void
   onOpenAddressBook: () => void
+  onOpenSettings: () => void
 }) {
   const visibleRows = rows
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
@@ -3043,6 +3016,8 @@ function WalletOverviewSummary({
           onChange={(value) => {
             if (value === "withdraw") onOpenWithdraw()
             if (value === "activity") onViewAllActivity?.()
+            if (value === "address-book") onOpenAddressBook()
+            if (value === "settings") onOpenSettings()
           }}
           options={walletWorkflowOptions}
         />
@@ -3133,7 +3108,6 @@ function WalletOverviewSummary({
           </div>
         )}
       </div>
-      <AddressBookPreviewCard destinationCount={addressBookDestinationCount} onOpen={onOpenAddressBook} />
     </div>
   )
 }
@@ -3241,6 +3215,7 @@ function BalanceRows({
   bitcoinPayoutEntries,
   copiedAddress,
   onCopy,
+  onWithdrawAsset,
 }: {
   sync: PineTreeWalletSyncResponse | null
   syncing: boolean
@@ -3250,6 +3225,7 @@ function BalanceRows({
   bitcoinPayoutEntries: AddressEntry[]
   copiedAddress: string
   onCopy: (address: string) => void
+  onWithdrawAsset: (rail: WithdrawalRail, asset: WithdrawalAsset) => void
 }) {
   const assetRailLabel = (rail: SyncedBalanceAsset["rail"]) =>
     rail === "base" ? "Base" : rail === "solana" ? "Solana" : "Bitcoin"
@@ -3308,7 +3284,7 @@ function BalanceRows({
               <p className={dashboardSectionLabelClass}>{row.asset} • {assetRailLabel(row.rail)}</p>
               <p className="mt-2 text-2xl font-semibold leading-tight text-gray-950">{formatBalance(row.balance, row.asset)}</p>
             </div>
-            <p className="text-right text-sm font-semibold text-gray-950">
+            <div className="flex shrink-0 flex-col items-end gap-2">
               {row.status === "unavailable" || row.status === "stale" ? (
                 <StatusBadge
                   label={row.status === "stale" ? "Stale" : "Unavailable"}
@@ -3316,7 +3292,14 @@ function BalanceRows({
                   showIcon={false}
                 />
               ) : null}
-            </p>
+              <button
+                type="button"
+                onClick={() => onWithdrawAsset(row.rail, row.asset)}
+                className="inline-flex h-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-100"
+              >
+                Withdraw
+              </button>
+            </div>
           </div>
           <dl className="mt-4 divide-y divide-gray-100 text-sm">
             <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 py-2.5">
@@ -3385,7 +3368,7 @@ function WalletFloatingWorkspace({
       className="space-y-3"
     >
       <header className="flex items-start justify-between gap-4">
-        <h2 className="min-w-0 text-base font-semibold text-gray-950">{title}</h2>
+        <h2 className={`min-w-0 ${dashboardSectionLabelClass}`}>{title.toUpperCase()}</h2>
         <button
           type="button"
           onClick={onClose}
@@ -3397,6 +3380,69 @@ function WalletFloatingWorkspace({
       </header>
       {children}
     </section>
+  )
+}
+
+function WalletSettingsWorkspace() {
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <section className="rounded-[1.25rem] border border-blue-200/70 bg-white px-4 py-4 shadow-[0_14px_36px_rgba(15,23,42,0.07)] sm:px-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className={dashboardSectionLabelClass}>AUTO CONVERSION</p>
+            <p className="mt-2 text-sm leading-5 text-gray-600">Automatically convert supported crypto proceeds when a settlement provider is available.</p>
+          </div>
+          <span className="shrink-0 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">Coming soon</span>
+        </div>
+        <fieldset disabled className="mt-4 space-y-3 opacity-65">
+          <label className="block text-xs font-semibold text-gray-600">
+            Auto conversion
+            <select value="disabled" onChange={() => {}} className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-700">
+              <option value="disabled">Disabled</option>
+              <option value="enabled">Enabled</option>
+            </select>
+          </label>
+          <label className="block text-xs font-semibold text-gray-600">
+            Convert to
+            <select value="usd" onChange={() => {}} className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-700">
+              <option value="usd">USD</option>
+            </select>
+          </label>
+          <label className="block text-xs font-semibold text-gray-600">
+            Conversion timing
+            <select value="provider_required" onChange={() => {}} className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-700">
+              <option value="provider_required">Requires settlement provider</option>
+            </select>
+          </label>
+        </fieldset>
+      </section>
+
+      <section className="rounded-[1.25rem] border border-blue-200/70 bg-white px-4 py-4 shadow-[0_14px_36px_rgba(15,23,42,0.07)] sm:px-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className={dashboardSectionLabelClass}>WITHDRAW TO BANK</p>
+            <p className="mt-2 text-sm leading-5 text-gray-600">Configure bank settlement preferences after supported bank withdrawal rails are available.</p>
+          </div>
+          <span className="shrink-0 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">Not yet available</span>
+        </div>
+        <fieldset disabled className="mt-4 space-y-3 opacity-65">
+          <label className="block text-xs font-semibold text-gray-600">
+            Connected bank account
+            <input value="Requires Stripe Bridge" readOnly className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-700" />
+          </label>
+          <label className="block text-xs font-semibold text-gray-600">
+            Settlement frequency
+            <select value="unavailable" onChange={() => {}} className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-700">
+              <option value="unavailable">Coming soon</option>
+            </select>
+          </label>
+          <label className="block text-xs font-semibold text-gray-600">
+            Minimum settlement threshold
+            <input value="Not yet available" readOnly className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-700" />
+          </label>
+        </fieldset>
+      </section>
+    </div>
   )
 }
 
@@ -3856,7 +3902,6 @@ function PineTreeWalletRuntime() {
   const [finalProvisioningRefreshAttempted, setFinalProvisioningRefreshAttempted] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [copiedAddress, setCopiedAddress] = useState("")
-  const [addressBookDestinationCount, setAddressBookDestinationCount] = useState<number | null>(null)
   const [enabledRails, setEnabledRails] = useState<EnabledRailState>(defaultEnabledRails)
   const [railReadiness, setRailReadiness] = useState<PineTreeRailReadinessMap | null>(null)
   const [walletSync, setWalletSync] = useState<PineTreeWalletSyncResponse>(defaultWalletSyncState)
@@ -4273,26 +4318,6 @@ function PineTreeWalletRuntime() {
     }
   }, [])
 
-  const fetchAddressBookPreview = useCallback(async (token: string | null = accessTokenRef.current) => {
-    if (!token) {
-      setAddressBookDestinationCount(null)
-      return
-    }
-    try {
-      const res = await fetch("/api/wallets/pinetree-wallet/withdrawal-destinations?include_disabled=true", {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) {
-        setAddressBookDestinationCount(null)
-        return
-      }
-      const json = (await res.json()) as { destinations?: Array<{ archived_at?: string | null }> }
-      setAddressBookDestinationCount((json.destinations || []).filter((destination) => !destination.archived_at).length)
-    } catch {
-      setAddressBookDestinationCount(null)
-    }
-  }, [])
-
   // --- Load profiles and provider rail enablement from DB on mount ---
   const fetchAllProfiles = useCallback(async () => {
     setProfileState({ kind: "loading" })
@@ -4329,7 +4354,6 @@ function PineTreeWalletRuntime() {
         }),
       ])
       void fetchProviderRailState(token)
-      void fetchAddressBookPreview(token)
 
       let businessProfileCompleteForResume = false
       if (settingsRes.ok) {
@@ -4441,7 +4465,7 @@ function PineTreeWalletRuntime() {
       setBusinessProfileReadiness({ kind: "error" })
       setLightningProfileState({ kind: "none" })
     }
-  }, [fetchAddressBookPreview, fetchProviderRailState])
+  }, [fetchProviderRailState])
 
   useEffect(() => {
     void fetchAllProfiles()
@@ -9047,6 +9071,17 @@ function PineTreeWalletRuntime() {
     setActiveView(walletRailDetailView(rail))
   }, [])
 
+  function handleAssetDetailWithdraw(rail: WithdrawalRail, asset: WithdrawalAsset) {
+    if (isWithdrawalActivelyProcessing()) {
+      setActiveView("withdraw")
+      return
+    }
+    resetWithdrawalDraft()
+    setWithdrawalRail(rail)
+    setWithdrawalAsset(asset)
+    setActiveView("withdraw")
+  }
+
   function handleEditWithdrawal() {
     setWithdrawalScreen("form")
     setWithdrawalSubmitResult(null)
@@ -10223,11 +10258,11 @@ function PineTreeWalletRuntime() {
               rows={walletRailRows}
               sync={walletSync}
               syncing={walletSyncing}
-              addressBookDestinationCount={addressBookDestinationCount}
               onSelectRail={handleOverviewRailSelect}
               onOpenWithdraw={() => setActiveView("withdraw")}
               onViewAllActivity={() => setActiveView("activity")}
               onOpenAddressBook={() => setActiveView("address-book")}
+              onOpenSettings={() => setActiveView("settings")}
             />
           ) : null}
 
@@ -10242,6 +10277,7 @@ function PineTreeWalletRuntime() {
                 bitcoinPayoutEntries={bitcoinPayoutEntries}
                 copiedAddress={copiedAddress}
                 onCopy={(a) => void copyAddress(a)}
+                onWithdrawAsset={handleAssetDetailWithdraw}
               />
             </WalletFloatingWorkspace>
           ) : null}
@@ -10257,6 +10293,7 @@ function PineTreeWalletRuntime() {
                 bitcoinPayoutEntries={bitcoinPayoutEntries}
                 copiedAddress={copiedAddress}
                 onCopy={(a) => void copyAddress(a)}
+                onWithdrawAsset={handleAssetDetailWithdraw}
               />
             </WalletFloatingWorkspace>
           ) : null}
@@ -10272,6 +10309,7 @@ function PineTreeWalletRuntime() {
                 bitcoinPayoutEntries={bitcoinPayoutEntries}
                 copiedAddress={copiedAddress}
                 onCopy={(a) => void copyAddress(a)}
+                onWithdrawAsset={handleAssetDetailWithdraw}
               />
             </WalletFloatingWorkspace>
           ) : null}
@@ -10374,12 +10412,15 @@ function PineTreeWalletRuntime() {
           {activeView === "address-book" ? (
             <WalletFloatingWorkspace
               title="Address Book"
-              onClose={() => {
-                setActiveView(null)
-                void fetchAddressBookPreview()
-              }}
+              onClose={() => setActiveView(null)}
             >
               <AddressBookTab accessToken={accessTokenRef.current} onWithdraw={handleWithdrawShortcut} />
+            </WalletFloatingWorkspace>
+          ) : null}
+
+          {activeView === "settings" ? (
+            <WalletFloatingWorkspace title="Wallet Settings" onClose={() => setActiveView(null)}>
+              <WalletSettingsWorkspace />
             </WalletFloatingWorkspace>
           ) : null}
         </section>

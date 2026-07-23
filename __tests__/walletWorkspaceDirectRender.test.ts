@@ -130,18 +130,30 @@ describe("Mobile wallet workflow navigation stays contained", () => {
   it("workflow navigation reuses the shared segmented button component", () => {
     const navBlock = page.slice(
       page.indexOf('ariaLabel="Wallet workflows"') - 400,
-      page.indexOf('ariaLabel="Wallet workflows"') + 500
+      page.indexOf('ariaLabel="Wallet workflows"') + 700
     )
     expect(navBlock).toContain("<SegmentedButtons")
     expect(navBlock).toContain("walletWorkflowOptions")
+    expect(page).toContain('{ value: "withdraw", label: "Withdraw" }')
+    expect(page).toContain('{ value: "activity", label: "Activity" }')
+    expect(page).toContain('{ value: "address-book", label: "Address Book" }')
+    expect(page).toContain('{ value: "settings", label: "Settings" }')
     expect(page).toContain('className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"')
     expect(page).toContain('rounded-2xl border border-gray-200/80 bg-white p-3 shadow-sm')
   })
 
-  it("overview and address-book are not permanent navigation buttons", () => {
+  it("overview and balances are not permanent navigation buttons", () => {
     expect(page).not.toContain('{ id: "overview", label: "Overview" }')
     expect(page).not.toContain('{ id: "balances", label: "Balances" }')
-    expect(page).not.toContain('{ id: "address-book", label: "Address Book" }')
+  })
+
+  it("segmented controls use PineTree blue outline and pale-blue inactive fill", () => {
+    const segmented = fs.readFileSync(
+      path.join(process.cwd(), "components/ui/SegmentedButtons.tsx"),
+      "utf8"
+    )
+    expect(segmented).toContain("border-blue-600 bg-blue-600 font-semibold text-white shadow-sm")
+    expect(segmented).toContain("border-blue-200 bg-blue-50/70 font-medium text-blue-700")
   })
 })
 
@@ -203,7 +215,8 @@ describe("Wallet dashboard page hierarchy matches Reports-style surfaces", () =>
     expect(overview.indexOf("TOTAL BALANCE")).toBeLessThan(overview.indexOf("<SegmentedButtons"))
     expect(overview.indexOf("<SegmentedButtons")).toBeLessThan(overview.indexOf("WALLET SUMMARY"))
     expect(overview.indexOf("WALLET SUMMARY")).toBeLessThan(overview.indexOf("RECENT WITHDRAWALS"))
-    expect(overview.indexOf("RECENT WITHDRAWALS")).toBeLessThan(overview.indexOf("AddressBookPreviewCard"))
+    expect(page).not.toContain("function AddressBookPreviewCard")
+    expect(overview).not.toContain("AddressBookPreviewCard")
     expect(src).not.toContain('aria-label="PineTree Wallet sections"')
     expect(src).not.toContain('activeTab === "overview"')
     expect(src).not.toContain('activeTab === "balances"')
@@ -240,12 +253,59 @@ describe("Wallet dashboard page hierarchy matches Reports-style surfaces", () =>
     expect(src).toContain('activeView === "solana-details"')
     expect(src).toContain('activeView === "bitcoin-details"')
     expect(src).toContain('activeView === "address-book"')
+    expect(src).toContain('activeView === "settings"')
+  })
+
+  it("address book and settings are secondary workspaces reached from workflow navigation", () => {
+    const src = workspaceSrc()
+    const overview = overviewSrc()
+    expect(overview).toContain('if (value === "address-book") onOpenAddressBook()')
+    expect(overview).toContain('if (value === "settings") onOpenSettings()')
+    expect(src).toContain("<AddressBookTab accessToken={accessTokenRef.current} onWithdraw={handleWithdrawShortcut} />")
+    expect(src).toContain("<WalletSettingsWorkspace />")
+  })
+
+  it("activity control and View All Withdrawals open the same Activity workspace", () => {
+    const overview = overviewSrc()
+    const src = workspaceSrc()
+    expect(overview).toContain('if (value === "activity") onViewAllActivity?.()')
+    expect(overview).toContain("onClick={onViewAllActivity}")
+    expect(src).toContain('onViewAllActivity={() => setActiveView("activity")}')
+    expect(src).toContain('activeView === "activity"')
+    expect(src).toContain("<ActivityTab sync={walletSync} syncing={walletSyncing} accessToken={accessTokenRef.current} />")
+  })
+
+  it("asset detail workspaces use blue section headings and direct withdraw buttons", () => {
+    const src = workspaceSrc()
+    const rows = balanceRowsSrc()
+    expect(page).toContain("function handleAssetDetailWithdraw")
+    expect(page).toContain("setWithdrawalRail(rail)")
+    expect(page).toContain("setWithdrawalAsset(asset)")
+    expect(page).toContain('setActiveView("withdraw")')
+    expect(page).toContain('pendingBalance("BASE_ETH", "base", "ETH", "base", "dynamic", 18)')
+    expect(page).toContain('pendingBalance("BASE_USDC", "base", "USDC", "base", "dynamic", 6)')
+    expect(page).toContain('pendingBalance("SOLANA_SOL", "solana", "SOL", "solana", "dynamic", 9)')
+    expect(page).toContain('pendingBalance("SOLANA_USDC", "solana", "USDC", "solana", "dynamic", 6)')
+    expect(page).toContain('pendingBalance("BTC", "bitcoin", "BTC", "bitcoin_lightning", "speed", 8)')
+    expect(page).toContain('onWithdrawAsset={handleAssetDetailWithdraw}')
+    expect(rows).toContain("onWithdrawAsset: (rail: WithdrawalRail, asset: WithdrawalAsset) => void")
+    expect(rows).toContain("onClick={() => onWithdrawAsset(row.rail, row.asset)}")
+    expect(rows).toContain("Withdraw")
+    expect(page).toContain('<h2 className={`min-w-0 ${dashboardSectionLabelClass}`}>{title.toUpperCase()}</h2>')
+    expect(src).toContain('title="Base Details"')
+    expect(src).toContain('title="Solana Details"')
+    expect(src).toContain('title="Bitcoin Details"')
   })
 
   it("wallet withdrawal status pills use the shared platform status component", () => {
     expect(page).toContain('import StatusBadge from "@/components/ui/StatusBadge"')
     expect(page).toContain("function ActivityStatusPill")
     expect(page).toContain("<StatusBadge status={status} />")
+    const overview = overviewSrc()
+    const activity = activityTabSrc()
+    expect(overview).toContain("<ActivityStatusPill status={item.status} />")
+    expect(activity).toContain("<ActivityStatusPill status={item.status} />")
+    expect(overview).not.toContain("justify-stretch")
   })
 
   it("activity rows remain tappable and open details", () => {
@@ -253,5 +313,30 @@ describe("Wallet dashboard page hierarchy matches Reports-style surfaces", () =>
     expect(src).toContain("items.map((item)")
     expect(src).toContain("onClick={() => void openActivityDetail(item)}")
     expect(src).toContain('type="button"')
+  })
+
+  it("wallet settings is disabled future configuration scaffolding", () => {
+    expect(page).toContain("function WalletSettingsWorkspace")
+    expect(page).toContain("AUTO CONVERSION")
+    expect(page).toContain("WITHDRAW TO BANK")
+    expect(page).toContain("Coming soon")
+    expect(page).toContain("Not yet available")
+    expect(page).toContain("<fieldset disabled")
+    expect(page).not.toContain("from(\"wallet_settings\")")
+  })
+})
+
+describe("Providers page keeps wallet settings out of provider management", () => {
+  const providers = fs.readFileSync(
+    path.join(process.cwd(), "app/dashboard/providers/page.tsx"),
+    "utf8"
+  )
+
+  it("removes the misplaced Engine Settings presentation from Providers", () => {
+    expect(providers).not.toContain("Engine Settings")
+    expect(providers).not.toContain("Smart Routing")
+    expect(providers).not.toContain("Auto Convert to Fiat")
+    expect(providers).not.toContain("engineSettingsPanel")
+    expect(providers).not.toContain("updateSettings")
   })
 })

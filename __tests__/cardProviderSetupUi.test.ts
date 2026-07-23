@@ -134,19 +134,23 @@ describe("card provider setup UI", () => {
 
   it("active filter button uses PineTree blue styling, not plain black or gray", () => {
     const source = read("app/dashboard/providers/page.tsx")
+    const segmented = read("components/ui/SegmentedButtons.tsx")
 
+    expect(source).toContain("<SegmentedButtons")
     // Active state: blue fill and border
-    expect(source).toContain("border-blue-300")
-    expect(source).toContain("bg-blue-50")
-    expect(source).toContain("text-blue-700")
-    // Inactive state: light background, gray text, blue hover
-    expect(source).toContain("border-gray-200")
-    expect(source).toContain("hover:border-blue-200")
-    expect(source).toContain("hover:text-blue-600")
+    expect(segmented).toContain("border-blue-600")
+    expect(segmented).toContain("bg-blue-600")
+    expect(segmented).toContain("text-white")
+    // Inactive state: pale-blue fill, blue outline, blue hover
+    expect(segmented).toContain("border-blue-200")
+    expect(segmented).toContain("bg-blue-50/70")
+    expect(segmented).toContain("text-blue-700")
+    expect(segmented).toContain("hover:border-blue-300")
+    expect(segmented).toContain("hover:text-blue-600")
     // No gray-900 / black text active state from old implementation
-    expect(source).not.toContain('"bg-white font-semibold text-gray-900 shadow-sm"')
+    expect(segmented).not.toContain('"bg-white font-semibold text-gray-900 shadow-sm"')
     // No gray track background from old implementation
-    expect(source).not.toContain("rounded-xl bg-gray-100 p-1")
+    expect(segmented).not.toContain("rounded-xl bg-gray-100 p-1")
   })
 
   it("defaults the provider filter to All", () => {

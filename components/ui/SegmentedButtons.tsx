@@ -12,8 +12,8 @@ export function segmentedButtonClass(active: boolean, size: "default" | "compact
   const metrics = size === "compact" ? "px-2 py-2 text-xs" : "px-3 py-1.5 text-sm"
   return `shrink-0 rounded-lg border ${metrics} transition ${
     active
-      ? "border-blue-300 bg-blue-50 font-semibold text-blue-700 shadow-sm"
-      : "border-gray-200 bg-white/70 font-medium text-gray-500 hover:border-blue-200 hover:text-blue-600"
+      ? "border-blue-600 bg-blue-600 font-semibold text-white shadow-sm"
+      : "border-blue-200 bg-blue-50/70 font-medium text-blue-700 hover:border-blue-300 hover:bg-blue-100/70 hover:text-blue-600"
   }`
 }
 
