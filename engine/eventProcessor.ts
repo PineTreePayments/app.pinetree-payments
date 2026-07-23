@@ -20,6 +20,7 @@ import { syncTransactionProgressForPayment } from "./transactionProgress"
 import { getMerchantStripeAccountId } from "./stripeConnect"
 import { releaseTerminalReaderClaim } from "@/database/merchantTerminalReaders"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { recordSpeedApplicationFeeSettlement } from "./speedFeeSettlement"
 
 export type WebhookInput = {
   provider: string
@@ -434,6 +435,16 @@ export async function processWebhook({
       // Connected-account BTC remains at Speed. Merchant withdrawals are
       // user-triggered Instant Send operations; no automatic settlement,
       // treasury sweep, AutoSwap, or AutoPayout runs during payment webhooks.
+
+      if (provider === SPEED_PROVIDER_NAME) {
+        const transfers = readPath(payload, ["data", "object", "transfers"])
+        await recordSpeedApplicationFeeSettlement(paymentId, transfers).catch((settlementError) => {
+          console.warn("[speed] application_fee_settlement_record_failed", {
+            paymentId,
+            error: settlementError instanceof Error ? settlementError.message : String(settlementError),
+          })
+        })
+      }
     }
 
 

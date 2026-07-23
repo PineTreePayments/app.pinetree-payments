@@ -171,16 +171,14 @@ export type CreateSpeedLightningPaymentParams = {
   currency: string
   merchantAmount: number
   pineTreeFeeAmount: number
-  // OPTIONAL, internal bookkeeping ONLY - never sent to Speed. A prior
-  // production incident sent this pre-converted sats value as Speed's
-  // application_fee and Speed's POST /payments rejected it with a 400
-  // (Speed's real unit/field contract for application_fee is unconfirmed -
-  // it is NOT necessarily whole satoshis, despite target_currency being
-  // SATS). Until Speed's exact supported contract is confirmed (sandbox
-  // response or official docs), application_fee is never sent at all - see
-  // docs/environment/bitcoin-fee-settlement.md. If supplied, this value is
-  // only persisted in metadata for future reconciliation once a verified
-  // mechanism exists.
+  // OPTIONAL, internal bookkeeping ONLY - never sent to Speed in this unit.
+  // A prior production incident sent this pre-converted sats value AS Speed's
+  // application_fee and Speed's POST /payments rejected it with a 400 - the
+  // official Speed Custom Connect API Documentation (confirmed 2026-07-23)
+  // proves application_fee is a fixed amount in the payment's own `currency`
+  // (USD), never sats, regardless of `target_currency`. The USD amount
+  // (pineTreeFeeAmount) is what is sent as application_fee; this sats value
+  // is only ever persisted in metadata for reconciliation/display.
   pineTreeFeeSats?: number
   // BTC/USD rate used to produce pineTreeFeeSats - persisted as the
   // conversion/quote reference, never used for anything except that record.
@@ -194,12 +192,27 @@ export type CreateSpeedLightningPaymentParams = {
   metadata?: Record<string, unknown>
 }
 
-// Deliberately has NO "credited"/"collected" state: Speed does not currently
-// expose a documented or modeled way to verify actual treasury settlement of
-// an application fee, so this code must never claim one occurred.
-// "not_collected" replaces the earlier "requested" state - PineTree no
-// longer asks Speed for this fee at all until the contract is confirmed.
-export type SpeedFeeSettlementStatus = "not_collected" | "retained_pending_sweep" | "not_applicable"
+/**
+ * Confirmed 2026-07-23 against Speed's official Custom Connect API
+ * Documentation (POST /payments: application_fee is a FIXED amount in the
+ * payment's own fiat `currency`, e.g. USD - never converted to sats despite
+ * `target_currency` being "SATS") plus Vivek's confirmation that
+ * payments/instant-send scope the connected account via the `speed-account`
+ * header (not a body field). "settled" is only ever set from real provider
+ * evidence - a `transfers[]` entry with `created_type: "APPLICATION_FEE"` AND
+ * a `transfer_id` - never inferred merely from the payment being paid.
+ * "missing" and "failed" are deliberately merged into one state: Speed's
+ * POST /payments is atomic (the whole request either succeeds or fails), so
+ * there is no code path where the payment succeeds but the fee distinctly
+ * "fails" separately from simply not appearing in `transfers[]`.
+ * See docs/environment/bitcoin-fee-settlement.md.
+ */
+export type SpeedFeeSettlementStatus =
+  | "not_applicable"          // no PineTree fee is owed on this payment
+  | "retained_pending_sweep"  // treasury-sweep mode: fee retained internally, not via Speed's application_fee
+  | "transfer_created"        // application_fee was requested and Speed's create-payment response confirmed a planned APPLICATION_FEE transfer
+  | "missing"                 // a fee was expected but no APPLICATION_FEE transfer evidence was found
+  | "settled"                 // a paid webhook/retrieval confirmed a realized APPLICATION_FEE transfer (has a transfer_id)
 
 export type CreateSpeedLightningPaymentResult = {
   speedPaymentId: string
@@ -212,6 +225,9 @@ export type CreateSpeedLightningPaymentResult = {
   metadata: Record<string, unknown>
   platformFeeSats: number | null
   feeSettlementStatus: SpeedFeeSettlementStatus
+  applicationFeeRequested: number | null
+  applicationFeeTransferDestinationAccount: string | null
+  applicationFeeTransferFixedAmount: number | null
   raw: SpeedPaymentObject
 }
 
@@ -1143,20 +1159,14 @@ export async function createSpeedLightningPayment(
     throw new Error("Lightning amount must be greater than the PineTree service fee.")
   }
 
-  const feeSettlementStatus: SpeedFeeSettlementStatus =
-    pineTreeFeeAmount === 0 ? "not_applicable" : useTreasurySweep ? "retained_pending_sweep" : "not_collected"
+  // application_fee is only applicable on the merchant-connected-account
+  // (split) path: treasury-sweep mode routes the entire gross amount to
+  // PineTree's own platform account directly (no connected account, no
+  // split), so there is nothing for Speed's application_fee to carve out.
+  const feeApplies = !useTreasurySweep && pineTreeFeeAmount > 0
 
-  // IMPORTANT: application_fee is never sent to Speed today. A raw USD float
-  // (0.15) produced zero-value "Application Fee In" records; a pre-converted
-  // whole-satoshi integer (e.g. 225) was then tried and Speed's POST
-  // /payments rejected it outright with a 400 - proving that assumption was
-  // also wrong (or at least incomplete). Speed's real application_fee
-  // contract is unconfirmed. Bitcoin payment creation must not be blocked on
-  // PineTree's platform fee, so this value is recorded internally (for
-  // future reconciliation once Speed's contract is confirmed) but never
-  // placed in the request body. See docs/environment/bitcoin-fee-settlement.md.
   const platformFeeSats: number | null =
-    feeSettlementStatus === "not_collected" && Number.isInteger(Number(params.pineTreeFeeSats)) && Number(params.pineTreeFeeSats) > 0
+    feeApplies && Number.isInteger(Number(params.pineTreeFeeSats)) && Number(params.pineTreeFeeSats) > 0
       ? Number(params.pineTreeFeeSats)
       : null
 
@@ -1191,14 +1201,14 @@ export async function createSpeedLightningPayment(
     platform_fee_usd: pineTreeFeeAmount,
     platform_fee_sats: platformFeeSats,
     fee_conversion_rate_usd: params.btcPriceUsdAtFeeQuote ?? null,
-    fee_settlement_status: feeSettlementStatus,
     merchant_net_usd: merchantAmount,
     ...(merchantSpeedAccountId ? { merchantSpeedAccountId, merchantTransferPercentage } : {})
   }
 
-  // application_fee is intentionally never included in the request body - see
-  // the comment above platformFeeSats. Do not reintroduce it (in any unit)
-  // without an official Speed contract or a confirmed sandbox response.
+  // Per Speed's official Custom Connect API Documentation (confirmed
+  // 2026-07-23): application_fee is a FIXED amount in the payment's own
+  // `currency` (USD here) - never converted to sats, and never combined with
+  // application_fee_percentage (PineTree's fee is fixed, not a percentage).
   const body = {
     currency: params.currency || "USD",
     amount: grossAmount,
@@ -1208,6 +1218,7 @@ export async function createSpeedLightningPayment(
     statement_descriptor: "PineTree",
     description: `PineTree payment ${params.pineTreePaymentId}`,
     metadata,
+    ...(feeApplies ? { application_fee: pineTreeFeeAmount } : {}),
   }
 
   let payment: SpeedPaymentObject
@@ -1237,9 +1248,11 @@ export async function createSpeedLightningPayment(
       requestId: isSpeedError ? error.requestId : null,
       operation: "payment.create",
       settlementMode,
-      applicationFeePresent: false,
-      applicationFeeValue: null,
-      applicationFeeAssumedUnit: null,
+      applicationFeePresent: feeApplies,
+      applicationFeeValue: feeApplies ? pineTreeFeeAmount : null,
+      applicationFeePercentagePresent: false,
+      speedAccountHeaderPresent: Boolean(merchantSpeedAccountId),
+      apiEnvironment: inferSpeedMode(process.env.SPEED_API_KEY),
       invoiceCurrency: body.currency,
       targetCurrency: body.target_currency,
       merchantSpeedAccountSuffix: merchantSpeedAccountId ? merchantSpeedAccountId.slice(-6) : null,
@@ -1253,6 +1266,21 @@ export async function createSpeedLightningPayment(
   }
 
   const hostedUrl = String(payment.hosted_url || payment.checkout_url || payment.url || "").trim()
+  const transfers = Array.isArray(payment.transfers) ? payment.transfers : []
+  const applicationFeeTransfer = feeApplies
+    ? transfers.find((transfer) => String(transfer.created_type || "").toUpperCase() === "APPLICATION_FEE") ?? null
+    : null
+
+  // "settled" is never assigned here - only a later confirmed-payment
+  // reconciliation (engine/speedFeeSettlement.ts) can prove a transfer_id was
+  // realized. At creation time Speed's response only ever shows a *planned*
+  // transfer (per the documented example, present even while status is
+  // "unpaid"), never a transfer_id.
+  const feeSettlementStatus: SpeedFeeSettlementStatus = !feeApplies
+    ? (useTreasurySweep ? "retained_pending_sweep" : "not_applicable")
+    : applicationFeeTransfer
+      ? "transfer_created"
+      : "missing"
 
   return {
     speedPaymentId: payment.id,
@@ -1261,10 +1289,15 @@ export async function createSpeedLightningPayment(
     hostedUrl: hostedUrl || undefined,
     status: String(payment.status || "unpaid"),
     merchantTransferPercentage,
-    transfers: Array.isArray(payment.transfers) ? payment.transfers : [],
+    transfers,
     metadata,
     platformFeeSats,
     feeSettlementStatus,
+    applicationFeeRequested: feeApplies ? pineTreeFeeAmount : null,
+    applicationFeeTransferDestinationAccount: applicationFeeTransfer?.destination_account
+      ? String(applicationFeeTransfer.destination_account)
+      : null,
+    applicationFeeTransferFixedAmount: applicationFeeTransfer?.fixed_amount ?? null,
     raw: payment
   }
 }

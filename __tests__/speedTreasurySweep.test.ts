@@ -22,7 +22,14 @@ describe("Speed treasury-sweep invoice creation", () => {
         id: "speed_pay_1",
         status: "unpaid",
         payment_request: "lnbc1test",
-        transfers: [],
+        transfers: [
+          {
+            destination_account: "acct_platform_1",
+            fixed_amount: 0.25,
+            created_type: "APPLICATION_FEE",
+            description: "Application fee transfer",
+          },
+        ],
       }), { status: 200 })))
   })
 
@@ -90,18 +97,17 @@ describe("Speed treasury-sweep invoice creation", () => {
     })
   })
 
-  it("creates connected-account payments with speed-account and NO application_fee (unconfirmed Speed contract - production 400 regression)", async () => {
-    // A prior production incident: a pre-converted sats integer here was
-    // rejected by Speed's POST /payments with an HTTP 400 - proving the
-    // assumed application_fee unit contract was wrong (or incomplete).
-    // application_fee must not be sent at all until Speed's real contract is
-    // confirmed. See docs/environment/bitcoin-fee-settlement.md.
+  it("creates connected-account payments with speed-account header AND a fixed-USD application_fee (confirmed against Speed's official docs)", async () => {
+    // Confirmed 2026-07-23 against Speed's official Custom Connect API
+    // Documentation: application_fee is a fixed amount in the payment's own
+    // `currency` (USD) - never sats, despite target_currency being "SATS".
+    // See docs/environment/bitcoin-fee-settlement.md.
     await createSpeedLightningPayment({
       amount: 10.25,
       currency: "USD",
       merchantAmount: 10,
       pineTreeFeeAmount: 0.25,
-      pineTreeFeeSats: 375, // internal bookkeeping only - must never reach the request body
+      pineTreeFeeSats: 375, // internal bookkeeping/display only - must never reach application_fee
       btcPriceUsdAtFeeQuote: 66_667,
       merchantSpeedAccountId: "acct_speed_merchant",
       pineTreePaymentId: "pay_1",
@@ -120,13 +126,12 @@ describe("Speed treasury-sweep invoice creation", () => {
       target_currency: "SATS",
       ttl: 300,
       statement_descriptor: "PineTree",
+      application_fee: 0.25,
     })
-    expect(body).not.toHaveProperty("application_fee")
     expect(body.metadata).toMatchObject({
       platform_fee_usd: 0.25,
       platform_fee_sats: 375,
       fee_conversion_rate_usd: 66_667,
-      fee_settlement_status: "not_collected",
     })
     expect(headers.get("speed-account")).toBe("acct_speed_merchant")
     expect(body.account_id).toBeUndefined()
@@ -144,7 +149,7 @@ describe("Speed treasury-sweep invoice creation", () => {
       pineTreePaymentId: "pay_1",
       merchantId: "merchant_1",
       settlementMode: "speed_merchant_account",
-    })).resolves.toMatchObject({ feeSettlementStatus: "not_collected" })
+    })).resolves.toMatchObject({ feeSettlementStatus: "transfer_created", applicationFeeRequested: 0.25 })
   })
 
   it("creates a connected-account webhook registration with connect true", async () => {

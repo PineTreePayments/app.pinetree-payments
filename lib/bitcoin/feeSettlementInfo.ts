@@ -11,6 +11,8 @@ export type BitcoinFeeSettlementInfo = {
   feeConversionRateUsd: number | null
   feeSettlementStatus: string | null
   providerReferencePresent: boolean
+  applicationFeeTransferId: string | null
+  applicationFeeTransferDestinationAccount: string | null
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -34,5 +36,12 @@ export function extractBitcoinFeeSettlementInfo(paymentMetadata: unknown): Bitco
       ? providerMetadata.feeSettlementStatus
       : null,
     providerReferencePresent: Boolean(providerMetadata?.speedPaymentId),
+    applicationFeeTransferId: typeof providerMetadata?.applicationFeeTransferId === "string"
+      ? providerMetadata.applicationFeeTransferId
+      : null,
+    applicationFeeTransferDestinationAccount:
+      typeof providerMetadata?.applicationFeeTransferDestinationAccount === "string"
+        ? providerMetadata.applicationFeeTransferDestinationAccount
+        : null,
   }
 }

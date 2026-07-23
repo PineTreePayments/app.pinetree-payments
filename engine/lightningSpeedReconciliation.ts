@@ -16,6 +16,7 @@ import { advancePaymentToTargetStatus, processPaymentEvent } from "./eventProces
 import { SpeedApiError, isSpeedPaymentPaid } from "@/providers/lightning/speedClient"
 import { retrieveMerchantSpeedPayment } from "@/providers/lightning/speedAdapter"
 import { extractBitcoinFeeSettlementInfo } from "@/lib/bitcoin/feeSettlementInfo"
+import { recordSpeedApplicationFeeSettlement } from "./speedFeeSettlement"
 
 export type SpeedLightningReconciliationResult = {
   checked: boolean
@@ -116,6 +117,12 @@ export async function reconcileSpeedLightningPayment(
       reconciliationState: feeInfo.feeSettlementStatus ?? "unknown",
     })
     await processPaymentEvent({ type: "payment.confirmed", paymentId, feeCaptureValidated: true })
+    await recordSpeedApplicationFeeSettlement(paymentId, speedPayment.transfers).catch((settlementError) => {
+      console.warn("[speed] application_fee_settlement_record_failed", {
+        paymentId,
+        error: settlementError instanceof Error ? settlementError.message : String(settlementError),
+      })
+    })
   } else if (speedStatus === "processing" || speedStatus === "settling") {
     await processPaymentEvent({ type: "payment.processing", paymentId })
   } else if (speedStatus === "expired" || speedStatus === "cancelled" || speedStatus === "canceled") {

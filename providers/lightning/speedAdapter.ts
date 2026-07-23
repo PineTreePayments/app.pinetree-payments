@@ -116,13 +116,12 @@ export const speedAdapter: ProviderAdapter = {
     const feeApplies = !treasurySweepEnabled && pineTreeFeeAmount > 0
     const btcPriceUsd = Number(input.btcPriceUsd)
 
-    // application_fee is never sent to Speed (see the comment in
-    // createSpeedLightningPayment / docs/environment/bitcoin-fee-settlement.md
-    // for why - both a raw USD float and a pre-converted sats integer have
-    // been rejected or produced zero-value records in production). Bitcoin
-    // payment creation must never be blocked by fee-conversion availability,
-    // so this is best-effort, internal bookkeeping only - a missing/invalid
-    // BTC price simply means this record stays empty, never a thrown error.
+    // pineTreeFeeSats is internal bookkeeping/display only - Speed's
+    // application_fee (sent below, in USD, by createSpeedLightningPayment)
+    // is never expressed in sats. Bitcoin payment creation must never be
+    // blocked by fee-conversion availability, so this is best-effort - a
+    // missing/invalid BTC price simply means this record stays empty, never
+    // a thrown error.
     let pineTreeFeeSats: number | undefined
     if (feeApplies && Number.isFinite(btcPriceUsd) && btcPriceUsd > 0) {
       try {
@@ -160,10 +159,8 @@ export const speedAdapter: ProviderAdapter = {
       feeBtc: speedPayment.platformFeeSats != null ? speedPayment.platformFeeSats / 100_000_000 : null,
       conversionRateUsd: Number.isFinite(btcPriceUsd) && btcPriceUsd > 0 ? btcPriceUsd : null,
       merchantSpeedAccountSuffix: merchantSpeedAccountId ? merchantSpeedAccountId.slice(-6) : null,
-      // application_fee is never sent to Speed today (see above) - this is
-      // always false, kept as an explicit field rather than removed so a
-      // future re-enablement is a one-line, auditable change.
-      feeRequestAttempted: false,
+      feeRequestAttempted: feeApplies,
+      applicationFeeRequested: speedPayment.applicationFeeRequested,
       feeApplies,
       providerFeeReferencePresent: Boolean(speedPayment.speedPaymentId),
       reconciliationState: speedPayment.feeSettlementStatus,
@@ -198,12 +195,15 @@ export const speedAdapter: ProviderAdapter = {
         pineTreeFeeAmount,
         platformFeeSats: speedPayment.platformFeeSats,
         feeConversionRateUsd: Number.isFinite(btcPriceUsd) && btcPriceUsd > 0 ? btcPriceUsd : null,
-        // Honest by design: never "credited" here. Speed's application-fee
-        // settlement cannot currently be independently verified (no
-        // documented/modeled endpoint or field for it) - see
-        // reconcileSpeedLightningPayment / docs/environment for the
-        // known limitation this status intentionally reflects.
-        feeSettlementStatus: speedPayment.feeSettlementStatus
+        // Honest by design: "settled" is only ever written later, by
+        // engine/speedFeeSettlement.ts, from real provider evidence (a
+        // transfers[] entry with created_type "APPLICATION_FEE" and a
+        // transfer_id) once the payment is actually confirmed paid - never
+        // assumed here at invoice-creation time.
+        feeSettlementStatus: speedPayment.feeSettlementStatus,
+        applicationFeeRequested: speedPayment.applicationFeeRequested,
+        applicationFeeTransferDestinationAccount: speedPayment.applicationFeeTransferDestinationAccount,
+        applicationFeeTransferFixedAmount: speedPayment.applicationFeeTransferFixedAmount
       }
     }
   },

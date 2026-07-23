@@ -1,53 +1,90 @@
 # Bitcoin platform fee settlement (Speed application_fee)
 
-## Current state (as of the 2026-07-23 urgent restoration)
+## Confirmed contract (2026-07-23)
 
-**`application_fee` is not sent to Speed's `POST /payments` at all**, for any
-settlement mode. PineTree's $0.15/transaction platform fee (`PINETREE_FEE`,
-`engine/config.ts`) is still calculated and recorded internally
-(`platform_fee_usd`, `platform_fee_sats`, `fee_conversion_rate_usd`,
-`fee_settlement_status` in the payment's metadata), but is never requested
-from Speed until Speed's real `application_fee` contract is confirmed.
-Bitcoin Lightning payment creation must never be blocked by fee-conversion
-availability or by an unconfirmed provider fee mechanism - see
-`providers/lightning/speedClient.ts`'s `createSpeedLightningPayment` and
-`providers/lightning/speedAdapter.ts`'s `createLightningInvoice`.
+Speed's official Custom Connect API Documentation (`POST /payments`) confirms:
+
+- `application_fee` is a **fixed amount in the payment's own `currency`**
+  (USD for PineTree) - **never** converted to sats, regardless of
+  `target_currency` being `"SATS"`.
+- `application_fee_percentage` is a separate, optional percentage-based fee.
+  PineTree's platform fee is fixed ($0.15/transaction, `PINETREE_FEE` in
+  `engine/config.ts`), so `application_fee_percentage` is never sent.
+- The connected account a payment is created for is scoped via the
+  `speed-account` HTTP request header (not a body field) - confirmed
+  separately by Speed's Vivek (Speed <> PineTree channel, 2026-07-17): "Just
+  like 'payments' and 'instant send' APIs you need to pass connected account
+  id in 'speed-account' header field." This was already implemented correctly
+  in `speedRequestWithStatus` (`providers/lightning/speedClient.ts`) and was
+  never the source of the regression below.
+
+`createSpeedLightningPayment` now sends `application_fee: <USD amount>` on
+every connect-split Bitcoin payment (never on treasury-sweep payments, which
+route the full gross amount to PineTree's own platform account directly and
+have no connected-account split to fee against).
 
 ## History - two failed unit assumptions, in production, back to back
 
-1. **Raw USD float** (`application_fee: 0.15`): Speed accepted the request
-   (HTTP 200) but created a zero-value "Application Fee In" record - the
-   value was silently misinterpreted (most likely as `0.15` of whatever unit
-   Speed expects, collapsing to zero).
+1. **Raw USD float** (`application_fee: 0.15`): produced a zero-value
+   "Application Fee In" record in Speed's dashboard. In hindsight this was
+   very likely a different bug (a stale merchant Speed account or an earlier
+   request-shape issue), not proof the unit itself was wrong - the official
+   documentation shows this exact float format working end-to-end.
 2. **Pre-converted whole satoshis** (`application_fee: 225` or similar,
    derived from the live BTC/USD rate via `lib/bitcoin/feeConversion.ts`):
    Speed's `POST /payments` **rejected this outright with an HTTP 400**,
-   breaking Bitcoin Lightning payment creation entirely in production
-   (`select-network` returning 400 for every Bitcoin Lightning selection).
+   breaking Bitcoin Lightning payment creation entirely in production. This
+   was the correct diagnosis: satoshis are the wrong unit for
+   `application_fee`. Sats are only ever `target_currency`/`target_amount` -
+   not the fee.
 
-Both attempts were guesses at Speed's unit contract, and both were wrong (or
-at least incomplete). **Do not guess a third time.** Do not reintroduce
-`application_fee` in any unit without either Speed's official documentation
-for this exact field on this exact endpoint, or a confirmed sandbox response
-proving the request shape is accepted.
+Both attempts were guesses at Speed's unit contract, made without the
+official documentation in hand. The documentation resolves this: unit #1's
+format (USD float) was correct all along; only the concurrent removal of
+`application_fee` entirely (to unblock production) was the over-correction,
+and it is now reverted.
 
 ## What actually happens today
 
-- `createSpeedLightningPayment` builds the invoice request body without an
-  `application_fee` key at all, regardless of settlement mode.
-- `pineTreeFeeSats`/`btcPriceUsdAtFeeQuote` may still be supplied by the
-  caller (best-effort; a missing/invalid BTC price is logged and the fields
-  are simply omitted, never a thrown error) - if present they are persisted
-  in the request's opaque `metadata` object (Speed's own free-form
-  pass-through field, unrelated to `application_fee`'s specific semantics)
-  purely for PineTree's own future reconciliation once a verified mechanism
-  exists.
-- `SpeedFeeSettlementStatus` is `"not_collected"` for the normal
-  merchant-connected-account path (fee calculated/tracked, never requested
-  from Speed), `"retained_pending_sweep"` for treasury-sweep mode (fee
-  retained by simply not paying it out - a real, different mechanism, not
-  Speed's `application_fee`), or `"not_applicable"` when no fee is owed.
-  **There is no `"credited"`/`"collected"` state** - see below.
+- `createSpeedLightningPayment` includes `application_fee: pineTreeFeeAmount`
+  (raw USD, e.g. `0.15`) in the request body whenever a connect-split fee
+  applies (`!useTreasurySweep && pineTreeFeeAmount > 0`). Never
+  `application_fee_percentage`. Never both.
+- `pineTreeFeeSats`/`btcPriceUsdAtFeeQuote` are still computed/persisted
+  best-effort (a missing/invalid BTC price is logged and simply omitted,
+  never a thrown error) purely for PineTree's own display/reconciliation -
+  they are never sent to Speed in any field.
+- `SpeedFeeSettlementStatus` (`providers/lightning/speedClient.ts`) now has 5
+  honest states: `"not_applicable"` (no fee owed), `"retained_pending_sweep"`
+  (treasury-sweep mode - no Speed-side split), `"transfer_created"` (the
+  create-payment response confirmed a planned `APPLICATION_FEE` transfer -
+  Speed's documented example shows this even while `status: "unpaid"`),
+  `"missing"` (a fee was expected but no transfer evidence was found), and
+  `"settled"` (a paid webhook/retrieval confirmed a *realized*
+  `APPLICATION_FEE` transfer - i.e. one carrying a `transfer_id`, which Speed
+  only includes post-settlement). **There is no `"credited"`/`"collected"`
+  state** - "settled" only ever comes from a `transfer_id`, never inferred
+  from the payment merely being paid.
+
+## Where "settled" gets set
+
+`engine/speedFeeSettlement.ts` (`recordSpeedApplicationFeeSettlement`) is the
+only place that writes `"settled"`. It is called from both places a
+payment.paid event can be observed:
+
+- `engine/eventProcessor.ts`'s `processWebhook`, using the raw webhook
+  payload's `data.object.transfers[]`.
+- `engine/lightningSpeedReconciliation.ts`'s `reconcileSpeedLightningPayment`,
+  using the `transfers[]` from a `GET /payments/:id` retrieval (the polling
+  path used when no webhook has arrived yet).
+
+Both call sites already guard on the payment's terminal status before
+reaching this point (a redelivered/duplicate `payment.paid` webhook cannot
+re-enter), and `recordSpeedApplicationFeeSettlement` independently only acts
+on payments whose recorded status is `"transfer_created"` or `"missing"` -
+never `"not_applicable"`/`"retained_pending_sweep"`/`"settled"` - so it can
+never downgrade an already-settled record or act on a payment that never
+expected a fee.
 
 ## Treasury vs merchant account routing (unchanged)
 
@@ -55,41 +92,28 @@ proving the request shape is accepted.
   / `speed_connected_account_relationship_id`, resolved via
   `resolveSpeedHeaderAccountId`): scoped via the `speed-account` HTTP header
   on the invoice-creation request. This is where the *gross* customer payment
-  settles - correct, unaffected by any of the fee-related changes above.
+  settles.
 - **PineTree treasury/platform account**: the account that owns
-  `SPEED_API_KEY`. If/when `application_fee` (or an alternative supported
-  mechanism) is re-enabled, this is still the intended fee destination -
-  there is no separate "destination" parameter for the fee in the request
-  payload today.
+  `SPEED_API_KEY`. `application_fee` transfers to this account automatically,
+  per Speed's Custom Connect model - there is no separate "destination"
+  parameter in the request payload; Speed determines the platform account
+  from the API key making the request.
 - `SPEED_PLATFORM_ACCOUNT_ID` exists in configuration only for
   diagnostics/config-status reporting (`getPineTreeSpeedConfigStatus`) - not
   wired into any request as a routing destination.
-
-## Known limitation (documented, not silently worked around)
-
-Speed does not currently expose a documented or modeled way for PineTree to
-read back confirmation that a fee was actually credited to the treasury
-account for a given payment. Because of this:
-
-- `SpeedFeeSettlementStatus` intentionally has no `"credited"` state. Adding
-  one without a real verification mechanism would reproduce the exact kind of
-  unverified assumption that caused both regressions above.
-- `engine/lightningSpeedReconciliation.ts` logs the fee-settlement
-  bookkeeping (`[speed] bitcoin_fee_reconciliation`) whenever a payment is
-  confirmed, for visibility, but never marks a fee "credited."
-- Reports/ledger surfaces must not display a Bitcoin platform fee as
-  "collected" based on this data alone.
 
 ## Speed POST /payments 400 diagnostics
 
 A payment-creation failure is logged as `[speed] bitcoin_payment_create_failed`
 with: canonical transaction id, HTTP status, Speed's provider code, the
 sanitized field-error message, request id, operation (`payment.create`),
-settlement mode, whether `application_fee` was present (now always `false`),
-invoice currency, target currency, and a masked (suffix-only) merchant Speed
-account identifier. Never the API key or a full account id. This is in
-addition to the pre-existing generic `[speed] API request failed` log that
-covers every Speed endpoint.
+settlement mode, whether `application_fee` was present and its value,
+confirmation that `application_fee_percentage` is never present, whether the
+`speed-account` header was present, the inferred API environment
+(test/live), invoice currency, target currency, and a masked (suffix-only)
+merchant Speed account identifier. Never the API key, the full account id, or
+the Authorization header value. This is in addition to the pre-existing
+generic `[speed] API request failed` log that covers every Speed endpoint.
 
 ## Stale/permanently-invalid payment.retrieve references
 
@@ -106,6 +130,5 @@ left untouched for support review.
 ## Existing zero-value records already in Speed's dashboard
 
 Historical "Application Fee In" records with `net`/`amount`/`fee` all zero
-are Speed-side provider records from the first (raw-USD-float) attempt - this
-fix does not and must not mutate them. No retroactive merchant debit should
-be attempted without explicit finance/ops review.
+predate this fix and must not be mutated retroactively. No retroactive
+merchant debit should be attempted without explicit finance/ops review.
