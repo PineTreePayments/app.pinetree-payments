@@ -18,6 +18,7 @@ import {
   getHostedCheckoutTerminalEvent,
   postHostedCheckoutEvent,
 } from "@/lib/checkout/hostedCheckoutEvents"
+import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
 import {
   buildSignAndSendUrl,
   clearSolflareSession,
@@ -258,29 +259,7 @@ export default function PayClient() {
   const isSolflareCallbackMode =
     solflareAction === "connect_callback" || solflareAction === "sign_callback"
 
-  // ── WalletConnect prewarm ───────────────────────────────────────────────────
-  // The customer-visible "Preparing…" delay came from initializing the
-  // WalletConnect client only after the customer opened the Base asset card.
-  // Kick off connector.getProvider() as soon as checkout becomes interactive
-  // instead, so the relay/session-discovery round trip is already in flight
-  // (or done) by the time the customer picks Base. wagmi's connector caches
-  // the resulting provider promise internally, so this is the same client
-  // BaseWalletPayment resolves later — no duplicate WalletConnect client is
-  // ever created, and repeatedly opening/closing the asset card never
-  // re-triggers this work.
   const connectors = useConnectors()
-  useEffect(() => {
-    if (baseWalletConnectPrewarmed) return
-    const connector = connectors.find((c) =>
-      `${c.id} ${c.name} ${c.type}`.toLowerCase().includes("walletconnect")
-    )
-    if (!connector) return
-    baseWalletConnectPrewarmed = true
-    void connector.getProvider().catch(() => {
-      // Best-effort — BaseWalletPayment retries provider resolution itself
-      // when the customer actually selects Base.
-    })
-  }, [connectors])
 
   // ── Shared clipboard state ─────────────────────────────────────────────────
   const [copiedLink, setCopiedLink] = useState(false)
@@ -292,6 +271,59 @@ export default function PayClient() {
   const [paymentStatus, setPaymentStatus] = useState<string>("")
   const [intentPayload, setIntentPayload] = useState<IntentPayload | null>(null)
   const [intentLoadError, setIntentLoadError] = useState<string>("")
+  // One sessionAttemptId per checkout page load — every timing log for this
+  // browser tab's attempt carries it, so two tabs/devices attempting the same
+  // paymentId are immediately distinguishable in logs.
+  const sessionAttemptIdRef = useRef<string>("")
+  if (!sessionAttemptIdRef.current) sessionAttemptIdRef.current = createSessionAttemptId()
+  const checkoutLoadedLoggedRef = useRef(false)
+
+  useEffect(() => {
+    if (checkoutLoadedLoggedRef.current) return
+    checkoutLoadedLoggedRef.current = true
+    logPaymentSession("checkout", "checkout_loaded", {
+      sessionAttemptId: sessionAttemptIdRef.current,
+      payload: { intentId: intentId || null }
+    })
+  }, [intentId])
+
+  // ── WalletConnect prewarm ───────────────────────────────────────────────────
+  // The customer-visible "Preparing…" delay came from initializing the
+  // WalletConnect client only after the customer opened the Base asset card.
+  // Kick off connector.getProvider() as soon as Base is confirmed to be an
+  // available network for this checkout instead, so the relay/session-
+  // discovery round trip is already in flight (or done) by the time the
+  // customer picks Base. wagmi's connector caches the resulting provider
+  // promise internally, so this is the same client BaseWalletPayment resolves
+  // later — no duplicate WalletConnect client is ever created, and repeatedly
+  // opening/closing the asset card never re-triggers this work.
+  //
+  // Gated on availableNetworks including "base": a Lightning-only or
+  // Solana-only checkout must never initialize a WalletConnect client at all.
+  const baseAvailableForCheckout = Boolean(intentPayload?.availableNetworks?.includes("base"))
+  useEffect(() => {
+    if (!baseAvailableForCheckout) return
+    if (baseWalletConnectPrewarmed) return
+    const connector = connectors.find((c) =>
+      `${c.id} ${c.name} ${c.type}`.toLowerCase().includes("walletconnect")
+    )
+    if (!connector) return
+    baseWalletConnectPrewarmed = true
+    logPaymentSession("base", "wallet_library_preload_started", {
+      sessionAttemptId: sessionAttemptIdRef.current,
+      payload: { connectorId: connector.id }
+    })
+    void connector.getProvider()
+      .then(() => {
+        logPaymentSession("base", "wallet_library_preload_completed", {
+          sessionAttemptId: sessionAttemptIdRef.current
+        })
+      })
+      .catch(() => {
+        // Best-effort — BaseWalletPayment retries provider resolution itself
+        // when the customer actually selects Base.
+      })
+  }, [baseAvailableForCheckout, connectors])
   // Checkout session token — scoped to the current intent, used to authorise
   // customer-initiated cancellation (/fail) without merchant credentials.
   // Stored in a ref so useEffect closures (Phantom, Solflare) always see the
@@ -374,6 +406,29 @@ export default function PayClient() {
       : ""
   const intentCardsRef = useRef<HTMLDivElement | null>(null)
   const emittedCheckoutEventRef = useRef<string>("")
+
+  const terminalSessionLoggedRef = useRef(false)
+  useEffect(() => {
+    if (!terminalPaymentStatus) return
+    if (terminalSessionLoggedRef.current) return
+    terminalSessionLoggedRef.current = true
+    const rail = intentPayload?.selectedNetwork === "base"
+      ? "base"
+      : intentPayload?.selectedNetwork === "solana"
+        ? "solana"
+        : intentPayload?.selectedNetwork === "bitcoin_lightning"
+          ? "lightning"
+          : "checkout"
+    const paymentId = intentPayload?.paymentId
+    if (terminalPaymentStatus === "CONFIRMED") {
+      logPaymentSession(rail, "confirmed", { paymentId, sessionAttemptId: sessionAttemptIdRef.current })
+    }
+    logPaymentSession(rail, "watcher_stopped", {
+      paymentId,
+      sessionAttemptId: sessionAttemptIdRef.current,
+      payload: { finalStatus: terminalPaymentStatus }
+    })
+  }, [terminalPaymentStatus, intentPayload?.selectedNetwork, intentPayload?.paymentId])
 
   // ── Intent mode helpers ────────────────────────────────────────────────────
 

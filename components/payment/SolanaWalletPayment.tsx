@@ -13,6 +13,7 @@ import {
   type DetectedSolanaWallet,
   type SolanaBrowserProvider,
 } from "@/lib/wallets/solana"
+import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
 
 type SolanaAsset = "SOL" | "USDC"
 type StepStatus = "done" | "active" | "upcoming"
@@ -248,6 +249,13 @@ export default function SolanaWalletPayment({
 
   const terminalStatus = normalizeTerminalStatus(paymentStatus)
   const isMobile = useMemo(() => isMobileBrowser(), [])
+  // One sessionAttemptId per component mount — a duplicate mount (e.g. a
+  // second checkout tab for the same payment) gets its own ID, so two
+  // different IDs logging the same stage for one paymentId is the signal of
+  // a duplicate wallet session, not a single legitimate one.
+  const sessionAttemptIdRef = useRef<string>("")
+  if (!sessionAttemptIdRef.current) sessionAttemptIdRef.current = createSessionAttemptId()
+  const walletListReadyLoggedRef = useRef(false)
   const refreshWallets = useCallback(() => {
     const detected = getDetectedSolanaWallets()
     setWallets(detected)
@@ -255,7 +263,15 @@ export default function SolanaWalletPayment({
       if (current && detected.some((wallet) => wallet.id === current)) return current
       return ""
     })
-  }, [])
+    if (!walletListReadyLoggedRef.current) {
+      walletListReadyLoggedRef.current = true
+      logPaymentSession("solana", "wallet_list_ready", {
+        paymentId: paymentData?.paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        payload: { walletCount: detected.length }
+      })
+    }
+  }, [paymentData?.paymentId])
 
   useEffect(() => {
     refreshWallets()
@@ -292,9 +308,17 @@ export default function SolanaWalletPayment({
     setError(initialError)
   }, [initialError])
 
+  const confirmedLoggedRef = useRef(false)
   useEffect(() => {
-    if (terminalStatus === "CONFIRMED") setExecStage("confirmed")
-  }, [terminalStatus])
+    if (terminalStatus !== "CONFIRMED") return
+    setExecStage("confirmed")
+    if (confirmedLoggedRef.current) return
+    confirmedLoggedRef.current = true
+    logPaymentSession("solana", "confirmed", {
+      paymentId: paymentData?.paymentId,
+      sessionAttemptId: sessionAttemptIdRef.current
+    })
+  }, [terminalStatus, paymentData?.paymentId])
 
   useEffect(() => {
     const normalized = String(paymentStatus || "").toUpperCase()
@@ -420,6 +444,10 @@ export default function SolanaWalletPayment({
     const tx = Transaction.from(Buffer.from(data.transaction, "base64"))
 
     setExecStage("confirm_payment")
+    logPaymentSession("solana", "signature_requested", {
+      paymentId,
+      sessionAttemptId: sessionAttemptIdRef.current
+    })
     const result = await provider.signAndSendTransaction(tx)
     const signature = getSolanaTransactionSignature(result)
     if (!signature) {
@@ -427,6 +455,11 @@ export default function SolanaWalletPayment({
     }
 
     void logSolana("signature_received", { paymentId, rail: "solana", signaturePrefix: signature.slice(0, 8) })
+    logPaymentSession("solana", "transaction_submitted", {
+      paymentId,
+      sessionAttemptId: sessionAttemptIdRef.current,
+      payload: { signaturePrefix: signature.slice(0, 8) }
+    })
     return signature
   }
 
@@ -446,6 +479,11 @@ export default function SolanaWalletPayment({
     try {
       const preparedPayment = await getPaymentData()
       void logSolana("wallet_open_attempted", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana" })
+      logPaymentSession("solana", "wallet_opened", {
+        paymentId: preparedPayment.paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        payload: { walletId: wallet.id, strategy: "injected_provider" }
+      })
       setExecStage("connecting_wallet")
       const signature = await sendWalletTransaction(wallet.provider, preparedPayment.paymentId)
 
@@ -457,6 +495,11 @@ export default function SolanaWalletPayment({
         body: JSON.stringify({ txHash: signature }),
       }).catch(() => null)
       void logSolana("detect_completed", { paymentId: preparedPayment.paymentId, rail: "solana" })
+      logPaymentSession("solana", "transaction_hash_stored", {
+        paymentId: preparedPayment.paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        payload: { signaturePrefix: signature.slice(0, 8) }
+      })
 
       setExecStage("detecting")
       onPaymentCreated?.(preparedPayment.paymentId)
@@ -514,6 +557,11 @@ export default function SolanaWalletPayment({
 
         window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer), { once: true })
         void logSolana("wallet_open_attempted", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", strategy: "solflare_universal" })
+        logPaymentSession("solana", "wallet_opened", {
+          paymentId: preparedPayment.paymentId,
+          sessionAttemptId: sessionAttemptIdRef.current,
+          payload: { walletId: wallet.id, strategy: "solflare_universal" }
+        })
         window.location.href = data.connectUrl
         return
       }
@@ -545,6 +593,11 @@ export default function SolanaWalletPayment({
 
       window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer), { once: true })
       void logSolana("wallet_open_attempted", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", strategy: wallet.mobileDeepLink ?? "deep_link" })
+      logPaymentSession("solana", "wallet_opened", {
+        paymentId: preparedPayment.paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        payload: { walletId: wallet.id, strategy: wallet.mobileDeepLink ?? "deep_link" }
+      })
       window.location.href = walletUrl
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to open Solana wallet"

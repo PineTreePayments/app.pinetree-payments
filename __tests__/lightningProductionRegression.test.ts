@@ -27,8 +27,15 @@ describe("production Lightning payment flow", () => {
     expect(component).toContain("window.sessionStorage.getItem(storageKey)")
     expect(component).toContain("window.sessionStorage.setItem(storageKey, created)")
     expect(component).toContain('"Idempotency-Key": creationIdempotencyKey')
-    expect(intents).toContain("clientAttemptId")
     expect(intents).toContain("payment-intent:${intent.id}:${normalizedNetwork}")
+    // The per-attempt idempotency key is now derived from prevPaymentId (an
+    // "attempt epoch") rather than a fresh random UUID per call, so two
+    // concurrent calls that both see the same prevPaymentId collide on the
+    // same claim instead of each creating their own payment/invoice — see
+    // markPaymentIntentSelectedIfUnchanged's compare-and-set for the other
+    // half of this same-intent race fix.
+    expect(intents).toContain("after:${prevPaymentId ?? \"initial\"}")
+    expect(intents).toContain("markPaymentIntentSelectedIfUnchanged")
     expect(creation).toContain("shouldPreserveSpeedCreationIdempotencyClaim(error)")
     expect(component).not.toContain('throw new Error(data.error ||')
   })

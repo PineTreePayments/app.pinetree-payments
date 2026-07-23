@@ -6,6 +6,7 @@ import { base } from "wagmi/chains"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import { classifyWalletFamily, detectCapabilitiesFromProvider } from "@/lib/basePay/strategyOrchestrator"
+import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
 type BaseAsset = "ETH" | "USDC"
 type Props = {
   intentId?: string
@@ -692,6 +693,7 @@ async function sendWalletConnectTransaction(input: {
   fromAddress: string
   txRequest: EvmTransactionRequest
   paymentId?: string
+  sessionAttemptId?: string
   actionKind?: WalletRequestKind
   onProviderRequestStarted?: () => void
   debugTimings?: {
@@ -704,6 +706,13 @@ async function sendWalletConnectTransaction(input: {
 }): Promise<string> {
   const actionKind = input.actionKind || "eth_payment"
   const startedAt = Date.now()
+  if (input.sessionAttemptId) {
+    logPaymentSession("base", "signature_requested", {
+      paymentId: input.paymentId,
+      sessionAttemptId: input.sessionAttemptId,
+      payload: { actionKind }
+    })
+  }
   const params = [
     {
       from: input.fromAddress,
@@ -797,6 +806,7 @@ async function sendWalletConnectTransactionWithTimeout(input: {
   fromAddress: string
   txRequest: EvmTransactionRequest
   paymentId?: string
+  sessionAttemptId?: string
   timeoutMs: number
   timeoutMessage: string
   actionKind?: WalletRequestKind
@@ -817,6 +827,7 @@ async function sendWalletConnectTransactionWithTimeout(input: {
         fromAddress: input.fromAddress,
         txRequest: input.txRequest,
         paymentId: input.paymentId,
+        sessionAttemptId: input.sessionAttemptId,
         actionKind: input.actionKind,
         onProviderRequestStarted: input.onProviderRequestStarted,
         debugTimings: input.debugTimings,
@@ -995,6 +1006,11 @@ export default function BaseWalletPayment({
   // always read the current value without needing to be re-created.
   const checkoutTokenRef = useRef<string>("")
   checkoutTokenRef.current = checkoutToken ?? ""
+  // One sessionAttemptId per component mount — reused by every timing log
+  // this attempt emits, so a duplicate mount for the same paymentId (e.g. two
+  // checkout tabs) is visible as two different IDs logging the same stage.
+  const sessionAttemptIdRef = useRef<string>("")
+  if (!sessionAttemptIdRef.current) sessionAttemptIdRef.current = createSessionAttemptId()
   const isSendingBaseTxRef = useRef(false)
   const autoResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autoResumeRetryRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -1503,6 +1519,7 @@ export default function BaseWalletPayment({
         fromAddress,
         txRequest,
         paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
         timeoutMs: kind === "eth_payment" ? BASE_ETH_TX_REQUEST_TIMEOUT_MS : BASE_USDC_TX_REQUEST_TIMEOUT_MS,
         timeoutMessage: kind === "eth_payment"
           ? BASE_ETH_TX_TIMEOUT_MESSAGE
@@ -1530,6 +1547,11 @@ export default function BaseWalletPayment({
       // of the observed browser→wallet→browser→wallet ping-pong overlay.
       if (!source.startsWith("auto-")) {
         logBasePay("wallet_open_prompt_triggered", { actionKind: kind, reason: "manual-retry-dispatch" })
+        logPaymentSession("base", "wallet_opened", {
+          paymentId,
+          sessionAttemptId: sessionAttemptIdRef.current,
+          payload: { actionKind: kind, reason: "manual-retry-dispatch" }
+        })
         tryOpenWalletNativeUri(provider)
       }
       const txHash = await txPromise
@@ -1594,6 +1616,11 @@ export default function BaseWalletPayment({
       setExecStageRef.current("payment_submitted")
       setBaseMobileStepRef.current("payment_submitted")
       setSubmittedTxHash(txHash)
+      logPaymentSession("base", "transaction_submitted", {
+        paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        payload: { actionKind: kind, txHashPrefix: txHash.slice(0, 10) }
+      })
       console.log("[BASE UI] final-tx-submitted", { paymentId, txHashPrefix: txHash.slice(0, 10), asset: kind === "eth_payment" ? "ETH" : "USDC" })
       void logBase(kind === "eth_payment" ? "eth-payment-submitted" : "usdc-payment-submitted", { paymentId, txHashPrefix: txHash.slice(0, 10) })
       void logBase("detect-start", { paymentId, txHashPrefix: txHash.slice(0, 10) })
@@ -2320,6 +2347,7 @@ export default function BaseWalletPayment({
             fromAddress,
             txRequest: storedPaymentTx,
             paymentId: storedPaymentId,
+            sessionAttemptId: sessionAttemptIdRef.current,
             timeoutMs: BASE_USDC_TX_REQUEST_TIMEOUT_MS,
             timeoutMessage: "Payment transaction was not completed. Retry payment approval to try again.",
             actionKind: "usdc_payment",
@@ -2495,6 +2523,7 @@ export default function BaseWalletPayment({
         fromAddress,
         txRequest,
         paymentId: paymentData.paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
         timeoutMs: BASE_ETH_TX_REQUEST_TIMEOUT_MS,
         timeoutMessage: BASE_ETH_TX_TIMEOUT_MESSAGE,
         actionKind: "eth_payment",
@@ -2513,6 +2542,11 @@ export default function BaseWalletPayment({
       setBaseMobileStepRef.current("payment_submitted")
       setIsOpeningWallet(false)
       setSubmittedTxHash(ethTxHash)
+      logPaymentSession("base", "transaction_submitted", {
+        paymentId: paymentData.paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        payload: { actionKind: "eth_payment", txHashPrefix: ethTxHash.slice(0, 10) }
+      })
       console.log("[BASE UI] final-tx-submitted", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10), asset: "ETH" })
       void logBase("eth-payment-submitted", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10) })
       void logBase("detect-start", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10) })
@@ -2843,10 +2877,18 @@ export default function BaseWalletPayment({
         } else {
           let fromAddress = ""
           try {
+            logPaymentSession("base", "pairing_started", {
+              sessionAttemptId: sessionAttemptIdRef.current,
+              payload: { selectedAsset }
+            })
             const result = await connectAsync({ connector: walletConnectConnector, chainId: base.id })
             logBasePay("connect_resolved", { selectedAsset, hasAccount: Boolean(extractAddressFromConnectResult(result)) })
             markWalletConnectionApproved("connectAsync-resolved", {
               hasAccount: Boolean(extractAddressFromConnectResult(result)),
+            })
+            logPaymentSession("base", "session_approved", {
+              sessionAttemptId: sessionAttemptIdRef.current,
+              payload: { hasAccount: Boolean(extractAddressFromConnectResult(result)) }
             })
             resolveWalletRequest()
             fromAddress = extractAddressFromConnectResult(result) || currentAddress

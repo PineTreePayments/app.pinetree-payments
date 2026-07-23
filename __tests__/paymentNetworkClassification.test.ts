@@ -18,6 +18,7 @@ vi.mock("@/database", () => ({
   createPaymentIntent: vi.fn(),
   getPaymentIntentById: vi.fn(),
   markPaymentIntentSelected: vi.fn(),
+  markPaymentIntentSelectedIfUnchanged: vi.fn(),
   expirePaymentIntent: vi.fn(),
   getMerchantWallets: vi.fn(),
   getConnectedHostedCheckoutNetworks: vi.fn(),
@@ -52,12 +53,14 @@ vi.mock("@/lib/pinetreeRailReadiness", () => ({
 
 const {
   cancelPaymentIntentEngine,
+  selectPaymentIntentNetworkEngine,
   isProviderAvailableForCheckout,
   walletNetworkToProviderKey
 } = await import("@/engine/paymentIntents")
 const paymentIntentDb = await import("@/database")
 const paymentStateActions = await import("@/engine/paymentStateActions")
 const baseChainReconciliation = await import("@/engine/baseChainReconciliation")
+const { createPayment, buildCreatePaymentRequest } = await import("@/engine/createPayment")
 
 describe("walletNetworkToProviderKey", () => {
   it("maps stripe to its own provider key, distinct from every crypto rail", () => {
@@ -328,5 +331,160 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
     await cancelPaymentIntentEngine("intent-1")
 
     expect(baseChainReconciliation.reconcileBasePaymentFromChain).not.toHaveBeenCalled()
+  })
+})
+
+// ── selectPaymentIntentNetworkEngine — concurrent /select-network races ─────
+//
+// Reproduces a double-tapped QR link, a stale tab plus a fresh one, or a POS
+// refresh racing the phone: two calls for the SAME intent, neither of which
+// has seen the other's write yet. An unconditional intent-linking update let
+// whichever call finished last silently orphan the other's payment — the
+// customer could go on to pay into a payment record checkout polling never
+// looks at again. These tests prove the compare-and-set + deterministic
+// idempotency key close that gap without breaking the normal single-caller
+// path or legitimate later retries.
+describe("selectPaymentIntentNetworkEngine — concurrent selection", () => {
+  const baseIntent = {
+    id: "intent-1",
+    merchant_id: "merchant-1",
+    amount: 10,
+    currency: "USD",
+    terminal_id: null,
+    metadata: {},
+    available_networks: ["base"],
+    payment_id: null,
+    status: "PENDING" as const,
+    expires_at: "2099-01-01T00:00:00.000Z",
+  }
+
+  const winnerPayment = {
+    id: "winner-payment-1",
+    provider: "base",
+    status: "PENDING",
+    network: "base",
+    payment_url: "ethereum:0xsplit@8453?value=1",
+    qr_code_url: "data:image/png;base64,winner",
+    metadata: { selectedAsset: "ETH", split: {} },
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(buildCreatePaymentRequest).mockResolvedValue({
+      createPaymentInput: {
+        amount: 10,
+        currency: "USD",
+        merchantId: "merchant-1",
+        preferredNetwork: "base",
+        metadata: {},
+      },
+    } as never)
+  })
+
+  it("derives a deterministic per-attempt-epoch idempotency key when the caller supplies none", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue(baseIntent as never)
+    vi.mocked(createPayment).mockResolvedValue({
+      id: "payment-1",
+      provider: "base",
+      paymentUrl: "ethereum:0xsplit@8453?value=1",
+      qrCodeUrl: "data:image/png;base64,abc",
+      address: "0xsplit",
+    } as never)
+    vi.mocked(paymentIntentDb.markPaymentIntentSelectedIfUnchanged).mockResolvedValue({
+      id: "intent-1",
+      payment_id: "payment-1",
+    } as never)
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({
+      id: "payment-1",
+      status: "PENDING",
+      network: "base",
+      metadata: { selectedAsset: "ETH" },
+    } as never)
+
+    await selectPaymentIntentNetworkEngine({ intentId: "intent-1", network: "base" })
+
+    expect(createPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "payment-intent:intent-1:base:ETH:after:initial",
+      })
+    )
+    expect(paymentIntentDb.markPaymentIntentSelectedIfUnchanged).toHaveBeenCalledWith({
+      id: "intent-1",
+      selected_network: "base",
+      payment_id: "payment-1",
+      expectedPreviousPaymentId: null,
+    })
+  })
+
+  it("retires its own payment and returns the winner's when it loses the intent-linking race", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById)
+      .mockResolvedValueOnce(baseIntent as never) // initial read: nobody linked yet
+      .mockResolvedValue({ ...baseIntent, payment_id: "winner-payment-1", status: "SELECTED" } as never) // resolveConcurrentSelectionWinner's read(s)
+    vi.mocked(createPayment).mockResolvedValue({
+      id: "payment-1",
+      provider: "base",
+      paymentUrl: "ethereum:0xsplit@8453?value=1",
+      qrCodeUrl: "data:image/png;base64,abc",
+      address: "0xsplit",
+    } as never)
+    // Lost the race: some other concurrent call already linked winner-payment-1.
+    vi.mocked(paymentIntentDb.markPaymentIntentSelectedIfUnchanged).mockResolvedValue(null)
+    vi.mocked(paymentIntentDb.getPaymentById).mockImplementation(async (id: string) => {
+      if (id === "winner-payment-1") return winnerPayment as never
+      return { id, status: "PENDING", network: "base", metadata: {} } as never
+    })
+    vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
+
+    const result = await selectPaymentIntentNetworkEngine({ intentId: "intent-1", network: "base" })
+
+    // The orphaned payment we created must never be shown as canonical.
+    expect(paymentStateActions.markPaymentIncomplete).toHaveBeenCalledWith(
+      "payment-1",
+      expect.objectContaining({ providerEvent: "concurrent_selection_lost" })
+    )
+    expect(result).toMatchObject({
+      paymentId: "winner-payment-1",
+      alreadySelected: true,
+    })
+  })
+
+  it("recovers from a duplicate-idempotency-key collision at the provider-creation layer by returning the winner's payment", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById)
+      .mockResolvedValueOnce(baseIntent as never)
+      .mockResolvedValue({ ...baseIntent, payment_id: "winner-payment-1", status: "SELECTED" } as never)
+    vi.mocked(createPayment).mockRejectedValue(
+      new Error("Duplicate idempotency key. Start a new checkout attempt with a unique idempotency key.")
+    )
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue(winnerPayment as never)
+
+    const result = await selectPaymentIntentNetworkEngine({ intentId: "intent-1", network: "base" })
+
+    // No payment of our own was ever created, so there is nothing to retire.
+    expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+    expect(paymentIntentDb.markPaymentIntentSelectedIfUnchanged).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      paymentId: "winner-payment-1",
+      alreadySelected: true,
+    })
+  })
+
+  it("still reuses an already-linked active payment on a normal (non-racing) repeat call", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+      ...baseIntent,
+      payment_id: "payment-1",
+    } as never)
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({
+      id: "payment-1",
+      status: "PENDING",
+      network: "base",
+      metadata: { selectedAsset: "ETH" },
+      payment_url: "ethereum:0xsplit@8453?value=1",
+      qr_code_url: "data:image/png;base64,abc",
+    } as never)
+
+    const result = await selectPaymentIntentNetworkEngine({ intentId: "intent-1", network: "base" })
+
+    expect(createPayment).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ paymentId: "payment-1", alreadySelected: true })
   })
 })

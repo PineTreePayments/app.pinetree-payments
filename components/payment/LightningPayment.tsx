@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import WalletPickerModal, { type WalletPickerSection } from "@/components/payment/WalletPickerModal"
-import { acquireLightningStatusPoller } from "@/lib/lightning/lightningStatusPoller"
+import { acquireLightningStatusPoller, isTerminalLightningPollStatus } from "@/lib/lightning/lightningStatusPoller"
+import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
 
 type LightningWallet = {
   id: string
@@ -197,6 +198,13 @@ export default function LightningPayment({
   const [launchedWalletName, setLaunchedWalletName] = useState("")
   const autoPrepareStartedRef = useRef(false)
   const [creationIdempotencyKey] = useState(() => getLightningCreationIdempotencyKey(intentId))
+  // One sessionAttemptId per component mount. Bitcoin Lightning never
+  // initializes WalletConnect or any blockchain wallet adapter — these logs
+  // exist only to time invoice preparation, wallet hand-off, and detection.
+  const sessionAttemptIdRef = useRef<string>("")
+  if (!sessionAttemptIdRef.current) sessionAttemptIdRef.current = createSessionAttemptId()
+  const walletListReadyLoggedRef = useRef(false)
+  const confirmedLoggedRef = useRef(false)
   const checkoutTokenRef = useRef(checkoutToken)
   const onPaymentCreatedRef = useRef(onPaymentCreated)
   checkoutTokenRef.current = checkoutToken
@@ -207,6 +215,15 @@ export default function LightningPayment({
   const hasInvoice = Boolean(invoiceUri)
   const terminalStatus = normalizeTerminalStatus(paymentStatus)
   const isPaymentProcessing = String(paymentStatus || "").toUpperCase() === "PROCESSING"
+
+  useEffect(() => {
+    if (terminalStatus !== "CONFIRMED" || confirmedLoggedRef.current) return
+    confirmedLoggedRef.current = true
+    logPaymentSession("lightning", "confirmed", {
+      paymentId: payment?.paymentId,
+      sessionAttemptId: sessionAttemptIdRef.current
+    })
+  }, [terminalStatus, payment?.paymentId])
   const formattedUsdAmount = useMemo(() => new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -246,6 +263,19 @@ export default function LightningPayment({
 
       setPayment(data)
       setWalletSearch("")
+      logPaymentSession("lightning", "transaction_submitted", {
+        paymentId: String(data.paymentId || "") || undefined,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        payload: { note: "invoice created — the actual payment happens inside the customer's wallet app" }
+      })
+      if (!walletListReadyLoggedRef.current) {
+        walletListReadyLoggedRef.current = true
+        logPaymentSession("lightning", "wallet_list_ready", {
+          paymentId: String(data.paymentId || "") || undefined,
+          sessionAttemptId: sessionAttemptIdRef.current,
+          payload: { walletCount: LIGHTNING_WALLETS.length }
+        })
+      }
       onPaymentCreated?.()
     } catch (err) {
       setError((err as Error).message || "Unable to prepare Lightning invoice")
@@ -264,6 +294,7 @@ export default function LightningPayment({
     const paymentId = String(payment?.paymentId || "").trim()
     if (!hasInvoice || terminalStatus || !checkoutToken || !paymentId) return
 
+    let providerDetectedLogged = false
     const { poller, release } = acquireLightningStatusPoller(paymentId, {
       check: async (signal) => {
         const token = checkoutTokenRef.current
@@ -278,7 +309,25 @@ export default function LightningPayment({
         if (!res.ok) throw new Error("Lightning reconciliation is temporarily unavailable.")
         return { status: data.status }
       },
-      onResult: () => onPaymentCreatedRef.current?.(),
+      onResult: (result) => {
+        const status = String(result.status || "").trim().toUpperCase()
+        if (status && status !== "CREATED" && status !== "PENDING" && !providerDetectedLogged) {
+          providerDetectedLogged = true
+          logPaymentSession("lightning", "provider_detected", {
+            paymentId,
+            sessionAttemptId: sessionAttemptIdRef.current,
+            payload: { status }
+          })
+        }
+        if (isTerminalLightningPollStatus(status)) {
+          logPaymentSession("lightning", "watcher_stopped", {
+            paymentId,
+            sessionAttemptId: sessionAttemptIdRef.current,
+            payload: { status }
+          })
+        }
+        onPaymentCreatedRef.current?.()
+      },
     })
 
     const updateVisibility = () => document.hidden ? poller.pause() : poller.resume()
@@ -364,6 +413,11 @@ export default function LightningPayment({
       )
 
       logLightning("app_open_attempted", { walletId: wallet.id, rail: "lightning", scheme: appUrl.split(":")[0] })
+      logPaymentSession("lightning", "wallet_opened", {
+        paymentId: payment?.paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        payload: { walletId: wallet.id, scheme: appUrl.split(":")[0] }
+      })
       window.location.href = appUrl
       return
     }
@@ -377,7 +431,7 @@ export default function LightningPayment({
     logLightning("app_store_fallback_triggered", { walletId: wallet.id, rail: "lightning", reason: "no_invoice_url_builder" })
     window.open(installUrl, "_blank", "noopener,noreferrer")
     setPendingWalletId("")
-  }, [invoiceUri, onExecutionStarted])
+  }, [invoiceUri, onExecutionStarted, payment?.paymentId])
 
   const walletPickerSections: WalletPickerSection[] = useMemo(() => {
     const query = normalizeWalletName(walletSearch)

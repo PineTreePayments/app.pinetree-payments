@@ -2,6 +2,7 @@ import {
   createPaymentIntent as createPaymentIntentRecord,
   getPaymentIntentById,
   markPaymentIntentSelected,
+  markPaymentIntentSelectedIfUnchanged,
   expirePaymentIntent,
   getMerchantWallets,
   getConnectedHostedCheckoutNetworks,
@@ -384,6 +385,127 @@ export async function getPaymentIntentEngine(intentId: string) {
   }
 }
 
+type ExistingPaymentForReuse = {
+  id: string
+  status: string
+  network?: string | null
+  provider?: string | null
+  payment_url?: string | null
+  qr_code_url?: string | null
+  metadata?: unknown
+}
+
+/**
+ * Build the "reuse an already-active payment" response shape. Shared by the
+ * upfront fast-path (below) and by the concurrent-selection recovery path —
+ * both cases end the same way: return the one canonical payment the intent
+ * is actually linked to, never a payment the caller created but lost.
+ */
+function buildReuseSelectNetworkResponse(input: {
+  intentId: string
+  normalizedNetwork: string
+  selectedAsset?: string
+  existingPayment: ExistingPaymentForReuse
+}) {
+  const { intentId, normalizedNetwork, selectedAsset, existingPayment } = input
+  const existingMeta = (existingPayment.metadata ?? null) as {
+    split?: { baseUsdcStrategy?: string; splitContract?: string }
+  } | null
+  const existingSplit = existingMeta?.split
+  const reuseStrategy = existingSplit?.baseUsdcStrategy === "v7_eip3009_relayer"
+    ? "v7_eip3009_relayer" as const
+    : undefined
+  const reuseSplitContract = String(existingSplit?.splitContract || "").trim() || undefined
+  const reusePaymentUrl = String(existingPayment.payment_url || "").trim()
+  const reuseWalletUrl = reusePaymentUrl
+  const reuseEstimatedSats = normalizedNetwork === "bitcoin_lightning"
+    ? getLightningEstimatedSats()
+    : undefined
+
+  return {
+    intentId,
+    paymentId: existingPayment.id,
+    network: normalizedNetwork,
+    selectedNetwork: normalizedNetwork,
+    asset: selectedAsset,
+    provider: String(existingPayment.provider || ""),
+    paymentUrl: reusePaymentUrl,
+    qrCodeUrl: String(existingPayment.qr_code_url || ""),
+    address: reuseSplitContract,
+    walletUrl: reuseWalletUrl || undefined,
+    walletOptions: buildWalletOptions(reuseWalletUrl, normalizedNetwork),
+    universalUrl: undefined,
+    nativeAmount: undefined,
+    nativeSymbol: undefined,
+    estimatedSats: reuseEstimatedSats,
+    baseUsdcStrategy: reuseStrategy,
+    clientSecret: undefined,
+    metadata: {
+      split: {
+        baseUsdcStrategy: reuseStrategy,
+        splitContract: reuseSplitContract
+      }
+    },
+    alreadySelected: true
+  }
+}
+
+function isActiveReusablePayment(
+  payment: ExistingPaymentForReuse,
+  normalizedNetwork: string,
+  selectedAsset?: string
+): boolean {
+  const existingStatus = String(payment.status || "").toUpperCase()
+  const existingNetwork = String(payment.network || "").toLowerCase().trim()
+  const existingMeta = (payment.metadata ?? null) as { selectedAsset?: string } | null
+  const existingSelectedAsset = String(existingMeta?.selectedAsset || "").toUpperCase()
+  const isSameNetwork = existingNetwork === normalizedNetwork
+  const isSameAsset = !selectedAsset || existingSelectedAsset === String(selectedAsset || "").toUpperCase()
+  const isActiveStatus = existingStatus === "CREATED" || existingStatus === "PENDING" || existingStatus === "PROCESSING"
+  return isActiveStatus && isSameNetwork && isSameAsset
+}
+
+/**
+ * Recover from losing a concurrent /select-network race for the same intent
+ * (a double-tapped QR link, a stale tab plus a fresh one, a POS refresh
+ * racing the phone). The winner has already — or is about to — link its
+ * payment to the intent; poll briefly for that link to land, then return the
+ * SAME canonical payment instead of leaving the loser's own orphaned.
+ */
+async function resolveConcurrentSelectionWinner(input: {
+  intentId: string
+  normalizedNetwork: string
+  selectedAsset?: string
+}) {
+  const maxAttempts = 6
+  const delayMs = 400
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const intent = await getPaymentIntentById(input.intentId)
+    if (intent?.payment_id) {
+      const payment = await getPaymentById(intent.payment_id)
+      if (payment && isActiveReusablePayment(payment, input.normalizedNetwork, input.selectedAsset)) {
+        console.info("[payment-intent] select-network:concurrent-selection-resolved", {
+          intentId: input.intentId,
+          winningPaymentId: payment.id,
+          attempt
+        })
+        return buildReuseSelectNetworkResponse({
+          intentId: input.intentId,
+          normalizedNetwork: input.normalizedNetwork,
+          selectedAsset: input.selectedAsset,
+          existingPayment: payment
+        })
+      }
+    }
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+    }
+  }
+
+  throw new Error("Payment selection is already in progress for this session. Please retry in a moment.")
+}
+
 export async function selectPaymentIntentNetworkEngine(input: {
   intentId: string
   network: string
@@ -417,70 +539,27 @@ export async function selectPaymentIntentNetworkEngine(input: {
   // network and asset. This prevents creating a duplicate payment (and marking the
   // active one INCOMPLETE) when the checkout resumes after a browser suspension —
   // e.g. when the customer returns from a mobile wallet mid EIP-3009 signing.
-  if (intent.payment_id) {
+  //
+  // Stripe client secrets are deliberately never persisted. A repeated Stripe
+  // selection therefore creates a fresh PaymentIntent instead of returning an
+  // unusable response or storing a reusable secret in PineTree metadata.
+  if (intent.payment_id && normalizedNetwork !== "stripe") {
     const existingPayment = await getPaymentById(intent.payment_id)
-    if (existingPayment) {
-      const existingStatus = String(existingPayment.status || "").toUpperCase()
-      const existingNetwork = String(existingPayment.network || "").toLowerCase().trim()
-      const existingMeta = (existingPayment.metadata ?? null) as {
-        selectedAsset?: string
-        split?: { baseUsdcStrategy?: string; splitContract?: string }
-      } | null
-      const existingSelectedAsset = String(existingMeta?.selectedAsset || "").toUpperCase()
-      const isSameNetwork = existingNetwork === normalizedNetwork
-      const isSameAsset = !selectedAsset || existingSelectedAsset === String(selectedAsset || "").toUpperCase()
-      const isActiveStatus = existingStatus === "CREATED" || existingStatus === "PENDING" || existingStatus === "PROCESSING"
+    if (existingPayment && isActiveReusablePayment(existingPayment, normalizedNetwork, selectedAsset)) {
+      console.info("[payment-intent] select-network:reuse-existing", {
+        intentId: intent.id,
+        paymentId: existingPayment.id,
+        network: normalizedNetwork,
+        status: existingPayment.status,
+        durationMs: Date.now() - startedAt
+      })
 
-      // Stripe client secrets are deliberately never persisted. A repeated Stripe
-      // selection therefore creates a fresh PaymentIntent instead of returning an
-      // unusable response or storing a reusable secret in PineTree metadata.
-      if (isActiveStatus && isSameNetwork && isSameAsset && normalizedNetwork !== "stripe") {
-        const existingSplit = existingMeta?.split
-        const reuseStrategy = existingSplit?.baseUsdcStrategy === "v7_eip3009_relayer"
-          ? "v7_eip3009_relayer" as const
-          : undefined
-        const reuseSplitContract = String(existingSplit?.splitContract || "").trim() || undefined
-        const reusePaymentUrl = String(existingPayment.payment_url || "").trim()
-        const reuseWalletUrl = reusePaymentUrl
-        const reuseEstimatedSats = normalizedNetwork === "bitcoin_lightning"
-          ? getLightningEstimatedSats()
-          : undefined
-
-        console.info("[payment-intent] select-network:reuse-existing", {
-          intentId: intent.id,
-          paymentId: existingPayment.id,
-          network: normalizedNetwork,
-          status: existingStatus,
-          durationMs: Date.now() - startedAt
-        })
-
-        return {
-          intentId: intent.id,
-          paymentId: existingPayment.id,
-          network: normalizedNetwork,
-          selectedNetwork: normalizedNetwork,
-          asset: selectedAsset,
-          provider: String(existingPayment.provider || ""),
-          paymentUrl: reusePaymentUrl,
-          qrCodeUrl: String(existingPayment.qr_code_url || ""),
-          address: reuseSplitContract,
-          walletUrl: reuseWalletUrl || undefined,
-          walletOptions: buildWalletOptions(reuseWalletUrl, normalizedNetwork),
-          universalUrl: undefined,
-          nativeAmount: undefined,
-          nativeSymbol: undefined,
-          estimatedSats: reuseEstimatedSats,
-          baseUsdcStrategy: reuseStrategy,
-          clientSecret: undefined,
-          metadata: {
-            split: {
-              baseUsdcStrategy: reuseStrategy,
-              splitContract: reuseSplitContract
-            }
-          },
-          alreadySelected: true
-        }
-      }
+      return buildReuseSelectNetworkResponse({
+        intentId: intent.id,
+        normalizedNetwork,
+        selectedAsset,
+        existingPayment
+      })
     }
   }
 
@@ -513,23 +592,80 @@ export async function selectPaymentIntentNetworkEngine(input: {
       "Payment preparation"
     )
 
-    const clientAttemptId = String(input.idempotencyKey || crypto.randomUUID()).trim()
-    const payment = await withTimeout(
-      createPayment({
-        ...createPaymentInput,
-        preferredNetwork: normalizedNetwork,
-        asset: selectedAsset,
-        idempotencyKey: `payment-intent:${intent.id}:${normalizedNetwork}:${selectedAsset || "default"}:${clientAttemptId}`
-      }),
-      normalizedNetwork === "bitcoin_lightning" ? Math.max(PAYMENT_DETAILS_TIMEOUT_MS, 20_000) : PAYMENT_DETAILS_TIMEOUT_MS,
-      "Payment creation"
-    )
+    // Deterministic per-"attempt epoch" key so two concurrent calls that both
+    // see the same prevPaymentId (neither has linked yet) collide on the SAME
+    // idempotency claim instead of each creating their own payment/provider
+    // invoice — see database/idempotency.ts's claimIdempotencyKey. A caller
+    // that supplies its own key (e.g. Lightning's per-tab sessionStorage key)
+    // is honoured as-is; the epoch fallback still changes on every legitimate
+    // subsequent retry, once prevPaymentId itself has moved on.
+    const idempotencyKey = input.idempotencyKey
+      || `payment-intent:${intent.id}:${normalizedNetwork}:${selectedAsset || "default"}:after:${prevPaymentId ?? "initial"}`
 
-    await markPaymentIntentSelected({
-      id: intent.id,
-      selected_network: normalizedNetwork,
-      payment_id: payment.id
-    })
+    let payment: Awaited<ReturnType<typeof createPayment>>
+    try {
+      payment = await withTimeout(
+        createPayment({
+          ...createPaymentInput,
+          preferredNetwork: normalizedNetwork,
+          asset: selectedAsset,
+          idempotencyKey
+        }),
+        normalizedNetwork === "bitcoin_lightning" ? Math.max(PAYMENT_DETAILS_TIMEOUT_MS, 20_000) : PAYMENT_DETAILS_TIMEOUT_MS,
+        "Payment creation"
+      )
+    } catch (createError) {
+      if (createError instanceof Error && createError.message.includes("Duplicate idempotency key")) {
+        // A concurrent call already claimed this exact selection attempt.
+        // Wait for it to finish linking and reuse its payment rather than
+        // surfacing an error for what is, from the customer's perspective,
+        // the same tap that already succeeded on another tab/device.
+        console.info("[payment-intent] select-network:idempotency-collision", {
+          intentId: intent.id,
+          network: normalizedNetwork
+        })
+        return await resolveConcurrentSelectionWinner({ intentId: intent.id, normalizedNetwork, selectedAsset })
+      }
+      throw createError
+    }
+
+    if (normalizedNetwork === "stripe") {
+      await markPaymentIntentSelected({
+        id: intent.id,
+        selected_network: normalizedNetwork,
+        payment_id: payment.id
+      })
+    } else {
+      const linked = await markPaymentIntentSelectedIfUnchanged({
+        id: intent.id,
+        selected_network: normalizedNetwork,
+        payment_id: payment.id,
+        expectedPreviousPaymentId: prevPaymentId
+      })
+
+      if (!linked) {
+        // Lost the race: some other concurrent call linked a different
+        // payment to this intent between our read and our write. Retire the
+        // orphaned payment we just created — it will never be shown to the
+        // customer as canonical — and return the winner's payment instead.
+        console.warn("[payment-intent] select-network:lost-concurrent-link", {
+          intentId: intent.id,
+          orphanedPaymentId: payment.id,
+          network: normalizedNetwork
+        })
+        await markPaymentIncomplete(payment.id, {
+          providerEvent: "concurrent_selection_lost",
+          rawPayload: { reason: "concurrent_selection_lost" }
+        }).catch((cleanupError) => {
+          console.warn("[payment-intent] select-network:orphan-cleanup-failed", {
+            intentId: intent.id,
+            orphanedPaymentId: payment.id,
+            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+          })
+        })
+        return await resolveConcurrentSelectionWinner({ intentId: intent.id, normalizedNetwork, selectedAsset })
+      }
+    }
 
     // New payment is safely linked — now it is safe to retire the previous payment.
     if (prevPaymentId) {

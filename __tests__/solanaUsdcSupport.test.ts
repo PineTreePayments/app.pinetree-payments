@@ -71,12 +71,14 @@ const {
   getPaymentIntentById,
   getPaymentById,
   markPaymentIntentSelected,
+  markPaymentIntentSelectedIfUnchanged,
   createPayment,
   buildCreatePaymentRequest,
 } = vi.hoisted(() => ({
   getPaymentIntentById: vi.fn(),
   getPaymentById: vi.fn(),
   markPaymentIntentSelected: vi.fn(),
+  markPaymentIntentSelectedIfUnchanged: vi.fn(),
   createPayment: vi.fn(),
   buildCreatePaymentRequest: vi.fn(),
 }))
@@ -85,6 +87,7 @@ vi.mock("@/database", () => ({
   getPaymentIntentById,
   getPaymentById,
   markPaymentIntentSelected,
+  markPaymentIntentSelectedIfUnchanged,
   createPaymentIntent: vi.fn(),
   expirePaymentIntent: vi.fn(),
   getMerchantWallets: vi.fn(),
@@ -188,6 +191,12 @@ describe("Solana USDC hosted checkout routing", () => {
         },
       },
     })
+    markPaymentIntentSelectedIfUnchanged.mockResolvedValue({
+      id: "intent-1",
+      payment_id: "payment-1",
+      selected_network: "solana",
+      status: "SELECTED",
+    })
   })
 
   it("passes asset USDC through network selection to Solana payment creation", async () => {
@@ -215,10 +224,11 @@ describe("Solana USDC hosted checkout routing", () => {
         asset: "USDC",
       })
     )
-    expect(markPaymentIntentSelected).toHaveBeenCalledWith({
+    expect(markPaymentIntentSelectedIfUnchanged).toHaveBeenCalledWith({
       id: "intent-1",
       selected_network: "solana",
       payment_id: "payment-1",
+      expectedPreviousPaymentId: null,
     })
     expect(result).toMatchObject({
       network: "solana",
