@@ -535,9 +535,9 @@ describe("speedClient /connect/custom", () => {
       password: "temporary-secret",
     }).catch(() => undefined)
 
-    const detailCall = warnSpy.mock.calls.find((call) => call[0] === "[speed] speed_custom_connect_error_detail")
+    const detailCall = warnSpy.mock.calls.find((call) => call[0] === "[speed] provider_error_detail")
     expect(detailCall).toBeTruthy()
-    expect(detailCall?.[1]).toMatchObject({ status: 400 })
+    expect(detailCall?.[1]).toMatchObject({ status: 400, path: "/connect/custom", responseBodyType: "json" })
     const sanitizedBody = detailCall?.[1].sanitizedErrorBody as { errors: Array<Record<string, unknown>> }
     expect(sanitizedBody.errors[0].allowed_values).toEqual(["United States"])
     expect(sanitizedBody.errors[0].country_id).toBe(840)
@@ -545,7 +545,7 @@ describe("speedClient /connect/custom", () => {
     warnSpy.mockRestore()
   })
 
-  it("never logs this diagnostic for non-/connect/custom endpoints", async () => {
+  it("also logs this diagnostic for non-/connect/custom endpoints (generalized 2026-07-23: every non-2xx Speed response gets the full structure, not just /connect/custom)", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error_code: "invalid_request", error_message: "bad request" }), { status: 400 })
     )
@@ -554,7 +554,28 @@ describe("speedClient /connect/custom", () => {
     const { createSpeedConnectAccountLink } = await import("@/providers/lightning/speedClient")
     await createSpeedConnectAccountLink({}).catch(() => undefined)
 
-    expect(warnSpy.mock.calls.some((call) => call[0] === "[speed] speed_custom_connect_error_detail")).toBe(false)
+    const detailCall = warnSpy.mock.calls.find((call) => call[0] === "[speed] provider_error_detail")
+    expect(detailCall).toBeTruthy()
+    expect(detailCall?.[1]).toMatchObject({ status: 400, path: "/connect/generate/account-link" })
+
+    warnSpy.mockRestore()
+  })
+
+  it("logs a safely truncated raw body (never the sanitized structure) when the response body is not valid JSON", async () => {
+    fetchMock.mockResolvedValue(new Response("<html>502 Bad Gateway</html>", { status: 502 }))
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    const { createSpeedConnectAccountLink } = await import("@/providers/lightning/speedClient")
+    await createSpeedConnectAccountLink({}).catch(() => undefined)
+
+    const detailCall = warnSpy.mock.calls.find((call) => call[0] === "[speed] provider_error_detail")
+    expect(detailCall).toBeTruthy()
+    expect(detailCall?.[1]).toMatchObject({
+      status: 502,
+      responseBodyType: "non_json",
+      sanitizedErrorBody: null,
+      rawBodyTruncated: "<html>502 Bad Gateway</html>",
+    })
 
     warnSpy.mockRestore()
   })

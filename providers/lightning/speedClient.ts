@@ -911,6 +911,7 @@ export async function speedRequestWithStatus<T>(
   if (!response.ok) {
     const { providerCode, fieldErrors } = parseSpeedErrorBody(body)
     responseDiagnostics.jsonParsed = speedBodyParsesAsJson(body)
+    const retryClassification = [408, 429, 500, 502, 503, 504].includes(response.status) ? "bounded_retry" : "permanent_no_retry"
     console.error("[speed] API request failed", {
       merchantId,
       providerAccountId: providerAccountId || null,
@@ -925,22 +926,30 @@ export async function speedRequestWithStatus<T>(
       fieldErrorCount: fieldErrors.length,
       apiHost: getSpeedApiHost(),
       elapsedMs: Date.now() - startedAt,
-      retryClassification: [408, 429, 500, 502, 503, 504].includes(response.status) ? "bounded_retry" : "permanent_no_retry",
+      retryClassification,
     })
 
-    // TEMPORARY diagnostic: parseSpeedErrorBody flattens each error to
-    // {field, message} and silently drops any sibling metadata Speed's body
-    // might carry (allowed_values, parameter, expected, country_id, details,
-    // documentation_url, ...). Log the full structure - every key, not just
-    // field/message - so a real rejection reveals whatever Speed actually
-    // sent instead of only what today's flattener knows to look for. Remove
-    // once Speed's /connect/custom country contract is confirmed.
-    if (path === "/connect/custom") {
-      console.warn("[speed] speed_custom_connect_error_detail", {
-        status: response.status,
-        sanitizedErrorBody: sanitizeSpeedErrorStructureForDiagnostics(body),
-      })
-    }
+    // Every non-2xx response gets the COMPLETE parsed error structure logged
+    // (not just a flattened {field, message} pair, and not just for
+    // /connect/custom) - parseSpeedErrorBody drops sibling metadata Speed's
+    // body might carry (allowed_values, parameter, expected, details,
+    // documentation_url, ...), and a body that isn't valid JSON at all would
+    // otherwise be reduced to nothing. This is the diagnostic that must never
+    // collapse to a bare "Speed API returned 400".
+    console.warn("[speed] provider_error_detail", {
+      operation,
+      path,
+      status: response.status,
+      requestId,
+      retryClassification,
+      responseContentType: contentType,
+      responseBodyType: responseDiagnostics.jsonParsed ? "json" : "non_json",
+      responseHeaders: responseHeadersForDiagnostics(response.headers),
+      sanitizedErrorBody: responseDiagnostics.jsonParsed
+        ? sanitizeSpeedErrorStructureForDiagnostics(body)
+        : null,
+      rawBodyTruncated: responseDiagnostics.jsonParsed ? null : safeSpeedDiagnosticText(body, 500),
+    })
 
     if (isSpeedTransferPercentageValidationMessage(body)) {
       throw new Error(SPEED_TRANSFER_SPLIT_ERROR)
@@ -1220,6 +1229,35 @@ export async function createSpeedLightningPayment(
     metadata,
     ...(feeApplies ? { application_fee: pineTreeFeeAmount } : {}),
   }
+
+  // Logged for EVERY /payments attempt (success or failure) - a redacted
+  // summary of the exact request shape PineTree sent, so a runtime failure
+  // never has to be diagnosed by guessing what the request "probably" looked
+  // like. Never includes the API key, the Authorization header value, the
+  // full connected-account id, or the full metadata object.
+  console.info("[speed] payment_create_request_summary", {
+    canonicalTransactionId: params.pineTreePaymentId,
+    canonicalPaymentIntentId: params.pineTreePaymentIntentId || null,
+    merchantId: params.merchantId,
+    merchantSpeedAccountSuffix: merchantSpeedAccountId ? merchantSpeedAccountId.slice(-6) : null,
+    apiEnvironment: inferSpeedMode(process.env.SPEED_API_KEY),
+    apiHost: getSpeedApiHost(),
+    settlementMode,
+    currency: body.currency,
+    amount: body.amount,
+    amountDigitCount: String(body.amount).replace(/[^0-9]/g, "").length,
+    target_currency: body.target_currency,
+    ttl: body.ttl,
+    payment_methods: body.payment_methods,
+    statementDescriptorPresent: Boolean(body.statement_descriptor),
+    descriptionPresent: Boolean(body.description),
+    metadataPresent: Boolean(body.metadata && typeof body.metadata === "object"),
+    applicationFeePresent: feeApplies,
+    applicationFeeValue: feeApplies ? pineTreeFeeAmount : null,
+    applicationFeePercentagePresent: false,
+    speedAccountHeaderPresent: Boolean(merchantSpeedAccountId),
+    authorizationHeaderPresent: true,
+  })
 
   let payment: SpeedPaymentObject
   try {

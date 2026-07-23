@@ -294,6 +294,133 @@ describe("Speed Bitcoin Lightning payment creation follows the documented applic
   })
 })
 
+describe("Root cause: floating-point amount precision (production 400 - 'Invalid amount. Integers and fractions can have up to 16 digits value only.')", () => {
+  // Traced from an actual production failure (Speed request id: none returned,
+  // canonical payment d674ae4b-fb18-4345-ba8d-8be3941e20b4, payment intent
+  // 6530ce60-e091-4851-8b05-15b9dad9a72f): a tax-enabled merchant amount
+  // produced a gross amount with 17 significant digits once JS floating-point
+  // arithmetic was applied (e.g. 19.99 at 8.25% tax -> 21.789174999999997),
+  // which Speed's POST /payments rejects. This was never an application_fee
+  // problem - `amount` itself was the malformed field. Fixed by rounding every
+  // monetary calculation in engine/fees.ts to cents.
+  it("calculateGrossAmount never returns a value with more than 2 decimal places, even from tax-distorted inputs that produce float noise", async () => {
+    const { calculateGrossAmount, calculateTax } = await import("@/engine/fees")
+
+    const cases = [
+      { merchantAmount: 19.99, taxRate: 8.25 },
+      { merchantAmount: 24.99, taxRate: 7.25 },
+      { merchantAmount: 100.0, taxRate: 8.875 },
+    ]
+
+    for (const { merchantAmount, taxRate } of cases) {
+      const tax = calculateTax(merchantAmount, taxRate)
+      const total = merchantAmount + tax
+      const gross = calculateGrossAmount(total, 0.15)
+      const decimalPart = String(gross).split(".")[1] || ""
+      expect(decimalPart.length).toBeLessThanOrEqual(2)
+      expect(String(gross).replace(/[^0-9]/g, "").length).toBeLessThanOrEqual(16)
+    }
+  })
+
+  it("reproduces the exact production artifact (19.99 at 8.25% tax) and proves the fix eliminates it", async () => {
+    const { calculateGrossAmount, calculateTax } = await import("@/engine/fees")
+    const merchantAmount = 19.99
+    const taxRate = 8.25
+
+    // Raw arithmetic (the pre-fix behavior) produces the 17-digit artifact.
+    const rawTax = merchantAmount * (taxRate / 100)
+    const rawGross = merchantAmount + rawTax + 0.15
+    expect(String(rawGross)).toBe("21.789174999999997")
+    expect(String(rawGross).replace(/[^0-9]/g, "").length).toBeGreaterThan(16)
+
+    // The fixed functions produce a clean, Speed-acceptable value.
+    const tax = calculateTax(merchantAmount, taxRate)
+    const gross = calculateGrossAmount(merchantAmount + tax, 0.15)
+    expect(gross).toBe(21.79)
+  })
+
+  it("createSpeedLightningPayment sends an amount field that always round-trips through JSON with at most 2 decimal places", async () => {
+    process.env.SPEED_API_KEY = "sk_test_present"
+    process.env.SPEED_WEBHOOK_SECRET = "wsec_present"
+    process.env.SPEED_API_BASE_URL = "https://api.tryspeed.test"
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "pi_precision_test", status: "unpaid",
+      payment_method_options: { lightning: { payment_request: "lntb1precision" } },
+    }), { status: 200 })))
+
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    const { calculateGrossAmount, calculateTax } = await import("@/engine/fees")
+
+    const merchantAmount = 19.99
+    const tax = calculateTax(merchantAmount, 8.25)
+    const grossAmount = calculateGrossAmount(merchantAmount + tax, 0.15)
+
+    await createSpeedLightningPayment({
+      amount: grossAmount,
+      currency: "USD",
+      merchantAmount,
+      pineTreeFeeAmount: 0.15,
+      merchantSpeedAccountId: "acct_merchant_1",
+      pineTreePaymentId: "pay-precision-test",
+      merchantId: "merchant-1",
+      settlementMode: "speed_connect_split",
+    })
+
+    const fetchMock = vi.mocked(fetch)
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init?.body || "{}"))
+    expect(body.amount).toBe(21.79)
+    expect(String(body.amount).replace(/[^0-9]/g, "").length).toBeLessThanOrEqual(16)
+
+    vi.unstubAllGlobals()
+  })
+
+  it("the public Payments API's precomputed-amount branch (reachable with arbitrary caller-supplied tax/fee metadata) also rounds to cents", async () => {
+    const createPaymentSrc = read("engine/createPayment.ts")
+    const precomputedBranch = createPaymentSrc.slice(
+      createPaymentSrc.indexOf("if (input.metadata?.amountsPrecomputed === true) {"),
+      createPaymentSrc.indexOf("try {\n    const { getMerchantTaxSettings }")
+    )
+    expect(precomputedBranch).toContain("calculateGrossAmount(merchantAmount, pinetreeFee)")
+    expect(precomputedBranch).not.toContain("merchantAmount + pinetreeFee")
+  })
+
+  it("logs a redacted request summary (with digit-count) for every /payments attempt, not just failures", async () => {
+    process.env.SPEED_API_KEY = "sk_test_present"
+    process.env.SPEED_WEBHOOK_SECRET = "wsec_present"
+    process.env.SPEED_API_BASE_URL = "https://api.tryspeed.test"
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "pi_summary_test", status: "unpaid",
+      payment_method_options: { lightning: { payment_request: "lntb1summary" } },
+    }), { status: 200 })))
+    const infoSpy = vi.spyOn(console, "info")
+
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    await createSpeedLightningPayment({
+      amount: 10.15, currency: "USD", merchantAmount: 10, pineTreeFeeAmount: 0.15,
+      merchantSpeedAccountId: "acct_merchant_1", pineTreePaymentId: "pay-summary-test",
+      merchantId: "merchant-1", settlementMode: "speed_connect_split",
+    })
+
+    const summaryCall = infoSpy.mock.calls.find((call) => call[0] === "[speed] payment_create_request_summary")
+    expect(summaryCall).toBeTruthy()
+    expect(summaryCall?.[1]).toMatchObject({
+      currency: "USD",
+      amount: 10.15,
+      amountDigitCount: 4,
+      target_currency: "SATS",
+      applicationFeePresent: true,
+      applicationFeeValue: 0.15,
+      applicationFeePercentagePresent: false,
+      speedAccountHeaderPresent: true,
+      authorizationHeaderPresent: true,
+    })
+
+    infoSpy.mockRestore()
+    vi.unstubAllGlobals()
+  })
+})
+
 describe("USD-to-sats conversion (retained for internal bookkeeping/display only)", () => {
   it("never converts a nonzero $0.15 fee to zero sats, across a realistic BTC price range", () => {
     for (const btcPriceUsd of [10_000, 30_000, 60_000, 100_000, 250_000, 500_000]) {

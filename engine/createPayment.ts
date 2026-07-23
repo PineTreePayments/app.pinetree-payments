@@ -171,7 +171,13 @@ export async function buildCreatePaymentRequest(
   if (input.metadata?.amountsPrecomputed === true) {
     taxAmount = Number(input.metadata.taxAmount || 0)
     const pinetreeFee = Number(input.metadata.serviceFee ?? PINETREE_FEE)
-    const grossAmount = merchantAmount + pinetreeFee
+    // calculateGrossAmount rounds to cents - required here because this branch
+    // is reachable from the public Payments API (app/api/payments/route.ts)
+    // with caller-supplied metadata.taxAmount/serviceFee of arbitrary
+    // precision; an unrounded sum can produce a float with 15+ significant
+    // digits, which Speed's POST /payments rejects outright ("Invalid amount.
+    // Integers and fractions can have up to 16 digits value only.").
+    const grossAmount = calculateGrossAmount(merchantAmount, pinetreeFee)
 
     return {
       createPaymentInput: {
@@ -188,7 +194,7 @@ export async function buildCreatePaymentRequest(
           merchantAmount,
           taxAmount,
           pinetreeFee,
-          totalAmount: merchantAmount + pinetreeFee
+          totalAmount: grossAmount
         }
       },
       breakdown: {
