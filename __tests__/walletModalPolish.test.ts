@@ -234,7 +234,7 @@ describe("Provider-branded wallet tab removed", () => {
 
   it("does not mount a second Bitcoin Lightning wallet panel inside Activity", () => {
     const modalSrc = runtimeSrc().slice(
-      runtimeSrc().indexOf('aria-labelledby="pinetree-wallet-modal-title"'),
+      runtimeSrc().indexOf('aria-label="PineTree Wallet workspace"'),
       runtimeSrc().indexOf("// ---------------------------------------------------------------------------\n// Page")
     )
     expect(modalSrc).not.toContain("MerchantWalletManagementPanel")
@@ -471,16 +471,17 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
     expect(walletPage).not.toContain('if (step === "profile_synced") return "Wallet ready"')
   })
 
-  it("wallet modal header shows only the title and close control", () => {
-    const modalHeader = walletPage.slice(
-      walletPage.indexOf('aria-labelledby="pinetree-wallet-modal-title"'),
-      walletPage.indexOf("</header>", walletPage.indexOf('aria-labelledby="pinetree-wallet-modal-title"'))
+  it("wallet workspace header shows only the title - no page-level close control", () => {
+    const workspaceHeader = walletPage.slice(
+      walletPage.indexOf('aria-label="PineTree Wallet workspace"'),
+      walletPage.indexOf("</header>", walletPage.indexOf('aria-label="PineTree Wallet workspace"'))
     )
-    expect(modalHeader).toContain("PineTree Wallet")
-    expect(modalHeader).toContain('aria-label="Close PineTree Wallet"')
-    expect(modalHeader).not.toContain("WalletStatusPill")
-    expect(modalHeader).not.toContain("label={walletStatus}")
-    expect(modalHeader).not.toContain("One merchant wallet profile")
+    expect(workspaceHeader).toContain("PineTree Wallet")
+    expect(workspaceHeader).not.toContain('aria-label="Close PineTree Wallet"')
+    expect(workspaceHeader).not.toContain("<X size=")
+    expect(workspaceHeader).not.toContain("WalletStatusPill")
+    expect(workspaceHeader).not.toContain("label={walletStatus}")
+    expect(workspaceHeader).not.toContain("One merchant wallet profile")
   })
 
   it("ready wallet launcher is removed while setup actions remain in the content flow", () => {
@@ -633,7 +634,7 @@ describe("Activity tab - recent withdrawal visibility", () => {
     expect(src).toContain("View Explorer")
     expect(src).toContain("Provider Reference")
     expect(src).toContain("Withdrawal ID")
-    expect(src).toContain("Instant Send ID")
+    expect(src).toContain("Settlement Reference")
     expect(src).toContain("Raw provider status")
     expect(src).toContain("CopyableDetailValue")
   })

@@ -64,7 +64,7 @@ describe("PineTree Wallet reconnect flow", () => {
   it("retryable authorization recovery enables Try Again whenever a review exists", () => {
     const modal = page.slice(
       page.indexOf("{withdrawalAuthorizationRecoveryOpen ? ("),
-      page.indexOf("{walletOpen ? (")
+      page.indexOf("{showWalletWorkspace ? (")
     )
     expect(modal).toContain("{withdrawalReview ? (")
     expect(modal).toContain("Your PineTree Wallet is still connected. Please try authorizing this withdrawal again.")

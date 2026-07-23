@@ -2984,6 +2984,7 @@ function WalletOverviewSummary({
   const visibleRows = rows
   const lastSynced = formatLastSynced(sync?.lastSyncedAt ?? null)
   const recentItems = (sync?.recentActivity ?? []).slice(0, 3)
+  const hasSyncedOnce = Boolean(sync?.lastSyncedAt)
   return (
     <div className="space-y-4">
       <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_90%_8%,rgba(0,82,255,0.20),transparent_34%),linear-gradient(135deg,rgba(239,246,255,0.98),rgba(255,255,255,0.96))] px-5 py-5 shadow-[0_22px_50px_rgba(37,99,235,0.13)] sm:px-6 sm:py-6">
@@ -3052,7 +3053,12 @@ function WalletOverviewSummary({
             </button>
           ) : null}
         </div>
-        {recentItems.length === 0 ? (
+        {!hasSyncedOnce && syncing ? (
+          <div className="flex items-center gap-1.5 px-4 py-5 sm:px-5">
+            <Loader2 size={13} className="animate-spin text-blue-500" />
+            <p className="text-sm text-gray-500">Loading recent activity...</p>
+          </div>
+        ) : recentItems.length === 0 ? (
           <div className="px-4 py-5 sm:px-5">
             <p className="text-sm text-gray-500">No wallet activity yet.</p>
           </div>
@@ -3241,6 +3247,15 @@ function BalanceRows({
     : null
 
   if (balanceOptions.length === 0) {
+    const hasSyncedOnce = Boolean(sync?.lastSyncedAt)
+    if (!hasSyncedOnce && syncing) {
+      return (
+        <div className="flex items-center gap-1.5 rounded-[1.1rem] border border-dashed border-gray-200 bg-gray-50 px-4 py-5">
+          <Loader2 size={13} className="animate-spin text-blue-500" />
+          <p className="text-sm text-gray-500">Loading balances...</p>
+        </div>
+      )
+    }
     return (
       <div className="rounded-[1.1rem] border border-dashed border-gray-200 bg-gray-50 px-4 py-5">
         <p className="text-sm font-semibold text-gray-950">No balances yet</p>
@@ -3367,6 +3382,7 @@ function ActivityTab({
   accessToken: string | null
 }) {
   const items = sync?.recentActivity ?? []
+  const hasSyncedOnce = Boolean(sync?.lastSyncedAt)
   const [selectedItem, setSelectedItem] = useState<WalletActivityItem | null>(null)
   const [selectedDetail, setSelectedDetail] = useState<WalletActivityDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -3503,7 +3519,12 @@ function ActivityTab({
             {syncing ? "Syncing..." : "RECENT WITHDRAWALS"}
           </p>
         </div>
-        {items.length === 0 ? (
+        {!hasSyncedOnce && syncing ? (
+          <div className="flex items-center justify-center gap-1.5 px-4 py-6 text-center sm:px-5">
+            <Loader2 size={13} className="animate-spin text-blue-500" />
+            <p className="text-sm text-gray-500">Loading activity...</p>
+          </div>
+        ) : items.length === 0 ? (
           <div className="px-4 py-6 text-center sm:px-5">
             <p className="text-sm text-gray-500">No wallet activity yet.</p>
           </div>
@@ -3626,7 +3647,7 @@ function ActivityTab({
                 <dl className="mt-2 divide-y divide-gray-200">
                   <DetailRow label="Provider Reference">{selectedDetail.providerReference || "Not available"}</DetailRow>
                   <DetailRow label="Withdrawal ID">{selectedDetail.withdrawalId}</DetailRow>
-                  <DetailRow label="Instant Send ID">{selectedDetail.instantSendId || "Not available"}</DetailRow>
+                  <DetailRow label="Settlement Reference">{selectedDetail.instantSendId || "Not available"}</DetailRow>
                   {selectedDetail.rawProviderStatus ? (
                     <DetailRow label="Raw provider status">{selectedDetail.rawProviderStatus}</DetailRow>
                   ) : null}
@@ -3844,7 +3865,6 @@ function PineTreeWalletRuntime() {
   const [reviewingWithdrawal, setReviewingWithdrawal] = useState(false)
   const [submittingWithdrawal, setSubmittingWithdrawal] = useState(false)
   const [withdrawalAuthorizationRecoveryOpen, setWithdrawalAuthorizationRecoveryOpen] = useState(false)
-  const [withdrawalDiscardConfirmOpen, setWithdrawalDiscardConfirmOpen] = useState(false)
   const [withdrawalReconnectPending, setWithdrawalReconnectPending] = useState(false)
   const [maxEstimating, setMaxEstimating] = useState(false)
   const [maxWarning, setMaxWarning] = useState("")
@@ -4119,16 +4139,6 @@ function PineTreeWalletRuntime() {
     }
   }, [sdkHasLoaded])
 
-  // --- Escape key closes modal ---
-  useEffect(() => {
-    if (!walletOpen) return
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") handleRequestCloseWallet()
-    }
-    window.addEventListener("keydown", closeOnEscape)
-    return () => window.removeEventListener("keydown", closeOnEscape)
-  }, [walletOpen])
-
   const syncPineTreeWallet = useCallback(async () => {
     const token = accessTokenRef.current
     if (!token) return
@@ -4176,10 +4186,6 @@ function PineTreeWalletRuntime() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!walletOpen) return
-    void syncPineTreeWallet()
-  }, [walletOpen, syncPineTreeWallet])
 
   const fetchProviderRailState = useCallback(async (token: string) => {
     try {
@@ -8079,6 +8085,18 @@ function PineTreeWalletRuntime() {
   })
   const showProvisioningRetryOnly = walletSetupPrimaryState === "failed" && Boolean(user)
   const showWalletSetupCard = walletSetupPrimaryState !== "ready" || !hasWallet
+  // The workspace is the route's primary content once a wallet exists - it must
+  // never wait on walletOpen (Dynamic signer hydration for withdrawals, see
+  // handleOpenWallet below). Tabs that need that hydration show their own
+  // reconnect state instead of hiding the whole workspace behind it.
+  const showWalletWorkspace = !showWalletSetupCard
+
+  // Balance/activity data has no dependency on Dynamic signer hydration - fetch
+  // it as soon as the workspace is visible instead of waiting on walletOpen.
+  useEffect(() => {
+    if (!showWalletWorkspace) return
+    void syncPineTreeWallet()
+  }, [showWalletWorkspace, syncPineTreeWallet])
 
   useEffect(() => {
     if (directWalletOpenAttemptedRef.current) return
@@ -8977,12 +8995,6 @@ function PineTreeWalletRuntime() {
     return false
   }
 
-  function hasWithdrawalDraftInput() {
-    return Boolean(
-      withdrawalDestination.trim() || withdrawalAmount.trim() || withdrawalSelectedDestinationId
-    )
-  }
-
   // Clears only client-side draft/UI state - never touches a withdrawal
   // request row that already exists server-side (that row keeps its own
   // lifecycle regardless of what the merchant does in the UI afterward).
@@ -9006,29 +9018,7 @@ function PineTreeWalletRuntime() {
 
   function handleDoneWithdrawal() {
     resetWithdrawalDraft()
-    setWalletOpen(false)
-  }
-
-  // Shared close path for both the header X button and a backdrop click.
-  // An active/outcome-uncertain withdrawal is always preserved (reopening
-  // the wallet resumes it - see handleOpenWallet); an untouched form closes
-  // immediately; anything in between asks for confirmation before discarding.
-  function handleRequestCloseWallet() {
-    if (isWithdrawalActivelyProcessing()) {
-      setWalletOpen(false)
-      return
-    }
-    if (activeTab === "withdraw" && withdrawalScreen !== "submitted" && hasWithdrawalDraftInput()) {
-      setWithdrawalDiscardConfirmOpen(true)
-      return
-    }
-    setWalletOpen(false)
-  }
-
-  function handleConfirmDiscardWithdrawal() {
-    setWithdrawalDiscardConfirmOpen(false)
-    resetWithdrawalDraft()
-    setWalletOpen(false)
+    setActiveTab("overview")
   }
 
   // Address Book "Withdraw" shortcut: the merchant should never need to
@@ -9052,7 +9042,6 @@ function PineTreeWalletRuntime() {
     setWithdrawalDestination(destination.destination_address)
     setWithdrawalSelectedDestinationId(destination.id)
     setActiveTab("withdraw")
-    setWalletOpen(true)
   }
 
   async function handleReviewWithdrawal() {
@@ -10103,46 +10092,6 @@ function PineTreeWalletRuntime() {
         <WalletDiagnosticsPanel wallets={wallets} sdkNetworkGroups={dynamicNetworkAddresses} />
       ) : null}
 
-      {withdrawalDiscardConfirmOpen ? (
-        <div
-          className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.currentTarget === event.target) setWithdrawalDiscardConfirmOpen(false)
-          }}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="pinetree-withdrawal-discard-title"
-            className="w-full max-w-[26rem] rounded-[1.25rem] border border-white/70 bg-white px-5 py-5 shadow-[0_28px_80px_rgba(15,23,42,0.28)]"
-          >
-            <h2 id="pinetree-withdrawal-discard-title" className="text-base font-semibold text-gray-950">
-              Discard this withdrawal?
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-gray-600">
-              The amount and destination you entered will be cleared.
-            </p>
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setWithdrawalDiscardConfirmOpen(false)}
-                className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700 sm:order-1"
-              >
-                Continue Editing
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDiscardWithdrawal}
-                className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:order-2"
-              >
-                Cancel
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
-
       {withdrawalAuthorizationRecoveryOpen ? (
         <div
           className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
@@ -10195,55 +10144,38 @@ function PineTreeWalletRuntime() {
         </div>
       ) : null}
 
-      {walletOpen ? (
-        <div
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-5"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.currentTarget === event.target) handleRequestCloseWallet()
-          }}
+      {showWalletWorkspace ? (
+        <section
+          aria-label="PineTree Wallet workspace"
+          className="flex w-full max-w-[42rem] flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(15,23,42,0.30)] backdrop-blur-xl"
         >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="pinetree-wallet-modal-title"
-            className="flex max-h-[92dvh] w-full max-w-[42rem] flex-col overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_rgba(15,23,42,0.30)] backdrop-blur-xl"
+          <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-7 sm:py-6">
+            <h2 className="min-w-0 flex-1 text-lg font-semibold text-gray-950">PineTree Wallet</h2>
+          </header>
+
+          <nav
+            className="grid shrink-0 grid-cols-5 gap-1 border-b border-gray-100 px-2 py-3 sm:gap-1.5 sm:px-6"
+            aria-label="PineTree Wallet sections"
           >
-            <header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-5 sm:px-7 sm:py-6">
-              <h2 id="pinetree-wallet-modal-title" className="min-w-0 flex-1 text-lg font-semibold text-gray-950">PineTree Wallet</h2>
+            {walletTabs.map((tab) => (
               <button
+                key={tab.id}
                 type="button"
-                onClick={handleRequestCloseWallet}
-                aria-label="Close PineTree Wallet"
-                className={modalCloseButtonClass}
+                onClick={() => setActiveTab(tab.id)}
+                className={`min-w-0 rounded-xl px-1 py-2.5 text-center text-[10px] font-semibold leading-tight transition sm:whitespace-nowrap sm:px-4 sm:text-xs ${
+                  activeTab === tab.id
+                    ? "bg-[#0052FF] text-white"
+                    : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                }`}
               >
-                <X size={18} />
+                {tab.label}
               </button>
-            </header>
+            ))}
+          </nav>
 
-            <nav
-              className="grid shrink-0 grid-cols-5 gap-1 border-b border-gray-100 px-2 py-3 sm:gap-1.5 sm:px-6"
-              aria-label="PineTree Wallet sections"
-            >
-              {walletTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`min-w-0 shrink-0 whitespace-nowrap rounded-xl px-1 py-2.5 text-[10px] font-semibold transition sm:px-4 sm:text-xs ${
-                    activeTab === tab.id
-                      ? "bg-[#0052FF] text-white"
-                      : "text-gray-500 hover:bg-gray-100 hover:text-gray-800"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </nav>
+          <div className="px-5 py-5 sm:px-6 sm:py-6">
 
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6">
-
-              {activeTab === "overview" ? (
+            {activeTab === "overview" ? (
                 <>
                   <WalletOverviewSummary
                     rows={walletRailRows}
@@ -10366,9 +10298,8 @@ function PineTreeWalletRuntime() {
                 <AddressBookTab accessToken={accessTokenRef.current} onWithdraw={handleWithdrawShortcut} />
               ) : null}
 
-            </div>
-          </section>
-        </div>
+          </div>
+        </section>
       ) : null}
     </>
   )
