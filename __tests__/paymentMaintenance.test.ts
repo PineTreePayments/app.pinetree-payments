@@ -371,8 +371,10 @@ describe("payment maintenance", () => {
     await ensurePaymentFresh("pay-1", { txHash: "0xdef", forceWatcher: true })
 
     expect(runPaymentWatcher).toHaveBeenCalledTimes(2)
-    expect(runPaymentWatcher).toHaveBeenCalledWith("pay-1", { txHash: "0xabc" })
-    expect(runPaymentWatcher).toHaveBeenCalledWith("pay-1", { txHash: "0xdef" })
+    // maxAttempts: 1 — a customer-facing forced recheck must never run the
+    // watcher's internal multi-attempt sleep-retry loop (see engine/checkPaymentOnce.ts).
+    expect(runPaymentWatcher).toHaveBeenCalledWith("pay-1", { txHash: "0xabc", maxAttempts: 1, sessionAttemptId: undefined })
+    expect(runPaymentWatcher).toHaveBeenCalledWith("pay-1", { txHash: "0xdef", maxAttempts: 1, sessionAttemptId: undefined })
   })
 
   it("keeps payment-state decisions out of route files", () => {

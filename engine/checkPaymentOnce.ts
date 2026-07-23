@@ -16,6 +16,7 @@ import { watchPaymentOnce, WatchOnceInput } from "./paymentWatcher"
 import { StoredPaymentSplitMetadata } from "@/types/payment"
 import { markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 
 /**
  * Build the WatchOnceInput for a payment from its stored split metadata.
@@ -54,7 +55,10 @@ export function buildBaseWatchInput(
  * Returns true if a matching on-chain transaction was found, false otherwise.
  * Never throws — all errors are caught and logged so callers can fire-and-forget.
  */
-export async function runPaymentWatcher(paymentId: string, options?: { txHash?: string }): Promise<boolean> {
+export async function runPaymentWatcher(
+  paymentId: string,
+  options?: { txHash?: string; maxAttempts?: number; sessionAttemptId?: string }
+): Promise<boolean> {
   let payment: Awaited<ReturnType<typeof getPaymentById>>
 
   try {
@@ -133,11 +137,30 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
   // For EVM payments where we have a txHash, the receipt may not be available
   // immediately after the tx is submitted. Retry up to 5 times with a short delay
   // so detection succeeds without waiting for the next cron cycle.
+  //
+  // This internal retry loop sleeps synchronously (setTimeout) between
+  // attempts. It is safe for background/cron callers (app/api/cron/*,
+  // fire-and-forget calls) but must NEVER run at its default width inside a
+  // customer-facing request — a caller blocked on this response (e.g. the
+  // checkout page's POST /detect right after the wallet returns a hash) would
+  // otherwise wait up to ~5 x 3s of pure sleep plus RPC latency, with no
+  // timeout guard, before getting a response. Customer-facing callers pass
+  // maxAttempts: 1 (see engine/paymentMaintenance.ts's ensurePaymentFresh) so
+  // a single request performs one bounded check and returns immediately;
+  // their own external retry loop (already polling every few seconds) is the
+  // sole retry mechanism in that path.
   const network = payment.network ?? ""
   const isEvmWithTxHash =
     (network === "base" || network === "ethereum") && Boolean(options?.txHash)
-  const maxAttempts = isEvmWithTxHash ? 5 : 1
+  const maxAttempts = options?.maxAttempts ?? (isEvmWithTxHash ? 5 : 1)
   const retryDelayMs = 3_000
+
+  logConfirmationTrace("watcher_started", {
+    paymentId,
+    sessionAttemptId: options?.sessionAttemptId,
+    transactionHash: options?.txHash,
+    payload: { network: payment.network, maxAttempts }
+  })
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -152,6 +175,12 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
             attempt
           })
         }
+        logConfirmationTrace("watcher_detected_transaction", {
+          paymentId,
+          sessionAttemptId: options?.sessionAttemptId,
+          transactionHash: options?.txHash,
+          payload: { attempt }
+        })
         return true
       }
     } catch (error) {

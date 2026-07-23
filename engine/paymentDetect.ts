@@ -6,6 +6,7 @@ import {
 import type { StoredPaymentSplitMetadata } from "@/types/payment"
 import { processPaymentEvent } from "./eventProcessor"
 import { ensurePaymentFresh } from "./paymentMaintenance"
+import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 
 export type PaymentDetectResult = {
   httpStatus: number
@@ -23,12 +24,20 @@ function isEvmTxHash(value?: string): value is string {
 
 export async function runPaymentDetectForPayment(
   paymentId: string,
-  options?: { txHash?: string }
+  options?: { txHash?: string; sessionAttemptId?: string }
 ): Promise<PaymentDetectResult> {
+  const sessionAttemptId = options?.sessionAttemptId
   const payment = await getPaymentById(paymentId)
   if (!payment) {
     return { httpStatus: 404, body: { error: "Payment not found" } }
   }
+
+  logConfirmationTrace("detect_request_received", {
+    paymentId,
+    sessionAttemptId,
+    transactionHash: options?.txHash,
+    payload: { network: payment.network }
+  })
 
   const currentStatus = String(payment.status || "").toUpperCase()
   if (currentStatus === "CONFIRMED" || currentStatus === "FAILED" || currentStatus === "INCOMPLETE") {
@@ -90,10 +99,17 @@ export async function runPaymentDetectForPayment(
   }
 
   console.info("[detect] triggered", { paymentId, txHash, network: payment.network })
-  const freshness = await ensurePaymentFresh(paymentId, { txHash, forceWatcher: true })
+  const freshness = await ensurePaymentFresh(paymentId, { txHash, forceWatcher: true, sessionAttemptId })
   const updatedPayment = await getPaymentById(paymentId)
   const detected = Boolean(freshness?.detected)
   const status = String(updatedPayment?.status || payment.status || "").toUpperCase()
+
+  logConfirmationTrace("detect_request_completed", {
+    paymentId,
+    sessionAttemptId,
+    transactionHash: txHash,
+    payload: { detected, status }
+  })
 
   if (isBase) {
     console.info("[PineTreeBaseTrace] detect watcher result", {

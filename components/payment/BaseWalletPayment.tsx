@@ -7,6 +7,7 @@ import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import { classifyWalletFamily, detectCapabilitiesFromProvider } from "@/lib/basePay/strategyOrchestrator"
 import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
+import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 type BaseAsset = "ETH" | "USDC"
 type Props = {
   intentId?: string
@@ -1621,6 +1622,12 @@ export default function BaseWalletPayment({
         sessionAttemptId: sessionAttemptIdRef.current,
         payload: { actionKind: kind, txHashPrefix: txHash.slice(0, 10) }
       })
+      logConfirmationTrace("wallet_hash_returned", {
+        paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        transactionHash: txHash,
+        payload: { actionKind: kind, source: "primary" }
+      })
       console.log("[BASE UI] final-tx-submitted", { paymentId, txHashPrefix: txHash.slice(0, 10), asset: kind === "eth_payment" ? "ETH" : "USDC" })
       void logBase(kind === "eth_payment" ? "eth-payment-submitted" : "usdc-payment-submitted", { paymentId, txHashPrefix: txHash.slice(0, 10) })
       void logBase("detect-start", { paymentId, txHashPrefix: txHash.slice(0, 10) })
@@ -2366,6 +2373,12 @@ export default function BaseWalletPayment({
         usdcFinalPaymentIdRef.current = null
         console.log("[BASE USDC CHAIN] payment-submitted", { paymentId: storedPaymentId, via: "resume", txHashPrefix: resumeTxHash.slice(0, 10) })
         void logBase("[BASE USDC CHAIN] payment-submitted", { paymentId: storedPaymentId, txHashPrefix: resumeTxHash.slice(0, 10) })
+        logConfirmationTrace("wallet_hash_returned", {
+          paymentId: storedPaymentId,
+          sessionAttemptId: sessionAttemptIdRef.current,
+          transactionHash: resumeTxHash,
+          payload: { actionKind: "usdc_payment", source: "resume" }
+        })
         console.log("[BASE USDC CHAIN] final-tx", { paymentId: storedPaymentId, via: "resume", txHashPrefix: resumeTxHash.slice(0, 10) })
         void logBase("[BASE USDC CHAIN] final-tx", { paymentId: storedPaymentId, txHashPrefix: resumeTxHash.slice(0, 10) })
         paymentSubmittedRef.current = true
@@ -2477,6 +2490,12 @@ export default function BaseWalletPayment({
         activeBaseV6PaymentRef.current = null
         setExecStageRef.current("payment_submitted")
         console.log("[BASE UI] final-tx-submitted", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10), asset: "USDC", version: "v6" })
+        logConfirmationTrace("wallet_hash_returned", {
+          paymentId: paymentData.paymentId,
+          sessionAttemptId: sessionAttemptIdRef.current,
+          transactionHash: normalizedTxHash,
+          payload: { actionKind: "usdc_payment", source: "v6_delegated_batch" }
+        })
         void logBase("detect-start", { paymentId: paymentData.paymentId, txHashPrefix: normalizedTxHash.slice(0, 10) })
         logBasePay("network_confirmation_entered", { hasTxHash: true, actionKind: "usdc_payment" })
         logBaseV6("network_confirmation_entered", { paymentId: paymentData.paymentId, selectedAsset, actionKind: "usdc_payment", hasTxHash: true })
@@ -2546,6 +2565,12 @@ export default function BaseWalletPayment({
         paymentId: paymentData.paymentId,
         sessionAttemptId: sessionAttemptIdRef.current,
         payload: { actionKind: "eth_payment", txHashPrefix: ethTxHash.slice(0, 10) }
+      })
+      logConfirmationTrace("wallet_hash_returned", {
+        paymentId: paymentData.paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        transactionHash: ethTxHash,
+        payload: { actionKind: "eth_payment", source: "direct_dispatch" }
       })
       console.log("[BASE UI] final-tx-submitted", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10), asset: "ETH" })
       void logBase("eth-payment-submitted", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10) })

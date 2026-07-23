@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import Image from "next/image"
 import { supabase } from "@/lib/supabaseClient"
+import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 import Button from "@/components/ui/Button"
@@ -392,6 +393,10 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     if (!next) return
 
     setStatus(next)
+    logConfirmationTrace("pos_ui_updated", {
+      paymentId: sourcePaymentId || activePaymentIdRef.current,
+      payload: { dbStatus, uiStatus: next }
+    })
 
     if (paymentMode === "card") {
       if (next === "processing") setCardView("processing")
@@ -498,6 +503,10 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
           filter: `id=eq.${activePaymentId}`
         },
         (payload) => {
+          logConfirmationTrace("pos_realtime_received", {
+            paymentId: activePaymentId,
+            payload: { newStatus: String(payload.new.status || ""), via: "direct_payment" }
+          })
           applyPaymentStatus(String(payload.new.status || ""), activePaymentId)
         }
       )
@@ -542,6 +551,10 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
             filter: `id=eq.${pid}`
           },
           (payload) => {
+            logConfirmationTrace("pos_realtime_received", {
+              paymentId: pid,
+              payload: { newStatus: String(payload.new.status || ""), via: "intent_resolved_payment" }
+            })
             applyPaymentStatus(String(payload.new.status || ""), pid)
           }
         )
@@ -784,9 +797,19 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
 
       await updatePosBaseSession(iid, { step: "payment_submitted" })
       finalTxHashSubmitted = true
+      logConfirmationTrace("wallet_hash_returned", {
+        paymentId,
+        transactionHash: txHash,
+        payload: { surface: "pos", asset }
+      })
 
       const detectPrefix = asset === "ETH" ? "[POS Base ETH]" : "[POS Base USDC]"
       console.log(`${detectPrefix} detect_start`, { paymentId, txHashPrefix: txHash.slice(0, 10) })
+      logConfirmationTrace("detect_request_sent", {
+        paymentId,
+        transactionHash: txHash,
+        payload: { surface: "pos" }
+      })
       const detectRes = await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -801,6 +824,11 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       console.log(`${detectPrefix} detect_resolved`, {
         paymentId,
         status: detectRes?.status ?? "network_error",
+      })
+      logConfirmationTrace("detect_request_completed", {
+        paymentId,
+        transactionHash: txHash,
+        payload: { surface: "pos", httpStatus: detectRes?.status ?? "network_error" }
       })
 
       await updatePosBaseSession(iid, { step: "confirming" })

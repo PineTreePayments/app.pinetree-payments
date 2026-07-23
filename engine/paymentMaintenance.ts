@@ -88,7 +88,7 @@ function getWatcherThrottleMap(): Map<string, WatcherThrottleEntry> {
  */
 function runPaymentWatcherThrottled(
   paymentId: string,
-  watcherOptions: { txHash?: string } | undefined,
+  watcherOptions: { txHash?: string; maxAttempts?: number; sessionAttemptId?: string } | undefined,
   bypassThrottle: boolean
 ): Promise<boolean> {
   const throttleMap = getWatcherThrottleMap()
@@ -181,7 +181,7 @@ async function runWatcherWithTimeout(paymentId: string, timeoutMs: number): Prom
 
 export async function ensurePaymentFresh(
   paymentId: string,
-  options?: { txHash?: string; forceWatcher?: boolean }
+  options?: { txHash?: string; forceWatcher?: boolean; sessionAttemptId?: string }
 ): Promise<PaymentFreshnessResult | null> {
   const payment = await getPaymentById(paymentId)
   if (!payment) return null
@@ -213,7 +213,17 @@ export async function ensurePaymentFresh(
     previousStatus === "PROCESSING" ||
     (previousStatus === "PENDING" && (hasEvidence || options?.forceWatcher))
   ) {
-    const watcherOptions = options?.txHash ? { txHash: options.txHash } : undefined
+    // maxAttempts: 1 — this path is reached synchronously from the
+    // customer-facing POST /detect route (engine/paymentDetect.ts) the moment
+    // a wallet returns a transaction hash. runPaymentWatcher's default retry
+    // loop (up to 5 attempts x 3s sleep for EVM+txHash) is meant for
+    // background/cron callers; running it here would block the customer's
+    // browser for up to ~15s per call with no timeout guard. The client
+    // already re-polls /detect on its own short interval, so a single bounded
+    // check per call is sufficient and keeps this request fast.
+    const watcherOptions = options?.txHash
+      ? { txHash: options.txHash, maxAttempts: 1, sessionAttemptId: options.sessionAttemptId }
+      : undefined
     // An explicit forceWatcher call or a freshly-submitted txHash is a
     // deliberate, user-driven recheck request - never throttle those.
     const bypassThrottle = Boolean(options?.forceWatcher || options?.txHash)

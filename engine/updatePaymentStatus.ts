@@ -30,6 +30,7 @@ import {
 } from "./paymentEvidence"
 import { toPublicCheckoutSessionMetadata } from "./checkoutSessionMetadata"
 import { deliverV1CheckoutSessionWebhook } from "./webhookDelivery"
+import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 
 const STATUS_TO_WEBHOOK_EVENT: Partial<Record<PaymentStatus, WebhookEvent>> = {
   CONFIRMED: "payment.confirmed",
@@ -130,6 +131,25 @@ export async function updatePaymentStatus(
   // overlapping watcher/webhook already moved this payment, this call fails
   // before creating a duplicate lifecycle event.
   const updatedPayment = await updatePaymentStatusInDb(paymentId, nextStatus, currentStatus)
+
+  if (nextStatus === "PROCESSING" || nextStatus === "CONFIRMED") {
+    const rawPayload = metadata?.rawPayload && typeof metadata.rawPayload === "object"
+      ? metadata.rawPayload as Record<string, unknown>
+      : null
+    // This is the moment the row commits — the earliest point Postgres
+    // replication can emit the realtime UPDATE event to subscribed clients.
+    // There is no separate application-level hook for "realtime emitted";
+    // the next observable step downstream is *_realtime_received on
+    // whichever client (checkout page / POS) picks up the change.
+    logConfirmationTrace(
+      nextStatus === "CONFIRMED" ? "payment_status_confirmed" : "payment_status_processing",
+      {
+        paymentId,
+        transactionHash: typeof rawPayload?.txHash === "string" ? rawPayload.txHash : undefined,
+        payload: { source: metadata?.providerEvent || "engine" }
+      }
+    )
+  }
 
   // Create a payment event for audit trail
   const eventType = statusToEventType(nextStatus, metadata)

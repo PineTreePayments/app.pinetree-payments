@@ -19,6 +19,7 @@ import {
   postHostedCheckoutEvent,
 } from "@/lib/checkout/hostedCheckoutEvents"
 import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
+import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 import {
   buildSignAndSendUrl,
   clearSolflareSession,
@@ -596,12 +597,18 @@ export default function PayClient() {
     const retryDelayMs = 5_000
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      logConfirmationTrace("detect_request_sent", {
+        paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        transactionHash: normalizedTxHash,
+        payload: { attempt, surface: "checkout" }
+      })
       const detectRes = await fetch(
         `/api/payments/${encodeURIComponent(paymentId)}/detect`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ txHash: normalizedTxHash }),
+          body: JSON.stringify({ txHash: normalizedTxHash, sessionAttemptId: sessionAttemptIdRef.current }),
         }
       ).catch(() => null)
 
@@ -618,6 +625,18 @@ export default function PayClient() {
         attempt,
         txHashPresent: true,
         v7RouteUsed: true
+      })
+      logConfirmationTrace("detect_request_completed", {
+        paymentId,
+        sessionAttemptId: sessionAttemptIdRef.current,
+        transactionHash: normalizedTxHash,
+        payload: {
+          attempt,
+          surface: "checkout",
+          httpStatus: detectRes?.status ?? "network_error",
+          detected: Boolean(detectData?.detected),
+          paymentStatus: status || null
+        }
       })
 
       await loadIntentCallback()
@@ -1305,6 +1324,11 @@ export default function PayClient() {
             (event.new as Record<string, unknown>)?.status ?? ""
           ).toUpperCase()
           if (!newStatus) return
+          logConfirmationTrace("checkout_realtime_received", {
+            paymentId,
+            sessionAttemptId: sessionAttemptIdRef.current,
+            payload: { newStatus }
+          })
           if (newStatus === "INCOMPLETE" || newStatus === "FAILED") {
             // Re-load intent before accepting a terminal status — a network switch may
             // have already linked a new PENDING payment to this intent.
@@ -1312,6 +1336,11 @@ export default function PayClient() {
           } else {
             setPaymentStatus(newStatus)
           }
+          logConfirmationTrace("checkout_ui_updated", {
+            paymentId,
+            sessionAttemptId: sessionAttemptIdRef.current,
+            payload: { newStatus }
+          })
         }
       )
       .subscribe()

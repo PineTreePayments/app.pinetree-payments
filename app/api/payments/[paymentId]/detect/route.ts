@@ -17,14 +17,16 @@ export async function POST(
     schedulePaymentMaintenance("payments.detect")
 
     let txHash: string | undefined
+    let sessionAttemptId: string | undefined
     try {
-      const body = (await req.json()) as { txHash?: string }
+      const body = (await req.json()) as { txHash?: string; sessionAttemptId?: string }
       txHash = body.txHash
+      sessionAttemptId = body.sessionAttemptId
     } catch {
       // body is optional
     }
 
-    const result = await runPaymentDetectForPayment(paymentId, { txHash })
+    const result = await runPaymentDetectForPayment(paymentId, { txHash, sessionAttemptId })
     return NextResponse.json(result.body, { status: result.httpStatus })
   } catch (err) {
     const message = err instanceof Error ? err.message : "Detection failed"
