@@ -3,12 +3,14 @@ import {
   getPaymentMaintenanceCandidates,
   getTerminalPaymentMaintenanceCandidates,
   getLightningReconciliationCandidates,
-  getConfirmedLightningFeeSettlementCandidates
+  getConfirmedLightningFeeSettlementCandidates,
+  getIncompleteBasePaymentReconciliationCandidates
 } from "@/database/paymentMaintenance"
 import { getPaymentEvents } from "@/database/paymentEvents"
 import { getTransactionByPaymentId } from "@/database/transactions"
 import { CHECKOUT_TIMEOUT_MS } from "./config"
 import { runPaymentWatcher } from "./checkPaymentOnce"
+import { reconcileBasePaymentFromChain } from "./baseChainReconciliation"
 import { reconcileSpeedLightningPayment, reconcileConfirmedLightningFeeSettlement } from "./lightningSpeedReconciliation"
 import { paymentHasProcessingEvidence } from "./paymentEvidence"
 import { markPaymentIncomplete } from "./paymentStateActions"
@@ -29,6 +31,12 @@ const LIGHTNING_RECONCILE_MIN_AGE_MS = 3 * 60_000
 // a reasonable window to finish attaching the APPLICATION_FEE transfer to
 // that payment before treating "not settled yet" as worth re-polling for.
 const FEE_SETTLEMENT_RECHECK_MIN_AGE_MS = 2 * 60_000
+
+// Self-healing window for INCOMPLETE Base payments: only payments created
+// within this lookback are re-checked against the chain. A payment abandoned
+// (or falsely cancelled) longer ago than this is treated as settled history
+// rather than repeatedly re-scanned.
+const BASE_RECONCILE_LOOKBACK_MS = 24 * 60 * 60_000
 
 const DEFAULT_THROTTLE_MS = 60_000
 const DEFAULT_WATCHER_TIMEOUT_MS = 4_000
@@ -132,6 +140,9 @@ export type PaymentMaintenanceSummary = {
   feeSettlementCandidates: number
   feeSettlementReconciled: number
   feeSettlementErrors: number
+  baseReconcileCandidates: number
+  baseReconciled: number
+  baseReconcileErrors: number
 }
 
 export type PaymentFreshnessResult = {
@@ -266,7 +277,10 @@ export async function runPaymentMaintenanceTick(options?: {
     lightningErrors: 0,
     feeSettlementCandidates: 0,
     feeSettlementReconciled: 0,
-    feeSettlementErrors: 0
+    feeSettlementErrors: 0,
+    baseReconcileCandidates: 0,
+    baseReconciled: 0,
+    baseReconcileErrors: 0
   }
 
   if (lease.running) {
@@ -396,8 +410,29 @@ export async function runPaymentMaintenanceTick(options?: {
       }
     }
 
+    let baseReconciled = 0
+    let baseReconcileErrors = 0
+    const baseReconcileLimit = Math.max(1, Math.min(options?.reconcileLimit ?? 5, 25))
+    const baseReconcileSince = new Date(now - BASE_RECONCILE_LOOKBACK_MS).toISOString()
+    const baseReconcileCandidates = await getIncompleteBasePaymentReconciliationCandidates({
+      limit: baseReconcileLimit,
+      since: baseReconcileSince
+    })
+    for (const candidate of baseReconcileCandidates) {
+      try {
+        const result = await reconcileBasePaymentFromChain(candidate.id)
+        if (result.detected) baseReconciled += 1
+      } catch (error) {
+        baseReconcileErrors += 1
+        console.warn("[payment-maintenance] base chain reconciliation failed", {
+          paymentId: candidate.id,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+
     const completedAt = new Date(options?.now ?? Date.now()).toISOString()
-    const failures = sweep.failures + watcherErrors + reconcileErrors + lightningErrors + feeSettlementErrors
+    const failures = sweep.failures + watcherErrors + reconcileErrors + lightningErrors + feeSettlementErrors + baseReconcileErrors
     const summary: PaymentMaintenanceSummary = {
       runId,
       startedAt,
@@ -422,7 +457,10 @@ export async function runPaymentMaintenanceTick(options?: {
       lightningErrors,
       feeSettlementCandidates: feeSettlementCandidates.length,
       feeSettlementReconciled,
-      feeSettlementErrors
+      feeSettlementErrors,
+      baseReconcileCandidates: baseReconcileCandidates.length,
+      baseReconciled,
+      baseReconcileErrors
     }
     console.info("[payment-maintenance] run completed", summary)
     return summary

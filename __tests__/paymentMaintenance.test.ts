@@ -18,11 +18,16 @@ vi.mock("@/database/paymentMaintenance", () => ({
   getPaymentMaintenanceCandidates: vi.fn().mockResolvedValue([]),
   getTerminalPaymentMaintenanceCandidates: vi.fn().mockResolvedValue([]),
   getLightningReconciliationCandidates: vi.fn().mockResolvedValue([]),
-  getConfirmedLightningFeeSettlementCandidates: vi.fn().mockResolvedValue([])
+  getConfirmedLightningFeeSettlementCandidates: vi.fn().mockResolvedValue([]),
+  getIncompleteBasePaymentReconciliationCandidates: vi.fn().mockResolvedValue([])
 }))
 
 vi.mock("@/engine/checkPaymentOnce", () => ({
   runPaymentWatcher: vi.fn().mockResolvedValue(false)
+}))
+
+vi.mock("@/engine/baseChainReconciliation", () => ({
+  reconcileBasePaymentFromChain: vi.fn().mockResolvedValue({ detected: false })
 }))
 
 vi.mock("@/engine/lightningSpeedReconciliation", () => ({

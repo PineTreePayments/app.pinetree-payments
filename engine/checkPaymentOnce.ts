@@ -11,10 +11,42 @@
  */
 
 import { getPaymentById } from "@/database"
-import { watchPaymentOnce } from "./paymentWatcher"
+import type { Payment } from "@/database/payments"
+import { watchPaymentOnce, WatchOnceInput } from "./paymentWatcher"
 import { StoredPaymentSplitMetadata } from "@/types/payment"
 import { markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+
+/**
+ * Build the WatchOnceInput for a payment from its stored split metadata.
+ *
+ * Single source of truth for the payment → watcher-input mapping so the
+ * normal watcher path (below) and reconciliation/self-healing callers
+ * (engine/baseChainReconciliation.ts) can never drift apart.
+ */
+export function buildBaseWatchInput(
+  payment: Pick<Payment, "id" | "network" | "merchant_amount" | "pinetree_fee" | "metadata">,
+  options?: { txHash?: string }
+): WatchOnceInput {
+  const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
+
+  return {
+    paymentId: payment.id,
+    network: payment.network ?? "",
+    merchantWallet: split?.merchantWallet ?? "",
+    pinetreeWallet: split?.pinetreeWallet ?? "",
+    merchantAmount: Number(payment.merchant_amount ?? 0),
+    pinetreeFee: Number(payment.pinetree_fee ?? 0),
+    expectedAmountNative: split?.expectedAmountNative,
+    // prefer the canonical field names written by createPayment; fall back to legacy aliases
+    expectedMerchantAtomic: split?.merchantNativeAmountAtomic ?? split?.expectedMerchantAtomic,
+    expectedFeeAtomic: split?.feeNativeAmountAtomic ?? split?.expectedFeeAtomic,
+    feeCaptureMethod: split?.feeCaptureMethod,
+    splitContract: split?.splitContract,
+    asset: split?.asset,
+    txHash: options?.txHash
+  }
+}
 
 /**
  * Load a payment by ID and run a single blockchain check via watchPaymentOnce.
@@ -96,22 +128,7 @@ export async function runPaymentWatcher(paymentId: string, options?: { txHash?: 
     })
   }
 
-  const watchInput = {
-    paymentId: payment.id,
-    network: payment.network ?? "",
-    merchantWallet: split?.merchantWallet ?? "",
-    pinetreeWallet: split?.pinetreeWallet ?? "",
-    merchantAmount: Number(payment.merchant_amount ?? 0),
-    pinetreeFee: Number(payment.pinetree_fee ?? 0),
-    expectedAmountNative: split?.expectedAmountNative,
-    // prefer the canonical field names written by createPayment; fall back to legacy aliases
-    expectedMerchantAtomic: split?.merchantNativeAmountAtomic ?? split?.expectedMerchantAtomic,
-    expectedFeeAtomic: split?.feeNativeAmountAtomic ?? split?.expectedFeeAtomic,
-    feeCaptureMethod: split?.feeCaptureMethod,
-    splitContract: split?.splitContract,
-    asset: split?.asset,
-    txHash: options?.txHash
-  }
+  const watchInput = buildBaseWatchInput(payment, { txHash: options?.txHash })
 
   // For EVM payments where we have a txHash, the receipt may not be available
   // immediately after the tx is submitted. Retry up to 5 times with a short delay

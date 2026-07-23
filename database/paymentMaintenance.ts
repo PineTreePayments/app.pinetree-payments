@@ -129,6 +129,37 @@ export async function getLightningReconciliationCandidates(input: {
  * re-processing the payment's status itself (see
  * reconcileConfirmedLightningFeeSettlement).
  */
+/**
+ * Recently-abandoned (INCOMPLETE) Base payments, most-recent first, bounded
+ * to a lookback window so a bad actor or a stuck cancel/timeout loop cannot
+ * force unbounded repeated chain checks against very old records.
+ *
+ * Feeds engine/baseChainReconciliation.ts's self-healing pass: a payment
+ * marked INCOMPLETE before the engine ever saw its (later-confirmed)
+ * on-chain transaction must eventually be repaired even if nothing
+ * synchronous ever re-checks it.
+ */
+export async function getIncompleteBasePaymentReconciliationCandidates(input: {
+  limit: number
+  since: string
+}): Promise<Pick<Payment, "id" | "updated_at">[]> {
+  const boundedLimit = Math.max(1, Math.min(input.limit, 25))
+  const { data, error } = await db
+    .from("payments")
+    .select("id,updated_at")
+    .eq("status", "INCOMPLETE")
+    .eq("network", "base")
+    .gte("created_at", input.since)
+    .order("updated_at", { ascending: false })
+    .limit(boundedLimit)
+
+  if (error) {
+    throw new Error(`Failed to load incomplete Base reconciliation candidates: ${error.message}`)
+  }
+
+  return (data || []) as Pick<Payment, "id" | "updated_at">[]
+}
+
 export async function getConfirmedLightningFeeSettlementCandidates(input: {
   limit: number
   cutoff: string

@@ -983,6 +983,11 @@ export default function BaseWalletPayment({
   })
   const [isPreparingPayment, setIsPreparingPayment] = useState(false)
   const [isOpeningWallet, setIsOpeningWallet] = useState(false)
+  // Captured once the wallet returns a transaction hash — surfaced in the
+  // "Network confirmation" step so the customer sees a shortened reference
+  // and Base block explorer link while confirmation is pending, per the
+  // PROCESSING/CONFIRMED checkout copy requirements.
+  const [submittedTxHash, setSubmittedTxHash] = useState("")
   const [basePayStatus, setBasePayStatus] = useState<string>("")
   const [connectedPeerName, setConnectedPeerName] = useState<string | null>(null)
   // checkoutToken arrives as a prop that starts empty and is set after the
@@ -1588,6 +1593,7 @@ export default function BaseWalletPayment({
       activeBasePaymentAttemptRef.current = null
       setExecStageRef.current("payment_submitted")
       setBaseMobileStepRef.current("payment_submitted")
+      setSubmittedTxHash(txHash)
       console.log("[BASE UI] final-tx-submitted", { paymentId, txHashPrefix: txHash.slice(0, 10), asset: kind === "eth_payment" ? "ETH" : "USDC" })
       void logBase(kind === "eth_payment" ? "eth-payment-submitted" : "usdc-payment-submitted", { paymentId, txHashPrefix: txHash.slice(0, 10) })
       void logBase("detect-start", { paymentId, txHashPrefix: txHash.slice(0, 10) })
@@ -2506,6 +2512,7 @@ export default function BaseWalletPayment({
       setExecStageRef.current("payment_submitted")
       setBaseMobileStepRef.current("payment_submitted")
       setIsOpeningWallet(false)
+      setSubmittedTxHash(ethTxHash)
       console.log("[BASE UI] final-tx-submitted", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10), asset: "ETH" })
       void logBase("eth-payment-submitted", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10) })
       void logBase("detect-start", { paymentId: paymentData.paymentId, txHashPrefix: ethTxHash.slice(0, 10) })
@@ -3595,6 +3602,21 @@ export default function BaseWalletPayment({
               confirmPayStatus === "active" ? (selectedAsset === "USDC" ? "Approve final payment in your wallet." : "Approve in your wallet") : undefined
             )}
             {renderStep("Network confirmation", networkConfStatus)}
+            {submittedTxHash && networkConfStatus !== "upcoming" ? (
+              <div className="px-3.5 pb-1 -mt-1 flex items-center gap-2 text-xs text-gray-500">
+                <span className="font-mono">
+                  {submittedTxHash.slice(0, 10)}…{submittedTxHash.slice(-6)}
+                </span>
+                <a
+                  href={`https://basescan.org/tx/${submittedTxHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#0052FF] hover:underline"
+                >
+                  View on Base explorer
+                </a>
+              </div>
+            ) : null}
           </div>
           {contextMessage ? (
             <div className={`mx-4 mb-4 rounded-2xl px-4 py-3.5 ${showWalletPrompt ? "bg-[#0052FF]/5 ring-1 ring-[#0052FF]/15" : "bg-gray-50 ring-1 ring-gray-100"}`}>

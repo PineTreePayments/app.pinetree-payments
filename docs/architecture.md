@@ -202,6 +202,7 @@ is an explicit operational or administrative action.
 | Withdrawal reconciliation | `POST /api/internal/wallets/pinetree/reconcile-withdrawals` -> `reconcileProcessingWithdrawals` | `CRON_SECRET` or `INTERNAL_API_SECRET` bearer | Recheck bounded processing withdrawal batches. | Manual; not scheduled |
 | Lightning payout processing | `POST /api/internal/lightning-payouts/process` -> `processPendingLightningPayoutJobs` | `CRON_SECRET` or `INTERNAL_API_SECRET` bearer | Process a bounded batch of pending Lightning payout jobs. | Manual; not scheduled |
 | Lightning settlement payout processing | `POST /api/internal/lightning-settlement-payouts/process` -> `processQueuedLightningSettlementPayoutJobs` | `INTERNAL_API_SECRET` bearer | Process queued Lightning settlement payouts using saved merchant destinations. | Manual; not scheduled |
+| Base payment chain reconciliation | `POST /api/internal/base-payments/[paymentId]/reconcile` -> `reconcileBasePaymentFromChain` | `CRON_SECRET` or `INTERNAL_API_SECRET` bearer | Re-verify a single Base (ETH/USDC) payment directly against the chain and repair it (including a falsely INCOMPLETE payment) if genuine on-chain evidence is found. Also run automatically, bounded, inside the full payment maintenance tick. | Manual + event-triggered; not scheduled |
 
 ### Event-Triggered Deferred Work
 

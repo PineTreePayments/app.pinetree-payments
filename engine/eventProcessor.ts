@@ -8,6 +8,7 @@
 import { getProvider } from "@/providers/registry"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { getPaymentById, getPaymentByProviderReference, upsertLedgerEntry } from "@/database"
+import { repairIncompletePaymentForReconciliation } from "./paymentReconciliation"
 import { PaymentStatus, normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 import { StoredPaymentSplitMetadata } from "@/types/payment"
 import {
@@ -501,6 +502,14 @@ export type WatcherEvent = {
   value?: string
   from?: string
   feeCaptureValidated?: boolean
+  /**
+   * Self-healing reconciliation only. When true and the payment is currently
+   * INCOMPLETE, allows this verified on-chain match to repair it back to
+   * PROCESSING/CONFIRMED instead of being silently skipped as terminal.
+   * Never set by normal watcher polling or webhook delivery — only by the
+   * explicit reconciliation entry point (engine/baseChainReconciliation.ts).
+   */
+  reconcile?: boolean
 }
 
 const watcherEventToStatus: Record<WatcherEvent["type"], PaymentStatus> = {
@@ -629,11 +638,33 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
     return
   }
 
-  const currentStatus = normalizeToStrictPaymentStatus(payment.status)
+  let currentStatus = normalizeToStrictPaymentStatus(payment.status)
   const TERMINAL_STATES = new Set<string>(["CONFIRMED", "FAILED", "INCOMPLETE"])
   if (TERMINAL_STATES.has(currentStatus)) {
-    console.info("[eventProcessor] processPaymentEvent: idempotent skip", { paymentId, currentStatus })
-    return
+    // Self-healing reconciliation: a payment that was marked INCOMPLETE before
+    // the engine ever saw this (now independently verified) on-chain evidence
+    // may be repaired back to PROCESSING. This is the ONLY way INCOMPLETE is
+    // ever left — see engine/paymentReconciliation.ts for the guarded bypass.
+    // Every other terminal state (or a non-reconciliation caller) is skipped
+    // exactly as before.
+    if (currentStatus === "INCOMPLETE" && event.reconcile && targetStatus !== "FAILED") {
+      const repair = await repairIncompletePaymentForReconciliation(paymentId, { txHash, value, from })
+      if (!repair.repaired) {
+        console.info("[eventProcessor] processPaymentEvent: reconciliation repair skipped", {
+          paymentId,
+          reason: repair.reason
+        })
+        return
+      }
+      console.info("[eventProcessor] processPaymentEvent: reconciliation repaired INCOMPLETE -> PROCESSING", {
+        paymentId,
+        txHash: txHash || null
+      })
+      currentStatus = "PROCESSING"
+    } else {
+      console.info("[eventProcessor] processPaymentEvent: idempotent skip", { paymentId, currentStatus })
+      return
+    }
   }
 
   // Validate transaction data before advancing to CONFIRMED when the event has not

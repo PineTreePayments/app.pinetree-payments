@@ -630,6 +630,37 @@ export async function cancelPaymentIntentEngine(intentId: string): Promise<void>
     if (status === "CONFIRMED" || status === "PROCESSING" || status === "FAILED") {
       return
     }
+
+    // Base wallet-signed payments are cancelled from a client-observed error
+    // (e.g. a WalletConnect request timing out) that does not prove the
+    // customer's wallet never actually submitted the transaction — a slow
+    // relay round-trip can leave the wallet completing the send after the
+    // dApp already gave up waiting. Before honouring the cancel, take one
+    // bounded look at the chain itself. If the payment already has genuine
+    // on-chain evidence, let it advance instead of cancelling out from under
+    // it — this is the same canonical verification every Base payment uses,
+    // just invoked a moment earlier than the routine watcher would.
+    if (status !== "INCOMPLETE" && String(payment?.network || "").toLowerCase() === "base") {
+      try {
+        const { reconcileBasePaymentFromChain } = await import("./baseChainReconciliation")
+        const preCheck = await reconcileBasePaymentFromChain(intent.payment_id, { timeoutMs: 3_500 })
+        if (preCheck.detected) {
+          console.info("[paymentIntents] cancel pre-empted by chain evidence", {
+            intentId,
+            paymentId: intent.payment_id,
+            resolvedStatus: preCheck.status
+          })
+          return
+        }
+      } catch (error) {
+        console.warn("[paymentIntents] pre-cancel chain check failed — proceeding with cancel", {
+          intentId,
+          paymentId: intent.payment_id,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+
     const changed = await markPaymentIncomplete(intent.payment_id, {
       providerEvent: "terminal_cancel",
       rawPayload: { reason: "merchant_canceled", intentId }

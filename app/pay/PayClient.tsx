@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useConnectors } from "wagmi"
 import { useSearchParams } from "next/navigation"
 import { createBrowserClient } from "@supabase/ssr"
 import { ALLOWED_ASSETS, getAvailableAssetsFromValues } from "@/engine/providerMappings"
@@ -43,6 +44,13 @@ const BASE_WC_PENDING_KEY = "pinetree_base_wc_pending"
 const BASE_EXEC_STORAGE_PREFIX = "pinetree_base_exec_"
 const CHECKOUT_SESSION_STORAGE_PREFIX = "pinetree_checkout_session_"
 const TERMINAL_PAYMENT_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
+
+// Module-scope (not per-component-instance) guard: the WalletConnect
+// connector's own provider is already a singleton cached inside wagmi's
+// config, so calling getProvider() twice is safe — this just avoids a
+// redundant log line / getProvider() call across StrictMode double-mounts
+// or repeated PayClient renders within the same browser tab.
+let baseWalletConnectPrewarmed = false
 
 type SplitOutput = {
   address: string
@@ -249,6 +257,30 @@ export default function PayClient() {
     Boolean(walletBrowserPaymentId)
   const isSolflareCallbackMode =
     solflareAction === "connect_callback" || solflareAction === "sign_callback"
+
+  // ── WalletConnect prewarm ───────────────────────────────────────────────────
+  // The customer-visible "Preparing…" delay came from initializing the
+  // WalletConnect client only after the customer opened the Base asset card.
+  // Kick off connector.getProvider() as soon as checkout becomes interactive
+  // instead, so the relay/session-discovery round trip is already in flight
+  // (or done) by the time the customer picks Base. wagmi's connector caches
+  // the resulting provider promise internally, so this is the same client
+  // BaseWalletPayment resolves later — no duplicate WalletConnect client is
+  // ever created, and repeatedly opening/closing the asset card never
+  // re-triggers this work.
+  const connectors = useConnectors()
+  useEffect(() => {
+    if (baseWalletConnectPrewarmed) return
+    const connector = connectors.find((c) =>
+      `${c.id} ${c.name} ${c.type}`.toLowerCase().includes("walletconnect")
+    )
+    if (!connector) return
+    baseWalletConnectPrewarmed = true
+    void connector.getProvider().catch(() => {
+      // Best-effort — BaseWalletPayment retries provider resolution itself
+      // when the customer actually selects Base.
+    })
+  }, [connectors])
 
   // ── Shared clipboard state ─────────────────────────────────────────────────
   const [copiedLink, setCopiedLink] = useState(false)

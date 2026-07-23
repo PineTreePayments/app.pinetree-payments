@@ -12,6 +12,7 @@ export type PaymentEventType =
   | "payment.incomplete"
   | "payment.expired"
   | "payment.refunded"
+  | "payment.reconciled"
 
 export type PaymentEvent = {
   id: string

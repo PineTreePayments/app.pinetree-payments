@@ -53,6 +53,19 @@ export type WatchOnceInput = {
   paymentId: string
   asset?: string
   txHash?: string
+  /**
+   * When true, a detected match is allowed to repair a payment that is
+   * already in the terminal INCOMPLETE state (self-healing reconciliation).
+   * Normal watcher/webhook callers must never set this — only the explicit
+   * reconciliation entry point (engine/baseChainReconciliation.ts) does.
+   */
+  reconcile?: boolean
+  /**
+   * Overrides the env-configured lookback window (in blocks/slots). Used by
+   * reconciliation callers that need to scan back to a specific payment's
+   * creation time rather than the short window used for routine polling.
+   */
+  lookbackOverride?: number
 }
 
 // ─── Internal RPC types ──────────────────────────────────────────────────────
@@ -253,7 +266,8 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
               return handleMatchingTransaction(
                 input.paymentId,
                 { hash: input.txHash, value: match.totalAtomic.toString(), from: match.from },
-                true
+                true,
+                input.reconcile
               )
             }
           } else {
@@ -273,7 +287,8 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
               return handleMatchingTransaction(
                 input.paymentId,
                 { hash: input.txHash, value: String(match.totalLamports / 1e9), from: match.from },
-                true
+                true,
+                input.reconcile
               )
             }
           }
@@ -328,7 +343,8 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       return handleMatchingTransaction(
         input.paymentId,
         { hash: splitTx.hash, value: splitTx.totalAtomic.toString(), from: splitTx.from },
-        true // fee capture validated for Solana split
+        true, // fee capture validated for Solana split
+        input.reconcile
       )
     }
 
@@ -353,7 +369,8 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
     return handleMatchingTransaction(
       input.paymentId,
       { hash: splitTx.hash, value: String(splitTx.totalLamports / 1e9), from: splitTx.from },
-      true // fee capture validated for Solana split
+      true, // fee capture validated for Solana split
+      input.reconcile
     )
   }
 
@@ -379,7 +396,9 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
     return false
   }
 
-  const lookback = getLookbackWindow(input.network)
+  const lookback = Number.isFinite(input.lookbackOverride) && Number(input.lookbackOverride) > 0
+    ? Math.floor(Number(input.lookbackOverride))
+    : getLookbackWindow(input.network)
   const startBlock = Math.max(0, currentBlock - lookback)
   const fromBlockHex = "0x" + startBlock.toString(16)
 
@@ -621,7 +640,8 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       return handleMatchingTransaction(
         input.paymentId,
         { hash: input.txHash, value: totalAtomic, from: payer },
-        true
+        true,
+        input.reconcile
       )
     }
 
@@ -696,7 +716,8 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       const detected = await handleMatchingTransaction(
         input.paymentId,
         { hash: log.transactionHash, value: totalAtomic, from: payer },
-        true
+        true,
+        input.reconcile
       )
       if (detected) return true
     }
@@ -751,7 +772,7 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       // complete on-chain proof for this payment.  updatePaymentStatus auto-validates
       // feeCaptureMethod === "direct", so we emit payment.confirmed immediately rather
       // than stopping at payment.processing (which has no follow-up confirmation path).
-      const detected = await handleMatchingTransaction(input.paymentId, tx, true)
+      const detected = await handleMatchingTransaction(input.paymentId, tx, true, input.reconcile)
       if (detected) return true
     } else {
       console.info("[watcher:evm] direct tx below threshold", {
@@ -789,7 +810,8 @@ function isEvmReceiptFailed(status: unknown): boolean {
 async function handleMatchingTransaction(
   paymentId: string,
   tx: { hash: string; value: string; from: string },
-  feeCaptureValidated: boolean
+  feeCaptureValidated: boolean,
+  reconcile?: boolean
 ): Promise<boolean> {
   await processPaymentEvent({
     type: feeCaptureValidated ? "payment.confirmed" : "payment.processing",
@@ -797,7 +819,8 @@ async function handleMatchingTransaction(
     txHash: tx.hash,
     value: tx.value,
     from: tx.from,
-    feeCaptureValidated
+    feeCaptureValidated,
+    reconcile
   })
 
   return true
