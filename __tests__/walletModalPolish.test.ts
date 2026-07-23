@@ -72,8 +72,7 @@ describe("Wallet overview - polished PineTree summary", () => {
     expect(src).toContain("grid-cols-[minmax(0,1fr)_auto_auto_auto]")
     expect(src).toContain("sm:grid-cols-[minmax(0,1fr)_7.75rem_minmax(5.75rem,auto)_auto]")
     expect(src).toContain("className=\"flex justify-center\"")
-    expect(src).toContain("StatusBadge")
-    expect(src).toContain("walletRailStatusClasses")
+    expect(src).toContain("ProviderStatusPill")
     expect(src).toContain("<ChevronRight")
     expect(src).toContain("text-right")
   })
@@ -84,7 +83,7 @@ describe("Wallet overview - polished PineTree summary", () => {
     expect(walletPage).toContain("<StatusBadge status={status} />")
     expect(walletPage).toContain('import StatusBadge from "@/components/ui/StatusBadge"')
     expect(walletOverviewSrc()).toContain("ActivityStatusPill")
-    expect(walletPage).not.toContain("ProviderStatusPill")
+    expect(walletOverviewSrc()).toContain("<ProviderStatusPill")
   })
 
   it("Overview renders Total Balance, workflow navigation, Wallet Summary, and Recent Withdrawals only", () => {

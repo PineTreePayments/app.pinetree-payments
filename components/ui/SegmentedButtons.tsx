@@ -10,7 +10,7 @@ import type { ReactNode } from "react"
 // colors or states.
 export function segmentedButtonClass(active: boolean, size: "default" | "compact" = "default") {
   const metrics = size === "compact" ? "px-2 py-2 text-xs" : "px-3 py-1.5 text-sm"
-  return `shrink-0 rounded-lg border ${metrics} transition ${
+  return `min-w-0 shrink-0 rounded-lg border ${metrics} transition ${
     active
       ? "border-blue-600 bg-blue-600 font-semibold text-white shadow-sm"
       : "border-blue-200 bg-blue-50/70 font-medium text-blue-700 hover:border-blue-300 hover:bg-blue-100/70 hover:text-blue-600"
@@ -29,12 +29,14 @@ export function SegmentedButtons<T extends string>({
   onChange,
   className = "flex flex-wrap gap-1.5",
   ariaLabel,
+  size = "default",
 }: {
   options: ReadonlyArray<SegmentedOption<T>>
   value: T
   onChange: (value: T) => void
   className?: string
   ariaLabel?: string
+  size?: "default" | "compact"
 }) {
   return (
     <div className={className} aria-label={ariaLabel}>
@@ -45,9 +47,9 @@ export function SegmentedButtons<T extends string>({
           aria-pressed={value === option.value}
           disabled={option.disabled}
           onClick={() => onChange(option.value)}
-          className={`${segmentedButtonClass(value === option.value)} disabled:cursor-not-allowed disabled:opacity-50`}
+          className={`flex items-center justify-center ${segmentedButtonClass(value === option.value, size)} disabled:cursor-not-allowed disabled:opacity-50`}
         >
-          {option.label}
+          <span className="truncate">{option.label}</span>
         </button>
       ))}
     </div>

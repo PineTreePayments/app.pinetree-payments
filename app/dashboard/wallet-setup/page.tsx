@@ -33,6 +33,7 @@ import {
   type DynamicWalletLike,
 } from "@/lib/wallets/dynamicSignerLookup"
 import {
+  ProviderStatusPill,
   dashboardPageTitleClass,
   dashboardSectionLabelClass,
 } from "@/components/dashboard/DashboardPrimitives"
@@ -3008,20 +3009,19 @@ function WalletOverviewSummary({
           </p>
         </div>
       </div>
-      <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-sm">
-        <SegmentedButtons
-          ariaLabel="Wallet workflows"
-          className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-          value="none"
-          onChange={(value) => {
-            if (value === "withdraw") onOpenWithdraw()
-            if (value === "activity") onViewAllActivity?.()
-            if (value === "address-book") onOpenAddressBook()
-            if (value === "settings") onOpenSettings()
-          }}
-          options={walletWorkflowOptions}
-        />
-      </div>
+      <SegmentedButtons
+        ariaLabel="Wallet workflows"
+        className="grid grid-cols-4 gap-1.5"
+        value="none"
+        onChange={(value) => {
+          if (value === "withdraw") onOpenWithdraw()
+          if (value === "activity") onViewAllActivity?.()
+          if (value === "address-book") onOpenAddressBook()
+          if (value === "settings") onOpenSettings()
+        }}
+        options={walletWorkflowOptions}
+        size="compact"
+      />
       {visibleRows.length > 0 ? (
         <div className="overflow-hidden rounded-[1.35rem] border border-blue-200/60 bg-white shadow-[0_18px_42px_rgba(15,23,42,0.07)]">
           <div className="border-b border-blue-100/70 bg-blue-50/55 px-4 py-3 sm:px-5">
@@ -3047,7 +3047,7 @@ function WalletOverviewSummary({
                   >
                     <p className="min-w-0 text-sm font-semibold text-gray-900">{row.label}</p>
                     <span className="flex justify-center">
-                      <StatusBadge label={statusLabel} classes={walletRailStatusClasses(statusTone)} showIcon={false} />
+                      <ProviderStatusPill label={statusLabel} tone={statusTone} />
                     </span>
                     <span className="min-w-[72px] text-right text-sm font-semibold tabular-nums text-gray-950 sm:min-w-[92px]">{formatUsd(railUsd)}</span>
                     <ChevronRight size={15} className="text-gray-400" aria-hidden="true" />
@@ -3094,7 +3094,7 @@ function WalletOverviewSummary({
                 key={item.id}
                 type="button"
                 onClick={onViewAllActivity}
-                className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3 text-left transition hover:bg-blue-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-100 sm:px-5"
+                className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left transition hover:bg-blue-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-100 sm:px-5"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-gray-950">{activityAmountLabel(item)}</p>

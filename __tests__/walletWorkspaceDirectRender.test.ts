@@ -138,8 +138,7 @@ describe("Mobile wallet workflow navigation stays contained", () => {
     expect(page).toContain('{ value: "activity", label: "Activity" }')
     expect(page).toContain('{ value: "address-book", label: "Address Book" }')
     expect(page).toContain('{ value: "settings", label: "Settings" }')
-    expect(page).toContain('className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"')
-    expect(page).toContain('rounded-2xl border border-gray-200/80 bg-white p-3 shadow-sm')
+    expect(page).toContain('className="grid grid-cols-4 gap-1.5"')
   })
 
   it("overview and balances are not permanent navigation buttons", () => {
