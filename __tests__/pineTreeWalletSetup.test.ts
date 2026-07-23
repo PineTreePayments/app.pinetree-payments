@@ -123,10 +123,15 @@ describe("PineTree embedded wallet setup", () => {
   // -------------------------------------------------------------------------
 
   it("presents one merchant PineTree Wallet profile", () => {
-    expect(page).toContain("<h1 className={dashboardPageTitleClass}>Merchant Wallet</h1>")
+    expect(page).toContain("<h1 className={dashboardPageTitleClass}>PineTree Wallet</h1>")
     expect(page).not.toContain('title="MERCHANT WALLET"')
-    expect(page).not.toContain(">PineTree Wallet</h1>")
-    expect(page).toContain(">PineTree Wallet</h2>")
+    expect(page).not.toContain(">Merchant Wallet</h1>")
+    const workspaceStart = page.indexOf('<section aria-label="PineTree Wallet workspace"')
+    const workspaceLead = page.slice(
+      workspaceStart,
+      page.indexOf("<nav", workspaceStart)
+    )
+    expect(workspaceLead).not.toContain(">PineTree Wallet</h2>")
     expect(page).not.toContain("One merchant wallet profile")
     expect(page).toContain("Create PineTree Wallet")
     expect(page).toContain("Open PineTree Wallet")
@@ -1547,11 +1552,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain('"Address syncing"')
   })
 
-  it("shows wallet addresses in the Balances asset detail instead of a separate Wallets tab", () => {
+  it("shows wallet addresses in the Balances asset cards instead of a separate Wallets tab", () => {
     expect(page).toContain("Wallet address")
     expect(page).toContain('aria-label="Copy wallet address"')
-    expect(page).toContain('selectedAsset.rail === "base"')
-    expect(page).toContain('selectedAsset.rail === "solana"')
+    expect(page).toContain('if (row.rail === "base") return profileAddresses.base[0]?.address ?? null')
+    expect(page).toContain('if (row.rail === "solana") return profileAddresses.solana[0]?.address ?? null')
     expect(page).toContain("bitcoinPayoutEntries[0]?.address")
     expect(page).not.toContain("function ReceiveRow")
     expect(page).not.toContain("function WalletRows")
@@ -1567,9 +1572,14 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("uses a clean merchant wallet hierarchy without redundant descriptive copy", () => {
-    expect(page).toContain("<h1 className={dashboardPageTitleClass}>Merchant Wallet</h1>")
-    expect(page).toContain(">PineTree Wallet</h2>")
-    expect(page).not.toContain(">PineTree Wallet</h1>")
+    expect(page).toContain("<h1 className={dashboardPageTitleClass}>PineTree Wallet</h1>")
+    expect(page).not.toContain(">Merchant Wallet</h1>")
+    const workspaceStart = page.indexOf('<section aria-label="PineTree Wallet workspace"')
+    const workspaceLead = page.slice(
+      workspaceStart,
+      page.indexOf("<nav", workspaceStart)
+    )
+    expect(workspaceLead).not.toContain(">PineTree Wallet</h2>")
     expect(page).not.toContain("Create and open your merchant wallet.")
     expect(page).not.toContain("One merchant wallet for receiving funds and managing payments.")
     expect(page).toContain("<EnabledRailChips rows={walletRailRows} />")
@@ -1596,10 +1606,16 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).not.toContain("Balances will update as wallet activity is indexed.")
   })
 
-  it("balances tab uses a selected asset dropdown without fake unsynced zeroes", () => {
+  it("balances tab uses a complete asset card list without fake unsynced zeroes", () => {
     expect(page).toContain("function BalanceRows")
-    expect(page).toContain("AssetSelectDropdown")
-    expect(page).toContain("dropdownOptions")
+    const balanceRowsSource = page.slice(
+      page.indexOf("function BalanceRows("),
+      page.indexOf("function EnabledRailChips(")
+    )
+    expect(balanceRowsSource).toContain("balanceOptions.map((row)")
+    expect(balanceRowsSource).toContain("key={row.key}")
+    expect(balanceRowsSource).not.toContain("AssetSelectDropdown")
+    expect(balanceRowsSource).not.toContain("dropdownOptions")
     expect(page).toContain("balanceOptions")
     expect(page).not.toContain("allAssets.map((row, index)")
     expect(page).not.toContain("ChevronRight")

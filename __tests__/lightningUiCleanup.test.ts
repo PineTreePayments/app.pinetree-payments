@@ -87,14 +87,16 @@ describe("Wallet modal tabs and rail state", () => {
 })
 
 describe("Balances tab wallet details", () => {
-  it("BalanceRows uses one selected asset detail view with wallet address details", () => {
+  it("BalanceRows uses standalone asset cards with wallet address details", () => {
     const balanceRowsSrc = walletPage.slice(
       walletPage.indexOf("function BalanceRows("),
       walletPage.indexOf("function EnabledRailChips(")
     )
-    expect(balanceRowsSrc).toContain("AssetSelectDropdown")
-    expect(balanceRowsSrc).toContain("dropdownOptions")
-    expect(balanceRowsSrc).toContain("selectedAsset")
+    expect(balanceRowsSrc).toContain("balanceOptions.map((row)")
+    expect(balanceRowsSrc).toContain("key={row.key}")
+    expect(balanceRowsSrc).not.toContain("AssetSelectDropdown")
+    expect(balanceRowsSrc).not.toContain("dropdownOptions")
+    expect(balanceRowsSrc).not.toContain("selectedAsset")
     expect(balanceRowsSrc).toContain("No balances yet")
     expect(balanceRowsSrc).not.toContain("allAssets.map((row, index)")
     expect(balanceRowsSrc).not.toContain("ChevronRight")

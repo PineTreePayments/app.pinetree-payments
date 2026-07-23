@@ -16,7 +16,7 @@ const layout = fs.readFileSync(
 // flipped true after an async Dynamic-signer hydration chain (handleOpenWallet)
 // completed. On a fresh navigation that hydration could silently fail to ever
 // resolve (see directWalletOpenAttemptedRef races), leaving the page blank
-// under the "Merchant Wallet" heading until a hard refresh reset the ref.
+// under the wallet heading until a hard refresh reset the ref.
 describe("PineTree Wallet workspace renders directly on the route, not behind a modal gate", () => {
   it("the workspace section is gated on showWalletWorkspace, never on walletOpen", () => {
     expect(page).toContain("{showWalletWorkspace ? (")
@@ -39,15 +39,17 @@ describe("PineTree Wallet workspace renders directly on the route, not behind a 
     expect(workspaceBlock).not.toContain('aria-modal="true"')
   })
 
-  it("page mode renders no close X on the workspace header", () => {
-    const workspaceHeader = page.slice(
+  it("page mode has no duplicate workspace header inside the wallet content", () => {
+    const workspaceBlock = page.slice(
       page.indexOf('aria-label="PineTree Wallet workspace"'),
-      page.indexOf("</header>", page.indexOf('aria-label="PineTree Wallet workspace"'))
+      page.indexOf('aria-label="PineTree Wallet sections"')
     )
-    expect(workspaceHeader).toContain("PineTree Wallet")
-    expect(workspaceHeader).not.toContain("<X size=")
-    expect(workspaceHeader).not.toContain('aria-label="Close PineTree Wallet"')
-    expect(workspaceHeader).not.toContain("onClick={handleRequestCloseWallet}")
+    const pageComponent = page.slice(page.indexOf("export default function PineTreeWalletPage()"))
+    expect(pageComponent).toContain('<h1 className={dashboardPageTitleClass}>PineTree Wallet</h1>')
+    expect(workspaceBlock).not.toContain("<header")
+    expect(workspaceBlock).not.toContain("<h2")
+    expect(workspaceBlock).not.toContain('aria-label="Close PineTree Wallet"')
+    expect(workspaceBlock).not.toContain("onClick={handleRequestCloseWallet}")
   })
 
   it("there is no dead close-confirmation machinery left over from modal mode", () => {
@@ -125,19 +127,104 @@ describe("Wallet workspace loading state is distinct from empty state", () => {
 })
 
 describe("Mobile wallet workspace tabs stay contained (no full-page horizontal overflow)", () => {
-  it("the five-tab strip uses an equal-width grid, not an unconstrained flex row", () => {
+  it("the five-tab strip uses a wrapping responsive grid, not an unconstrained flex row", () => {
     const navBlock = page.slice(
       page.indexOf('aria-label="PineTree Wallet sections"') - 200,
       page.indexOf('aria-label="PineTree Wallet sections"') + 200
     )
-    expect(navBlock).toContain("grid-cols-5")
+    expect(navBlock).toContain("grid-cols-2")
+    expect(navBlock).toContain("min-[420px]:grid-cols-3")
+    expect(navBlock).toContain("sm:grid-cols-5")
   })
 
   it("tab labels can wrap on narrow viewports instead of clipping or forcing overflow", () => {
-    const buttonClassIndex = page.indexOf("rounded-xl px-1 py-2.5 text-center text-[10px] font-semibold leading-tight")
+    const buttonClassIndex = page.indexOf("min-h-10 rounded-xl px-3 py-2 text-center text-xs font-semibold leading-tight")
     expect(buttonClassIndex).toBeGreaterThan(-1)
     const buttonClass = page.slice(buttonClassIndex - 40, buttonClassIndex + 150)
     expect(buttonClass).not.toMatch(/(?<!sm:)whitespace-nowrap/)
     expect(buttonClass).toContain("sm:whitespace-nowrap")
+  })
+})
+
+describe("Wallet dashboard page hierarchy matches Reports-style surfaces", () => {
+  function runtimeSrc() {
+    return page.slice(
+      page.indexOf("function PineTreeWalletRuntime("),
+      page.indexOf("function PineTreeWalletPage(")
+    )
+  }
+
+  function workspaceSrc() {
+    const src = runtimeSrc()
+    const end = src.indexOf("// ---------------------------------------------------------------------------\n// Page")
+    return src.slice(
+      src.indexOf('aria-label="PineTree Wallet workspace"'),
+      end > -1 ? end : src.length
+    )
+  }
+
+  function balanceRowsSrc() {
+    return page.slice(
+      page.indexOf("function BalanceRows("),
+      page.indexOf("function EnabledRailChips(")
+    )
+  }
+
+  function activityTabSrc() {
+    return page.slice(
+      page.indexOf("function ActivityTab("),
+      page.indexOf("function mapActivityDetailStatus(")
+    )
+  }
+
+  it("does not wrap the ready wallet route in a giant workspace card", () => {
+    const workspaceOpen = page.slice(
+      page.indexOf('aria-label="PineTree Wallet workspace"'),
+      page.indexOf('aria-label="PineTree Wallet sections"')
+    )
+    expect(workspaceOpen).toContain('className="space-y-4 md:space-y-5"')
+    expect(workspaceOpen).not.toContain("max-w-[42rem]")
+    expect(workspaceOpen).not.toContain("overflow-hidden rounded-[1.5rem] border border-white/70 bg-white/95")
+    expect(workspaceOpen).not.toContain("shadow-[0_32px_100px")
+  })
+
+  it("renders wallet tabs before content cards, outside the tab body", () => {
+    const src = workspaceSrc()
+    expect(src.indexOf('aria-label="PineTree Wallet sections"')).toBeLessThan(src.indexOf('activeTab === "overview"'))
+    expect(src.indexOf('aria-label="PineTree Wallet sections"')).toBeLessThan(src.indexOf('activeTab === "balances"'))
+    expect(src).toContain('<div className="min-w-0">')
+  })
+
+  it("renders balances as a complete card list without selected dropdown state", () => {
+    const src = balanceRowsSrc()
+    expect(src).toContain("balanceOptions.map((row)")
+    expect(src).toContain("key={row.key}")
+    expect(src).not.toContain("selectedKey")
+    expect(src).not.toContain("onSelectKey")
+    expect(src).not.toContain("dropdownOptions")
+    expect(src).not.toContain("AssetSelectDropdown")
+  })
+
+  it("withdrawal details use shared overlay structure and omit merchant-facing internals", () => {
+    const src = activityTabSrc()
+    expect(src).toContain('data-pinetree-overlay="true"')
+    expect(src).toContain("pinetree-modal-backdrop")
+    expect(src).not.toContain(">Advanced<")
+    expect(src).not.toContain("Provider Reference")
+    expect(src).not.toContain("Raw provider status")
+    expect(src).not.toContain("Settlement Reference")
+  })
+
+  it("wallet withdrawal status pills use the shared platform status component", () => {
+    expect(page).toContain('import StatusBadge from "@/components/ui/StatusBadge"')
+    expect(page).toContain("function ActivityStatusPill")
+    expect(page).toContain("<StatusBadge status={status} />")
+  })
+
+  it("activity rows remain tappable and open details", () => {
+    const src = activityTabSrc()
+    expect(src).toContain("items.map((item)")
+    expect(src).toContain("onClick={() => void openActivityDetail(item)}")
+    expect(src).toContain('type="button"')
   })
 })
