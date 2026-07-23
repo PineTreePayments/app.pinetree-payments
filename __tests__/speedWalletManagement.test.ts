@@ -27,6 +27,7 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     currency: "USD",
     merchantAmount: 9,
     pineTreeFeeAmount: 1,
+    pineTreeFeeSats: 1500,
     merchantSpeedAccountId: "acct_merchant_1",
     pineTreePaymentId: "payment-1",
     pineTreePaymentIntentId: "intent-1",
@@ -501,13 +502,15 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     }), { status: 200 }))
     const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
     await createSpeedLightningPayment({
-      amount: 10, currency: "USD", merchantAmount: 9, pineTreeFeeAmount: 1,
+      amount: 10, currency: "USD", merchantAmount: 9, pineTreeFeeAmount: 1, pineTreeFeeSats: 1500,
       merchantSpeedAccountId: "acct_merchant_1", pineTreePaymentId: "payment-1",
       merchantId: "merchant-1", settlementMode: "speed_connect_split",
     })
     const init = fetchSpy.mock.calls[0][1]
     expect(new Headers(init?.headers).get("speed-account")).toBe("acct_merchant_1")
-    expect(JSON.parse(String(init?.body))).toMatchObject({ application_fee: 1 })
+    // application_fee must be the pre-converted sats value, never the raw USD figure -
+    // Speed's target_currency for this invoice is SATS.
+    expect(JSON.parse(String(init?.body))).toMatchObject({ application_fee: 1500 })
     expect(JSON.parse(String(init?.body))).not.toHaveProperty("account_id")
   })
 
@@ -556,7 +559,7 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     await getConnectedAccountBalances(context)
     await listConnectedAccountTransactions(context)
     await createSpeedLightningPayment({
-      amount: 10, currency: "USD", merchantAmount: 9, pineTreeFeeAmount: 1,
+      amount: 10, currency: "USD", merchantAmount: 9, pineTreeFeeAmount: 1, pineTreeFeeSats: 1500,
       merchantSpeedAccountId: "acct_merchant_1", pineTreePaymentId: "payment-1",
       merchantId: "merchant-1", settlementMode: "speed_connect_split",
     })

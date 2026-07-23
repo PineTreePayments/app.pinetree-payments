@@ -171,6 +171,15 @@ export type CreateSpeedLightningPaymentParams = {
   currency: string
   merchantAmount: number
   pineTreeFeeAmount: number
+  // Pre-converted whole-satoshi value of pineTreeFeeAmount, required whenever
+  // a nonzero application_fee will actually be sent to Speed (i.e. not
+  // treasury-sweep mode). Speed's target_currency for this invoice is SATS -
+  // application_fee must be expressed in the same unit, never a raw USD
+  // float, or a small fee (e.g. $0.15) silently collapses to zero.
+  pineTreeFeeSats?: number
+  // BTC/USD rate used to produce pineTreeFeeSats - persisted as the
+  // conversion/quote reference, never used for anything except that record.
+  btcPriceUsdAtFeeQuote?: number
   merchantSpeedAccountId?: string
   pineTreePaymentId: string
   pineTreePaymentIntentId?: string | null
@@ -179,6 +188,8 @@ export type CreateSpeedLightningPaymentParams = {
   settlementMode?: SpeedLightningSettlementMode
   metadata?: Record<string, unknown>
 }
+
+export type SpeedFeeSettlementStatus = "requested" | "retained_pending_sweep" | "not_applicable"
 
 export type CreateSpeedLightningPaymentResult = {
   speedPaymentId: string
@@ -189,6 +200,8 @@ export type CreateSpeedLightningPaymentResult = {
   merchantTransferPercentage: number
   transfers: SpeedPaymentTransfer[]
   metadata: Record<string, unknown>
+  platformFeeSats: number | null
+  feeSettlementStatus: SpeedFeeSettlementStatus
   raw: SpeedPaymentObject
 }
 
@@ -1120,6 +1133,27 @@ export async function createSpeedLightningPayment(
     throw new Error("Lightning amount must be greater than the PineTree service fee.")
   }
 
+  const feeSettlementStatus: SpeedFeeSettlementStatus =
+    pineTreeFeeAmount === 0 ? "not_applicable" : useTreasurySweep ? "retained_pending_sweep" : "requested"
+
+  // Speed's application_fee must be expressed in the invoice's own settlement
+  // unit (target_currency: SATS), never a raw USD float - a $0.15 fee sent as
+  // the literal number 0.15 collapses to zero once Speed interprets it as
+  // sats. Whenever a nonzero fee will actually be requested from Speed
+  // (feeSettlementStatus === "requested"), the caller MUST supply a
+  // pre-converted whole-satoshi value; fail closed rather than silently
+  // sending a value that produces a zero-amount "Application Fee In" record.
+  let platformFeeSats: number | null = null
+  if (feeSettlementStatus === "requested") {
+    const suppliedSats = Number(params.pineTreeFeeSats)
+    if (!Number.isInteger(suppliedSats) || suppliedSats <= 0) {
+      throw new Error(
+        "PineTree service fee must be pre-converted to a positive whole-satoshi amount before requesting a Speed application fee."
+      )
+    }
+    platformFeeSats = suppliedSats
+  }
+
   const merchantTransferPercentageRaw = ((grossAmount - pineTreeFeeAmount) / grossAmount) * 100
   const merchantTransferPercentage = calculateSpeedMerchantTransferPercentage(
     grossAmount,
@@ -1149,6 +1183,9 @@ export async function createSpeedLightningPayment(
     settlement_mode: settlementMode,
     settlementMode,
     platform_fee_usd: pineTreeFeeAmount,
+    platform_fee_sats: platformFeeSats,
+    fee_conversion_rate_usd: params.btcPriceUsdAtFeeQuote ?? null,
+    fee_settlement_status: feeSettlementStatus,
     merchant_net_usd: merchantAmount,
     ...(merchantSpeedAccountId ? { merchantSpeedAccountId, merchantTransferPercentage } : {})
   }
@@ -1162,11 +1199,11 @@ export async function createSpeedLightningPayment(
     statement_descriptor: "PineTree",
     description: `PineTree payment ${params.pineTreePaymentId}`,
     metadata,
-    ...(useTreasurySweep
-      ? {}
-      : {
-          application_fee: pineTreeFeeAmount
-        }),
+    ...(platformFeeSats !== null
+      ? {
+          application_fee: platformFeeSats
+        }
+      : {}),
   }
 
   const payment = useTreasurySweep
@@ -1195,6 +1232,8 @@ export async function createSpeedLightningPayment(
     merchantTransferPercentage,
     transfers: Array.isArray(payment.transfers) ? payment.transfers : [],
     metadata,
+    platformFeeSats,
+    feeSettlementStatus,
     raw: payment
   }
 }

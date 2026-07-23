@@ -3,6 +3,7 @@ export type DynamicWalletOwnershipFailureReason =
   | "DYNAMIC_USER_NOT_FOUND"
   | "DYNAMIC_IDENTITY_MISMATCH"
   | "DYNAMIC_WALLETS_MISSING"
+  | "DYNAMIC_WALLETS_HYDRATING"
   | "DYNAMIC_ENVIRONMENT_MISMATCH"
 
 export type DynamicWalletOwnershipResolution = {
@@ -77,8 +78,12 @@ export function resolveDynamicWalletOwnership(input: {
     failureReason = "DYNAMIC_ENVIRONMENT_MISMATCH"
   } else if (storedDynamicUserId && !storedDynamicIdIsExternalSubject && !storedDynamicIdMatchesCurrent) {
     failureReason = "DYNAMIC_IDENTITY_MISMATCH"
-  } else if (storedAddresses.length > 0 && walletCount === 0) {
-    failureReason = "DYNAMIC_IDENTITY_MISMATCH"
+  } else if (walletCount === 0 && (input.sdkLoaded === false || storedAddresses.length > 0)) {
+    // An empty wallet list right after auth restoration is a hydration-timing
+    // signal, not proof of a different owner - the SDK has not necessarily
+    // finished loading this session's wallets yet. Callers should retry
+    // (bounded) rather than treat this the same as a real identity mismatch.
+    failureReason = "DYNAMIC_WALLETS_HYDRATING"
   } else if (storedAddresses.length > 0 && !storedAddressesMatchHydrated) {
     failureReason = "DYNAMIC_IDENTITY_MISMATCH"
   } else if (walletCount === 0) {

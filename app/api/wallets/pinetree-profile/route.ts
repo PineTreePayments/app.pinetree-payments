@@ -14,6 +14,12 @@ import { provisionMerchantBitcoinAddress } from "@/engine/pineTreeBitcoinAddress
 import { isDynamicBtcLegacyEnabled } from "@/lib/pinetreeDynamicBtcLegacy"
 import { assertMerchantBusinessProfileComplete } from "@/engine/businessProfile"
 import { withOperationTimeout } from "@/engine/promiseTimeout"
+import { decideDynamicUserIdWrite } from "@/lib/wallets/dynamicIdentityRepair"
+
+function idSuffix(value: unknown) {
+  const text = String(value || "").trim()
+  return text ? text.slice(-6) : null
+}
 
 const BACKGROUND_PROVISIONING_TIMEOUT_MS = 12_000
 const BUSINESS_PROFILE_REQUIRED_MESSAGE = "Complete your Business Profile before creating your PineTree Wallet."
@@ -280,6 +286,51 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const dynamicIdentityOwnershipProven = Boolean(
+      syncsDynamicProfile && dynamicExternalUserId && merchantId && dynamicExternalUserId === merchantId
+    )
+    const dynamicIdentityDecision = syncsDynamicProfile && "dynamic_user_id" in body
+      ? decideDynamicUserIdWrite({
+          merchantId,
+          existingDynamicUserId: existingProfile?.dynamic_user_id ?? null,
+          incomingDynamicUserId: dynamicUserId,
+          ownershipProven: dynamicIdentityOwnershipProven,
+        })
+      : null
+
+    if (dynamicIdentityDecision?.action === "blocked") {
+      console.warn("[pinetree-wallets] wallet_dynamic_identity_repair_blocked", {
+        merchantId,
+        merchantIdSuffix: idSuffix(merchantId),
+        externalUserIdSuffix: idSuffix(dynamicExternalUserId),
+        storedDynamicUserIdSuffix: idSuffix(existingProfile?.dynamic_user_id),
+        incomingDynamicUserIdSuffix: idSuffix(dynamicUserId),
+        reason: dynamicIdentityDecision.reason,
+        identityRepairAttempted: true,
+        identityRepairSucceeded: false,
+        ownershipValidationMethod: "dynamic_external_user_id_matches_merchant_id",
+      })
+      return NextResponse.json(
+        { error: "dynamic_identity_conflict", retryable: false },
+        { status: 409 }
+      )
+    }
+
+    if (dynamicIdentityDecision?.action === "write" && dynamicIdentityDecision.reason === "legacy_repair") {
+      console.info("[pinetree-wallets] wallet_dynamic_identity_repaired", {
+        merchantId,
+        merchantIdSuffix: idSuffix(merchantId),
+        externalUserIdSuffix: idSuffix(dynamicExternalUserId),
+        storedDynamicUserIdSuffix: idSuffix(existingProfile?.dynamic_user_id),
+        repairedDynamicUserIdSuffix: idSuffix(dynamicIdentityDecision.dynamicUserId),
+        identityRepairAttempted: true,
+        identityRepairSucceeded: true,
+        ownershipValidationMethod: "dynamic_external_user_id_matches_merchant_id",
+      })
+    }
+
+    const dynamicIdentityNeedsWrite = dynamicIdentityDecision?.action === "write"
+
     const hasBtcAddressInput = "btc_address" in body || "bitcoin_onchain_address" in body
     const bodyBtcAddress = "btc_address" in body
       ? (body.btc_address as string | null)
@@ -360,7 +411,7 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      if (existingReadyProfile && baseAddressOwnedBySameMerchant && solanaAddressOwnedBySameMerchant) {
+      if (existingReadyProfile && baseAddressOwnedBySameMerchant && solanaAddressOwnedBySameMerchant && !dynamicIdentityNeedsWrite) {
         const readyProfile = existingProfile!
         console.info("[pinetree-wallets] wallet_profile_post_idempotent_success", {
           merchantId,
@@ -410,7 +461,7 @@ export async function POST(req: NextRequest) {
     const profileSaveStartedAt = Date.now()
     const profile = await upsertPineTreeWalletProfile({
       merchantId,
-      dynamicUserId: "dynamic_user_id" in body ? dynamicUserId : undefined,
+      dynamicUserId: dynamicIdentityDecision?.action === "write" ? dynamicIdentityDecision.dynamicUserId : undefined,
       dynamicEmail: "dynamic_email" in body ? (body.dynamic_email as string | null) : undefined,
       baseAddress: "base_address" in body ? (body.base_address as string | null) : undefined,
       solanaAddress: "solana_address" in body ? (body.solana_address as string | null) : undefined,

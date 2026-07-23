@@ -14,6 +14,7 @@ import type { Payment } from "@/database/payments"
 import { advancePaymentToTargetStatus, processPaymentEvent } from "./eventProcessor"
 import { isSpeedPaymentPaid } from "@/providers/lightning/speedClient"
 import { retrieveMerchantSpeedPayment } from "@/providers/lightning/speedAdapter"
+import { extractBitcoinFeeSettlementInfo } from "@/lib/bitcoin/feeSettlementInfo"
 
 export type SpeedLightningReconciliationResult = {
   checked: boolean
@@ -43,6 +44,29 @@ export async function reconcileSpeedLightningPayment(
   const speedStatus = String(speedPayment.status || "").toLowerCase().trim()
 
   if (detected) {
+    // The payment itself is confirmed by Speed, but that does NOT by itself
+    // prove PineTree's platform fee was actually credited to treasury - Speed
+    // does not currently expose a documented way to read that back (see
+    // docs/environment/bitcoin-fee-settlement.md). Log the fee-settlement
+    // bookkeeping this payment was created with so reconciliation state is
+    // visible, without ever claiming a credit this code cannot verify.
+    // TERMINAL_STATUSES above already makes this a one-time transition per
+    // payment - webhook retries/reconciliation re-runs against an
+    // already-CONFIRMED payment short-circuit before reaching this branch,
+    // so this can never fire twice for the same canonical payment.
+    const fullPayment = await getPaymentById(paymentId)
+    const feeInfo = extractBitcoinFeeSettlementInfo(fullPayment?.metadata)
+    console.info("[speed] bitcoin_fee_reconciliation", {
+      canonicalTransactionId: paymentId,
+      feeUsd: feeInfo.feeUsd,
+      feeSats: feeInfo.feeSats,
+      feeBtc: feeInfo.feeSats != null ? feeInfo.feeSats / 100_000_000 : null,
+      conversionRateUsd: feeInfo.feeConversionRateUsd,
+      providerFeeReferencePresent: feeInfo.providerReferencePresent,
+      treasuryCreditAmount: null,
+      treasuryCreditConfirmed: false,
+      reconciliationState: feeInfo.feeSettlementStatus ?? "unknown",
+    })
     await processPaymentEvent({ type: "payment.confirmed", paymentId, feeCaptureValidated: true })
   } else if (speedStatus === "processing" || speedStatus === "settling") {
     await processPaymentEvent({ type: "payment.processing", paymentId })

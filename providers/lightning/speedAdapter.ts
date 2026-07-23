@@ -19,6 +19,7 @@ import {
   isSpeedPlatformTreasurySweepEnabled,
   SPEED_PLATFORM_TREASURY_SWEEP_MODE
 } from "./speedClient"
+import { convertUsdFeeToSats } from "@/lib/bitcoin/feeConversion"
 import QRCode from "qrcode"
 
 export const SPEED_NETWORK = "bitcoin_lightning"
@@ -111,11 +112,34 @@ export const speedAdapter: ProviderAdapter = {
       ? ""
       : await resolveMerchantSpeedAccount(input.merchantId)
 
+    const pineTreeFeeAmount = Number(input.pinetreeFee)
+    const feeRequiresProviderSideCollection = !treasurySweepEnabled && pineTreeFeeAmount > 0
+    const btcPriceUsd = Number(input.btcPriceUsd)
+
+    // Speed's application_fee must be sent in the invoice's own settlement
+    // unit (sats, since target_currency is SATS) - never PineTree's raw USD
+    // fee figure. Convert here, using the live rate the caller already
+    // fetched, and fail closed (never send a fee-less request that silently
+    // drops PineTree's cut) if a live rate isn't available.
+    let pineTreeFeeSats: number | undefined
+    if (feeRequiresProviderSideCollection) {
+      if (!Number.isFinite(btcPriceUsd) || btcPriceUsd <= 0) {
+        console.warn("[speed] fee_conversion_rate_unavailable", {
+          canonicalTransactionId: input.paymentId,
+          feeUsd: pineTreeFeeAmount,
+        })
+        throw new Error("BTC price unavailable — cannot convert PineTree's Bitcoin service fee to sats.")
+      }
+      pineTreeFeeSats = convertUsdFeeToSats(pineTreeFeeAmount, btcPriceUsd)
+    }
+
     const speedPayment = await createSpeedLightningPayment({
       amount: Number(input.grossAmount),
       currency: input.currency || "USD",
       merchantAmount: Number(input.merchantAmount),
-      pineTreeFeeAmount: Number(input.pinetreeFee),
+      pineTreeFeeAmount,
+      pineTreeFeeSats,
+      btcPriceUsdAtFeeQuote: Number.isFinite(btcPriceUsd) && btcPriceUsd > 0 ? btcPriceUsd : undefined,
       merchantSpeedAccountId,
       pineTreePaymentId: input.paymentId,
       pineTreePaymentIntentId: String(input.metadata?.paymentIntentId || ""),
@@ -124,6 +148,18 @@ export const speedAdapter: ProviderAdapter = {
         ? SPEED_PLATFORM_TREASURY_SWEEP_MODE
         : "speed_connect_split",
       metadata: input.metadata
+    })
+
+    console.info("[speed] bitcoin_fee_request", {
+      canonicalTransactionId: input.paymentId,
+      feeUsd: pineTreeFeeAmount,
+      feeSats: speedPayment.platformFeeSats,
+      feeBtc: speedPayment.platformFeeSats != null ? speedPayment.platformFeeSats / 100_000_000 : null,
+      conversionRateUsd: Number.isFinite(btcPriceUsd) && btcPriceUsd > 0 ? btcPriceUsd : null,
+      merchantSpeedAccountSuffix: merchantSpeedAccountId ? merchantSpeedAccountId.slice(-6) : null,
+      feeRequestAttempted: feeRequiresProviderSideCollection,
+      providerFeeReferencePresent: Boolean(speedPayment.speedPaymentId),
+      reconciliationState: speedPayment.feeSettlementStatus,
     })
 
     const qrCodeUrl = await QRCode.toDataURL(speedPayment.paymentUrl.toUpperCase(), {
@@ -152,7 +188,15 @@ export const speedAdapter: ProviderAdapter = {
           : speedPayment.transfers.length > 0 ? "split_configured" : "split_pending_verification",
         grossAmount: Number(input.grossAmount),
         merchantAmount: Number(input.merchantAmount),
-        pineTreeFeeAmount: Number(input.pinetreeFee)
+        pineTreeFeeAmount,
+        platformFeeSats: speedPayment.platformFeeSats,
+        feeConversionRateUsd: Number.isFinite(btcPriceUsd) && btcPriceUsd > 0 ? btcPriceUsd : null,
+        // Honest by design: never "credited" here. Speed's application-fee
+        // settlement cannot currently be independently verified (no
+        // documented/modeled endpoint or field for it) - see
+        // reconcileSpeedLightningPayment / docs/environment for the
+        // known limitation this status intentionally reflects.
+        feeSettlementStatus: speedPayment.feeSettlementStatus
       }
     }
   },

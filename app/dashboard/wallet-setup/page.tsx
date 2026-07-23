@@ -6479,7 +6479,6 @@ function PineTreeWalletRuntime() {
       ? findDynamicApprovalWalletForSource(snapshotWallets, primaryWallet, "solana", profile.solana_address)
       : null
     const profileDynamicUserId = String(profile?.dynamic_user_id || "").trim()
-    const hasStoredWalletAddresses = Boolean(profile?.base_address || profile?.solana_address)
     const environmentId = String(process.env.NEXT_PUBLIC_DYNAMIC_ENVIRONMENT_ID || "").trim()
     const walletCount = snapshotWallets.length
     const hydratedWalletAddresses = snapshotWallets.flatMap((wallet) => getDynamicWalletAddresses(wallet))
@@ -6505,13 +6504,7 @@ function PineTreeWalletRuntime() {
           ? "DYNAMIC_NOT_AUTHENTICATED"
           : !dynamicUserId
             ? "DYNAMIC_USER_NOT_FOUND"
-          : !identityMatches
-            ? ownership.failureReason
-            : walletCount === 0 && hasStoredWalletAddresses
-              ? "DYNAMIC_IDENTITY_MISMATCH"
-              : walletCount === 0
-                ? "DYNAMIC_WALLETS_MISSING"
-                : null
+            : ownership.failureReason
 
     return {
       authenticated,
@@ -6623,23 +6616,50 @@ function PineTreeWalletRuntime() {
       asset: prepared.asset,
       walletCount: beforeRefresh.walletCount,
     })
-    await refreshDynamicWalletRuntime("withdrawal_approval_runtime_ready", { requireApprovalWallet: true })
-    const runtimeWallets = collectDynamicRuntimeWalletSnapshot()
-    const snapshot = buildDynamicWalletRuntimeSnapshot(runtimeWallets, runtimeUserPresent, runtimeDynamicUserId)
-    emitDynamicRuntimeStage("DYNAMIC_WALLETS_HYDRATED", {
-      correlationId: correlationId || "none",
-      requestId,
-      rail: prepared.rail,
-      asset: prepared.asset,
-      walletCount: snapshot.walletCount,
-      matchingBaseWallet: Boolean(snapshot.matchingBaseWallet),
-      matchingSolanaWallet: Boolean(snapshot.matchingSolanaWallet),
-      currentDynamicUserIdSuffix: snapshot.ownership.currentDynamicUserIdSuffix,
-      storedDynamicUserIdSuffix: snapshot.ownership.storedDynamicUserIdSuffix,
-      storedWalletAddresses: dynamicWalletDiagnosticList(snapshot.ownership.storedWalletAddresses),
-      hydratedWalletAddresses: dynamicWalletDiagnosticList(snapshot.ownership.hydratedWalletAddresses),
-      ownershipFailureReason: snapshot.ownership.failureReason,
-    })
+
+    // A wallet count of 0 immediately after auth restoration is frequently
+    // just the Dynamic SDK not having hydrated the session's wallets yet
+    // (DYNAMIC_WALLETS_HYDRATING), not a genuine identity problem. Retry the
+    // existing refresh mechanism a bounded number of times before giving up -
+    // never poll indefinitely.
+    const MAX_WALLET_HYDRATION_ATTEMPTS = 3
+    const WALLET_HYDRATION_RETRY_DELAY_MS = 400
+    let snapshot = beforeRefresh
+    for (let attempt = 1; attempt <= MAX_WALLET_HYDRATION_ATTEMPTS; attempt++) {
+      await refreshDynamicWalletRuntime("withdrawal_approval_runtime_ready", { requireApprovalWallet: true })
+      const runtimeWallets = collectDynamicRuntimeWalletSnapshot()
+      snapshot = buildDynamicWalletRuntimeSnapshot(runtimeWallets, runtimeUserPresent, runtimeDynamicUserId)
+      emitDynamicRuntimeStage("DYNAMIC_WALLETS_HYDRATED", {
+        correlationId: correlationId || "none",
+        requestId,
+        rail: prepared.rail,
+        asset: prepared.asset,
+        attempt,
+        walletCount: snapshot.walletCount,
+        matchingBaseWallet: Boolean(snapshot.matchingBaseWallet),
+        matchingSolanaWallet: Boolean(snapshot.matchingSolanaWallet),
+        currentDynamicUserIdSuffix: snapshot.ownership.currentDynamicUserIdSuffix,
+        storedDynamicUserIdSuffix: snapshot.ownership.storedDynamicUserIdSuffix,
+        storedWalletAddresses: dynamicWalletDiagnosticList(snapshot.ownership.storedWalletAddresses),
+        hydratedWalletAddresses: dynamicWalletDiagnosticList(snapshot.ownership.hydratedWalletAddresses),
+        ownershipFailureReason: snapshot.ownership.failureReason,
+      })
+
+      if (snapshot.failureCode !== "DYNAMIC_WALLETS_HYDRATING") {
+        break
+      }
+      if (attempt < MAX_WALLET_HYDRATION_ATTEMPTS) {
+        emitDynamicRuntimeStage("DYNAMIC_WALLETS_HYDRATION_RETRY", {
+          correlationId: correlationId || "none",
+          requestId,
+          rail: prepared.rail,
+          asset: prepared.asset,
+          attempt,
+          walletCount: snapshot.walletCount,
+        })
+        await new Promise((resolve) => setTimeout(resolve, WALLET_HYDRATION_RETRY_DELAY_MS * attempt))
+      }
+    }
 
     if (snapshot.failureCode === "DYNAMIC_IDENTITY_MISMATCH") {
       emitDynamicRuntimeStage("DYNAMIC_IDENTITY_MISMATCH", {

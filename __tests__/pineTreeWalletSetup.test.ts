@@ -203,7 +203,11 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("dynamic_user_id: user.userId")
     expect(page).toContain("dynamic_external_user_id: dynamicExternalUserId")
     expect(apiRoute).toContain("normalizedString(body.dynamic_external_user_id)")
-    expect(apiRoute).toContain("dynamicUserId: \"dynamic_user_id\" in body ? dynamicUserId : undefined")
+    // dynamic_user_id is never written as a raw pass-through of the request
+    // body - it goes through decideDynamicUserIdWrite, which refuses to ever
+    // persist merchant_id as dynamic_user_id (see dynamicIdentityRepair.ts).
+    expect(apiRoute).toContain("decideDynamicUserIdWrite")
+    expect(apiRoute).toContain("dynamicUserId: dynamicIdentityDecision?.action === \"write\" ? dynamicIdentityDecision.dynamicUserId : undefined")
     expect(apiRoute).toContain("dynamicExternalUserId !== merchantId")
     expect(apiRoute).toContain('error: "merchant_not_resolved"')
     expect(apiRoute).toContain('error: reason')

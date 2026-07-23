@@ -16,6 +16,7 @@ import { supabaseAdmin, supabase } from "@/database"
 import { createLedgerEntry } from "@/database/ledgerEntries"
 import { getMerchantNwcSetup } from "@/database/merchantProviders"
 import { payNwcInvoice, maskNwcUri } from "@/providers/lightning/nwcClient"
+import { convertUsdFeeToSats } from "@/lib/bitcoin/feeConversion"
 import { getMarketPricesUSD } from "./marketPrices"
 import { PINETREE_FEE } from "./config"
 
@@ -54,7 +55,7 @@ export async function getFeeAmountSats(feeUsd: number = PINETREE_FEE): Promise<{
     throw new Error("BTC price unavailable — cannot convert fee to sats")
   }
 
-  const feeAmountSats = Math.ceil((feeUsd / btcPriceUsd) * 100_000_000)
+  const feeAmountSats = convertUsdFeeToSats(feeUsd, btcPriceUsd)
 
   return { feeAmountSats, btcPriceUsd }
 }

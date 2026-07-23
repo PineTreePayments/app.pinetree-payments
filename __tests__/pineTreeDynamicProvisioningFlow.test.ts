@@ -41,7 +41,10 @@ describe("PineTree Dynamic provisioning flow", () => {
     expect(page).toContain("base_address: baseAddress")
     expect(page).toContain("solana_address: solanaAddress")
     expect(profileRoute).toContain("normalizedString(body.dynamic_external_user_id)")
-    expect(profileRoute).toContain('dynamicUserId: "dynamic_user_id" in body')
+    // dynamic_user_id is written via the ownership-validated decision helper,
+    // never a raw pass-through of the request body (see dynamicIdentityRepair.ts).
+    expect(profileRoute).toContain("decideDynamicUserIdWrite")
+    expect(profileRoute).toContain('dynamicUserId: dynamicIdentityDecision?.action === "write" ? dynamicIdentityDecision.dynamicUserId : undefined')
     expect(profileRoute).toContain('dynamicEmail: "dynamic_email" in body')
     expect(profileRoute).toContain('baseAddress: "base_address" in body')
     expect(profileRoute).toContain('solanaAddress: "solana_address" in body')
