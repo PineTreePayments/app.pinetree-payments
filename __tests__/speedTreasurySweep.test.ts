@@ -90,16 +90,18 @@ describe("Speed treasury-sweep invoice creation", () => {
     })
   })
 
-  it("creates connected-account payments with speed-account and a sats-denominated application_fee", async () => {
+  it("creates connected-account payments with speed-account and NO application_fee (unconfirmed Speed contract - production 400 regression)", async () => {
+    // A prior production incident: a pre-converted sats integer here was
+    // rejected by Speed's POST /payments with an HTTP 400 - proving the
+    // assumed application_fee unit contract was wrong (or incomplete).
+    // application_fee must not be sent at all until Speed's real contract is
+    // confirmed. See docs/environment/bitcoin-fee-settlement.md.
     await createSpeedLightningPayment({
       amount: 10.25,
       currency: "USD",
       merchantAmount: 10,
       pineTreeFeeAmount: 0.25,
-      // Pre-converted whole-satoshi value (as the caller/adapter is now
-      // required to supply) - never the raw USD float, since Speed's
-      // target_currency for this invoice is SATS.
-      pineTreeFeeSats: 375,
+      pineTreeFeeSats: 375, // internal bookkeeping only - must never reach the request body
       btcPriceUsdAtFeeQuote: 66_667,
       merchantSpeedAccountId: "acct_speed_merchant",
       pineTreePaymentId: "pay_1",
@@ -117,14 +119,14 @@ describe("Speed treasury-sweep invoice creation", () => {
       amount: 10.25,
       target_currency: "SATS",
       ttl: 300,
-      application_fee: 375,
       statement_descriptor: "PineTree",
     })
+    expect(body).not.toHaveProperty("application_fee")
     expect(body.metadata).toMatchObject({
       platform_fee_usd: 0.25,
       platform_fee_sats: 375,
       fee_conversion_rate_usd: 66_667,
-      fee_settlement_status: "requested",
+      fee_settlement_status: "not_collected",
     })
     expect(headers.get("speed-account")).toBe("acct_speed_merchant")
     expect(body.account_id).toBeUndefined()
@@ -132,7 +134,7 @@ describe("Speed treasury-sweep invoice creation", () => {
     expect(body.application_fee_percentage).toBeUndefined()
   })
 
-  it("rejects a nonzero fee that was not pre-converted to sats, rather than silently sending the raw USD float", async () => {
+  it("succeeds even when no sats value is supplied at all - fee conversion is never required for payment creation", async () => {
     await expect(createSpeedLightningPayment({
       amount: 10.25,
       currency: "USD",
@@ -142,7 +144,7 @@ describe("Speed treasury-sweep invoice creation", () => {
       pineTreePaymentId: "pay_1",
       merchantId: "merchant_1",
       settlementMode: "speed_merchant_account",
-    })).rejects.toThrow(/pre-converted to a positive whole-satoshi amount/)
+    })).resolves.toMatchObject({ feeSettlementStatus: "not_collected" })
   })
 
   it("creates a connected-account webhook registration with connect true", async () => {

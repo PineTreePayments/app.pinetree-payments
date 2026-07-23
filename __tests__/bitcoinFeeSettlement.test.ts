@@ -1,6 +1,6 @@
 import fs from "fs"
 import path from "path"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { convertUsdFeeToSats } from "@/lib/bitcoin/feeConversion"
 import { extractBitcoinFeeSettlementInfo, type BitcoinFeeSettlementInfo } from "@/lib/bitcoin/feeSettlementInfo"
 import { PINETREE_FEE } from "@/engine/config"
@@ -13,49 +13,125 @@ const speedClientSrc = read("providers/lightning/speedClient.ts")
 const speedAdapterSrc = read("providers/lightning/speedAdapter.ts")
 const speedWalletManagementSrc = read("providers/lightning/speedWalletManagement.ts")
 const reconciliationSrc = read("engine/lightningSpeedReconciliation.ts")
+const dynamicOwnershipSrc = read("lib/wallets/dynamicWalletOwnership.ts")
+const dynamicIdentityRepairSrc = read("lib/wallets/dynamicIdentityRepair.ts")
 
-describe("Bitcoin service fee: $0.15 platform fee (engine/config.ts PINETREE_FEE)", () => {
-  it("the platform fee constant is $0.15, not the earlier $0.10 value", () => {
-    expect(PINETREE_FEE).toBe(0.15)
-  })
+describe("Regression: restore Bitcoin Lightning payment creation (application_fee removed)", () => {
+  const originalEnv = { ...process.env }
 
-  it("11. a $0.15 platform fee never converts to zero sats across a realistic range of BTC prices", () => {
-    // From a very cheap BTC ($10k) to a very expensive one ($500k), 0.15 USD
-    // must always be at least 1 sat.
-    for (const btcPriceUsd of [10_000, 30_000, 60_000, 100_000, 250_000, 500_000]) {
-      const sats = convertUsdFeeToSats(0.15, btcPriceUsd)
-      expect(sats).toBeGreaterThanOrEqual(1)
-      expect(Number.isInteger(sats)).toBe(true)
+  beforeEach(() => {
+    vi.resetModules()
+    process.env = {
+      ...originalEnv,
+      SPEED_API_KEY: "sk_test_present",
+      SPEED_WEBHOOK_SECRET: "wsec_present",
+      SPEED_API_BASE_URL: "https://api.tryspeed.test",
     }
   })
 
-  it("11b. rejects rather than silently returning zero when the BTC price is missing or invalid", () => {
-    expect(() => convertUsdFeeToSats(0.15, 0)).toThrow(/BTC price unavailable/)
-    expect(() => convertUsdFeeToSats(0.15, -1)).toThrow(/BTC price unavailable/)
-    expect(() => convertUsdFeeToSats(0.15, NaN)).toThrow(/BTC price unavailable/)
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    process.env = originalEnv
   })
 
-  it("12. USD-to-sats conversion is deterministic (same inputs always produce the same output) and rounds up", () => {
-    const a = convertUsdFeeToSats(0.15, 66_666.6667)
-    const b = convertUsdFeeToSats(0.15, 66_666.6667)
-    expect(a).toBe(b)
-    // 0.15 / 66666.6667 * 1e8 = 225.000... -> ceil keeps it at 225, never truncated down.
-    expect(a).toBe(225)
-
-    // A price chosen so the raw division is NOT a whole number of sats -
-    // confirms ceil (round up), not floor/round-to-nearest.
-    const nonWholeSats = 0.15 / 61_234 * 100_000_000
-    expect(Number.isInteger(nonWholeSats)).toBe(false)
-    expect(convertUsdFeeToSats(0.15, 61_234)).toBe(Math.ceil(nonWholeSats))
-  })
-
-  it("13. the provider request contains the correct nonzero sats-denominated fee value, not the raw USD float", async () => {
-    vi.resetModules()
-    process.env.SPEED_API_KEY = "sk_test_present"
-    process.env.SPEED_WEBHOOK_SECRET = "wsec_present"
-    process.env.SPEED_API_BASE_URL = "https://api.tryspeed.test"
+  it("1. Bitcoin Lightning payment creation succeeds without application_fee", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       id: "speed_pay_1", status: "unpaid", payment_request: "lnbc1test",
+    }), { status: 200 })))
+
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    const result = await createSpeedLightningPayment({
+      amount: 10.15,
+      currency: "USD",
+      merchantAmount: 10,
+      pineTreeFeeAmount: 0.15,
+      merchantSpeedAccountId: "acct_merchant_1",
+      pineTreePaymentId: "pay-fee-test",
+      merchantId: "merchant-1",
+      settlementMode: "speed_connect_split",
+    })
+
+    expect(result.speedPaymentId).toBe("speed_pay_1")
+
+    const fetchMock = vi.mocked(fetch)
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String(init?.body || "{}"))
+    expect(body).not.toHaveProperty("application_fee")
+  })
+
+  it("2. a missing/unverified BTC price does not block invoice creation (fee conversion is best-effort, never fatal)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "speed_pay_2", status: "unpaid", payment_request: "lnbc1test2",
+    }), { status: 200 })))
+
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    // No pineTreeFeeSats/btcPriceUsdAtFeeQuote supplied at all - must not throw.
+    const result = await createSpeedLightningPayment({
+      amount: 10.15,
+      currency: "USD",
+      merchantAmount: 10,
+      pineTreeFeeAmount: 0.15,
+      merchantSpeedAccountId: "acct_merchant_1",
+      pineTreePaymentId: "pay-no-price",
+      merchantId: "merchant-1",
+      settlementMode: "speed_connect_split",
+    })
+
+    expect(result.speedPaymentId).toBe("speed_pay_2")
+    expect(result.platformFeeSats).toBeNull()
+  })
+
+  it("3. PineTree's expected $0.15 fee remains recorded internally (metadata), even though it is not sent to Speed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "speed_pay_3", status: "unpaid", payment_request: "lnbc1test3",
+    }), { status: 200 })))
+
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    const result = await createSpeedLightningPayment({
+      amount: 10.15,
+      currency: "USD",
+      merchantAmount: 10,
+      pineTreeFeeAmount: 0.15,
+      merchantSpeedAccountId: "acct_merchant_1",
+      pineTreePaymentId: "pay-fee-test-3",
+      merchantId: "merchant-1",
+      settlementMode: "speed_connect_split",
+    })
+
+    expect(result.metadata).toMatchObject({
+      platform_fee_usd: 0.15,
+      pineTreeFeeAmount: 0.15,
+    })
+  })
+
+  it("4. fee settlement is never marked collected/credited without provider evidence - 'credited' does not exist as a status value", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "speed_pay_4", status: "unpaid", payment_request: "lnbc1test4",
+    }), { status: 200 })))
+
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    const result = await createSpeedLightningPayment({
+      amount: 10.15,
+      currency: "USD",
+      merchantAmount: 10,
+      pineTreeFeeAmount: 0.15,
+      merchantSpeedAccountId: "acct_merchant_1",
+      pineTreePaymentId: "pay-fee-test-4",
+      merchantId: "merchant-1",
+      settlementMode: "speed_connect_split",
+    })
+
+    expect(result.feeSettlementStatus).toBe("not_collected")
+    expect(result.feeSettlementStatus).not.toBe("credited")
+    expect(speedClientSrc).toContain(
+      'export type SpeedFeeSettlementStatus = "not_collected" | "retained_pending_sweep" | "not_applicable"'
+    )
+    expect(speedClientSrc).not.toMatch(/SpeedFeeSettlementStatus\s*=[^\n]*"credited"/)
+  })
+
+  it("5. Speed POST /payments does not receive the previously-attempted sats-denominated fee, even if a caller still supplies pineTreeFeeSats", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "speed_pay_5", status: "unpaid", payment_request: "lnbc1test5",
     }), { status: 200 })))
 
     const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
@@ -64,10 +140,10 @@ describe("Bitcoin service fee: $0.15 platform fee (engine/config.ts PINETREE_FEE
       currency: "USD",
       merchantAmount: 10,
       pineTreeFeeAmount: 0.15,
-      pineTreeFeeSats: 225,
+      pineTreeFeeSats: 225, // the exact kind of value that triggered Speed's 400 in production
       btcPriceUsdAtFeeQuote: 66_666.6667,
       merchantSpeedAccountId: "acct_merchant_1",
-      pineTreePaymentId: "pay-fee-test",
+      pineTreePaymentId: "pay-fee-test-5",
       merchantId: "merchant-1",
       settlementMode: "speed_connect_split",
     })
@@ -75,150 +151,163 @@ describe("Bitcoin service fee: $0.15 platform fee (engine/config.ts PINETREE_FEE
     const fetchMock = vi.mocked(fetch)
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String(init?.body || "{}"))
-    expect(body.application_fee).toBe(225)
-    expect(body.application_fee).toBeGreaterThan(0)
-    expect(typeof body.application_fee).toBe("number")
-
-    vi.unstubAllGlobals()
+    expect(body).not.toHaveProperty("application_fee")
+    // The sats value is still recorded internally (metadata) for future
+    // reconciliation once Speed's contract is confirmed - just never sent.
+    expect(body.metadata).toMatchObject({ platform_fee_sats: 225 })
   })
 
-  it("14. the PineTree treasury account, not the merchant account, is the fee destination", () => {
-    // The gross payment is scoped to the merchant's own Speed sub-account via
-    // the speed-account header (correct - merchant proceeds belong there).
-    // application_fee carries no separate destination parameter of its own -
-    // Speed's Connect-style application fee always settles to whichever
-    // account owns the platform SPEED_API_KEY (PineTree's treasury/platform
-    // account), never the connected merchant sub-account passed in
-    // speed-account. Confirm the request body never attaches the fee to the
-    // merchant account id.
-    const fnSrc = speedClientSrc.slice(
-      speedClientSrc.indexOf("export async function createSpeedLightningPayment("),
-      speedClientSrc.indexOf("export async function createSpeedWithdrawRequest(")
-    )
-    expect(fnSrc).toContain("application_fee: platformFeeSats")
-    expect(fnSrc).not.toContain("application_fee_destination")
-    expect(fnSrc).not.toContain("application_fee_account")
-    // The merchant account id is only ever used for the speed-account header
-    // context (via createSpeedPaymentRequest/connectedAccountId), never
-    // embedded into the fee itself.
-    expect(fnSrc).toContain("connectedAccountId: merchantSpeedAccountId")
+  it("6. a Speed POST /payments 400 is logged with full safe diagnostics (status, provider code/message, request id, request shape)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      code: "invalid_request",
+      errors: [{ field: "amount", message: "amount is too small" }],
+    }), {
+      status: 400,
+      headers: { "webhook-id": "req_diagnostic_1" },
+    })))
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    await expect(createSpeedLightningPayment({
+      amount: 10.15,
+      currency: "USD",
+      merchantAmount: 10,
+      pineTreeFeeAmount: 0.15,
+      merchantSpeedAccountId: "acct_merchant_1",
+      pineTreePaymentId: "pay-fee-test-6",
+      merchantId: "merchant-1",
+      settlementMode: "speed_connect_split",
+    })).rejects.toThrow()
+
+    const call = errorSpy.mock.calls.find(([label]) => label === "[speed] bitcoin_payment_create_failed")
+    expect(call).toBeTruthy()
+    const [, details] = call!
+    expect(details).toMatchObject({
+      canonicalTransactionId: "pay-fee-test-6",
+      httpStatus: 400,
+      operation: "payment.create",
+      settlementMode: "speed_connect_split",
+      applicationFeePresent: false,
+      invoiceCurrency: "USD",
+      targetCurrency: "SATS",
+      merchantSpeedAccountSuffix: "acct_merchant_1".slice(-6),
+    })
+    expect(details.providerMessage).toBe("amount is too small")
+
+    errorSpy.mockRestore()
   })
 
-  it("15. provider/network fees remain separate from PineTree's platform fee - no double subtraction", () => {
-    // merchantAmount + pineTreeFeeAmount must equal grossAmount (the customer
-    // pays gross once; PineTree's cut and the merchant's net are two
-    // non-overlapping slices of that same gross amount - never subtracted
-    // twice).
-    const grossAmount = 10.15
-    const pineTreeFeeAmount = 0.15
-    const merchantAmount = 10
-    expect(merchantAmount + pineTreeFeeAmount).toBeCloseTo(grossAmount, 10)
-  })
-})
+  it("6b. never logs the full merchant Speed account id or API key in the failure diagnostic", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: "invalid_request" }), { status: 400 })))
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
-describe("Bitcoin fee idempotency (tests 16-18)", () => {
-  it("16/17. application_fee is requested exactly once, only at invoice creation - webhook code never calls createSpeedLightningPayment", () => {
-    // The only caller of createLightningInvoice/createSpeedLightningPayment
-    // in the whole engine is payment creation. Webhook translation
-    // (speedAdapter.translateEvent) only classifies an already-received
-    // payload into a status transition - it never creates a new invoice or
-    // re-requests a fee.
-    const translateEventSrc = speedAdapterSrc.slice(
-      speedAdapterSrc.indexOf("translateEvent(payload)"),
-      speedAdapterSrc.indexOf("async healthCheck()")
-    )
-    expect(translateEventSrc).not.toContain("createSpeedLightningPayment")
-    expect(translateEventSrc).not.toContain("createLightningInvoice")
-  })
+    const { createSpeedLightningPayment } = await import("@/providers/lightning/speedClient")
+    await createSpeedLightningPayment({
+      amount: 10.15, currency: "USD", merchantAmount: 10, pineTreeFeeAmount: 0.15,
+      merchantSpeedAccountId: "acct_merchant_full_identifier_1", pineTreePaymentId: "pay-fee-test-6b",
+      merchantId: "merchant-1", settlementMode: "speed_connect_split",
+    }).catch(() => undefined)
 
-  it("18. reconciliation never calls createSpeedLightningPayment and only ever reads status back", () => {
-    expect(reconciliationSrc).not.toContain("createSpeedLightningPayment")
-    expect(reconciliationSrc).not.toContain("createLightningInvoice")
-    expect(reconciliationSrc).toContain("retrieveMerchantSpeedPayment")
-    // A payment that already reached a terminal local status is never
-    // re-processed - see the dedicated test in
-    // lightningSpeedReconciliation.test.ts ("never calls Speed for a payment
-    // that is already terminal locally"), which proves webhook
-    // retries/reconciliation re-runs against a CONFIRMED payment cannot
-    // create a duplicate fee transfer, since the fee-request path
-    // (createSpeedLightningPayment) is never reachable from here at all.
-    expect(reconciliationSrc).toContain("TERMINAL_STATUSES.has(currentStatus)")
-  })
+    const call = errorSpy.mock.calls.find(([label]) => label === "[speed] bitcoin_payment_create_failed")
+    const serialized = JSON.stringify(call)
+    expect(serialized).not.toContain("acct_merchant_full_identifier_1")
+    expect(serialized).not.toContain("sk_test_present")
 
-  it("does not attach a Speed Idempotency-Key to payment creation (that contract is unconfirmed for /payments, same as documented for /send)", () => {
-    // Not required for correctness here (fee idempotency is structural, per
-    // above), but guards against silently reintroducing a guessed header.
-    const fnSrc = speedClientSrc.slice(
-      speedClientSrc.indexOf("export async function createSpeedLightningPayment("),
-      speedClientSrc.indexOf("export async function createSpeedWithdrawRequest(")
-    )
-    expect(fnSrc).not.toContain("Idempotency-Key")
+    errorSpy.mockRestore()
   })
 })
 
-describe("Bitcoin fee accounting honesty (tests 19-21)", () => {
-  it("19. a zero-value provider application-fee record can never be labeled 'credited' - that status value does not exist in the type", () => {
-    // SpeedFeeSettlementStatus intentionally only has states that are honest
-    // about what this code can actually verify - "credited" is not one of
-    // them, because Speed's application-fee settlement cannot currently be
-    // read back (no documented/modeled endpoint or field). Adding "credited"
-    // here without a real verification mechanism would be exactly the bug
-    // this fix removes.
-    expect(speedClientSrc).toContain(
-      'export type SpeedFeeSettlementStatus = "requested" | "retained_pending_sweep" | "not_applicable"'
-    )
-    expect(speedClientSrc).not.toMatch(/SpeedFeeSettlementStatus\s*=[^\n]*"credited"/)
-    // The adapter's own returned metadata documents why "credited" is
-    // deliberately absent.
-    expect(speedAdapterSrc).toContain("never \"credited\" here")
+describe("USD-to-sats conversion (retained for internal bookkeeping only)", () => {
+  it("never converts a nonzero $0.15 fee to zero sats, across a realistic BTC price range", () => {
+    for (const btcPriceUsd of [10_000, 30_000, 60_000, 100_000, 250_000, 500_000]) {
+      const sats = convertUsdFeeToSats(0.15, btcPriceUsd)
+      expect(sats).toBeGreaterThanOrEqual(1)
+      expect(Number.isInteger(sats)).toBe(true)
+    }
   })
 
-  it("20. request-time and confirmation-time diagnostics both surface a reconciliationState field for reporting to key off", () => {
-    expect(speedAdapterSrc).toContain("reconciliationState: speedPayment.feeSettlementStatus")
-    expect(reconciliationSrc).toContain("reconciliationState: feeInfo.feeSettlementStatus")
+  it("is deterministic and rounds up (ceil), never down", () => {
+    const a = convertUsdFeeToSats(0.15, 66_666.6667)
+    const b = convertUsdFeeToSats(0.15, 66_666.6667)
+    expect(a).toBe(b)
+    expect(a).toBe(225)
+
+    const nonWholeSats = 0.15 / 61_234 * 100_000_000
+    expect(Number.isInteger(nonWholeSats)).toBe(false)
+    expect(convertUsdFeeToSats(0.15, 61_234)).toBe(Math.ceil(nonWholeSats))
   })
 
-  it("21. failed/unknown fee settlement remains reconcilable - extraction never throws on missing or malformed metadata", () => {
+  it("PINETREE_FEE is $0.15, not the earlier $0.10 value", () => {
+    expect(PINETREE_FEE).toBe(0.15)
+  })
+})
+
+describe("Fee bookkeeping stays reconcilable even when incomplete", () => {
+  it("extraction never throws on missing or malformed metadata", () => {
     const cases: unknown[] = [null, undefined, {}, { split: null }, { split: {} }, { split: { lightningProviderMetadata: null } }, "not-an-object", 42]
     for (const input of cases) {
       let result: BitcoinFeeSettlementInfo | undefined
       expect(() => { result = extractBitcoinFeeSettlementInfo(input) }).not.toThrow()
-      expect(result).toMatchObject({
-        feeUsd: null,
-        feeSats: null,
-        feeConversionRateUsd: null,
-        feeSettlementStatus: null,
-        providerReferencePresent: false,
-      })
+      expect(result).toMatchObject({ feeUsd: null, feeSats: null, feeSettlementStatus: null, providerReferencePresent: false })
     }
+  })
 
-    // A well-formed record round-trips its values so it CAN be reconciled later.
+  it("a well-formed record round-trips its values for later reconciliation", () => {
     const wellFormed = extractBitcoinFeeSettlementInfo({
       split: {
         lightningProviderMetadata: {
           pineTreeFeeAmount: 0.15,
           platformFeeSats: 225,
           feeConversionRateUsd: 66_666.6667,
-          feeSettlementStatus: "requested",
+          feeSettlementStatus: "not_collected",
           speedPaymentId: "speed_pay_1",
         }
       }
     })
-    expect(wellFormed).toMatchObject({
-      feeUsd: 0.15,
-      feeSats: 225,
-      feeSettlementStatus: "requested",
-      providerReferencePresent: true,
-    })
+    expect(wellFormed).toMatchObject({ feeUsd: 0.15, feeSats: 225, feeSettlementStatus: "not_collected", providerReferencePresent: true })
+  })
+
+  it("request-time and confirmation-time diagnostics both surface a reconciliationState field", () => {
+    expect(speedAdapterSrc).toContain("reconciliationState: speedPayment.feeSettlementStatus")
+    expect(reconciliationSrc).toContain("reconciliationState: feeInfo.feeSettlementStatus")
   })
 })
 
-describe("22. existing successful Speed withdrawal behavior remains unchanged", () => {
-  it("Speed withdrawal request construction is untouched by the Lightning payment fee-conversion fix", () => {
-    // createSpeedWithdrawRequest has no platform-fee concept at all (Speed
-    // withdrawals move a merchant's own already-settled balance out - there
-    // is no PineTree application fee on a withdrawal), and this fix must not
-    // add one.
+describe("Fee-request idempotency", () => {
+  it("application_fee (if ever reintroduced) would only be requested once, at invoice creation - webhook/reconciliation never call createSpeedLightningPayment", () => {
+    const translateEventSrc = speedAdapterSrc.slice(
+      speedAdapterSrc.indexOf("translateEvent(payload)"),
+      speedAdapterSrc.indexOf("async healthCheck()")
+    )
+    expect(translateEventSrc).not.toContain("createSpeedLightningPayment")
+    expect(translateEventSrc).not.toContain("createLightningInvoice")
+    expect(reconciliationSrc).not.toContain("createSpeedLightningPayment")
+    expect(reconciliationSrc).not.toContain("createLightningInvoice")
+    expect(reconciliationSrc).toContain("TERMINAL_STATUSES.has(currentStatus)")
+  })
+})
+
+describe("7. Dynamic Base/Solana identity fixes remain unchanged by this urgent Bitcoin-only fix", () => {
+  it("DYNAMIC_WALLETS_HYDRATING (hydration-timing fix) is still present, not reverted", () => {
+    expect(dynamicOwnershipSrc).toContain("DYNAMIC_WALLETS_HYDRATING")
+    expect(dynamicOwnershipSrc).toContain('failureReason = "DYNAMIC_WALLETS_HYDRATING"')
+  })
+
+  it("the Dynamic identity write/repair contract (merchant_id never accepted as dynamic_user_id) is still present", () => {
+    expect(dynamicIdentityRepairSrc).toContain("export function decideDynamicUserIdWrite")
+    expect(dynamicIdentityRepairSrc).toContain('incoming === merchantId')
+    expect(dynamicIdentityRepairSrc).toContain('reason: "incoming_equals_merchant_id"')
+  })
+
+  it("the bounded wallet-hydration retry loop in ensureDynamicWalletRuntimeReady is still present", () => {
+    const page = read("app/dashboard/wallet-setup/page.tsx")
+    expect(page).toContain("MAX_WALLET_HYDRATION_ATTEMPTS")
+    expect(page).toContain("for (let attempt = 1; attempt <= MAX_WALLET_HYDRATION_ATTEMPTS; attempt++)")
+  })
+})
+
+describe("8/9. Speed Bitcoin withdrawals and connected-account routing remain unchanged", () => {
+  it("Speed withdrawal request construction has no application_fee/sats-fee concept and is untouched", () => {
     const fnSrc = speedClientSrc.slice(
       speedClientSrc.indexOf("export async function createSpeedWithdrawRequest("),
       speedClientSrc.indexOf("export async function retrieveSpeedPayment(")
@@ -228,8 +317,79 @@ describe("22. existing successful Speed withdrawal behavior remains unchanged", 
     expect(fnSrc).toContain('withdraw_method: "onchain"')
   })
 
-  it("connected-account withdrawal management (balances, Instant Send) does not reference the new sats-fee contract", () => {
+  it("connected-account withdrawal management (balances, Instant Send) does not reference the fee-sats contract", () => {
     expect(speedWalletManagementSrc).not.toContain("pineTreeFeeSats")
     expect(speedWalletManagementSrc).not.toContain("application_fee")
+  })
+
+  it("the speed-account header routing (merchant connected-account context) is unchanged", () => {
+    const fnSrc = speedClientSrc.slice(
+      speedClientSrc.indexOf("export async function createSpeedLightningPayment("),
+      speedClientSrc.indexOf("export async function createSpeedWithdrawRequest(")
+    )
+    expect(fnSrc).toContain("connectedAccountId: merchantSpeedAccountId")
+    expect(speedClientSrc).toContain('...(providerAccountId ? { "speed-account": providerAccountId } : {})')
+  })
+})
+
+describe("10. a permanent payment.retrieve 404 is not retried indefinitely", () => {
+  const mocks = vi.hoisted(() => ({
+    getPaymentById: vi.fn(),
+    updatePaymentMetadata: vi.fn(),
+    advancePaymentToTargetStatus: vi.fn(),
+    processPaymentEvent: vi.fn(),
+    retrieveMerchantSpeedPayment: vi.fn(),
+  }))
+
+  beforeEach(() => {
+    vi.resetModules()
+    vi.clearAllMocks()
+    mocks.getPaymentById.mockResolvedValue({ id: "pay-404", status: "PROCESSING", metadata: {} })
+    mocks.updatePaymentMetadata.mockResolvedValue({ id: "pay-404" })
+  })
+
+  it("logs the 404 as stale and flags the payment so it is skipped on the next reconciliation pass, without repeatedly polling Speed", async () => {
+    vi.doMock("@/database", () => ({ getPaymentById: mocks.getPaymentById }))
+    vi.doMock("@/database/payments", () => ({ updatePaymentMetadata: mocks.updatePaymentMetadata }))
+    vi.doMock("@/engine/eventProcessor", () => ({
+      advancePaymentToTargetStatus: mocks.advancePaymentToTargetStatus,
+      processPaymentEvent: mocks.processPaymentEvent,
+    }))
+    vi.doMock("@/providers/lightning/speedAdapter", () => ({
+      retrieveMerchantSpeedPayment: mocks.retrieveMerchantSpeedPayment,
+    }))
+    const { SpeedApiError, isSpeedPaymentPaid } = await vi.importActual<typeof import("@/providers/lightning/speedClient")>(
+      "@/providers/lightning/speedClient"
+    )
+    vi.doMock("@/providers/lightning/speedClient", () => ({ SpeedApiError, isSpeedPaymentPaid }))
+
+    mocks.retrieveMerchantSpeedPayment.mockRejectedValue(
+      new SpeedApiError("Speed API returned 404", 404, "not_found", [{ field: null, message: "Invalid payment id. Your request cannot be completed." }], null, "req_404")
+    )
+
+    const { reconcileSpeedLightningPayment } = await import("@/engine/lightningSpeedReconciliation")
+
+    // First call: hits the 404, flags the payment as stale.
+    const firstResult = await reconcileSpeedLightningPayment({
+      id: "pay-404", status: "PROCESSING", provider_reference: "speed_pay_stale", merchant_id: "merchant-1",
+    } as never)
+    expect(firstResult.checked).toBe(true)
+    expect(firstResult.detected).toBe(false)
+    expect(mocks.updatePaymentMetadata).toHaveBeenCalledWith("pay-404", expect.objectContaining({ speedRetrieveStale: true }))
+    expect(mocks.retrieveMerchantSpeedPayment).toHaveBeenCalledTimes(1)
+
+    // Second call: payment now has the stale flag persisted - must skip Speed entirely.
+    mocks.getPaymentById.mockResolvedValue({ id: "pay-404", status: "PROCESSING", metadata: { speedRetrieveStale: true, speedRetrieveStaleAt: "2026-07-23T00:00:00.000Z" } })
+    const secondResult = await reconcileSpeedLightningPayment({
+      id: "pay-404", status: "PROCESSING", provider_reference: "speed_pay_stale", merchant_id: "merchant-1",
+    } as never)
+    expect(secondResult.checked).toBe(false)
+    // Still only ever called once total across both reconciliation attempts.
+    expect(mocks.retrieveMerchantSpeedPayment).toHaveBeenCalledTimes(1)
+
+    // The canonical payment record itself was never mutated in status - only
+    // the stale-reference flag was recorded, preserving it for support review.
+    expect(mocks.advancePaymentToTargetStatus).not.toHaveBeenCalled()
+    expect(mocks.processPaymentEvent).not.toHaveBeenCalled()
   })
 })

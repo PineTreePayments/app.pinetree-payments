@@ -171,11 +171,16 @@ export type CreateSpeedLightningPaymentParams = {
   currency: string
   merchantAmount: number
   pineTreeFeeAmount: number
-  // Pre-converted whole-satoshi value of pineTreeFeeAmount, required whenever
-  // a nonzero application_fee will actually be sent to Speed (i.e. not
-  // treasury-sweep mode). Speed's target_currency for this invoice is SATS -
-  // application_fee must be expressed in the same unit, never a raw USD
-  // float, or a small fee (e.g. $0.15) silently collapses to zero.
+  // OPTIONAL, internal bookkeeping ONLY - never sent to Speed. A prior
+  // production incident sent this pre-converted sats value as Speed's
+  // application_fee and Speed's POST /payments rejected it with a 400
+  // (Speed's real unit/field contract for application_fee is unconfirmed -
+  // it is NOT necessarily whole satoshis, despite target_currency being
+  // SATS). Until Speed's exact supported contract is confirmed (sandbox
+  // response or official docs), application_fee is never sent at all - see
+  // docs/environment/bitcoin-fee-settlement.md. If supplied, this value is
+  // only persisted in metadata for future reconciliation once a verified
+  // mechanism exists.
   pineTreeFeeSats?: number
   // BTC/USD rate used to produce pineTreeFeeSats - persisted as the
   // conversion/quote reference, never used for anything except that record.
@@ -189,7 +194,12 @@ export type CreateSpeedLightningPaymentParams = {
   metadata?: Record<string, unknown>
 }
 
-export type SpeedFeeSettlementStatus = "requested" | "retained_pending_sweep" | "not_applicable"
+// Deliberately has NO "credited"/"collected" state: Speed does not currently
+// expose a documented or modeled way to verify actual treasury settlement of
+// an application fee, so this code must never claim one occurred.
+// "not_collected" replaces the earlier "requested" state - PineTree no
+// longer asks Speed for this fee at all until the contract is confirmed.
+export type SpeedFeeSettlementStatus = "not_collected" | "retained_pending_sweep" | "not_applicable"
 
 export type CreateSpeedLightningPaymentResult = {
   speedPaymentId: string
@@ -1134,25 +1144,21 @@ export async function createSpeedLightningPayment(
   }
 
   const feeSettlementStatus: SpeedFeeSettlementStatus =
-    pineTreeFeeAmount === 0 ? "not_applicable" : useTreasurySweep ? "retained_pending_sweep" : "requested"
+    pineTreeFeeAmount === 0 ? "not_applicable" : useTreasurySweep ? "retained_pending_sweep" : "not_collected"
 
-  // Speed's application_fee must be expressed in the invoice's own settlement
-  // unit (target_currency: SATS), never a raw USD float - a $0.15 fee sent as
-  // the literal number 0.15 collapses to zero once Speed interprets it as
-  // sats. Whenever a nonzero fee will actually be requested from Speed
-  // (feeSettlementStatus === "requested"), the caller MUST supply a
-  // pre-converted whole-satoshi value; fail closed rather than silently
-  // sending a value that produces a zero-amount "Application Fee In" record.
-  let platformFeeSats: number | null = null
-  if (feeSettlementStatus === "requested") {
-    const suppliedSats = Number(params.pineTreeFeeSats)
-    if (!Number.isInteger(suppliedSats) || suppliedSats <= 0) {
-      throw new Error(
-        "PineTree service fee must be pre-converted to a positive whole-satoshi amount before requesting a Speed application fee."
-      )
-    }
-    platformFeeSats = suppliedSats
-  }
+  // IMPORTANT: application_fee is never sent to Speed today. A raw USD float
+  // (0.15) produced zero-value "Application Fee In" records; a pre-converted
+  // whole-satoshi integer (e.g. 225) was then tried and Speed's POST
+  // /payments rejected it outright with a 400 - proving that assumption was
+  // also wrong (or at least incomplete). Speed's real application_fee
+  // contract is unconfirmed. Bitcoin payment creation must not be blocked on
+  // PineTree's platform fee, so this value is recorded internally (for
+  // future reconciliation once Speed's contract is confirmed) but never
+  // placed in the request body. See docs/environment/bitcoin-fee-settlement.md.
+  const platformFeeSats: number | null =
+    feeSettlementStatus === "not_collected" && Number.isInteger(Number(params.pineTreeFeeSats)) && Number(params.pineTreeFeeSats) > 0
+      ? Number(params.pineTreeFeeSats)
+      : null
 
   const merchantTransferPercentageRaw = ((grossAmount - pineTreeFeeAmount) / grossAmount) * 100
   const merchantTransferPercentage = calculateSpeedMerchantTransferPercentage(
@@ -1190,6 +1196,9 @@ export async function createSpeedLightningPayment(
     ...(merchantSpeedAccountId ? { merchantSpeedAccountId, merchantTransferPercentage } : {})
   }
 
+  // application_fee is intentionally never included in the request body - see
+  // the comment above platformFeeSats. Do not reintroduce it (in any unit)
+  // without an official Speed contract or a confirmed sandbox response.
   const body = {
     currency: params.currency || "USD",
     amount: grossAmount,
@@ -1199,22 +1208,44 @@ export async function createSpeedLightningPayment(
     statement_descriptor: "PineTree",
     description: `PineTree payment ${params.pineTreePaymentId}`,
     metadata,
-    ...(platformFeeSats !== null
-      ? {
-          application_fee: platformFeeSats
-        }
-      : {}),
   }
 
-  const payment = useTreasurySweep
-    ? await speedRequest<SpeedPaymentObject>("/payments", { method: "POST", body: JSON.stringify(body) })
-    : await createSpeedPaymentRequest(body, {
-        merchantId: params.merchantId,
-        connectedAccountId: merchantSpeedAccountId,
-        operation: "payment.create",
-        pineTreePaymentId: params.pineTreePaymentId,
-        pineTreePaymentIntentId: params.pineTreePaymentIntentId || null,
-      })
+  let payment: SpeedPaymentObject
+  try {
+    payment = useTreasurySweep
+      ? await speedRequest<SpeedPaymentObject>("/payments", { method: "POST", body: JSON.stringify(body) })
+      : await createSpeedPaymentRequest(body, {
+          merchantId: params.merchantId,
+          connectedAccountId: merchantSpeedAccountId,
+          operation: "payment.create",
+          pineTreePaymentId: params.pineTreePaymentId,
+          pineTreePaymentIntentId: params.pineTreePaymentIntentId || null,
+        })
+  } catch (error) {
+    // The generic "[speed] API request failed" log (speedRequestWithStatus)
+    // already captures the provider-level diagnostics for any Speed call.
+    // This adds the payment.create-specific context that log can't know
+    // about - the exact request shape PineTree sent - so a 400 here is fully
+    // diagnosable without guessing.
+    const isSpeedError = error instanceof SpeedApiError
+    console.error("[speed] bitcoin_payment_create_failed", {
+      canonicalTransactionId: params.pineTreePaymentId,
+      httpStatus: isSpeedError ? error.status : null,
+      providerCode: isSpeedError ? error.providerCode : null,
+      providerMessage: isSpeedError ? error.fieldErrors[0]?.message ?? null : null,
+      fieldErrorCount: isSpeedError ? error.fieldErrors.length : 0,
+      requestId: isSpeedError ? error.requestId : null,
+      operation: "payment.create",
+      settlementMode,
+      applicationFeePresent: false,
+      applicationFeeValue: null,
+      applicationFeeAssumedUnit: null,
+      invoiceCurrency: body.currency,
+      targetCurrency: body.target_currency,
+      merchantSpeedAccountSuffix: merchantSpeedAccountId ? merchantSpeedAccountId.slice(-6) : null,
+    })
+    throw error
+  }
 
   const paymentRequest = getLightningPaymentRequest(payment)
   if (!payment.id || !paymentRequest) {

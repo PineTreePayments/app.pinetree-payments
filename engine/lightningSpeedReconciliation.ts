@@ -11,8 +11,9 @@
  */
 import { getPaymentById } from "@/database"
 import type { Payment } from "@/database/payments"
+import { updatePaymentMetadata } from "@/database/payments"
 import { advancePaymentToTargetStatus, processPaymentEvent } from "./eventProcessor"
-import { isSpeedPaymentPaid } from "@/providers/lightning/speedClient"
+import { SpeedApiError, isSpeedPaymentPaid } from "@/providers/lightning/speedClient"
 import { retrieveMerchantSpeedPayment } from "@/providers/lightning/speedAdapter"
 import { extractBitcoinFeeSettlementInfo } from "@/lib/bitcoin/feeSettlementInfo"
 
@@ -24,6 +25,10 @@ export type SpeedLightningReconciliationResult = {
 }
 
 const TERMINAL_STATUSES = new Set(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])
+
+function readMetadataRecord(metadata: unknown): Record<string, unknown> {
+  return metadata && typeof metadata === "object" ? (metadata as Record<string, unknown>) : {}
+}
 
 export async function reconcileSpeedLightningPayment(
   payment: Pick<Payment, "id" | "status" | "provider_reference" | "merchant_id">
@@ -39,7 +44,51 @@ export async function reconcileSpeedLightningPayment(
     return { checked: false, detected: false, speedStatus: "", status: currentStatus }
   }
 
-  const speedPayment = await retrieveMerchantSpeedPayment(speedPaymentId, payment.merchant_id)
+  // A payment whose Speed provider reference has already been confirmed
+  // permanently invalid (404 "Invalid payment id") must not be polled again
+  // on every maintenance sweep forever - that's a stale/missing reference,
+  // not a transient failure. The canonical PineTree payment record is left
+  // exactly as-is (untouched status) for support review; only the fact that
+  // this reference is stale is recorded so this function can skip the Speed
+  // call cheaply next time.
+  const fullPayment = await getPaymentById(paymentId)
+  const existingMetadata = readMetadataRecord(fullPayment?.metadata)
+  if (existingMetadata.speedRetrieveStale === true) {
+    console.info("[speed] payment_retrieve_stale_skip", {
+      canonicalTransactionId: paymentId,
+      speedPaymentId,
+      staleSince: existingMetadata.speedRetrieveStaleAt ?? null,
+    })
+    return { checked: false, detected: false, speedStatus: "stale_reference", status: currentStatus }
+  }
+
+  let speedPayment: Awaited<ReturnType<typeof retrieveMerchantSpeedPayment>>
+  try {
+    speedPayment = await retrieveMerchantSpeedPayment(speedPaymentId, payment.merchant_id)
+  } catch (error) {
+    if (error instanceof SpeedApiError && error.status === 404) {
+      console.warn("[speed] payment_retrieve_permanently_stale", {
+        canonicalTransactionId: paymentId,
+        speedPaymentId,
+        httpStatus: error.status,
+        providerCode: error.providerCode,
+        requestId: error.requestId,
+        operation: "payment.retrieve",
+      })
+      await updatePaymentMetadata(paymentId, {
+        speedRetrieveStale: true,
+        speedRetrieveStaleAt: new Date().toISOString(),
+        speedRetrieveStaleReference: speedPaymentId,
+      }).catch((metadataError) => {
+        console.warn("[speed] payment_retrieve_stale_flag_failed", {
+          canonicalTransactionId: paymentId,
+          error: metadataError instanceof Error ? metadataError.message : String(metadataError),
+        })
+      })
+      return { checked: true, detected: false, speedStatus: "stale_reference", status: currentStatus }
+    }
+    throw error
+  }
   const detected = isSpeedPaymentPaid(speedPayment)
   const speedStatus = String(speedPayment.status || "").toLowerCase().trim()
 
@@ -54,7 +103,6 @@ export async function reconcileSpeedLightningPayment(
     // payment - webhook retries/reconciliation re-runs against an
     // already-CONFIRMED payment short-circuit before reaching this branch,
     // so this can never fire twice for the same canonical payment.
-    const fullPayment = await getPaymentById(paymentId)
     const feeInfo = extractBitcoinFeeSettlementInfo(fullPayment?.metadata)
     console.info("[speed] bitcoin_fee_reconciliation", {
       canonicalTransactionId: paymentId,

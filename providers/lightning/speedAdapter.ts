@@ -113,24 +113,27 @@ export const speedAdapter: ProviderAdapter = {
       : await resolveMerchantSpeedAccount(input.merchantId)
 
     const pineTreeFeeAmount = Number(input.pinetreeFee)
-    const feeRequiresProviderSideCollection = !treasurySweepEnabled && pineTreeFeeAmount > 0
+    const feeApplies = !treasurySweepEnabled && pineTreeFeeAmount > 0
     const btcPriceUsd = Number(input.btcPriceUsd)
 
-    // Speed's application_fee must be sent in the invoice's own settlement
-    // unit (sats, since target_currency is SATS) - never PineTree's raw USD
-    // fee figure. Convert here, using the live rate the caller already
-    // fetched, and fail closed (never send a fee-less request that silently
-    // drops PineTree's cut) if a live rate isn't available.
+    // application_fee is never sent to Speed (see the comment in
+    // createSpeedLightningPayment / docs/environment/bitcoin-fee-settlement.md
+    // for why - both a raw USD float and a pre-converted sats integer have
+    // been rejected or produced zero-value records in production). Bitcoin
+    // payment creation must never be blocked by fee-conversion availability,
+    // so this is best-effort, internal bookkeeping only - a missing/invalid
+    // BTC price simply means this record stays empty, never a thrown error.
     let pineTreeFeeSats: number | undefined
-    if (feeRequiresProviderSideCollection) {
-      if (!Number.isFinite(btcPriceUsd) || btcPriceUsd <= 0) {
-        console.warn("[speed] fee_conversion_rate_unavailable", {
+    if (feeApplies && Number.isFinite(btcPriceUsd) && btcPriceUsd > 0) {
+      try {
+        pineTreeFeeSats = convertUsdFeeToSats(pineTreeFeeAmount, btcPriceUsd)
+      } catch (error) {
+        console.warn("[speed] fee_conversion_unavailable", {
           canonicalTransactionId: input.paymentId,
           feeUsd: pineTreeFeeAmount,
+          error: error instanceof Error ? error.message : String(error),
         })
-        throw new Error("BTC price unavailable — cannot convert PineTree's Bitcoin service fee to sats.")
       }
-      pineTreeFeeSats = convertUsdFeeToSats(pineTreeFeeAmount, btcPriceUsd)
     }
 
     const speedPayment = await createSpeedLightningPayment({
@@ -157,7 +160,11 @@ export const speedAdapter: ProviderAdapter = {
       feeBtc: speedPayment.platformFeeSats != null ? speedPayment.platformFeeSats / 100_000_000 : null,
       conversionRateUsd: Number.isFinite(btcPriceUsd) && btcPriceUsd > 0 ? btcPriceUsd : null,
       merchantSpeedAccountSuffix: merchantSpeedAccountId ? merchantSpeedAccountId.slice(-6) : null,
-      feeRequestAttempted: feeRequiresProviderSideCollection,
+      // application_fee is never sent to Speed today (see above) - this is
+      // always false, kept as an explicit field rather than removed so a
+      // future re-enablement is a one-line, auditable change.
+      feeRequestAttempted: false,
+      feeApplies,
       providerFeeReferencePresent: Boolean(speedPayment.speedPaymentId),
       reconciliationState: speedPayment.feeSettlementStatus,
     })

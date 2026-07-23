@@ -508,9 +508,10 @@ describe("Speed connected-account wallet HTTP boundary", () => {
     })
     const init = fetchSpy.mock.calls[0][1]
     expect(new Headers(init?.headers).get("speed-account")).toBe("acct_merchant_1")
-    // application_fee must be the pre-converted sats value, never the raw USD figure -
-    // Speed's target_currency for this invoice is SATS.
-    expect(JSON.parse(String(init?.body))).toMatchObject({ application_fee: 1500 })
+    // application_fee is never sent - Speed's real unit contract for it is
+    // unconfirmed (a prior production incident got an HTTP 400 sending a
+    // sats-denominated value here). See docs/environment/bitcoin-fee-settlement.md.
+    expect(JSON.parse(String(init?.body))).not.toHaveProperty("application_fee")
     expect(JSON.parse(String(init?.body))).not.toHaveProperty("account_id")
   })
 
