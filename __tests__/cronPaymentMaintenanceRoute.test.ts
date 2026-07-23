@@ -63,7 +63,10 @@ describe("payment maintenance cron route", () => {
       reconcileErrors: 0,
       lightningCandidates: 0,
       lightningReconciled: 0,
-      lightningErrors: 0
+      lightningErrors: 0,
+      feeSettlementCandidates: 0,
+      feeSettlementReconciled: 0,
+      feeSettlementErrors: 0
     })
 
     const response = await GET(request("expected-secret"))

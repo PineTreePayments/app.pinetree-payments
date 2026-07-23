@@ -42,11 +42,11 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(page).toContain('openDynamicEmailFallbackAuth("withdrawal_reconnect", {')
     expect(page).toContain("explicitUserAction: true")
     expect(page).toContain("signatureRequired: false")
-    expect(page).toContain('if (!isPostSignSubmissionTimeout && withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
+    expect(page).toContain('if (!isAmbiguousOutcome && withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
   })
 
   it("keeps Bitcoin out of Dynamic authorization recovery", () => {
-    expect(page).toContain('if (!isPostSignSubmissionTimeout && withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
+    expect(page).toContain('if (!isAmbiguousOutcome && withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana"))')
     expect(page).toContain("setWithdrawalAuthorizationRecoveryOpen(true)")
     expect(page).toContain("const usesDynamicSigner = dynamicSignerWithdrawalRails.includes(withdrawalRail)")
     expect(page).not.toContain('selectedRail: "bitcoin"')
@@ -200,9 +200,9 @@ describe("PineTree Wallet reconnect flow", () => {
       page.indexOf("function base64ToBytes(")
     )
     const evmLogIndex = sendFn.indexOf("logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)")
-    const evmCallIndex = sendFn.indexOf("const txHash = await client.sendTransaction({")
+    const evmCallIndex = sendFn.indexOf("client.sendTransaction({")
     const btcLogIndex = sendFn.indexOf("logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)", evmLogIndex + 1)
-    const btcCallIndex = sendFn.indexOf("const signed = await wallet.signPsbt?.(psbtRequest)")
+    const btcCallIndex = sendFn.indexOf("wallet.signPsbt?.(psbtRequest) ?? wallet.connector?.signPsbt?.(psbtRequest)")
     const solanaCallbackIndex = sendFn.indexOf("logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)", btcLogIndex + 1)
     const solanaCallIndex = sendFn.indexOf("const result = await signDynamicSolanaTransactionWithActiveAccount(")
     expect(page).toContain('console.error("[pinetree-withdrawals] ABOUT_TO_OPEN_DYNAMIC_MODAL"')
@@ -266,7 +266,7 @@ describe("PineTree Wallet reconnect flow", () => {
     // rail (Bitcoin, Base, Solana) - no per-asset "success" branch like the old
     // isSolanaSolWithdrawal special case, which showed a different title/copy for SOL.
     expect(page).not.toContain("isSolanaSolWithdrawal")
-    expect(page).toContain("Your withdrawal has been submitted and is being processed.")
+    expect(page).toContain("Your withdrawal is still being processed. You can safely leave this screen.")
     expect(page).toContain('kind === "authorizing"')
   })
 

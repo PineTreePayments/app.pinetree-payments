@@ -111,3 +111,43 @@ export async function getLightningReconciliationCandidates(input: {
 
   return (data || []) as Payment[]
 }
+
+/**
+ * CONFIRMED Speed Lightning payments whose platform-fee settlement bookkeeping
+ * is still "transfer_created" or "missing" - i.e. Speed's create-payment
+ * response indicated a connect-split fee was expected, but no later check ever
+ * confirmed a realized (transfer_id-bearing) APPLICATION_FEE transfer.
+ *
+ * getLightningReconciliationCandidates above only selects PENDING/PROCESSING
+ * payments, so once a payment reaches CONFIRMED (e.g. the webhook that
+ * advanced it arrived before Speed's transfers[] was fully populated for that
+ * delivery), nothing ever re-checked fee settlement again - the payment
+ * itself is correctly terminal, but its fee bookkeeping could stay "missing"
+ * forever even when Speed's own side settled correctly. This candidate set
+ * exists so a payment's *fee settlement status* can still be re-verified after
+ * the payment's own status is already terminal, without ever re-advancing or
+ * re-processing the payment's status itself (see
+ * reconcileConfirmedLightningFeeSettlement).
+ */
+export async function getConfirmedLightningFeeSettlementCandidates(input: {
+  limit: number
+  cutoff: string
+}): Promise<Payment[]> {
+  const boundedLimit = Math.max(1, Math.min(input.limit, 25))
+  const { data, error } = await db
+    .from("payments")
+    .select("*")
+    .eq("status", "CONFIRMED")
+    .eq("network", "bitcoin_lightning")
+    .eq("provider", SPEED_PROVIDER_NAME)
+    .in("metadata->split->lightningProviderMetadata->>feeSettlementStatus", ["transfer_created", "missing"])
+    .lt("updated_at", input.cutoff)
+    .order("updated_at", { ascending: true })
+    .limit(boundedLimit)
+
+  if (error) {
+    throw new Error(`Failed to load Lightning fee-settlement reconciliation candidates: ${error.message}`)
+  }
+
+  return (data || []) as Payment[]
+}

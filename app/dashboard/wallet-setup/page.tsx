@@ -29,6 +29,7 @@ import {
   inferredSignerRailForWallet,
   resolveDynamicSolanaSignAndSendCapability,
   signDynamicSolanaTransactionWithActiveAccount,
+  withTimeout,
   type DynamicSignerRail,
   type DynamicWalletLike,
 } from "@/lib/wallets/dynamicSignerLookup"
@@ -100,6 +101,8 @@ type WithdrawalReviewResponse = {
     tx_hash: string | null
     error_message: string | null
     review_payload?: Record<string, unknown>
+    submitted_at?: string | null
+    confirmed_at?: string | null
   }
   review: {
     rail: WithdrawalRail
@@ -1010,6 +1013,15 @@ function validatePreparedSolanaTransaction(
   }
 }
 
+// Base/EVM and Bitcoin-PSBT signing previously had no timeout at all (unlike
+// Solana's existing 45s DYNAMIC_SOLANA_SIGN_TIMEOUT_MS) - a connector that
+// broadcasts the transaction but never settles this promise would hang the
+// awaited call forever, leaving the merchant stuck on "Approving withdrawal"
+// with no way out. Same 45s bound and "ambiguous, not failed" classification
+// as Solana's existing timeout.
+const DYNAMIC_EVM_SIGN_TIMEOUT_MS = 45_000
+const DYNAMIC_EVM_SIGN_TIMEOUT_MESSAGE = "Withdrawal approval is still pending. Check your wallet activity before trying again."
+
 async function sendDynamicPreparedWithdrawal(
   prepared: WithdrawalPrepareResponse,
   wallets: unknown[],
@@ -1170,12 +1182,31 @@ async function sendDynamicPreparedWithdrawal(
     }
     logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)
     emitDynamicPostPrepareStage(context, "dynamic_authorization_opened", { substage })
-    const txHash = await client.sendTransaction({
-      account: prepared.payload.from as `0x${string}`,
-      to: prepared.payload.to as `0x${string}`,
-      value: BigInt(prepared.payload.value),
-      data: prepared.payload.data,
-    })
+    // Unlike Solana (already bounded below), this await previously had no
+    // timeout at all - a connector that broadcasts the transaction but never
+    // resolves/rejects this promise would hang forever, leaving the merchant
+    // stuck on "Approving withdrawal" underneath a Dynamic modal that never
+    // gets a chance to close. A timeout here is genuinely ambiguous (the
+    // transaction may already be broadcast) so it must be classified as
+    // DYNAMIC_SIGNING_TIMEOUT, never a hard failure.
+    let txHash: string | bigint
+    try {
+      txHash = await withTimeout(
+        client.sendTransaction({
+          account: prepared.payload.from as `0x${string}`,
+          to: prepared.payload.to as `0x${string}`,
+          value: BigInt(prepared.payload.value),
+          data: prepared.payload.data,
+        }),
+        DYNAMIC_EVM_SIGN_TIMEOUT_MS,
+        DYNAMIC_EVM_SIGN_TIMEOUT_MESSAGE
+      )
+    } catch (error) {
+      if (error instanceof Error && error.message === DYNAMIC_EVM_SIGN_TIMEOUT_MESSAGE) {
+        throw makeDynamicPostPrepareError(DYNAMIC_EVM_SIGN_TIMEOUT_MESSAGE, "DYNAMIC_SIGNING_TIMEOUT")
+      }
+      throw error
+    }
     emitDynamicPostPrepareStage(context, "dynamic_authorization_confirmed", { substage, signature: maskDiagnosticValue(String(txHash)) })
     return { txHash: String(txHash), providerReference: String(txHash) }
   }
@@ -1186,8 +1217,23 @@ async function sendDynamicPreparedWithdrawal(
     const psbtRequest = { unsignedPsbtBase64: prepared.payload.psbtBase64 }
     logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)
     emitDynamicPostPrepareStage(context, "dynamic_authorization_opened", { substage })
-    const signed = await wallet.signPsbt?.(psbtRequest)
-      ?? await wallet.connector?.signPsbt?.(psbtRequest)
+    // Same rationale as the EVM branch above - signPsbt previously had no
+    // timeout at all.
+    const signPsbtPromise: Promise<{ signedPsbt?: string } | undefined> =
+      wallet.signPsbt?.(psbtRequest) ?? wallet.connector?.signPsbt?.(psbtRequest) ?? Promise.resolve(undefined)
+    let signed: { signedPsbt?: string } | undefined
+    try {
+      signed = await withTimeout(
+        signPsbtPromise,
+        DYNAMIC_EVM_SIGN_TIMEOUT_MS,
+        DYNAMIC_EVM_SIGN_TIMEOUT_MESSAGE
+      )
+    } catch (error) {
+      if (error instanceof Error && error.message === DYNAMIC_EVM_SIGN_TIMEOUT_MESSAGE) {
+        throw makeDynamicPostPrepareError(DYNAMIC_EVM_SIGN_TIMEOUT_MESSAGE, "DYNAMIC_SIGNING_TIMEOUT")
+      }
+      throw error
+    }
     if (!signed?.signedPsbt) {
       throw new Error("Unable to sign this withdrawal. Please try again.")
     }
@@ -2429,20 +2475,7 @@ function WithdrawalResultCard({
   onSubmit: (context?: WithdrawalSubmitContext) => void
   onOpenWallet?: () => void
 }) {
-  // Mutated inline during render (same established pattern as walletsRef/
-  // primaryWalletRef above) rather than in an effect: a poll tick calls
-  // setWithdrawalSubmitResult with a fresh object every ~1.6s while still
-  // processing, which re-renders this component with the *same* kind/status -
-  // counting those renders is what distinguishes "just submitted" from "still
-  // processing a little while later" without adding parent state that every
-  // draft-reset call site would need to remember to clear.
-  const stillProcessingRenderCountRef = useRef(0)
   const merchantStatus = submitResult?.merchantStatus ?? null
-  if (kind === "submitted" && merchantStatus === "Processing") {
-    stillProcessingRenderCountRef.current += 1
-  } else {
-    stillProcessingRenderCountRef.current = 0
-  }
 
   if (kind === "authorizing") {
     return (
@@ -2455,15 +2488,14 @@ function WithdrawalResultCard({
 
   if (kind === "submitted" && submitResult) {
     const confirmed = merchantStatus === "Confirmed"
-    const stillProcessing = !confirmed && stillProcessingRenderCountRef.current > 1
     const title = confirmed ? "Withdrawal complete" : "Withdrawal submitted"
     const supportingCopy = confirmed
-      ? "Your withdrawal has been confirmed."
-      : stillProcessing
-        ? "Your withdrawal is still being processed. You can safely leave this screen."
-        : "Your withdrawal has been submitted and is being processed."
+      ? "Your withdrawal has been completed."
+      : "Your withdrawal is still being processed. You can safely leave this screen."
     const txHash = submitResult.request.tx_hash || null
     const explorerUrl = buildWithdrawalExplorerUrl(review?.review.rail, txHash)
+    const submittedAtLabel = formatActivityTimestamp(submitResult.request.submitted_at ?? null)
+    const confirmedAtLabel = confirmed ? formatActivityTimestamp(submitResult.request.confirmed_at ?? null) : null
     const toneCardClass = confirmed
       ? "rounded-[1.2rem] border border-emerald-200 bg-emerald-50/70 px-5 py-5"
       : "rounded-[1.2rem] border border-blue-200 bg-blue-50/70 px-5 py-5"
@@ -2496,6 +2528,18 @@ function WithdrawalResultCard({
                 <dt className="text-xs font-semibold text-gray-500">Destination</dt>
                 <dd className="mt-0.5 break-words [overflow-wrap:anywhere] font-mono text-xs text-gray-800">{review.review.destinationAddress}</dd>
               </div>
+              {submittedAtLabel ? (
+                <div className="rounded-lg bg-white/70 px-3 py-2">
+                  <dt className="text-xs font-semibold text-gray-500">Submitted</dt>
+                  <dd className="mt-0.5 font-semibold text-gray-950">{submittedAtLabel}</dd>
+                </div>
+              ) : null}
+              {confirmedAtLabel ? (
+                <div className="rounded-lg bg-white/70 px-3 py-2">
+                  <dt className="text-xs font-semibold text-gray-500">Confirmed</dt>
+                  <dd className="mt-0.5 font-semibold text-gray-950">{confirmedAtLabel}</dd>
+                </div>
+              ) : null}
             </dl>
           ) : null}
         </div>
@@ -2535,7 +2579,7 @@ function WithdrawalResultCard({
         : "rounded-[1.2rem] border border-red-200 bg-red-50 px-5 py-5"}
       >
         <p className={withdrawalOutcomePending ? "text-base font-semibold text-amber-950" : "text-base font-semibold text-red-900"}>
-          {withdrawalOutcomePending ? "Withdrawal outcome pending" : "Withdrawal couldn't be completed"}
+          {withdrawalOutcomePending ? "Withdrawal outcome pending" : "Withdrawal failed"}
         </p>
         <p className={withdrawalOutcomePending ? "mt-1 text-sm leading-6 text-amber-900" : "mt-1 text-sm leading-6 text-red-800"}>
           {approvalError || error || submitResult?.request.error_message || "The withdrawal could not be completed. Review the details and try again."}
@@ -10003,7 +10047,7 @@ function PineTreeWalletRuntime() {
           cache: "no-store",
         })
         if (!res.ok) continue
-        const json = (await res.json()) as { ok?: boolean; data?: { status?: string; txHash?: string | null } }
+        const json = (await res.json()) as { ok?: boolean; data?: { status?: string; txHash?: string | null; completedAt?: string | null } }
         const operationStatus = String(json.data?.status || "").toUpperCase()
         if (!operationStatus) continue
         const nextStatus =
@@ -10014,7 +10058,11 @@ function PineTreeWalletRuntime() {
               : initial.merchantStatus
         setWithdrawalSubmitResult({
           ...initial,
-          request: { ...initial.request, tx_hash: json.data?.txHash ?? initial.request.tx_hash },
+          request: {
+            ...initial.request,
+            tx_hash: json.data?.txHash ?? initial.request.tx_hash,
+            confirmed_at: nextStatus === "Confirmed" ? (json.data?.completedAt ?? new Date().toISOString()) : initial.request.confirmed_at,
+          },
           merchantStatus: nextStatus,
         })
         if (nextStatus === "Withdrawal failed") setWithdrawalScreen("failed")
@@ -10172,6 +10220,7 @@ function PineTreeWalletRuntime() {
             provider_reference: null,
             tx_hash: result.data.operation.txHash ?? null,
             error_message: null,
+            submitted_at: new Date().toISOString(),
           },
           merchantStatus: "Processing",
           message: "Your Bitcoin Lightning withdrawal was submitted.",
@@ -10444,14 +10493,23 @@ function PineTreeWalletRuntime() {
       return
     } catch (error) {
       const errorCode = safeDynamicErrorCode(error)
-      // A timed-out /submit call after Dynamic already signed and returned a tx
-      // hash/signed PSBT means the transaction genuinely went out - the network
-      // call to persist it just didn't get an answer back in time. Telling the
-      // merchant "authorization failed" here would be wrong and could prompt a
-      // duplicate resubmission; report status-unknown instead (same safe,
-      // no-retry-suggested treatment already used for the Bitcoin rail).
+      // Two distinct "ambiguous, not failed" cases, both meaning "we cannot
+      // prove this didn't already reach the network":
+      // 1. A timed-out /submit call after Dynamic already signed and returned
+      //    a tx hash/signed PSBT - the transaction genuinely went out, the
+      //    network call to persist it just didn't get an answer back in time.
+      // 2. A signing-level timeout itself (DYNAMIC_SIGNING_TIMEOUT, from the
+      //    withTimeout wrapper around Solana/EVM/PSBT signing) - Dynamic's
+      //    wallet may have already broadcast the transaction even though its
+      //    promise never resolved back to PineTree.
+      // Telling the merchant "authorization failed" in either case would be
+      // wrong and could prompt a duplicate resubmission; report
+      // status-unknown instead (same safe, no-retry-suggested treatment
+      // already used for the Bitcoin rail).
       const isPostSignSubmissionTimeout = signedBeforeSubmitCall && errorCode === "PROVIDER_SUBMISSION_TIMEOUT"
-      const safeMessage = isPostSignSubmissionTimeout
+      const isAmbiguousSigningTimeout = errorCode === "DYNAMIC_SIGNING_TIMEOUT"
+      const isAmbiguousOutcome = isPostSignSubmissionTimeout || isAmbiguousSigningTimeout
+      const safeMessage = isAmbiguousOutcome
         ? withdrawalStatusUnknownMessage
         : sanitizeWithdrawalSubmitErrorForMerchant(error instanceof Error ? error.message : undefined)
       console.warn("[pinetree-withdrawals] handleSubmitWithdrawal_unhandled_error", {
@@ -10459,6 +10517,7 @@ function PineTreeWalletRuntime() {
         error: error instanceof Error ? error.message : "unknown",
         signedBeforeSubmitCall,
         isPostSignSubmissionTimeout,
+        isAmbiguousSigningTimeout,
       })
       emitWalletSetupDebugEvent("wallet_withdrawal_submit_unhandled_error", {
         correlationId,
@@ -10492,7 +10551,7 @@ function PineTreeWalletRuntime() {
       }
       setWithdrawalApprovalError(safeMessage)
       void syncPineTreeWallet()
-      if (!isPostSignSubmissionTimeout && withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana")) {
+      if (!isAmbiguousOutcome && withdrawalReview?.review.approvalMethod === "dynamic_browser" && (withdrawalRail === "base" || withdrawalRail === "solana")) {
         setWithdrawalAuthorizationRecoveryOpen(true)
       }
       setWithdrawalScreen("failed")

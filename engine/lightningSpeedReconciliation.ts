@@ -140,3 +140,64 @@ export async function reconcileSpeedLightningPayment(
     status: String(updatedPayment?.status || payment.status || "").toUpperCase()
   }
 }
+
+export type ConfirmedFeeSettlementReconciliationResult = {
+  checked: boolean
+  feeSettlementStatus: string | null
+}
+
+/**
+ * Re-verifies platform-fee settlement for a payment whose own status is
+ * already CONFIRMED (terminal) - reconcileSpeedLightningPayment above never
+ * reaches this payment again once it hits a terminal status, so a
+ * connect-split fee that was still "transfer_created"/"missing" at the moment
+ * the payment was confirmed (e.g. Speed's payment.confirmed webhook delivered
+ * before that specific delivery's transfers[] was fully populated) would
+ * otherwise never get a second look. This function ONLY ever re-reads the
+ * fee-settlement bookkeeping via recordSpeedApplicationFeeSettlement - it must
+ * never call processPaymentEvent/advancePaymentToTargetStatus, since the
+ * payment's own status is already correct and terminal.
+ */
+export async function reconcileConfirmedLightningFeeSettlement(
+  payment: Pick<Payment, "id" | "provider_reference" | "merchant_id">
+): Promise<ConfirmedFeeSettlementReconciliationResult> {
+  const paymentId = payment.id
+  const speedPaymentId = String(payment.provider_reference || "").trim()
+  if (!speedPaymentId) return { checked: false, feeSettlementStatus: null }
+
+  const fullPayment = await getPaymentById(paymentId)
+  const existingMetadata = readMetadataRecord(fullPayment?.metadata)
+  if (existingMetadata.speedRetrieveStale === true) {
+    return { checked: false, feeSettlementStatus: null }
+  }
+
+  let speedPayment: Awaited<ReturnType<typeof retrieveMerchantSpeedPayment>>
+  try {
+    speedPayment = await retrieveMerchantSpeedPayment(speedPaymentId, payment.merchant_id)
+  } catch (error) {
+    if (error instanceof SpeedApiError && error.status === 404) {
+      console.warn("[speed] fee_settlement_recheck_payment_retrieve_permanently_stale", {
+        canonicalTransactionId: paymentId,
+        speedPaymentId,
+        httpStatus: error.status,
+      })
+      await updatePaymentMetadata(paymentId, {
+        speedRetrieveStale: true,
+        speedRetrieveStaleAt: new Date().toISOString(),
+        speedRetrieveStaleReference: speedPaymentId,
+      }).catch(() => undefined)
+      return { checked: true, feeSettlementStatus: null }
+    }
+    throw error
+  }
+
+  await recordSpeedApplicationFeeSettlement(paymentId, speedPayment.transfers)
+  const updatedPayment = await getPaymentById(paymentId)
+  const feeInfo = extractBitcoinFeeSettlementInfo(updatedPayment?.metadata)
+  console.info("[speed] fee_settlement_recheck_completed", {
+    canonicalTransactionId: paymentId,
+    feeSettlementStatus: feeInfo.feeSettlementStatus,
+    applicationFeeTransferIdPresent: Boolean(feeInfo.applicationFeeTransferId),
+  })
+  return { checked: true, feeSettlementStatus: feeInfo.feeSettlementStatus }
+}

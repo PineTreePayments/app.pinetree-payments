@@ -2,13 +2,14 @@ import { getPaymentById } from "@/database"
 import {
   getPaymentMaintenanceCandidates,
   getTerminalPaymentMaintenanceCandidates,
-  getLightningReconciliationCandidates
+  getLightningReconciliationCandidates,
+  getConfirmedLightningFeeSettlementCandidates
 } from "@/database/paymentMaintenance"
 import { getPaymentEvents } from "@/database/paymentEvents"
 import { getTransactionByPaymentId } from "@/database/transactions"
 import { CHECKOUT_TIMEOUT_MS } from "./config"
 import { runPaymentWatcher } from "./checkPaymentOnce"
-import { reconcileSpeedLightningPayment } from "./lightningSpeedReconciliation"
+import { reconcileSpeedLightningPayment, reconcileConfirmedLightningFeeSettlement } from "./lightningSpeedReconciliation"
 import { paymentHasProcessingEvidence } from "./paymentEvidence"
 import { markPaymentIncomplete } from "./paymentStateActions"
 import {
@@ -22,6 +23,12 @@ import { sweepStalePayments, type StalePaymentSweepSummary } from "./stalePaymen
 // keeps this from duplicating the customer-facing checkout poller's own
 // work during a payment's first few minutes (lib/lightning/lightningStatusPoller.ts).
 const LIGHTNING_RECONCILE_MIN_AGE_MS = 3 * 60_000
+
+// A CONFIRMED payment's fee-settlement bookkeeping is only re-checked after
+// this much time has passed since it last changed - gives Speed's own system
+// a reasonable window to finish attaching the APPLICATION_FEE transfer to
+// that payment before treating "not settled yet" as worth re-polling for.
+const FEE_SETTLEMENT_RECHECK_MIN_AGE_MS = 2 * 60_000
 
 const DEFAULT_THROTTLE_MS = 60_000
 const DEFAULT_WATCHER_TIMEOUT_MS = 4_000
@@ -122,6 +129,9 @@ export type PaymentMaintenanceSummary = {
   lightningCandidates: number
   lightningReconciled: number
   lightningErrors: number
+  feeSettlementCandidates: number
+  feeSettlementReconciled: number
+  feeSettlementErrors: number
 }
 
 export type PaymentFreshnessResult = {
@@ -224,6 +234,7 @@ export async function runPaymentMaintenanceTick(options?: {
   reconcileLimit?: number
   watcherTimeoutMs?: number
   lightningReconcileLimit?: number
+  feeSettlementReconcileLimit?: number
   now?: number
 }): Promise<PaymentMaintenanceSummary> {
   const lease = getMaintenanceLease()
@@ -252,7 +263,10 @@ export async function runPaymentMaintenanceTick(options?: {
     reconcileErrors: 0,
     lightningCandidates: 0,
     lightningReconciled: 0,
-    lightningErrors: 0
+    lightningErrors: 0,
+    feeSettlementCandidates: 0,
+    feeSettlementReconciled: 0,
+    feeSettlementErrors: 0
   }
 
   if (lease.running) {
@@ -361,8 +375,29 @@ export async function runPaymentMaintenanceTick(options?: {
       }
     }
 
+    let feeSettlementReconciled = 0
+    let feeSettlementErrors = 0
+    const feeSettlementLimit = Math.max(1, Math.min(options?.feeSettlementReconcileLimit ?? 5, 25))
+    const feeSettlementCutoff = new Date(now - FEE_SETTLEMENT_RECHECK_MIN_AGE_MS).toISOString()
+    const feeSettlementCandidates = await getConfirmedLightningFeeSettlementCandidates({
+      limit: feeSettlementLimit,
+      cutoff: feeSettlementCutoff
+    })
+    for (const payment of feeSettlementCandidates) {
+      try {
+        const result = await reconcileConfirmedLightningFeeSettlement(payment)
+        if (result.checked) feeSettlementReconciled += 1
+      } catch (error) {
+        feeSettlementErrors += 1
+        console.warn("[payment-maintenance] fee settlement reconciliation failed", {
+          paymentId: payment.id,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+
     const completedAt = new Date(options?.now ?? Date.now()).toISOString()
-    const failures = sweep.failures + watcherErrors + reconcileErrors + lightningErrors
+    const failures = sweep.failures + watcherErrors + reconcileErrors + lightningErrors + feeSettlementErrors
     const summary: PaymentMaintenanceSummary = {
       runId,
       startedAt,
@@ -384,7 +419,10 @@ export async function runPaymentMaintenanceTick(options?: {
       reconcileErrors,
       lightningCandidates: lightningCandidates.length,
       lightningReconciled,
-      lightningErrors
+      lightningErrors,
+      feeSettlementCandidates: feeSettlementCandidates.length,
+      feeSettlementReconciled,
+      feeSettlementErrors
     }
     console.info("[payment-maintenance] run completed", summary)
     return summary

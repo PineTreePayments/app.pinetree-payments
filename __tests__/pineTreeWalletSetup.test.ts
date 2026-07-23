@@ -1685,7 +1685,7 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("\"Approve withdrawal\"")
     expect(page).toContain("Authorizing withdrawal")
     expect(page).toContain("Confirm this withdrawal in PineTree Wallet.")
-    expect(page).toContain("Withdrawal couldn't be completed")
+    expect(page).toContain("Withdrawal failed")
     expect(page).toContain("Done")
     expect(page).toContain("\"Processing\"")
     expect(page).toContain('setWithdrawalScreen("review")')
