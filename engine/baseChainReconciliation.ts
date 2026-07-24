@@ -29,11 +29,6 @@ import { normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 import { buildBaseWatchInput } from "./checkPaymentOnce"
 import { watchPaymentOnce, RpcTransportError } from "./paymentWatcher"
 import { getTransactionByPaymentId } from "@/database/transactions"
-import {
-  getBaseReconcileScanCursor,
-  setBaseReconcileScanCursor,
-  clearBaseReconcileScanCursor
-} from "@/database/baseWatcherLeases"
 
 export type BaseReconcileOutcome = {
   paymentId: string
@@ -102,39 +97,20 @@ export async function reconcileBasePaymentFromChain(
   const lookbackOverride = estimateLookbackBlocks(payment.created_at)
   const watcherPath = txHash ? "txHash-fast-path" : "chunked-log-fallback"
 
-  // Only the no-txHash chunked fallback scan can ever need to resume deeper
-  // across calls — the txHash fast path is a single, complete receipt check
-  // every time. Without this, every self-heal pass re-scans the exact same
-  // newest-blocks window (bounded by MAX_LOG_SCAN_CHUNKS_PER_CALL in
-  // engine/paymentWatcher.ts) and can never reach older evidence once enough
-  // real time has passed for it to fall outside that window.
-  const scanCeilingBlock = txHash ? undefined : await getBaseReconcileScanCursor(paymentId)
-  let lastScannedFromBlock: number | undefined
-
   console.info("[baseChainReconciliation] reconcile started", {
     paymentId,
     previousStatus,
     feeCaptureMethod: watchInput.feeCaptureMethod || null,
     hasStoredTxHash: Boolean(txHash),
     watcherPath,
-    lookbackOverride: lookbackOverride || null,
-    resumingFromCursor: scanCeilingBlock ?? null
+    lookbackOverride: lookbackOverride || null
   })
 
   const timeoutMs = Math.max(1_000, options?.timeoutMs ?? 8_000)
   let detected = false
   try {
     detected = await Promise.race([
-      watchPaymentOnce({
-        ...watchInput,
-        txHash,
-        reconcile: true,
-        lookbackOverride,
-        scanCeilingBlock: scanCeilingBlock ?? undefined,
-        onFallbackChunkScanned: (chunk) => {
-          lastScannedFromBlock = chunk.fromBlock
-        }
-      }),
+      watchPaymentOnce({ ...watchInput, txHash, reconcile: true, lookbackOverride }),
       new Promise<boolean>((resolve) => {
         setTimeout(() => resolve(false), timeoutMs)
       })
@@ -152,19 +128,6 @@ export async function reconcileBasePaymentFromChain(
     // contract of never throwing, so one payment's reconciliation trouble
     // never aborts the rest of the maintenance sweep.
     if (error instanceof RpcTransportError) throw error
-  }
-
-  if (!txHash) {
-    // detected, or nothing left to scan (reached the bottom of the lookback
-    // window without a match): reset so the next attempt (if any - a new
-    // INCOMPLETE payment reusing this cursor slot, or simply starting over)
-    // begins fresh from the newest blocks again instead of resuming from a
-    // now-meaningless or exhausted position.
-    if (detected || lastScannedFromBlock === undefined) {
-      await clearBaseReconcileScanCursor(paymentId)
-    } else {
-      await setBaseReconcileScanCursor(paymentId, lastScannedFromBlock - 1)
-    }
   }
 
   const refreshed = await getPaymentById(paymentId)
