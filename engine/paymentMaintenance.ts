@@ -211,21 +211,8 @@ export async function ensurePaymentFresh(
     if (changed) action = "marked_incomplete"
   } else if (
     previousStatus === "PROCESSING" ||
-    (previousStatus === "PENDING" && (hasEvidence || Boolean(options?.txHash)))
+    (previousStatus === "PENDING" && (hasEvidence || options?.forceWatcher))
   ) {
-    // A bare forceWatcher (no txHash, no other stored evidence) is
-    // deliberately NOT enough to enter this branch. /detect is also called
-    // with an empty body as an "ambiguous WalletConnect error" precheck
-    // (components/pos/POSLayout.tsx) — a genuine "is this already further
-    // along than I think?" status read, not proof a transaction was ever
-    // broadcast. Gating on forceWatcher alone previously forced a full
-    // chunked eth_getLogs fallback scan (engine/paymentWatcher.ts) on every
-    // one of those prechecks — including while truly still awaiting wallet
-    // approval — which is exactly the repeated-fallback-scan / Alchemy 429
-    // pattern this must never produce. A real txHash (caller-supplied or,
-    // via runPaymentWatcher's own lookup, previously stored) still always
-    // qualifies.
-    //
     // maxAttempts: 1 — this path is reached synchronously from the
     // customer-facing POST /detect route (engine/paymentDetect.ts) the moment
     // a wallet returns a transaction hash. runPaymentWatcher's default retry

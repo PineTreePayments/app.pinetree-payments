@@ -860,24 +860,30 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       // wallet had already connected: a slow relay round-trip can mean the
       // wallet is still completing (or already completed) the send even
       // though this request itself timed out / expired on our side with no
-      // txHash returned. Take one bounded look at the chain before showing
-      // "failed" — a false failure here is what previously led a merchant to
-      // cancel a payment that had, in fact, already gone through.
+      // txHash returned. Read canonical DB status before showing "failed" —
+      // a false failure here is what previously led a merchant to cancel a
+      // payment that had, in fact, already gone through.
+      //
+      // This is a plain read of the same status endpoint every other poller
+      // in the app already uses (GET /api/payments/status) - it never POSTs
+      // to /detect without a txHash. There is no evidence a transaction was
+      // ever broadcast at this point, so this must never itself trigger a
+      // blockchain watcher or mark the payment PROCESSING; it can only
+      // observe a status some other path (a normal txHash detect call, the
+      // routine maintenance sweep) has already established.
       if (!isRejection && walletConnectedForAttempt && !finalTxHashSubmitted) {
         console.log("[POS Base WC] ambiguous_error_precheck", { intentId: iid, paymentId, asset, error: message })
         try {
-          const precheckRes = await fetch(`/api/payments/${encodeURIComponent(paymentId)}/detect`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
-          })
-          const precheckData = (await precheckRes.json().catch(() => null)) as { status?: string; detected?: boolean } | null
+          const precheckRes = await fetch(
+            `/api/payments/status?paymentId=${encodeURIComponent(paymentId)}`,
+            { cache: "no-store" }
+          )
+          const precheckData = (await precheckRes.json().catch(() => null)) as { status?: string } | null
           const precheckStatus = String(precheckData?.status || "").toUpperCase()
           console.log("[POS Base WC] ambiguous_error_precheck_resolved", {
             intentId: iid,
             paymentId,
             status: precheckStatus || null,
-            detected: Boolean(precheckData?.detected),
           })
           if (precheckStatus === "PROCESSING" || precheckStatus === "CONFIRMED") {
             await updatePosBaseSession(iid, { step: "confirming" })
