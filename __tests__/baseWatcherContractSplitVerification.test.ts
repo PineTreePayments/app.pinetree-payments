@@ -241,6 +241,163 @@ describe("watchPaymentOnce — Base contract_split verification (no stored txHas
   })
 })
 
+/**
+ * Regression coverage for the live production incident: Alchemy's free tier
+ * rejects any eth_getLogs request spanning more than 10 inclusive blocks
+ * ("Under the Free tier plan, you can make eth_getLogs requests with up to a
+ * 10 block range"). Payment eb677bdf-a06e-4e54-9d8b-7673badb92ae had no
+ * stored tx hash (the wallet's eth_sendTransaction response never reached the
+ * POS session — see payment_intents.metadata.pos_base_session, stuck at
+ * "payment_sending" with no txHash recorded), so the watcher fell all the
+ * way through to the broad fallback scan, which at the time issued one
+ * eth_getLogs call spanning the full ~48-49 block lookback in a single
+ * request and was rejected outright. These tests prove the fallback scan now
+ * paginates into <= 10 inclusive-block chunks, walks newest-first, and stops
+ * immediately after finding and confirming an exact match.
+ */
+describe("watchPaymentOnce — chunked fallback log scan (Alchemy free-tier 10-block limit)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  function capturedEthGetLogsRanges(fetchMock: ReturnType<typeof vi.fn>) {
+    return fetchMock.mock.calls
+      .filter(([, init]) => JSON.parse(String((init as RequestInit).body)).method === "eth_getLogs")
+      .map(([, init]) => {
+        const params = JSON.parse(String((init as RequestInit).body)).params as Array<{
+          fromBlock: string
+          toBlock: string
+        }>
+        return { fromBlock: parseInt(params[0].fromBlock, 16), toBlock: parseInt(params[0].toBlock, 16) }
+      })
+  }
+
+  it("splits a 48-49 block lookback into valid chunks of at most 10 inclusive blocks each", async () => {
+    const getLogsSpy = vi.fn(() => [])
+    const fetchMock = jsonRpcResponder({
+      eth_blockNumber: () => "0x100", // 256
+      eth_getLogs: getLogsSpy
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    // 49-block lookback: currentBlock 256, startBlock 256-49=207 -> range [207, 256]
+    await watchPaymentOnce({ ...baseWatchInput, asset: "ETH", lookbackOverride: 49 })
+
+    const ranges = capturedEthGetLogsRanges(fetchMock)
+    expect(ranges.length).toBeGreaterThan(1) // must have paginated, not one oversized call
+    for (const range of ranges) {
+      const inclusiveBlockCount = range.toBlock - range.fromBlock + 1
+      expect(inclusiveBlockCount).toBeLessThanOrEqual(10)
+      expect(inclusiveBlockCount).toBeGreaterThan(0)
+    }
+    // Every requested block in [207, 256] must be covered by exactly the union of chunks.
+    expect(Math.min(...ranges.map((r) => r.fromBlock))).toBe(207)
+    expect(Math.max(...ranges.map((r) => r.toBlock))).toBe(256)
+  })
+
+  it("searches newest blocks first — the first chunk's range ends at the current block", async () => {
+    const getLogsSpy = vi.fn(() => [])
+    const fetchMock = jsonRpcResponder({
+      eth_blockNumber: () => "0x100",
+      eth_getLogs: getLogsSpy
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    await watchPaymentOnce({ ...baseWatchInput, asset: "ETH", lookbackOverride: 48 })
+
+    const ranges = capturedEthGetLogsRanges(fetchMock)
+    expect(ranges[0].toBlock).toBe(256)
+    expect(ranges[0].fromBlock).toBe(247) // 256 - 10 + 1
+    // Ranges must strictly decrease (newest-first, no overlap, no gaps).
+    for (let i = 1; i < ranges.length; i++) {
+      expect(ranges[i].toBlock).toBe(ranges[i - 1].fromBlock - 1)
+    }
+  })
+
+  it("stops issuing further chunk requests once an exact match is found and confirmed", async () => {
+    const matchingLog = {
+      address: SPLIT_CONTRACT.toLowerCase(),
+      topics: [PAYMENT_SPLIT_TOPIC, "0x", "0x", topicFromAddress(PAYER)],
+      data: encodePaymentSplitLog({
+        merchantAmount: BigInt("143733996284210"),
+        feeAmount: BigInt("79852220157894"),
+        paymentRef: PAYMENT_ID,
+        token: ZeroAddress
+      }),
+      transactionHash: "0xchunkedmatch"
+    }
+
+    let callCount = 0
+    const getLogsSpy = vi.fn(() => {
+      callCount += 1
+      // Match only appears in the 3rd (older) chunk — earlier (newer) chunks are empty.
+      return callCount === 3 ? [matchingLog] : []
+    })
+    const fetchMock = jsonRpcResponder({
+      eth_blockNumber: () => "0x100",
+      eth_getLogs: getLogsSpy
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const detected = await watchPaymentOnce({ ...baseWatchInput, asset: "ETH", lookbackOverride: 49 })
+
+    expect(detected).toBe(true)
+    expect(getLogsSpy).toHaveBeenCalledTimes(3) // stopped right after the match, did not scan remaining chunks
+    expect(mockProcessPaymentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "payment.confirmed", txHash: "0xchunkedmatch" })
+    )
+  })
+
+  it("bounds the number of chunks scanned per call even for a very deep lookback (self-heal reconciliation of an old payment)", async () => {
+    const getLogsSpy = vi.fn(() => [])
+    const fetchMock = jsonRpcResponder({
+      eth_blockNumber: () => "0x100000", // a large current block so a huge lookback fits
+      eth_getLogs: getLogsSpy
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    // A very old payment's reconciliation lookback (e.g. tens of thousands of
+    // blocks) must not turn into thousands of sequential RPC calls in one go.
+    await watchPaymentOnce({ ...baseWatchInput, asset: "ETH", lookbackOverride: 43_200 })
+
+    expect(getLogsSpy.mock.calls.length).toBeLessThanOrEqual(30)
+  })
+
+  it("still returns false (nothing found, safe to retry later) after exhausting the per-call chunk budget", async () => {
+    const getLogsSpy = vi.fn(() => [])
+    global.fetch = jsonRpcResponder({
+      eth_blockNumber: () => "0x100000",
+      eth_getLogs: getLogsSpy
+    }) as unknown as typeof fetch
+
+    const detected = await watchPaymentOnce({ ...baseWatchInput, asset: "ETH", lookbackOverride: 43_200 })
+
+    expect(detected).toBe(false)
+    expect(mockProcessPaymentEvent).not.toHaveBeenCalled()
+  })
+
+  it("a genuine RPC-level error on any chunk still throws RpcTransportError instead of being treated as an empty chunk", async () => {
+    global.fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { method: string }
+      if (body.method === "eth_blockNumber") {
+        return { json: async () => ({ jsonrpc: "2.0", id: 1, result: "0x100" }) } as Response
+      }
+      return {
+        json: async () => ({
+          jsonrpc: "2.0",
+          id: 1,
+          error: { code: -32600, message: "Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range" }
+        })
+      } as Response
+    }) as unknown as typeof fetch
+
+    await expect(
+      watchPaymentOnce({ ...baseWatchInput, asset: "ETH", lookbackOverride: 49 })
+    ).rejects.toBeInstanceOf(RpcTransportError)
+    expect(mockProcessPaymentEvent).not.toHaveBeenCalled()
+  })
+})
+
 describe("watchPaymentOnce — reverted Base transaction", () => {
   beforeEach(() => {
     vi.clearAllMocks()

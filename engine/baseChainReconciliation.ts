@@ -95,12 +95,14 @@ export async function reconcileBasePaymentFromChain(
   const transaction = await getTransactionByPaymentId(paymentId)
   const txHash = String(transaction?.provider_transaction_id || "").trim() || undefined
   const lookbackOverride = estimateLookbackBlocks(payment.created_at)
+  const watcherPath = txHash ? "txHash-fast-path" : "chunked-log-fallback"
 
   console.info("[baseChainReconciliation] reconcile started", {
     paymentId,
     previousStatus,
     feeCaptureMethod: watchInput.feeCaptureMethod || null,
     hasStoredTxHash: Boolean(txHash),
+    watcherPath,
     lookbackOverride: lookbackOverride || null
   })
 

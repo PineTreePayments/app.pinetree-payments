@@ -17,6 +17,7 @@ import { StoredPaymentSplitMetadata } from "@/types/payment"
 import { markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
+import { getTransactionByPaymentId } from "@/database/transactions"
 
 /**
  * Build the WatchOnceInput for a payment from its stored split metadata.
@@ -118,6 +119,36 @@ export async function runPaymentWatcher(
   const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
   const isBase = String(payment.network || "").toLowerCase() === "base"
 
+  // The tx-hash fast path (a single eth_getTransactionReceipt call) must be
+  // authoritative whenever a canonical hash exists — including when the
+  // caller (e.g. the maintenance cron's routine PENDING/PROCESSING re-check,
+  // engine/paymentMaintenance.ts's runWatcherWithTimeout -> runPaymentWatcher(paymentId)
+  // with no options) never explicitly passes one. Without this lookup a
+  // payment whose hash was already persisted by an earlier /detect call
+  // would still fall through to the broad eth_getLogs fallback scan on every
+  // subsequent routine check, which is both slower and (before the chunking
+  // fix below) capable of exceeding Alchemy's free-tier eth_getLogs block
+  // range limit outright.
+  let effectiveTxHash = String(options?.txHash || "").trim() || undefined
+  let txHashSource: "caller_supplied" | "stored_provider_transaction_id" | "none" =
+    effectiveTxHash ? "caller_supplied" : "none"
+  if (!effectiveTxHash) {
+    try {
+      const transaction = await getTransactionByPaymentId(paymentId)
+      const storedTxHash = String(transaction?.provider_transaction_id || "").trim()
+      if (storedTxHash) {
+        effectiveTxHash = storedTxHash
+        txHashSource = "stored_provider_transaction_id"
+      }
+    } catch (error) {
+      console.warn("[checkPaymentOnce] failed to look up stored transaction reference", {
+        paymentId,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+  }
+  const watcherPath = effectiveTxHash ? "txHash-fast-path" : "chunked-log-fallback"
+
   if (isBase) {
     console.info("[PineTreeBaseTrace] watcher engine started", {
       step: "watcher-entry",
@@ -127,12 +158,14 @@ export async function runPaymentWatcher(
       baseUsdcStrategy: split?.baseUsdcStrategy || null,
       splitContract: split?.splitContract || null,
       feeCaptureMethod: split?.feeCaptureMethod || null,
-      txHash: options?.txHash || null,
+      txHash: effectiveTxHash || null,
+      txHashSource,
+      watcherPath,
       paymentStatus: payment.status
     })
   }
 
-  const watchInput = buildBaseWatchInput(payment, { txHash: options?.txHash })
+  const watchInput = buildBaseWatchInput(payment, { txHash: effectiveTxHash })
 
   // For EVM payments where we have a txHash, the receipt may not be available
   // immediately after the tx is submitted. Retry up to 5 times with a short delay
@@ -151,15 +184,15 @@ export async function runPaymentWatcher(
   // sole retry mechanism in that path.
   const network = payment.network ?? ""
   const isEvmWithTxHash =
-    (network === "base" || network === "ethereum") && Boolean(options?.txHash)
+    (network === "base" || network === "ethereum") && Boolean(effectiveTxHash)
   const maxAttempts = options?.maxAttempts ?? (isEvmWithTxHash ? 5 : 1)
   const retryDelayMs = 3_000
 
   logConfirmationTrace("watcher_started", {
     paymentId,
     sessionAttemptId: options?.sessionAttemptId,
-    transactionHash: options?.txHash,
-    payload: { network: payment.network, maxAttempts }
+    transactionHash: effectiveTxHash,
+    payload: { network: payment.network, maxAttempts, watcherPath, txHashSource }
   })
 
   // Tracks the most recent failure so that, if every attempt fails, we can
@@ -179,7 +212,7 @@ export async function runPaymentWatcher(
           console.info("[PineTreeBaseTrace] watcher detected payment", {
             step: "watcher-detected",
             paymentId,
-            txHash: options?.txHash || null,
+            txHash: effectiveTxHash || null,
             network: payment.network,
             attempt
           })
@@ -187,8 +220,8 @@ export async function runPaymentWatcher(
         logConfirmationTrace("watcher_detected_transaction", {
           paymentId,
           sessionAttemptId: options?.sessionAttemptId,
-          transactionHash: options?.txHash,
-          payload: { attempt }
+          transactionHash: effectiveTxHash,
+          payload: { attempt, watcherPath }
         })
         return true
       }
@@ -204,7 +237,8 @@ export async function runPaymentWatcher(
         console.error("[PineTreeBaseTrace] watcher attempt error", {
           step: "watcher-attempt-error",
           paymentId,
-          txHash: options?.txHash || null,
+          txHash: effectiveTxHash || null,
+          watcherPath,
           network: payment.network,
           attempt,
           maxAttempts,
@@ -222,7 +256,8 @@ export async function runPaymentWatcher(
     console.info("[PineTreeBaseTrace] watcher completed without detection", {
       step: "watcher-not-detected",
       paymentId,
-      txHash: options?.txHash || null,
+      txHash: effectiveTxHash || null,
+      watcherPath,
       network: payment.network,
       attemptsUsed: maxAttempts,
       finalFailureWasRpcTransportError: lastError instanceof RpcTransportError

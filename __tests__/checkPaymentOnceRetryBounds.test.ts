@@ -16,9 +16,13 @@ const mocks = vi.hoisted(() => ({
   getPaymentById: vi.fn(),
   watchPaymentOnce: vi.fn(),
   markPaymentIncompleteIfAbandoned: vi.fn(),
+  getTransactionByPaymentId: vi.fn(),
 }))
 
 vi.mock("@/database", () => ({ getPaymentById: mocks.getPaymentById }))
+vi.mock("@/database/transactions", () => ({
+  getTransactionByPaymentId: mocks.getTransactionByPaymentId,
+}))
 vi.mock("@/engine/paymentWatcher", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/engine/paymentWatcher")>()
   return { ...actual, watchPaymentOnce: mocks.watchPaymentOnce }
@@ -118,5 +122,110 @@ describe("runPaymentWatcher - retry bounds", () => {
     await expect(resultPromise).resolves.toBe(false)
     expect(mocks.watchPaymentOnce).toHaveBeenCalledTimes(5)
     expect(mocks.markPaymentIncompleteIfAbandoned).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * Regression coverage for the live incident where the routine watcher path
+ * ignored an already-persisted transaction hash and fell through to the
+ * (at the time, unbounded) eth_getLogs fallback scan on every periodic
+ * re-check. Callers like engine/paymentMaintenance.ts's routine
+ * PENDING/PROCESSING sweep call runPaymentWatcher(paymentId) with no options
+ * at all — the stored transactions.provider_transaction_id must still be
+ * treated as authoritative in that case, not just when a caller explicitly
+ * threads a fresh txHash through (e.g. the customer-facing /detect route).
+ */
+describe("runPaymentWatcher - stored tx hash fast-path authority", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("looks up and uses the stored transaction hash when the caller passes none", async () => {
+    mocks.getPaymentById.mockResolvedValue(payment())
+    mocks.getTransactionByPaymentId.mockResolvedValue({
+      id: "txn-1",
+      provider_transaction_id: "0xstoredhash",
+    })
+    mocks.watchPaymentOnce.mockResolvedValue(true)
+
+    const { runPaymentWatcher } = await import("@/engine/checkPaymentOnce")
+    const result = await runPaymentWatcher("pay-1")
+
+    expect(result).toBe(true)
+    expect(mocks.getTransactionByPaymentId).toHaveBeenCalledWith("pay-1")
+    expect(mocks.watchPaymentOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ txHash: "0xstoredhash" })
+    )
+  })
+
+  it("uses the stored hash's fast-path attempt budget (single check) even though it wasn't caller-supplied, matching the routine sweep's expectations", async () => {
+    // maxAttempts defaults to 5 for EVM+txHash callers that don't override
+    // it; the point under test is that a STORED hash counts as "has a
+    // txHash" for that decision, exactly like a caller-supplied one would.
+    mocks.getPaymentById.mockResolvedValue(payment())
+    mocks.getTransactionByPaymentId.mockResolvedValue({
+      id: "txn-1",
+      provider_transaction_id: "0xstoredhash",
+    })
+    mocks.watchPaymentOnce.mockResolvedValue(false)
+
+    const { runPaymentWatcher } = await import("@/engine/checkPaymentOnce")
+    const resultPromise = runPaymentWatcher("pay-1")
+
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(3_000)
+    }
+
+    await expect(resultPromise).resolves.toBe(false)
+    expect(mocks.watchPaymentOnce).toHaveBeenCalledTimes(5)
+    for (const [input] of mocks.watchPaymentOnce.mock.calls) {
+      expect(input).toMatchObject({ txHash: "0xstoredhash" })
+    }
+  })
+
+  it("a caller-supplied tx hash takes precedence over any stored hash and skips the DB lookup entirely", async () => {
+    mocks.getPaymentById.mockResolvedValue(payment())
+    mocks.watchPaymentOnce.mockResolvedValue(true)
+
+    const { runPaymentWatcher } = await import("@/engine/checkPaymentOnce")
+    await runPaymentWatcher("pay-1", { txHash: "0xfreshhash" })
+
+    expect(mocks.getTransactionByPaymentId).not.toHaveBeenCalled()
+    expect(mocks.watchPaymentOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ txHash: "0xfreshhash" })
+    )
+  })
+
+  it("falls through to the chunked-log-fallback path (no txHash at all) when nothing is stored either", async () => {
+    mocks.getPaymentById.mockResolvedValue(payment())
+    mocks.getTransactionByPaymentId.mockResolvedValue(null)
+    mocks.watchPaymentOnce.mockResolvedValue(false)
+
+    const { runPaymentWatcher } = await import("@/engine/checkPaymentOnce")
+    const result = await runPaymentWatcher("pay-1")
+
+    expect(result).toBe(false)
+    expect(mocks.watchPaymentOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ txHash: undefined })
+    )
+  })
+
+  it("never fails the watcher run if the stored-hash lookup itself throws — falls back to no txHash", async () => {
+    mocks.getPaymentById.mockResolvedValue(payment())
+    mocks.getTransactionByPaymentId.mockRejectedValue(new Error("db unavailable"))
+    mocks.watchPaymentOnce.mockResolvedValue(false)
+
+    const { runPaymentWatcher } = await import("@/engine/checkPaymentOnce")
+    const result = await runPaymentWatcher("pay-1")
+
+    expect(result).toBe(false)
+    expect(mocks.watchPaymentOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ txHash: undefined })
+    )
   })
 })

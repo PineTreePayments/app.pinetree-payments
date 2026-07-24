@@ -169,6 +169,27 @@ function getAmountMatchRatio(network: string): number {
   return ratio
 }
 
+// Alchemy's free-tier eth_getLogs restriction allows at most a 10-block
+// *inclusive* range per request ("you can make eth_getLogs requests with up
+// to a 10 block range"). Every fallback log-scan request must respect this,
+// regardless of the configured lookback window — a single oversized request
+// throws immediately (see getContractEventLogs's RpcTransportError) rather
+// than silently returning nothing, so a too-large range must never be sent
+// in the first place.
+const MAX_LOG_SCAN_BLOCK_RANGE = 10
+
+// Upper bound on how many 10-block chunks a single watchPaymentOnce call will
+// scan when there is no stored tx hash to jump straight to. Newest-first
+// ordering means a normal, freshly-submitted payment matches within the
+// first chunk or two; this cap just keeps one foreground request (a
+// customer's own /detect poll) from turning into dozens of sequential RPC
+// round trips if nothing is found nearby. Any remaining part of the lookback
+// window is left for the next call — the periodic maintenance sweep and
+// self-heal reconciliation both call in repeatedly over time, so deeper
+// coverage is a background/recovery concern, not something one request needs
+// to exhaust.
+const MAX_LOG_SCAN_CHUNKS_PER_CALL = 30
+
 function getLookbackWindow(network: string): number {
   const normalized = String(network || "").toLowerCase().trim()
   // Solana: 1500 slots ≈ 10 minutes — safely covers a 5-min cron interval with overlap.
@@ -428,7 +449,6 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
     ? Math.floor(Number(input.lookbackOverride))
     : getLookbackWindow(input.network)
   const startBlock = Math.max(0, currentBlock - lookback)
-  const fromBlockHex = "0x" + startBlock.toString(16)
 
   if (input.txHash && feeCaptureMethod !== "contract_split") {
     const receipt = await getTransactionReceipt(rpcUrl, input.txHash)
@@ -673,87 +693,71 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       )
     }
 
-    // fallback: broad eth_getLogs scan (cron / webhook paths, no txHash available)
-    const logs = await getContractEventLogs(rpcUrl, splitContractEvm, PAYMENT_SPLIT_TOPIC, fromBlockHex)
+    // fallback: chunked eth_getLogs scan (cron / self-heal reconciliation
+    // paths, no txHash available). Alchemy's free tier rejects any
+    // eth_getLogs request spanning more than 10 inclusive blocks, so this
+    // never issues one call over the full lookback window — it walks
+    // backward from the current block in MAX_LOG_SCAN_BLOCK_RANGE-block
+    // chunks, newest first, and stops the instant a verified match is found.
+    // A bounded number of chunks are scanned per call (MAX_LOG_SCAN_CHUNKS_PER_CALL)
+    // so one foreground request stays fast; any remaining part of the window
+    // is left for the next maintenance/reconciliation call rather than
+    // exhausted here.
+    let chunkToBlock = currentBlock
+    let chunkIndex = 0
+    let totalLogsChecked = 0
 
-    if (logs.length === 0) {
-      console.info("[watcher:evm] no PaymentSplit events in lookback window", {
+    while (chunkToBlock >= startBlock && chunkIndex < MAX_LOG_SCAN_CHUNKS_PER_CALL) {
+      const chunkFromBlock = Math.max(startBlock, chunkToBlock - MAX_LOG_SCAN_BLOCK_RANGE + 1)
+      const inclusiveBlockCount = chunkToBlock - chunkFromBlock + 1
+      chunkIndex += 1
+
+      console.info("[watcher:evm] fallback log scan chunk", {
         paymentId: input.paymentId,
         splitContract: splitContractEvm,
-        fromBlock: startBlock,
-        toBlock: currentBlock
+        watcherPath: "chunked-log-fallback",
+        chunkIndex,
+        fromBlock: chunkFromBlock,
+        toBlock: chunkToBlock,
+        inclusiveBlockCount
       })
-      return false
-    }
-
-    for (const log of logs) {
-      const decoded = decodePaymentSplitLog(log.data)
-      if (!decoded) continue
-
-      if (!isValidBaseUsdcToken(decoded.token, isBaseUsdc)) {
-        console.info("[watcher:evm] PaymentSplit event token mismatch", {
+      if (isBaseNetwork) {
+        console.info("[PineTreeBaseTrace] watcher:evm fallback chunk", {
+          step: "watcher-evm-fallback-chunk",
           paymentId: input.paymentId,
-          txHash: log.transactionHash,
-          token: decoded.token
+          watcherPath: "chunked-log-fallback",
+          chunkIndex,
+          fromBlock: chunkFromBlock,
+          toBlock: chunkToBlock,
+          inclusiveBlockCount
         })
-        continue
       }
 
-      if (decoded.paymentRef !== input.paymentId) continue
-
-      // Validate both legs against expected amounts before accepting this event.
-      // The contract emits amounts in the token's atomic unit (Wei for ETH).
-      // expectedMerchantAtomic / expectedFeeAtomic are stored in the same unit.
-      const merchantAmountNum = Number(decoded.merchantAmount)
-      const feeAmountNum = Number(decoded.feeAmount)
-      const expectedMerchantNum = Number(input.expectedMerchantAtomic || 0)
-      const expectedFeeNum = Number(input.expectedFeeAtomic || 0)
-      const merchantThreshold = expectedMerchantNum > 0 ? expectedMerchantNum * matchRatio : 0
-      const feeThreshold = expectedFeeNum > 0 ? expectedFeeNum * matchRatio : 0
-
-      if (merchantAmountNum < merchantThreshold || feeAmountNum < feeThreshold) {
-        console.info("[watcher:evm] PaymentSplit event amounts below threshold", {
-          paymentId: input.paymentId,
-          txHash: log.transactionHash,
-          merchantAmount: merchantAmountNum,
-          expectedMerchant: expectedMerchantNum,
-          merchantThreshold,
-          feeAmount: feeAmountNum,
-          expectedFee: expectedFeeNum,
-          feeThreshold
-        })
-        continue
-      }
-
-      // payer is topics[3] (indexed) — last 20 bytes = 40 hex chars
-      const payerTopic = String(log.topics[3] || "")
-      const payer = payerTopic.length >= 42 ? "0x" + payerTopic.slice(-40) : "unknown"
-
-      console.info("[watcher:evm] PaymentSplit event matched — both legs validated", {
-        paymentId: input.paymentId,
-        txHash: log.transactionHash,
-        payer,
-        token: decoded.token,
-        merchantAmount: merchantAmountNum,
-        feeAmount: feeAmountNum
-      })
-
-      // Pass total atomic value (merchant + fee) for audit trail.
-      // feeCaptureValidated: true because both legs are on-chain and validated above.
-      const totalAtomic = String(merchantAmountNum + feeAmountNum)
-      const detected = await handleMatchingTransaction(
-        input.paymentId,
-        { hash: log.transactionHash, value: totalAtomic, from: payer },
-        true,
-        input.reconcile
+      const logs = await getContractEventLogs(
+        rpcUrl,
+        splitContractEvm,
+        PAYMENT_SPLIT_TOPIC,
+        "0x" + chunkFromBlock.toString(16),
+        "0x" + chunkToBlock.toString(16)
       )
-      if (detected) return true
+      totalLogsChecked += logs.length
+
+      if (logs.length > 0) {
+        const detected = await matchAndConfirmPaymentSplitLogs(logs, input, matchRatio, isBaseUsdc)
+        if (detected) return true
+      }
+
+      if (chunkFromBlock === startBlock) break
+      chunkToBlock = chunkFromBlock - 1
     }
 
-    console.info("[watcher:evm] no PaymentSplit event matched paymentId", {
+    console.info("[watcher:evm] no PaymentSplit event matched paymentId across fallback chunks", {
       paymentId: input.paymentId,
       splitContract: splitContractEvm,
-      logsChecked: logs.length
+      chunksScanned: chunkIndex,
+      logsChecked: totalLogsChecked,
+      fromBlock: startBlock,
+      toBlock: currentBlock
     })
     if (isBaseNetwork) {
       console.info("[PineTreeBaseTrace] watcher:evm fallback scan — no match", {
@@ -761,7 +765,9 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
         paymentId: input.paymentId,
         network: input.network,
         splitContract: splitContractEvm,
-        logsChecked: logs.length
+        watcherPath: "chunked-log-fallback",
+        chunksScanned: chunkIndex,
+        logsChecked: totalLogsChecked
       })
     }
     return false
@@ -852,6 +858,87 @@ async function handleMatchingTransaction(
   })
 
   return true
+}
+
+/**
+ * Evaluate a batch of PaymentSplit event logs (from one fallback eth_getLogs
+ * chunk) against this payment's expected paymentRef/token/amounts, and
+ * confirm through the standard engine handoff on the first full match.
+ *
+ * Shared by every chunk in the fallback scan below so chunking never changes
+ * matching behavior — only how many logs arrive per RPC call.
+ */
+async function matchAndConfirmPaymentSplitLogs(
+  logs: EvmLog[],
+  input: WatchOnceInput,
+  matchRatio: number,
+  isBaseUsdc: boolean
+): Promise<boolean> {
+  for (const log of logs) {
+    const decoded = decodePaymentSplitLog(log.data)
+    if (!decoded) continue
+
+    if (!isValidBaseUsdcToken(decoded.token, isBaseUsdc)) {
+      console.info("[watcher:evm] PaymentSplit event token mismatch", {
+        paymentId: input.paymentId,
+        txHash: log.transactionHash,
+        token: decoded.token
+      })
+      continue
+    }
+
+    if (decoded.paymentRef !== input.paymentId) continue
+
+    // Validate both legs against expected amounts before accepting this event.
+    // The contract emits amounts in the token's atomic unit (Wei for ETH).
+    // expectedMerchantAtomic / expectedFeeAtomic are stored in the same unit.
+    const merchantAmountNum = Number(decoded.merchantAmount)
+    const feeAmountNum = Number(decoded.feeAmount)
+    const expectedMerchantNum = Number(input.expectedMerchantAtomic || 0)
+    const expectedFeeNum = Number(input.expectedFeeAtomic || 0)
+    const merchantThreshold = expectedMerchantNum > 0 ? expectedMerchantNum * matchRatio : 0
+    const feeThreshold = expectedFeeNum > 0 ? expectedFeeNum * matchRatio : 0
+
+    if (merchantAmountNum < merchantThreshold || feeAmountNum < feeThreshold) {
+      console.info("[watcher:evm] PaymentSplit event amounts below threshold", {
+        paymentId: input.paymentId,
+        txHash: log.transactionHash,
+        merchantAmount: merchantAmountNum,
+        expectedMerchant: expectedMerchantNum,
+        merchantThreshold,
+        feeAmount: feeAmountNum,
+        expectedFee: expectedFeeNum,
+        feeThreshold
+      })
+      continue
+    }
+
+    // payer is topics[3] (indexed) — last 20 bytes = 40 hex chars
+    const payerTopic = String(log.topics[3] || "")
+    const payer = payerTopic.length >= 42 ? "0x" + payerTopic.slice(-40) : "unknown"
+
+    console.info("[watcher:evm] PaymentSplit event matched — both legs validated", {
+      paymentId: input.paymentId,
+      txHash: log.transactionHash,
+      payer,
+      token: decoded.token,
+      merchantAmount: merchantAmountNum,
+      feeAmount: feeAmountNum
+    })
+
+    // Pass total atomic value (merchant + fee) for audit trail.
+    // feeCaptureValidated: true because both legs are on-chain and validated above.
+    const totalAtomic = String(merchantAmountNum + feeAmountNum)
+    const detected = await handleMatchingTransaction(
+      input.paymentId,
+      { hash: log.transactionHash, value: totalAtomic, from: payer },
+      true,
+      input.reconcile
+    )
+    if (detected) return true
+  }
+
+  return false
 }
 
 // ─── RPC helpers ─────────────────────────────────────────────────────────────
@@ -954,7 +1041,8 @@ async function getContractEventLogs(
   rpcUrl: string,
   contractAddress: string,
   topic: string,
-  fromBlock: string
+  fromBlock: string,
+  toBlock: string = "latest"
 ): Promise<EvmLog[]> {
   let response: Response
   try {
@@ -968,7 +1056,7 @@ async function getContractEventLogs(
           address: contractAddress,
           topics: [topic],
           fromBlock,
-          toBlock: "latest"
+          toBlock
         }],
         id: 1
       })
