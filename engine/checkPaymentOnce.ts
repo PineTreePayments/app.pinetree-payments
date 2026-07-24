@@ -18,6 +18,13 @@ import { markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 import { getTransactionByPaymentId } from "@/database/transactions"
+import { acquireBaseWatcherLease, releaseBaseWatcherLease } from "@/database/baseWatcherLeases"
+
+// Durable, cross-Vercel-instance single-flight window for one Base
+// confirmation check. Comfortably covers the retry loop below (up to 5
+// attempts x 3s sleep plus RPC latency) with margin, and self-expires even
+// if this process crashes mid-check without ever reaching the release call.
+const BASE_WATCHER_LEASE_TTL_MS = 30_000
 
 /**
  * Build the WatchOnceInput for a payment from its stored split metadata.
@@ -188,92 +195,113 @@ export async function runPaymentWatcher(
   const maxAttempts = options?.maxAttempts ?? (isEvmWithTxHash ? 5 : 1)
   const retryDelayMs = 3_000
 
-  logConfirmationTrace("watcher_started", {
-    paymentId,
-    sessionAttemptId: options?.sessionAttemptId,
-    transactionHash: effectiveTxHash,
-    payload: { network: payment.network, maxAttempts, watcherPath, txHashSource }
-  })
-
-  // Tracks the most recent failure so that, if every attempt fails, we can
-  // tell a real RPC/transport failure (the check never actually happened)
-  // apart from a clean "no match yet" — see RpcTransportError in
-  // paymentWatcher.ts. Reset to null whenever an attempt completes cleanly
-  // (even with detected: false), since that proves the RPC endpoint is
-  // actually working at that moment.
-  let lastError: unknown = null
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const detected = await watchPaymentOnce(watchInput)
-      lastError = null
-      if (detected) {
-        if (isBase) {
-          console.info("[PineTreeBaseTrace] watcher detected payment", {
-            step: "watcher-detected",
-            paymentId,
-            txHash: effectiveTxHash || null,
-            network: payment.network,
-            attempt
-          })
-        }
-        logConfirmationTrace("watcher_detected_transaction", {
-          paymentId,
-          sessionAttemptId: options?.sessionAttemptId,
-          transactionHash: effectiveTxHash,
-          payload: { attempt, watcherPath }
-        })
-        return true
-      }
-    } catch (error) {
-      lastError = error
-      console.error("[checkPaymentOnce] watcher error", {
+  // Durable cross-instance single-flight guard, Base only: skip this check
+  // entirely if another Vercel instance is already running one for the same
+  // payment right now, rather than duplicating RPC work against the same
+  // provider at the same time. Fails open (proceeds) on any lease-layer
+  // error - a missing/unreachable lock must never block confirmation.
+  if (isBase) {
+    const acquired = await acquireBaseWatcherLease(paymentId, BASE_WATCHER_LEASE_TTL_MS)
+    if (!acquired) {
+      console.info("[PineTreeBaseTrace] watcher skipped — lease held by another instance", {
+        step: "watcher-lease-busy",
         paymentId,
-        attempt,
-        isRpcTransportError: error instanceof RpcTransportError,
-        error: error instanceof Error ? error.message : String(error)
+        network: payment.network
       })
-      if (isBase) {
-        console.error("[PineTreeBaseTrace] watcher attempt error", {
-          step: "watcher-attempt-error",
+      return false
+    }
+  }
+
+  try {
+    logConfirmationTrace("watcher_started", {
+      paymentId,
+      sessionAttemptId: options?.sessionAttemptId,
+      transactionHash: effectiveTxHash,
+      payload: { network: payment.network, maxAttempts, watcherPath, txHashSource }
+    })
+
+    // Tracks the most recent failure so that, if every attempt fails, we can
+    // tell a real RPC/transport failure (the check never actually happened)
+    // apart from a clean "no match yet" — see RpcTransportError in
+    // paymentWatcher.ts. Reset to null whenever an attempt completes cleanly
+    // (even with detected: false), since that proves the RPC endpoint is
+    // actually working at that moment.
+    let lastError: unknown = null
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const detected = await watchPaymentOnce(watchInput)
+        lastError = null
+        if (detected) {
+          if (isBase) {
+            console.info("[PineTreeBaseTrace] watcher detected payment", {
+              step: "watcher-detected",
+              paymentId,
+              txHash: effectiveTxHash || null,
+              network: payment.network,
+              attempt
+            })
+          }
+          logConfirmationTrace("watcher_detected_transaction", {
+            paymentId,
+            sessionAttemptId: options?.sessionAttemptId,
+            transactionHash: effectiveTxHash,
+            payload: { attempt, watcherPath }
+          })
+          return true
+        }
+      } catch (error) {
+        lastError = error
+        console.error("[checkPaymentOnce] watcher error", {
           paymentId,
-          txHash: effectiveTxHash || null,
-          watcherPath,
-          network: payment.network,
           attempt,
-          maxAttempts,
+          isRpcTransportError: error instanceof RpcTransportError,
           error: error instanceof Error ? error.message : String(error)
         })
+        if (isBase) {
+          console.error("[PineTreeBaseTrace] watcher attempt error", {
+            step: "watcher-attempt-error",
+            paymentId,
+            txHash: effectiveTxHash || null,
+            watcherPath,
+            network: payment.network,
+            attempt,
+            maxAttempts,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        }
+      }
+
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
       }
     }
 
-    if (attempt < maxAttempts) {
-      await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+    if (isBase) {
+      console.info("[PineTreeBaseTrace] watcher completed without detection", {
+        step: "watcher-not-detected",
+        paymentId,
+        txHash: effectiveTxHash || null,
+        watcherPath,
+        network: payment.network,
+        attemptsUsed: maxAttempts,
+        finalFailureWasRpcTransportError: lastError instanceof RpcTransportError
+      })
     }
+
+    // Every attempt failed with an RPC-level error — the transaction was
+    // never actually checked, so this must not be treated as "abandoned" or
+    // "not detected". Surface it as a real error (counted by callers such as
+    // engine/paymentMaintenance.ts's watcherErrors) instead of silently
+    // marking the payment incomplete for lack of evidence we never obtained.
+    if (lastError instanceof RpcTransportError) {
+      throw lastError
+    }
+
+    await markPaymentIncompleteIfAbandoned(payment.id)
+
+    return false
+  } finally {
+    if (isBase) await releaseBaseWatcherLease(paymentId)
   }
-
-  if (isBase) {
-    console.info("[PineTreeBaseTrace] watcher completed without detection", {
-      step: "watcher-not-detected",
-      paymentId,
-      txHash: effectiveTxHash || null,
-      watcherPath,
-      network: payment.network,
-      attemptsUsed: maxAttempts,
-      finalFailureWasRpcTransportError: lastError instanceof RpcTransportError
-    })
-  }
-
-  // Every attempt failed with an RPC-level error — the transaction was
-  // never actually checked, so this must not be treated as "abandoned" or
-  // "not detected". Surface it as a real error (counted by callers such as
-  // engine/paymentMaintenance.ts's watcherErrors) instead of silently
-  // marking the payment incomplete for lack of evidence we never obtained.
-  if (lastError instanceof RpcTransportError) {
-    throw lastError
-  }
-
-  await markPaymentIncompleteIfAbandoned(payment.id)
-
-  return false
 }

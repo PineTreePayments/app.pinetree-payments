@@ -377,6 +377,38 @@ describe("payment maintenance", () => {
     expect(runPaymentWatcher).toHaveBeenCalledWith("pay-1", { txHash: "0xdef", maxAttempts: 1, sessionAttemptId: undefined })
   })
 
+  it("never scans the chain for a bare forceWatcher precheck with no txHash and no stored evidence (POS ambiguous-WalletConnect-error precheck)", async () => {
+    // Regression coverage: components/pos/POSLayout.tsx calls POST /detect
+    // with an empty body (no txHash) after an ambiguous WalletConnect error,
+    // purely to check whether the payment already advanced through some
+    // other path. engine/paymentDetect.ts always passes forceWatcher: true
+    // on every /detect call, hash or not. Before this fix, a bare
+    // forceWatcher was enough on its own to enter the watcher branch, which
+    // ran the full chunked eth_getLogs fallback scan even though nothing had
+    // ever been broadcast — the exact repeated-fallback-scan / Alchemy 429
+    // pattern reported in production. A genuinely PENDING-with-no-evidence
+    // payment must stay a pure DB read here.
+    vi.mocked(getPaymentById).mockResolvedValue(payment("PENDING"))
+
+    const result = await ensurePaymentFresh("pay-1", { forceWatcher: true })
+
+    expect(result).toMatchObject({ action: "none", status: "PENDING" })
+    expect(runPaymentWatcher).not.toHaveBeenCalled()
+  })
+
+  it("still runs the watcher for a bare forceWatcher precheck once real evidence is stored", async () => {
+    vi.mocked(getPaymentById).mockResolvedValue(payment("PENDING"))
+    vi.mocked(getTransactionByPaymentId).mockResolvedValue({
+      provider_transaction_id: "0xstoredhash"
+    } as never)
+    vi.mocked(runPaymentWatcher).mockResolvedValue(true)
+
+    const result = await ensurePaymentFresh("pay-1", { forceWatcher: true })
+
+    expect(result).toMatchObject({ action: "watcher_recheck", detected: true })
+    expect(runPaymentWatcher).toHaveBeenCalledWith("pay-1", undefined)
+  })
+
   it("keeps payment-state decisions out of route files", () => {
     const routeFiles = [
       "app/api/payments/status/route.ts",

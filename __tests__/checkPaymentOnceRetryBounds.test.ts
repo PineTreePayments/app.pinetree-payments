@@ -17,11 +17,17 @@ const mocks = vi.hoisted(() => ({
   watchPaymentOnce: vi.fn(),
   markPaymentIncompleteIfAbandoned: vi.fn(),
   getTransactionByPaymentId: vi.fn(),
+  acquireBaseWatcherLease: vi.fn(),
+  releaseBaseWatcherLease: vi.fn(),
 }))
 
 vi.mock("@/database", () => ({ getPaymentById: mocks.getPaymentById }))
 vi.mock("@/database/transactions", () => ({
   getTransactionByPaymentId: mocks.getTransactionByPaymentId,
+}))
+vi.mock("@/database/baseWatcherLeases", () => ({
+  acquireBaseWatcherLease: mocks.acquireBaseWatcherLease,
+  releaseBaseWatcherLease: mocks.releaseBaseWatcherLease,
 }))
 vi.mock("@/engine/paymentWatcher", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/engine/paymentWatcher")>()
@@ -50,6 +56,8 @@ describe("runPaymentWatcher - retry bounds", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
+    mocks.acquireBaseWatcherLease.mockResolvedValue(true)
+    mocks.releaseBaseWatcherLease.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -139,6 +147,8 @@ describe("runPaymentWatcher - stored tx hash fast-path authority", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
+    mocks.acquireBaseWatcherLease.mockResolvedValue(true)
+    mocks.releaseBaseWatcherLease.mockResolvedValue(undefined)
   })
 
   afterEach(() => {

@@ -54,6 +54,12 @@ vi.mock("@/engine/paymentWatcher", async (importOriginal) => {
   return { ...actual, watchPaymentOnce: vi.fn() }
 })
 
+vi.mock("@/database/baseWatcherLeases", () => ({
+  getBaseReconcileScanCursor: vi.fn().mockResolvedValue(null),
+  setBaseReconcileScanCursor: vi.fn().mockResolvedValue(undefined),
+  clearBaseReconcileScanCursor: vi.fn().mockResolvedValue(undefined)
+}))
+
 import {
   createPaymentEvent,
   getPaymentById,
@@ -63,12 +69,20 @@ import { getTransactionByPaymentId } from "@/database/transactions"
 import { processPaymentEvent } from "@/engine/eventProcessor"
 import { watchPaymentOnce } from "@/engine/paymentWatcher"
 import { reconcileBasePaymentFromChain } from "@/engine/baseChainReconciliation"
+import {
+  getBaseReconcileScanCursor,
+  setBaseReconcileScanCursor,
+  clearBaseReconcileScanCursor
+} from "@/database/baseWatcherLeases"
 
 const mockGetPayment = vi.mocked(getPaymentById)
 const mockDbUpdate = vi.mocked(updatePaymentStatusInDb)
 const mockCreateEvent = vi.mocked(createPaymentEvent)
 const mockGetTransaction = vi.mocked(getTransactionByPaymentId)
 const mockWatchPaymentOnce = vi.mocked(watchPaymentOnce)
+const mockGetCursor = vi.mocked(getBaseReconcileScanCursor)
+const mockSetCursor = vi.mocked(setBaseReconcileScanCursor)
+const mockClearCursor = vi.mocked(clearBaseReconcileScanCursor)
 
 const basePayment = {
   id: "pay-incident",
@@ -201,6 +215,9 @@ describe("reconcileBasePaymentFromChain — canonical repair entry point", () =>
   beforeEach(() => {
     vi.clearAllMocks()
     mockGetTransaction.mockResolvedValue(null)
+    mockGetCursor.mockResolvedValue(null)
+    mockSetCursor.mockResolvedValue(undefined)
+    mockClearCursor.mockResolvedValue(undefined)
   })
 
   it("is a no-op for a payment that is already CONFIRMED (idempotent — safe to re-run)", async () => {
@@ -259,5 +276,86 @@ describe("reconcileBasePaymentFromChain — canonical repair entry point", () =>
     await expect(reconcileBasePaymentFromChain("pay-incident")).resolves.toMatchObject({
       detected: false
     })
+  })
+
+  /**
+   * Regression coverage: without a persisted resume cursor, every self-heal
+   * pass re-scans the exact same newest-blocks window (bounded by
+   * MAX_LOG_SCAN_CHUNKS_PER_CALL in engine/paymentWatcher.ts) because the
+   * chunked fallback scan always starts at the current block. A transaction
+   * whose block falls outside that per-call window — entirely plausible once
+   * enough real time has passed for a 24h-lookback INCOMPLETE payment — could
+   * then never be found by automatic reconciliation, no matter how many
+   * times it ran. These tests prove the cursor is read on entry and
+   * persisted/cleared correctly on exit.
+   */
+  it("passes the persisted scan cursor through as scanCeilingBlock so the next call resumes deeper", async () => {
+    mockGetPayment.mockResolvedValue({ ...basePayment, status: "INCOMPLETE" })
+    mockGetCursor.mockResolvedValue(500_000)
+    mockWatchPaymentOnce.mockImplementation(async () => false)
+
+    await reconcileBasePaymentFromChain("pay-incident")
+
+    expect(mockGetCursor).toHaveBeenCalledWith("pay-incident")
+    expect(mockWatchPaymentOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ scanCeilingBlock: 500_000 })
+    )
+  })
+
+  it("persists a new, deeper cursor after a call that scans without finding a match", async () => {
+    mockGetPayment.mockResolvedValue({ ...basePayment, status: "INCOMPLETE" })
+    mockWatchPaymentOnce.mockImplementation(async (input) => {
+      (input as { onFallbackChunkScanned?: (chunk: { fromBlock: number; toBlock: number }) => void })
+        .onFallbackChunkScanned?.({ fromBlock: 499_991, toBlock: 500_000 })
+      return false
+    })
+
+    await reconcileBasePaymentFromChain("pay-incident")
+
+    expect(mockSetCursor).toHaveBeenCalledWith("pay-incident", 499_990)
+    expect(mockClearCursor).not.toHaveBeenCalled()
+  })
+
+  it("clears the cursor once a match is confirmed", async () => {
+    mockGetPayment
+      .mockResolvedValueOnce({ ...basePayment, status: "INCOMPLETE" })
+      .mockResolvedValueOnce({ ...basePayment, status: "CONFIRMED" })
+    mockWatchPaymentOnce.mockImplementation(async (input) => {
+      (input as { onFallbackChunkScanned?: (chunk: { fromBlock: number; toBlock: number }) => void })
+        .onFallbackChunkScanned?.({ fromBlock: 499_991, toBlock: 500_000 })
+      return true
+    })
+
+    await reconcileBasePaymentFromChain("pay-incident")
+
+    expect(mockClearCursor).toHaveBeenCalledWith("pay-incident")
+    expect(mockSetCursor).not.toHaveBeenCalled()
+  })
+
+  it("clears the cursor once the fallback scan has exhausted the entire lookback window with nothing found", async () => {
+    mockGetPayment.mockResolvedValue({ ...basePayment, status: "INCOMPLETE" })
+    // No chunk callback fired at all — e.g. the scan ceiling was already at
+    // or below the lookback floor, so watchPaymentOnce's chunk loop never ran.
+    mockWatchPaymentOnce.mockImplementation(async () => false)
+
+    await reconcileBasePaymentFromChain("pay-incident")
+
+    expect(mockClearCursor).toHaveBeenCalledWith("pay-incident")
+    expect(mockSetCursor).not.toHaveBeenCalled()
+  })
+
+  it("never reads or writes the scan cursor when a stored tx hash routes through the fast path", async () => {
+    mockGetPayment.mockResolvedValue({ ...basePayment, status: "INCOMPLETE" })
+    mockGetTransaction.mockResolvedValue({ provider_transaction_id: "0xstoredhash" } as never)
+    mockWatchPaymentOnce.mockImplementation(async () => false)
+
+    await reconcileBasePaymentFromChain("pay-incident")
+
+    expect(mockGetCursor).not.toHaveBeenCalled()
+    expect(mockSetCursor).not.toHaveBeenCalled()
+    expect(mockClearCursor).not.toHaveBeenCalled()
+    expect(mockWatchPaymentOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ txHash: "0xstoredhash", scanCeilingBlock: undefined })
+    )
   })
 })

@@ -396,6 +396,80 @@ describe("watchPaymentOnce — chunked fallback log scan (Alchemy free-tier 10-b
     ).rejects.toBeInstanceOf(RpcTransportError)
     expect(mockProcessPaymentEvent).not.toHaveBeenCalled()
   })
+
+  /**
+   * Regression coverage for engine/baseChainReconciliation.ts's persisted
+   * resume cursor: without scanCeilingBlock, the fallback scan always starts
+   * at the current block, so a self-heal pass can never look any deeper than
+   * MAX_LOG_SCAN_CHUNKS_PER_CALL chunks below whatever the current block
+   * happens to be at call time — permanently missing older evidence once real
+   * time moves that window past it. scanCeilingBlock lets a caller resume
+   * from a specific point instead.
+   */
+  it("starts the chunk walk from scanCeilingBlock instead of the current block when one is supplied", async () => {
+    const getLogsSpy = vi.fn(() => [])
+    const fetchMock = jsonRpcResponder({
+      eth_blockNumber: () => "0x1e8480", // 2,000,000 — far above the ceiling
+      eth_getLogs: getLogsSpy
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    await watchPaymentOnce({
+      ...baseWatchInput,
+      asset: "ETH",
+      // startBlock = 2,000,000 - 1,600,000 = 400,000 — comfortably below the
+      // 500,000 ceiling, matching how a real persisted cursor (always inside
+      // a previous call's [startBlock, currentBlock] window) behaves.
+      lookbackOverride: 1_600_000,
+      scanCeilingBlock: 500_000
+    })
+
+    const ranges = capturedEthGetLogsRanges(fetchMock)
+    expect(ranges[0].toBlock).toBe(500_000)
+    expect(ranges[0].fromBlock).toBe(499_991)
+  })
+
+  it("ignores a scanCeilingBlock that is at or above the current block (never scans ahead of what actually exists)", async () => {
+    const getLogsSpy = vi.fn(() => [])
+    const fetchMock = jsonRpcResponder({
+      eth_blockNumber: () => "0x100", // 256
+      eth_getLogs: getLogsSpy
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    await watchPaymentOnce({
+      ...baseWatchInput,
+      asset: "ETH",
+      lookbackOverride: 49,
+      scanCeilingBlock: 999_999
+    })
+
+    const ranges = capturedEthGetLogsRanges(fetchMock)
+    expect(ranges[0].toBlock).toBe(256)
+  })
+
+  it("invokes onFallbackChunkScanned once per chunk, in scan order, without changing detection behavior", async () => {
+    const getLogsSpy = vi.fn(() => [])
+    global.fetch = jsonRpcResponder({
+      eth_blockNumber: () => "0x100",
+      eth_getLogs: getLogsSpy
+    }) as unknown as typeof fetch
+
+    const scannedChunks: Array<{ fromBlock: number; toBlock: number }> = []
+    const detected = await watchPaymentOnce({
+      ...baseWatchInput,
+      asset: "ETH",
+      lookbackOverride: 49,
+      onFallbackChunkScanned: (chunk) => scannedChunks.push(chunk)
+    })
+
+    expect(detected).toBe(false)
+    expect(scannedChunks.length).toBeGreaterThan(1)
+    expect(scannedChunks[0]).toEqual({ fromBlock: 247, toBlock: 256 })
+    for (let i = 1; i < scannedChunks.length; i++) {
+      expect(scannedChunks[i].toBlock).toBe(scannedChunks[i - 1].fromBlock - 1)
+    }
+  })
 })
 
 describe("watchPaymentOnce — reverted Base transaction", () => {

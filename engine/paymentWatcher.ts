@@ -86,6 +86,24 @@ export type WatchOnceInput = {
    * creation time rather than the short window used for routine polling.
    */
   lookbackOverride?: number
+  /**
+   * EVM chunked fallback scan only: caps the newest block the scan starts
+   * from, instead of always starting at the current block. Lets
+   * engine/baseChainReconciliation.ts resume a self-heal scan progressively
+   * further into the past across successive calls (using its persisted
+   * cursor, database/baseWatcherLeases.ts) instead of re-scanning the same
+   * newest-blocks window — bounded by MAX_LOG_SCAN_CHUNKS_PER_CALL — every
+   * single call and never reaching older evidence.
+   */
+  scanCeilingBlock?: number
+  /**
+   * EVM chunked fallback scan only: invoked once per 10-block chunk actually
+   * requested via eth_getLogs, in scan order (newest first). Purely an
+   * observability/progress hook — never changes matching behavior. Used by
+   * engine/baseChainReconciliation.ts to persist how far a call scanned so
+   * the next self-heal pass can resume from there.
+   */
+  onFallbackChunkScanned?: (chunk: { fromBlock: number; toBlock: number }) => void
 }
 
 // ─── Internal RPC types ──────────────────────────────────────────────────────
@@ -703,7 +721,10 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
     // so one foreground request stays fast; any remaining part of the window
     // is left for the next maintenance/reconciliation call rather than
     // exhausted here.
-    let chunkToBlock = currentBlock
+    let chunkToBlock =
+      Number.isFinite(input.scanCeilingBlock) && Number(input.scanCeilingBlock) < currentBlock
+        ? Math.max(startBlock, Math.floor(Number(input.scanCeilingBlock)))
+        : currentBlock
     let chunkIndex = 0
     let totalLogsChecked = 0
 
@@ -711,6 +732,7 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
       const chunkFromBlock = Math.max(startBlock, chunkToBlock - MAX_LOG_SCAN_BLOCK_RANGE + 1)
       const inclusiveBlockCount = chunkToBlock - chunkFromBlock + 1
       chunkIndex += 1
+      input.onFallbackChunkScanned?.({ fromBlock: chunkFromBlock, toBlock: chunkToBlock })
 
       console.info("[watcher:evm] fallback log scan chunk", {
         paymentId: input.paymentId,
