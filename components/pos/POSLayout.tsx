@@ -311,6 +311,19 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   const posBaseRunningRef = useRef(false)
   const posWcProviderRef = useRef<PosWcProvider | null>(null)
   const activePaymentIdRef = useRef("")
+  // Bumped every time the previous Base attempt must be treated as
+  // abandoned (a new intent replaces it, or the sale is reset/canceled).
+  // A runPosBaseFlow invocation captures the token value at start time and
+  // compares against the live ref at each checkpoint — isCurrentBasePayment
+  // alone only detects supersession *within the same intent* (e.g. the
+  // customer switched rails), never a POS terminal that has moved on to an
+  // entirely different intent, whose own DB row is left untouched and would
+  // otherwise keep reporting itself as "current" forever.
+  const posBaseAttemptRef = useRef(0)
+
+  function isOwnedBaseAttempt(myAttempt: number): boolean {
+    return posBaseAttemptRef.current === myAttempt
+  }
 
   const subtotalNum = digitsToNumber(digits)
   const displayAmount = digitsToDisplay(digits)
@@ -327,6 +340,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     }
     hasScheduledResetRef.current = false
     // Tear down any active POS Base WC session
+    posBaseAttemptRef.current += 1
     posBaseRunningRef.current = false
     if (posWcProviderRef.current) {
       posWcProviderRef.current.disconnect().catch(() => null)
@@ -630,13 +644,28 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     await updatePosBaseSession(iid, { clear: true })
   }
 
-  function createBasePaymentSupersededWatcher(iid: string, paymentId: string): {
+  function createBasePaymentSupersededWatcher(
+    iid: string,
+    paymentId: string,
+    myAttempt: number
+  ): {
     cancel: () => void
     promise: Promise<never>
   } {
     let interval: number | null = null
     const promise = new Promise<never>((_, reject) => {
       interval = window.setInterval(() => {
+        // Local-attempt check first: catches a new intent replacing this
+        // one immediately (same tick the POS moved on), without waiting on
+        // a network round trip. isCurrentBasePayment only ever re-reads
+        // *this* intent's own row, so it can never observe that the POS
+        // has since started an entirely different intent.
+        if (!isOwnedBaseAttempt(myAttempt)) {
+          if (interval !== null) window.clearInterval(interval)
+          interval = null
+          reject(new Error("Base payment attempt abandoned"))
+          return
+        }
         void isCurrentBasePayment(iid, paymentId).then((isCurrent) => {
           if (isCurrent) return
           if (interval !== null) window.clearInterval(interval)
@@ -658,20 +687,28 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     paymentId: string,
     iid: string,
     asset: "ETH" | "USDC",
-    paymentUrl: string
+    paymentUrl: string,
+    myAttempt: number
   ): Promise<void> {
     let finalTxHashSubmitted = false
     let walletConnectedForAttempt = false
+    // Captured locally (distinct from the shared posWcProviderRef) so this
+    // attempt can always tear down the WalletConnect session *it* created,
+    // even after a newer attempt has already reassigned the shared ref to
+    // its own provider.
+    let localProvider: PosWcProvider | null = null
     try {
-      console.log("[POS Base WC] session_created", { intentId: iid, paymentId, asset })
+      console.log("[POS Base WC] flow_owner_acquired", { intentId: iid, paymentId, asset, attemptId: myAttempt })
+      console.log("[POS Base WC] session_created", { intentId: iid, paymentId, asset, attemptId: myAttempt })
       await updatePosBaseSession(iid, { step: "awaiting_wallet", selectedAsset: asset })
 
       const wcResult = await initPosBaseWalletConnect()
       if (!wcResult.ok) throw new Error(wcResult.error)
 
+      localProvider = wcResult.provider
       posWcProviderRef.current = wcResult.provider
 
-      console.log("[POS Base WC] pairing_uri_published", { intentId: iid, paymentId, asset })
+      console.log("[POS Base WC] pairing_uri_published", { intentId: iid, paymentId, asset, attemptId: myAttempt })
       await updatePosBaseSession(iid, {
         step: "awaiting_wallet",
         pairingUri: wcResult.pairingUri,
@@ -679,12 +716,12 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       })
 
       // Wait for customer to open the wallet deep-link and approve pairing
-      const supersededWatcher = createBasePaymentSupersededWatcher(iid, paymentId)
+      const supersededWatcher = createBasePaymentSupersededWatcher(iid, paymentId, myAttempt)
       const walletAddress = await Promise.race([
         waitForWalletConnect(wcResult.provider),
         supersededWatcher.promise,
       ]).finally(() => supersededWatcher.cancel())
-      if (!(await isCurrentBasePayment(iid, paymentId))) {
+      if (!isOwnedBaseAttempt(myAttempt) || !(await isCurrentBasePayment(iid, paymentId))) {
         await abandonPosBaseAttempt(iid)
         return
       }
@@ -692,7 +729,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}`
         : ""
 
-      console.log("[POS Base WC] wallet_connected", { intentId: iid, paymentId, asset, maskedAddress })
+      console.log("[POS Base WC] wallet_connected", { intentId: iid, paymentId, asset, maskedAddress, attemptId: myAttempt })
       walletConnectedForAttempt = true
       await updatePosBaseSession(iid, {
         step: "wallet_connected",
@@ -700,7 +737,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       })
 
       await updatePosBaseSession(iid, { step: "payment_sending" })
-      if (!(await isCurrentBasePayment(iid, paymentId))) {
+      if (!isOwnedBaseAttempt(myAttempt) || !(await isCurrentBasePayment(iid, paymentId))) {
         await abandonPosBaseAttempt(iid)
         return
       }
@@ -711,7 +748,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         const parsed = parseEthereumUri(paymentUrl)
         if (!parsed) throw new Error("Invalid Base ETH payment URI")
 
-        console.log("[POS Base ETH] request_start", { paymentId })
+        console.log("[POS Base ETH] request_start", { paymentId, attemptId: myAttempt })
         // from is required by WalletConnect v2 to route to the correct account
         const rawTxHash = await wcResult.provider.request<string>({
           method: "eth_sendTransaction",
@@ -804,7 +841,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       })
 
       const detectPrefix = asset === "ETH" ? "[POS Base ETH]" : "[POS Base USDC]"
-      console.log(`${detectPrefix} detect_start`, { paymentId, txHashPrefix: txHash.slice(0, 10) })
+      console.log(`${detectPrefix} detect_start`, { paymentId, txHashPrefix: txHash.slice(0, 10), attemptId: myAttempt })
       logConfirmationTrace("detect_request_sent", {
         paymentId,
         transactionHash: txHash,
@@ -898,14 +935,36 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         }
       }
 
-      setPaymentError(message)
+      // A superseded attempt's failure belongs to whatever sale it was for,
+      // not to whatever the terminal is showing now — never let a stale
+      // attempt's error/failed state clobber the current sale's screen.
+      if (isOwnedBaseAttempt(myAttempt)) {
+        setPaymentError(message)
+      }
       await updatePosBaseSession(iid, { step: "failed", errorMessage: message }).catch(() => null)
-      setStatus("failed")
+      if (isOwnedBaseAttempt(myAttempt)) {
+        setStatus("failed")
+      } else {
+        console.log("[POS Base WC] stale_attempt_error_suppressed", { intentId: iid, paymentId, asset, attemptId: myAttempt })
+      }
     } finally {
-      posBaseRunningRef.current = false
-      if (posWcProviderRef.current) {
-        posWcProviderRef.current.disconnect().catch(() => null)
-        posWcProviderRef.current = null
+      console.log("[POS Base WC] flow_owner_released", { intentId: iid, paymentId, asset, attemptId: myAttempt })
+      // Always tear down the WalletConnect session this attempt created,
+      // whether or not it's still the current attempt — an abandoned
+      // attempt must never leave an orphaned WC session pairing/listening
+      // in the background.
+      if (localProvider) {
+        localProvider.disconnect().catch(() => null)
+      }
+      // Only clear the shared refs if this attempt still owns them — a
+      // newer attempt (resetSale or a fresh intent) may have already reset
+      // or reassigned them for its own flow, and clearing them here would
+      // clobber that.
+      if (isOwnedBaseAttempt(myAttempt)) {
+        posBaseRunningRef.current = false
+        if (posWcProviderRef.current === localProvider) {
+          posWcProviderRef.current = null
+        }
       }
     }
   }
@@ -916,7 +975,16 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   // where the DB write for selectedNetwork races with the realtime paymentId event.
   useEffect(() => {
     if (!intentId) return
-    if (posBaseRunningRef.current) return
+
+    // A distinct intentId mount always means a fresh sale attempt — even if
+    // it didn't arrive via resetSale()/cancelSale(). Invalidate whatever
+    // Base attempt may still be in flight from a previous intent (its own
+    // ownership checks will now fail fast) and release the running guard so
+    // this intent's poll loop is never blocked by a stale flag left behind
+    // by an attempt that hasn't reached its own cleanup yet.
+    posBaseAttemptRef.current += 1
+    posBaseRunningRef.current = false
+    console.log("[POS Base WC] intent_attempt_reset", { intentId, attemptId: posBaseAttemptRef.current })
 
     let cancelled = false
     const POLL_MS = 3000
@@ -953,7 +1021,8 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
             String(data.selectedAsset || "ETH").toUpperCase() === "USDC" ? "USDC" : "ETH"
           const paymentUrl = String(data.paymentUrl || "")
           posBaseRunningRef.current = true
-          void runPosBaseFlow(pid, intentId, asset, paymentUrl)
+          const myAttempt = posBaseAttemptRef.current
+          void runPosBaseFlow(pid, intentId, asset, paymentUrl, myAttempt)
           return
         }
       } catch {
