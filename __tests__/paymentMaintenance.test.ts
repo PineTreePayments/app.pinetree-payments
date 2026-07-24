@@ -328,35 +328,27 @@ describe("payment maintenance", () => {
     })
   })
 
-  it("throttles concurrent watcher rechecks for the same payment into one underlying call", async () => {
-    vi.mocked(getPaymentById).mockResolvedValue(payment("PROCESSING"))
-    vi.mocked(runPaymentWatcher).mockResolvedValue(true)
-
-    // Both calls are structurally identical async functions with the same
-    // number of prior awaits, so they interleave deterministically: the
-    // first to start is always the first to reach the watcher-throttle
-    // check and register the in-flight promise the second one then reuses.
-    const [firstResult, secondResult] = await Promise.all([
-      ensurePaymentFresh("pay-1"),
-      ensurePaymentFresh("pay-1"),
-    ])
-
-    expect(runPaymentWatcher).toHaveBeenCalledTimes(1)
-    expect(firstResult).toMatchObject({ action: "watcher_recheck", detected: true })
-    expect(secondResult).toMatchObject({ action: "watcher_recheck", detected: true })
-  })
-
-  it("skips a fresh watcher call when one just ran a moment ago for the same payment", async () => {
+  it("re-runs the watcher on every call for a PROCESSING payment — a stuck payment must never be starved of rechecks", async () => {
+    // A PROCESSING Base payment is re-checked on every poll from the
+    // customer-facing GET /api/payments/status route (no txHash, no
+    // forceWatcher — see app/api/payments/status/route.ts) while the client
+    // polls every few seconds. A per-payment cooldown/single-flight cache
+    // here previously caused most of those polls to return `detected: false`
+    // without ever calling runPaymentWatcher again, which could leave a
+    // payment stuck in PROCESSING indefinitely if the poll cadence happened
+    // to fall inside the cooldown window on every call. Restored to match
+    // the known-good c7d9e6a baseline: every call is a real check.
     vi.mocked(getPaymentById).mockResolvedValue(payment("PROCESSING"))
     vi.mocked(runPaymentWatcher).mockResolvedValue(true)
 
     const first = await ensurePaymentFresh("pay-1")
-    expect(first).toMatchObject({ action: "watcher_recheck", detected: true })
-
     const second = await ensurePaymentFresh("pay-1")
-    expect(second).toMatchObject({ action: "watcher_recheck", detected: false })
+    const third = await ensurePaymentFresh("pay-1")
 
-    expect(runPaymentWatcher).toHaveBeenCalledTimes(1)
+    expect(runPaymentWatcher).toHaveBeenCalledTimes(3)
+    expect(first).toMatchObject({ action: "watcher_recheck", detected: true })
+    expect(second).toMatchObject({ action: "watcher_recheck", detected: true })
+    expect(third).toMatchObject({ action: "watcher_recheck", detected: true })
   })
 
   it("does not throttle a different payment even while one payment's watcher is cooling down", async () => {
