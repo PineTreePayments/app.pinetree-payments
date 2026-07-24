@@ -5,7 +5,10 @@
  *
  * Flow:
  *   Alchemy push → verify signature → match activity to active payments by wallet address
- *     → if matched: processPaymentEvent("payment.confirmed") → engine → DB
+ *     → direct (non-contract_split) payments: processPaymentEvent("payment.confirmed") → engine → DB
+ *     → contract_split payments: address match alone cannot confirm — the txHash is
+ *       handed to the same authoritative receipt/PaymentSplit verification pipeline
+ *       the customer-facing POST /detect route uses (engine/alchemyWebhookProcessor.ts)
  *
  * Setup (one-time):
  *   1. Sign up free at https://alchemy.com

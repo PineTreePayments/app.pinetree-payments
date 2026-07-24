@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import BASE_WALLETS from "@/lib/payment/baseWallets"
 import type { BaseWalletApiEntry } from "@/lib/payment/baseWallets"
 
@@ -360,6 +361,34 @@ export default function BasePosCheckoutMirror({
         </div>
         <Button variant="danger" fullWidth onClick={onCancel}>
           Cancel
+        </Button>
+      </div>
+    )
+  }
+
+  // ── Canonical terminal status always wins ───────────────────────────────────
+  // The payments table is authoritative — a payment can reach CONFIRMED via a
+  // path this mirror never directly observes (e.g. the Base webhook supplying
+  // evidence the POS terminal's own WalletConnect session never returned).
+  // The polling effects above already stop once terminalStatus is set, but
+  // without this check the UI would still be showing whatever session.step
+  // was last polled (e.g. stuck on "payment_sending" / "Approve ... in your
+  // wallet.") forever, even though the payment is already done. This must be
+  // checked before every step-based branch below, not just relied on to gate
+  // polling.
+  if (terminalStatus === "CONFIRMED") {
+    return (
+      <div className="py-3">
+        <PaymentStatusVisual status="CONFIRMED" variant="card" />
+      </div>
+    )
+  }
+  if (terminalStatus) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-3">
+        <PaymentStatusVisual status={terminalStatus} variant="card" />
+        <Button variant="secondary" fullWidth onClick={onCancel}>
+          Back
         </Button>
       </div>
     )
