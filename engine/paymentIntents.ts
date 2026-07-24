@@ -9,6 +9,7 @@ import {
   getPaymentById
 } from "@/database"
 import { getTransactionByPaymentId } from "@/database/transactions"
+import { getPaymentEvents } from "@/database/paymentEvents"
 import QRCode from "qrcode"
 import { createPayment, buildCreatePaymentRequest } from "./createPayment"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
@@ -753,6 +754,21 @@ export async function selectPaymentIntentNetworkEngine(input: {
   }
 }
 
+/**
+ * Thrown by cancelPaymentIntentEngine when the linked payment already has
+ * submitted-transaction evidence (a stored on-chain tx hash, PROCESSING
+ * status, or a verified receipt). The route surfaces this as a 409 with an
+ * explanatory message instead of silently no-op'ing or, worse, letting a
+ * race with the customer's own detect call drop real evidence.
+ */
+export class PaymentAlreadySubmittedError extends Error {
+  constructor(message = "Payment already submitted; confirmation is still being checked.") {
+    super(message)
+    this.name = "PaymentAlreadySubmittedError"
+    Object.assign(this, { status: 409 })
+  }
+}
+
 export async function cancelPaymentIntentEngine(intentId: string): Promise<void> {
   const intent = await getPaymentIntentById(intentId)
   if (!intent) throw new Error("Payment intent not found")
@@ -764,7 +780,34 @@ export async function cancelPaymentIntentEngine(intentId: string): Promise<void>
     const payment = await getPaymentById(intent.payment_id)
     const status = String(payment?.status || "").toUpperCase()
     if (status === "CONFIRMED" || status === "PROCESSING" || status === "FAILED") {
-      return
+      throw new PaymentAlreadySubmittedError()
+    }
+
+    // DB-recorded submission evidence (a stored tx hash from a prior detect
+    // call, or a payment.processing event) is checked before any network
+    // call. This is cheap, does not depend on RPC availability, and closes
+    // the race where a customer's wallet already broadcast a transaction —
+    // and detect already persisted the hash — moments before a merchant
+    // cancel arrives: without this check the cancel would win the race and
+    // silently strand a real, submitted transaction as INCOMPLETE forever.
+    if (status !== "INCOMPLETE") {
+      const [transaction, events] = await Promise.all([
+        getTransactionByPaymentId(intent.payment_id),
+        getPaymentEvents(intent.payment_id).catch(() => [])
+      ])
+      const hasStoredTxHash = Boolean(transaction?.provider_transaction_id)
+      const hasProcessingEvidence = events.some((event) =>
+        String(event.event_type || "") === "payment.processing"
+      )
+      if (hasStoredTxHash || hasProcessingEvidence) {
+        console.info("[paymentIntents] cancel rejected — submitted transaction evidence already stored", {
+          intentId,
+          paymentId: intent.payment_id,
+          hasStoredTxHash,
+          hasProcessingEvidence
+        })
+        throw new PaymentAlreadySubmittedError()
+      }
     }
 
     // Base wallet-signed payments are cancelled from a client-observed error

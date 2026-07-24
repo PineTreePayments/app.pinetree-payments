@@ -25,6 +25,7 @@ vi.mock("@/database", () => ({
   getPaymentById: vi.fn(),
 }))
 vi.mock("@/database/transactions", () => ({ getTransactionByPaymentId: vi.fn() }))
+vi.mock("@/database/paymentEvents", () => ({ getPaymentEvents: vi.fn() }))
 vi.mock("@/engine/createPayment", () => ({ createPayment: vi.fn(), buildCreatePaymentRequest: vi.fn() }))
 vi.mock("@/engine/paymentStateActions", () => ({
   markPaymentIncomplete: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock("@/lib/pinetreeRailReadiness", () => ({
 
 const {
   cancelPaymentIntentEngine,
+  PaymentAlreadySubmittedError,
   selectPaymentIntentNetworkEngine,
   isProviderAvailableForCheckout,
   walletNetworkToProviderKey
@@ -61,6 +63,14 @@ const paymentIntentDb = await import("@/database")
 const paymentStateActions = await import("@/engine/paymentStateActions")
 const baseChainReconciliation = await import("@/engine/baseChainReconciliation")
 const { createPayment, buildCreatePaymentRequest } = await import("@/engine/createPayment")
+const { getTransactionByPaymentId } = await import("@/database/transactions")
+const { getPaymentEvents } = await import("@/database/paymentEvents")
+
+/** Default: no submitted-transaction evidence stored — most cancel tests start here. */
+function mockNoStoredEvidence() {
+  vi.mocked(getTransactionByPaymentId).mockResolvedValue(null)
+  vi.mocked(getPaymentEvents).mockResolvedValue([])
+}
 
 describe("walletNetworkToProviderKey", () => {
   it("maps stripe to its own provider key, distinct from every crypto rail", () => {
@@ -166,6 +176,7 @@ describe("cancelPaymentIntentEngine", () => {
     } as never)
     vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({ status: "PENDING" } as never)
     vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
+    mockNoStoredEvidence()
 
     await cancelPaymentIntentEngine("intent-1")
 
@@ -177,7 +188,7 @@ describe("cancelPaymentIntentEngine", () => {
   })
 
   it.each(["PROCESSING", "FAILED", "CONFIRMED"])(
-    "does not cancel or expire a %s payment",
+    "rejects with PaymentAlreadySubmittedError instead of cancelling or expiring a %s payment",
     async (status) => {
       vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
         id: "intent-1",
@@ -186,7 +197,9 @@ describe("cancelPaymentIntentEngine", () => {
       } as never)
       vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({ status } as never)
 
-      await cancelPaymentIntentEngine("intent-1")
+      await expect(cancelPaymentIntentEngine("intent-1")).rejects.toBeInstanceOf(
+        PaymentAlreadySubmittedError
+      )
 
       expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
       expect(paymentIntentDb.expirePaymentIntent).not.toHaveBeenCalled()
@@ -229,6 +242,7 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
       status: "PENDING",
       network: "base"
     } as never)
+    mockNoStoredEvidence()
     vi.mocked(baseChainReconciliation.reconcileBasePaymentFromChain).mockResolvedValue({
       paymentId: "payment-1",
       attempted: true,
@@ -258,6 +272,7 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
       status: "PENDING",
       network: "base"
     } as never)
+    mockNoStoredEvidence()
     vi.mocked(baseChainReconciliation.reconcileBasePaymentFromChain).mockResolvedValue({
       paymentId: "payment-1",
       attempted: true,
@@ -287,6 +302,7 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
       status: "PENDING",
       network: "base"
     } as never)
+    mockNoStoredEvidence()
     vi.mocked(baseChainReconciliation.reconcileBasePaymentFromChain).mockRejectedValue(
       new Error("RPC unreachable")
     )
@@ -308,6 +324,7 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
       status: "PENDING",
       network: "solana"
     } as never)
+    mockNoStoredEvidence()
     vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
 
     await cancelPaymentIntentEngine("intent-1")
@@ -331,6 +348,91 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
     await cancelPaymentIntentEngine("intent-1")
 
     expect(baseChainReconciliation.reconcileBasePaymentFromChain).not.toHaveBeenCalled()
+    expect(getTransactionByPaymentId).not.toHaveBeenCalled()
+  })
+})
+
+// ── cancelPaymentIntentEngine — stored submitted-transaction evidence guard ─
+//
+// Reproduces the exact live incident: payment 6fd3c713-6f3a-4e5d-bbff-b83e157af1fb.
+// The customer's wallet already returned a transaction hash and detect had
+// already persisted it (transactions.provider_transaction_id / a
+// payment.processing event) while the payment was still PENDING (the watcher
+// hadn't yet advanced it). A merchant cancel arriving in that window must be
+// rejected outright — this DB-only check runs before any network call, so it
+// closes the race even when the live chain pre-check would itself be unable
+// to run (e.g. a broken RPC endpoint).
+describe("cancelPaymentIntentEngine — stored submitted-transaction evidence guard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("rejects the cancel when a transaction hash is already stored, even though status is still PENDING", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+      id: "intent-1",
+      payment_id: "payment-1",
+      status: "SELECTED"
+    } as never)
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({
+      status: "PENDING",
+      network: "base"
+    } as never)
+    vi.mocked(getTransactionByPaymentId).mockResolvedValue({
+      id: "txn-1",
+      provider_transaction_id: "0x670fb79d50e4777bef5ee0f59a925ce123e3f7e5c90d4e3793e9f95c45624428"
+    } as never)
+    vi.mocked(getPaymentEvents).mockResolvedValue([])
+
+    await expect(cancelPaymentIntentEngine("intent-1")).rejects.toBeInstanceOf(
+      PaymentAlreadySubmittedError
+    )
+    expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+    expect(paymentIntentDb.expirePaymentIntent).not.toHaveBeenCalled()
+    // The DB-only check is cheap and runs first — no live chain call needed.
+    expect(baseChainReconciliation.reconcileBasePaymentFromChain).not.toHaveBeenCalled()
+  })
+
+  it("rejects the cancel when a payment.processing event already exists, even with no stored tx hash yet", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+      id: "intent-1",
+      payment_id: "payment-1",
+      status: "SELECTED"
+    } as never)
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({
+      status: "PENDING",
+      network: "base"
+    } as never)
+    vi.mocked(getTransactionByPaymentId).mockResolvedValue({
+      id: "txn-1",
+      provider_transaction_id: null
+    } as never)
+    vi.mocked(getPaymentEvents).mockResolvedValue([
+      { event_type: "payment.processing" }
+    ] as never)
+
+    await expect(cancelPaymentIntentEngine("intent-1")).rejects.toBeInstanceOf(
+      PaymentAlreadySubmittedError
+    )
+    expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+  })
+
+  it("proceeds with the normal cancel when there is genuinely no submitted evidence", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+      id: "intent-1",
+      payment_id: "payment-1",
+      status: "SELECTED"
+    } as never)
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({
+      status: "PENDING",
+      network: "solana"
+    } as never)
+    mockNoStoredEvidence()
+    vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
+
+    await cancelPaymentIntentEngine("intent-1")
+
+    expect(paymentStateActions.markPaymentIncomplete).toHaveBeenCalled()
+    expect(paymentIntentDb.expirePaymentIntent).toHaveBeenCalledWith("intent-1")
   })
 })
 

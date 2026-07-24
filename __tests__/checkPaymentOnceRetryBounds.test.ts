@@ -19,7 +19,10 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/database", () => ({ getPaymentById: mocks.getPaymentById }))
-vi.mock("@/engine/paymentWatcher", () => ({ watchPaymentOnce: mocks.watchPaymentOnce }))
+vi.mock("@/engine/paymentWatcher", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/engine/paymentWatcher")>()
+  return { ...actual, watchPaymentOnce: mocks.watchPaymentOnce }
+})
 vi.mock("@/engine/paymentStateActions", () => ({
   markPaymentIncompleteIfAbandoned: mocks.markPaymentIncompleteIfAbandoned,
 }))
@@ -85,5 +88,35 @@ describe("runPaymentWatcher - retry bounds", () => {
 
     expect(result).toBe(true)
     expect(mocks.watchPaymentOnce).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-throws RpcTransportError when every attempt fails with a real RPC failure, and never marks the payment abandoned", async () => {
+    const { RpcTransportError } = await import("@/engine/paymentWatcher")
+    mocks.getPaymentById.mockResolvedValue(payment())
+    mocks.watchPaymentOnce.mockRejectedValue(new RpcTransportError("Must be authenticated!"))
+
+    const { runPaymentWatcher } = await import("@/engine/checkPaymentOnce")
+    const resultPromise = runPaymentWatcher("pay-1", { txHash: "0xabc", maxAttempts: 1 })
+
+    await expect(resultPromise).rejects.toThrow("Must be authenticated!")
+    expect(mocks.markPaymentIncompleteIfAbandoned).not.toHaveBeenCalled()
+  })
+
+  it("does not throw when a later clean check resets the failure after an earlier RPC error", async () => {
+    const { RpcTransportError } = await import("@/engine/paymentWatcher")
+    mocks.getPaymentById.mockResolvedValue(payment())
+    mocks.watchPaymentOnce.mockResolvedValue(false)
+    mocks.watchPaymentOnce.mockRejectedValueOnce(new RpcTransportError("Must be authenticated!"))
+
+    const { runPaymentWatcher } = await import("@/engine/checkPaymentOnce")
+    const resultPromise = runPaymentWatcher("pay-1", { txHash: "0xabc" })
+
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(3_000)
+    }
+
+    await expect(resultPromise).resolves.toBe(false)
+    expect(mocks.watchPaymentOnce).toHaveBeenCalledTimes(5)
+    expect(mocks.markPaymentIncompleteIfAbandoned).toHaveBeenCalledTimes(1)
   })
 })

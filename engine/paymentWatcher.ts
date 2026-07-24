@@ -37,6 +37,26 @@ const PAYMENT_SPLIT_TOPIC = ethersId(
   "PaymentSplit(address,address,uint256,uint256,string,address,address)"
 )
 
+/**
+ * Thrown by the EVM RPC helpers below when the node itself responds with a
+ * JSON-RPC-level `error` (e.g. an invalid/expired API key returning "Must be
+ * authenticated!"), as opposed to a clean "no receipt/logs yet" result. This
+ * distinction matters: a clean empty result is expected and safe to silently
+ * retry, but an RPC-level error means the check never actually happened —
+ * treating it identically to "not found" hides infrastructure failures
+ * (a broken RPC endpoint) behind a misleading "transaction not detected",
+ * with zero operational visibility and no path to ever confirm a genuinely
+ * valid, already-mined payment. Callers (engine/checkPaymentOnce.ts,
+ * engine/baseChainReconciliation.ts) let this propagate so it is counted as
+ * a real error rather than silently swallowed.
+ */
+export class RpcTransportError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "RpcTransportError"
+  }
+}
+
 // ─── Input / Output types ────────────────────────────────────────────────────
 
 export type WatchOnceInput = {
@@ -393,6 +413,14 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
     currentBlock = await getCurrentBlockHeight(rpcUrl)
   } catch (error) {
     console.error("[watcher:evm] Failed to get current block:", error)
+    // An RPC-level failure (bad/expired API key, malformed response) means
+    // this check never actually happened — never swallow that as a clean
+    // "not detected", or a broken RPC endpoint silently and permanently
+    // blocks confirmation of every genuinely valid transaction. A plain
+    // network/transport failure (DNS, timeout) is not re-thrown here, since
+    // that is legitimately transient and the existing retry loop
+    // (engine/checkPaymentOnce.ts) already covers it.
+    if (error instanceof RpcTransportError) throw error
     return false
   }
 
@@ -840,7 +868,16 @@ async function getCurrentBlockHeight(rpcUrl: string): Promise<number> {
     })
   })
   const data = await response.json()
-  return parseInt(data.result, 16)
+  if (data?.error) {
+    console.error("[watcher:evm] eth_blockNumber rpc error", { rpcError: data.error })
+    throw new RpcTransportError(`eth_blockNumber RPC error: ${JSON.stringify(data.error)}`)
+  }
+  const blockHeight = parseInt(data.result, 16)
+  if (!Number.isFinite(blockHeight)) {
+    console.error("[watcher:evm] eth_blockNumber returned non-numeric result", { result: data.result })
+    throw new RpcTransportError(`eth_blockNumber returned non-numeric result: ${JSON.stringify(data.result)}`)
+  }
+  return blockHeight
 }
 
 async function getBlockByNumber(rpcUrl: string, blockNumber: number): Promise<EvmBlock | null> {
@@ -856,12 +893,17 @@ async function getBlockByNumber(rpcUrl: string, blockNumber: number): Promise<Ev
     })
   })
   const data = await response.json()
+  if (data?.error) {
+    console.error("[watcher:evm] eth_getBlockByNumber rpc error", { blockNumber, rpcError: data.error })
+    throw new RpcTransportError(`eth_getBlockByNumber RPC error: ${JSON.stringify(data.error)}`)
+  }
   return (data?.result || null) as EvmBlock | null
 }
 
 async function getTransactionReceipt(rpcUrl: string, txHash: string): Promise<EvmTransactionReceipt | null> {
+  let response: Response
   try {
-    const response = await fetch(rpcUrl, {
+    response = await fetch(rpcUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -871,12 +913,6 @@ async function getTransactionReceipt(rpcUrl: string, txHash: string): Promise<Ev
         id: 1
       })
     })
-    const data = await response.json()
-    if (data?.error) {
-      console.warn("[watcher:evm] eth_getTransactionReceipt rpc error", { txHash, rpcError: data.error })
-      return null
-    }
-    return (data?.result || null) as EvmTransactionReceipt | null
   } catch (error) {
     console.error("[watcher:evm] eth_getTransactionReceipt request failed", {
       txHash,
@@ -884,6 +920,17 @@ async function getTransactionReceipt(rpcUrl: string, txHash: string): Promise<Ev
     })
     return null
   }
+  const data = await response.json()
+  if (data?.error) {
+    // A JSON-RPC-level error (e.g. an invalid/expired API key) means the
+    // node never actually told us whether a receipt exists — this must NOT
+    // be treated the same as "receipt not yet available" (a clean null
+    // result), or a genuinely confirmed transaction can never be verified
+    // for as long as the RPC endpoint is broken, with no error ever surfaced.
+    console.error("[watcher:evm] eth_getTransactionReceipt rpc error", { txHash, rpcError: data.error })
+    throw new RpcTransportError(`eth_getTransactionReceipt RPC error: ${JSON.stringify(data.error)}`)
+  }
+  return (data?.result || null) as EvmTransactionReceipt | null
 }
 
 function weiToEth(wei: string): number {
@@ -909,8 +956,9 @@ async function getContractEventLogs(
   topic: string,
   fromBlock: string
 ): Promise<EvmLog[]> {
+  let response: Response
   try {
-    const response = await fetch(rpcUrl, {
+    response = await fetch(rpcUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -925,19 +973,19 @@ async function getContractEventLogs(
         id: 1
       })
     })
-    const data = await response.json()
-    if (data?.error) {
-      console.warn("[watcher:evm] eth_getLogs rpc error", { rpcError: data.error })
-      return []
-    }
-    if (!Array.isArray(data?.result)) return []
-    return data.result as EvmLog[]
   } catch (error) {
     console.error("[watcher:evm] eth_getLogs request failed", {
       error: error instanceof Error ? error.message : String(error)
     })
     return []
   }
+  const data = await response.json()
+  if (data?.error) {
+    console.error("[watcher:evm] eth_getLogs rpc error", { rpcError: data.error })
+    throw new RpcTransportError(`eth_getLogs RPC error: ${JSON.stringify(data.error)}`)
+  }
+  if (!Array.isArray(data?.result)) return []
+  return data.result as EvmLog[]
 }
 
 function decodePaymentSplitLog(data: string): DecodedPaymentSplitLog | null {

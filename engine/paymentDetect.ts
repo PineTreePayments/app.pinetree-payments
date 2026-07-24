@@ -39,14 +39,6 @@ export async function runPaymentDetectForPayment(
     payload: { network: payment.network }
   })
 
-  const currentStatus = String(payment.status || "").toUpperCase()
-  if (currentStatus === "CONFIRMED" || currentStatus === "FAILED" || currentStatus === "INCOMPLETE") {
-    return {
-      httpStatus: 200,
-      body: { detected: false, skipped: true, status: currentStatus }
-    }
-  }
-
   const txHash = String(options?.txHash || "").trim() || undefined
   const isBase = String(payment.network || "").toLowerCase() === "base"
 
@@ -73,6 +65,15 @@ export async function runPaymentDetectForPayment(
       return { httpStatus: 400, body: { error: "Invalid Base transaction hash" } }
     }
 
+    // Persist the wallet-returned hash BEFORE the terminal-status check
+    // below. A wallet returning a hash means a real transaction is already
+    // broadcast and irreversible — that evidence must never be dropped, even
+    // if this payment has *already* raced to a terminal state (e.g. a
+    // merchant cancel that landed a moment before this call reached the
+    // server). Recording the hash here — guarded by
+    // !transaction.provider_transaction_id so it's a one-time, idempotent
+    // write — means self-heal reconciliation can still find and repair the
+    // payment later instead of the evidence being silently lost forever.
     if (txHash) {
       const transaction = await getTransactionByPaymentId(paymentId)
       if (transaction && !transaction.provider_transaction_id) {
@@ -87,6 +88,14 @@ export async function runPaymentDetectForPayment(
           })
         }
       }
+    }
+  }
+
+  const currentStatus = String(payment.status || "").toUpperCase()
+  if (currentStatus === "CONFIRMED" || currentStatus === "FAILED" || currentStatus === "INCOMPLETE") {
+    return {
+      httpStatus: 200,
+      body: { detected: false, skipped: true, status: currentStatus }
     }
   }
 

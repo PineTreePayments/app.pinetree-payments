@@ -12,7 +12,7 @@
 
 import { getPaymentById } from "@/database"
 import type { Payment } from "@/database/payments"
-import { watchPaymentOnce, WatchOnceInput } from "./paymentWatcher"
+import { watchPaymentOnce, WatchOnceInput, RpcTransportError } from "./paymentWatcher"
 import { StoredPaymentSplitMetadata } from "@/types/payment"
 import { markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
@@ -162,9 +162,18 @@ export async function runPaymentWatcher(
     payload: { network: payment.network, maxAttempts }
   })
 
+  // Tracks the most recent failure so that, if every attempt fails, we can
+  // tell a real RPC/transport failure (the check never actually happened)
+  // apart from a clean "no match yet" — see RpcTransportError in
+  // paymentWatcher.ts. Reset to null whenever an attempt completes cleanly
+  // (even with detected: false), since that proves the RPC endpoint is
+  // actually working at that moment.
+  let lastError: unknown = null
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const detected = await watchPaymentOnce(watchInput)
+      lastError = null
       if (detected) {
         if (isBase) {
           console.info("[PineTreeBaseTrace] watcher detected payment", {
@@ -184,9 +193,11 @@ export async function runPaymentWatcher(
         return true
       }
     } catch (error) {
+      lastError = error
       console.error("[checkPaymentOnce] watcher error", {
         paymentId,
         attempt,
+        isRpcTransportError: error instanceof RpcTransportError,
         error: error instanceof Error ? error.message : String(error)
       })
       if (isBase) {
@@ -213,8 +224,18 @@ export async function runPaymentWatcher(
       paymentId,
       txHash: options?.txHash || null,
       network: payment.network,
-      attemptsUsed: maxAttempts
+      attemptsUsed: maxAttempts,
+      finalFailureWasRpcTransportError: lastError instanceof RpcTransportError
     })
+  }
+
+  // Every attempt failed with an RPC-level error — the transaction was
+  // never actually checked, so this must not be treated as "abandoned" or
+  // "not detected". Surface it as a real error (counted by callers such as
+  // engine/paymentMaintenance.ts's watcherErrors) instead of silently
+  // marking the payment incomplete for lack of evidence we never obtained.
+  if (lastError instanceof RpcTransportError) {
+    throw lastError
   }
 
   await markPaymentIncompleteIfAbandoned(payment.id)

@@ -27,7 +27,7 @@
 import { getPaymentById } from "@/database"
 import { normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 import { buildBaseWatchInput } from "./checkPaymentOnce"
-import { watchPaymentOnce } from "./paymentWatcher"
+import { watchPaymentOnce, RpcTransportError } from "./paymentWatcher"
 import { getTransactionByPaymentId } from "@/database/transactions"
 
 export type BaseReconcileOutcome = {
@@ -116,8 +116,16 @@ export async function reconcileBasePaymentFromChain(
   } catch (error) {
     console.warn("[baseChainReconciliation] chain check failed", {
       paymentId,
+      isRpcTransportError: error instanceof RpcTransportError,
       error: error instanceof Error ? error.message : String(error)
     })
+    // An RPC-level failure means this payment was never actually checked —
+    // that must be visible as a real error (counted via baseReconcileErrors
+    // in engine/paymentMaintenance.ts), not silently folded into "no chain
+    // evidence found". Any other failure keeps this function's existing
+    // contract of never throwing, so one payment's reconciliation trouble
+    // never aborts the rest of the maintenance sweep.
+    if (error instanceof RpcTransportError) throw error
   }
 
   const refreshed = await getPaymentById(paymentId)
