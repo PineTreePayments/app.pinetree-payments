@@ -95,6 +95,36 @@ function posAuthHeaders(token?: string): Record<string, string> {
 
 // ── Base V7 POS helpers (defined outside component — no state dependency) ────
 
+// The POS terminal's WalletConnect provider.request() calls (eth_sendTransaction,
+// eth_signTypedData_v4) had no timeout at all — unlike the customer-owned
+// checkout flow (components/payment/BaseWalletPayment.tsx's
+// sendWalletConnectTransactionWithTimeout), so a lost/delayed relay response
+// after the customer approved in their wallet left the request awaiting
+// forever with no bounded recovery, leaving the mirrored checkout UI stuck
+// on "Approve ... in your wallet." indefinitely. Matches the customer-owned
+// flow's 90s bound. The rejection message deliberately avoids the "timed out
+// waiting for wallet to connect" wording used by the pairing-wait timeout in
+// waitForWalletConnect, so this timeout instead routes through the
+// ambiguous-error precheck below, which checks canonical payment status
+// before declaring failure.
+const POS_BASE_WALLET_REQUEST_TIMEOUT_MS = 90_000
+
+function withPosWalletRequestTimeout<T>(
+  request: Promise<T>,
+  timeoutMessage: string,
+  timeoutMs: number = POS_BASE_WALLET_REQUEST_TIMEOUT_MS
+): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  return Promise.race([
+    request,
+    new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)
+    }),
+  ]).finally(() => {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle)
+  })
+}
+
 function parseEthereumUri(uri: string): { to: string; valueHex: string; data: string } | null {
   try {
     const withoutScheme = uri.replace(/^ethereum:/, "")
@@ -169,10 +199,13 @@ async function executePosBaseEip3009(
     throw new Error(errMsg)
   }
 
-  const signature = await provider.request<string>({
-    method: "eth_signTypedData_v4",
-    params: [walletAddress, JSON.stringify(prepared.typedData)],
-  })
+  const signature = await withPosWalletRequestTimeout(
+    provider.request<string>({
+      method: "eth_signTypedData_v4",
+      params: [walletAddress, JSON.stringify(prepared.typedData)],
+    }),
+    "Timed out waiting for wallet to respond to the signature request."
+  )
   if (typeof signature !== "string" || !signature.startsWith("0x")) {
     console.error("[POS Base USDC V7] relay_start", { paymentId, ok: false, reason: "invalid_signature_format" })
     throw new Error("Wallet did not return a valid EIP-3009 signature")
@@ -240,16 +273,19 @@ async function executePosBaseAllowancePath(
   if (!built.sufficient && built.approveTx) {
     console.log("[POS Base USDC V7] allowance_approve_start", { paymentId })
     // from is required by WalletConnect v2 to route to the correct account
-    await provider.request<string>({
-      method: "eth_sendTransaction",
-      params: [{
-        from: walletAddress,
-        to: built.approveTx.to,
-        data: built.approveTx.data,
-        value: "0x" + BigInt(built.approveTx.value || "0").toString(16),
-        chainId: "0x2105",
-      }],
-    })
+    await withPosWalletRequestTimeout(
+      provider.request<string>({
+        method: "eth_sendTransaction",
+        params: [{
+          from: walletAddress,
+          to: built.approveTx.to,
+          data: built.approveTx.data,
+          value: "0x" + BigInt(built.approveTx.value || "0").toString(16),
+          chainId: "0x2105",
+        }],
+      }),
+      "Timed out waiting for wallet to respond to the allowance approval request."
+    )
     console.log("[POS Base USDC V7] allowance_approve_submitted", { paymentId })
     // Wait for V7 approval to be mined before sending payment tx (~2 s block time on Base)
     await waitForAllowanceSufficient(paymentId, walletAddress)
@@ -259,16 +295,19 @@ async function executePosBaseAllowancePath(
   }
 
   console.log("[POS Base USDC V7] payment_tx_request_start", { paymentId })
-  const paymentTxHash = await provider.request<string>({
-    method: "eth_sendTransaction",
-    params: [{
-      from: walletAddress,
-      to: built.paymentTx.to,
-      data: built.paymentTx.data,
-      value: "0x" + BigInt(built.paymentTx.value || "0").toString(16),
-      chainId: "0x2105",
-    }],
-  })
+  const paymentTxHash = await withPosWalletRequestTimeout(
+    provider.request<string>({
+      method: "eth_sendTransaction",
+      params: [{
+        from: walletAddress,
+        to: built.paymentTx.to,
+        data: built.paymentTx.data,
+        value: "0x" + BigInt(built.paymentTx.value || "0").toString(16),
+        chainId: "0x2105",
+      }],
+    }),
+    "Timed out waiting for wallet to respond to the payment request."
+  )
   if (typeof paymentTxHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(paymentTxHash)) {
     throw new Error("Wallet did not return a valid transaction hash for USDC payment")
   }
@@ -750,16 +789,26 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
 
         console.log("[POS Base ETH] request_start", { paymentId, attemptId: myAttempt })
         // from is required by WalletConnect v2 to route to the correct account
-        const rawTxHash = await wcResult.provider.request<string>({
-          method: "eth_sendTransaction",
-          params: [{ from: walletAddress, to: parsed.to, value: parsed.valueHex, data: parsed.data, chainId: "0x2105" }],
+        const rawTxHash = await withPosWalletRequestTimeout(
+          wcResult.provider.request<string>({
+            method: "eth_sendTransaction",
+            params: [{ from: walletAddress, to: parsed.to, value: parsed.valueHex, data: parsed.data, chainId: "0x2105" }],
+          }),
+          "Timed out waiting for wallet to respond to the transaction request."
+        )
+        console.log("[POS Base ETH] request_resolved", {
+          paymentId,
+          attemptId: myAttempt,
+          hasTxHash: Boolean(rawTxHash),
+          returnedType: typeof rawTxHash,
+          returnedPrefix: typeof rawTxHash === "string" ? rawTxHash.slice(0, 10) : null,
         })
-        console.log("[POS Base ETH] request_resolved", { paymentId, hasTxHash: Boolean(rawTxHash) })
 
         if (typeof rawTxHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(rawTxHash)) {
           throw new Error("Wallet did not return a valid ETH transaction hash")
         }
         txHash = rawTxHash
+        console.log("[POS Base ETH] tx_hash_validated", { paymentId, attemptId: myAttempt })
         console.log("[POS Base ETH] tx_hash_captured", {
           paymentId,
           txHashPrefix: txHash.slice(0, 10),
@@ -832,7 +881,9 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         })
       }
 
+      console.log("[POS Base WC] session_step_update_start", { intentId: iid, paymentId, attemptId: myAttempt, step: "payment_submitted" })
       await updatePosBaseSession(iid, { step: "payment_submitted" })
+      console.log("[POS Base WC] session_step_update_resolved", { intentId: iid, paymentId, attemptId: myAttempt, step: "payment_submitted" })
       finalTxHashSubmitted = true
       logConfirmationTrace("wallet_hash_returned", {
         paymentId,

@@ -290,6 +290,36 @@ export default function BasePosCheckoutMirror({
     return () => clearInterval(timer)
   }, [paymentReady, pollSession, pairingReady, burstUntil, terminalStatus])
 
+  // Mobile browsers commonly suspend/throttle setInterval while a tab is
+  // backgrounded - and switching to the wallet app to approve the
+  // transaction backgrounds this exact tab. Without an explicit resume,
+  // the interval above can sit paused after the customer returns, leaving
+  // the UI stuck on a stale step (e.g. "payment_sending") even after the
+  // POS-owned session has already advanced past it. Force an immediate
+  // catch-up poll on every signal that the tab is active again.
+  useEffect(() => {
+    if (!paymentReady) return
+    if (terminalStatus) return
+
+    function handleResume(source: string) {
+      if (source === "visibilitychange" && document.visibilityState !== "visible") return
+      console.log("[POS Base Mirror] resume_poll", { intentId, source })
+      void pollSession()
+    }
+    const handleVisibilityChange = () => handleResume("visibilitychange")
+    const handleFocus = () => handleResume("focus")
+    const handlePageShow = () => handleResume("pageshow")
+
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    window.addEventListener("focus", handleFocus)
+    window.addEventListener("pageshow", handlePageShow)
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      window.removeEventListener("focus", handleFocus)
+      window.removeEventListener("pageshow", handlePageShow)
+    }
+  }, [paymentReady, pollSession, terminalStatus, intentId])
+
   // Notify parent when the POS enters active execution (wallet connected or beyond)
   useEffect(() => {
     if (executionStartedRef.current) return
