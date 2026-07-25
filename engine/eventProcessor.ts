@@ -8,7 +8,7 @@
 import { getProvider } from "@/providers/registry"
 import { updatePaymentStatus } from "./updatePaymentStatus"
 import { getPaymentById, getPaymentByProviderReference, upsertLedgerEntry } from "@/database"
-import { repairIncompletePaymentForReconciliation } from "./paymentReconciliation"
+import { repairTerminalPaymentForReconciliation } from "./paymentReconciliation"
 import { PaymentStatus, normalizeToStrictPaymentStatus } from "./paymentStateMachine"
 import { StoredPaymentSplitMetadata } from "@/types/payment"
 import {
@@ -641,14 +641,14 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
   let currentStatus = normalizeToStrictPaymentStatus(payment.status)
   const TERMINAL_STATES = new Set<string>(["CONFIRMED", "FAILED", "INCOMPLETE"])
   if (TERMINAL_STATES.has(currentStatus)) {
-    // Self-healing reconciliation: a payment that was marked INCOMPLETE before
+    // Self-healing reconciliation: a payment that was marked INCOMPLETE/FAILED before
     // the engine ever saw this (now independently verified) on-chain evidence
     // may be repaired back to PROCESSING. This is the ONLY way INCOMPLETE is
     // ever left — see engine/paymentReconciliation.ts for the guarded bypass.
     // Every other terminal state (or a non-reconciliation caller) is skipped
     // exactly as before.
-    if (currentStatus === "INCOMPLETE" && event.reconcile && targetStatus !== "FAILED") {
-      const repair = await repairIncompletePaymentForReconciliation(paymentId, { txHash, value, from })
+    if ((currentStatus === "INCOMPLETE" || currentStatus === "FAILED") && event.reconcile && targetStatus !== "FAILED") {
+      const repair = await repairTerminalPaymentForReconciliation(paymentId, { txHash, value, from })
       if (!repair.repaired) {
         console.info("[eventProcessor] processPaymentEvent: reconciliation repair skipped", {
           paymentId,
@@ -656,8 +656,9 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
         })
         return
       }
-      console.info("[eventProcessor] processPaymentEvent: reconciliation repaired INCOMPLETE -> PROCESSING", {
+      console.info("[eventProcessor] processPaymentEvent: reconciliation repaired terminal -> PROCESSING", {
         paymentId,
+        previousStatus: currentStatus,
         txHash: txHash || null
       })
       currentStatus = "PROCESSING"

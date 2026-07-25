@@ -25,7 +25,11 @@
 
 import { getBaseV7UsdcToken, getRpcUrl } from "./config"
 import { processPaymentEvent } from "./eventProcessor"
-import { id as ethersId, AbiCoder } from "ethers"
+import { AbiCoder } from "ethers"
+import {
+  BASE_V7_PAYMENT_SPLIT_TOPIC,
+  evaluateBaseV7ReceiptEvidence
+} from "./baseV7Evidence"
 
 // Solana Memo Program ID — same constant used in solanaSplitTransaction.ts
 const SOLANA_MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
@@ -33,9 +37,7 @@ const USDC_MINT_ADDRESS = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
 // PineTreeSplit contract event: PaymentSplit(address indexed merchant, address indexed treasury,
 //   uint256 merchantAmount, uint256 feeAmount, string paymentRef, address indexed payer, address token)
-const PAYMENT_SPLIT_TOPIC = ethersId(
-  "PaymentSplit(address,address,uint256,uint256,string,address,address)"
-)
+const PAYMENT_SPLIT_TOPIC = BASE_V7_PAYMENT_SPLIT_TOPIC
 
 /**
  * Thrown by the EVM RPC helpers below when the node itself responds with a
@@ -524,6 +526,68 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
             txHash: input.txHash
           })
         }
+        return false
+      }
+
+      if (isBaseUsdc) {
+        const transaction = await getTransactionByHash(rpcUrl, input.txHash)
+        const decision = evaluateBaseV7ReceiptEvidence({
+          txHash: input.txHash,
+          receipt,
+          transaction,
+          expectedSplitContract: splitContractEvm,
+          expectedUsdcToken: getBaseV7UsdcToken(),
+          expectedMerchantWallet: merchantWallet,
+          expectedPineTreeWallet: input.pinetreeWallet,
+          expectedPaymentRef: input.paymentId,
+          expectedMerchantAmountAtomic: input.expectedMerchantAtomic || 0,
+          expectedFeeAmountAtomic: input.expectedFeeAtomic || 0
+        })
+
+        console.info("[PineTreeBaseTrace] watcher:base-v7 evidence decision", {
+          step: "watcher-base-v7-evidence-decision",
+          paymentId: input.paymentId,
+          txHash: input.txHash,
+          kind: decision.kind,
+          status: decision.status,
+          reason: "reason" in decision ? decision.reason : null,
+          evidence: decision.kind === "not_found" ? null : decision.evidence
+        })
+
+        if (decision.kind === "wrong_transaction_type") {
+          console.warn("[PineTreeBaseTrace] base_v7_wrong_hash_type", {
+            paymentId: input.paymentId,
+            txHash: input.txHash,
+            reason: decision.reason,
+            transactionRole: decision.evidence.transactionRole
+          })
+          return false
+        }
+
+        if (decision.kind === "failed_transaction") {
+          await processPaymentEvent({
+            type: "payment.failed",
+            paymentId: input.paymentId,
+            txHash: input.txHash,
+            feeCaptureValidated: false
+          })
+          return true
+        }
+
+        if (decision.kind === "confirmed_payment") {
+          const payer = decision.evidence.payer || transaction?.from || "unknown"
+          const totalAtomic = (
+            BigInt(decision.evidence.merchantTransferAmount || "0") +
+            BigInt(decision.evidence.pineTreeFeeTransferAmount || "0")
+          ).toString()
+          return handleMatchingTransaction(
+            input.paymentId,
+            { hash: input.txHash, value: totalAtomic, from: payer },
+            true,
+            input.reconcile
+          )
+        }
+
         return false
       }
 
@@ -1071,6 +1135,39 @@ async function getTransactionReceipt(rpcUrl: string, txHash: string): Promise<Ev
     )
   }
   return (data?.result || null) as EvmTransactionReceipt | null
+}
+
+async function getTransactionByHash(rpcUrl: string, txHash: string): Promise<EvmTransaction | null> {
+  let response: Response
+  try {
+    response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "eth_getTransactionByHash",
+        params: [txHash],
+        id: 1
+      })
+    })
+  } catch (error) {
+    console.error("[watcher:evm] eth_getTransactionByHash request failed", {
+      txHash,
+      error: error instanceof Error ? error.message : String(error)
+    })
+    return null
+  }
+  const data = await response.json()
+  if (data?.error) {
+    console.error("[watcher:evm] eth_getTransactionByHash rpc error", { txHash, rpcError: data.error })
+    const rpc429 = classifyRpc429(data.error, response)
+    throw new RpcTransportError(
+      `eth_getTransactionByHash RPC error: ${JSON.stringify(data.error)}`,
+      rpc429.rpcErrorCode,
+      rpc429.retryAfterMs
+    )
+  }
+  return (data?.result || null) as EvmTransaction | null
 }
 
 function weiToEth(wei: string): number {

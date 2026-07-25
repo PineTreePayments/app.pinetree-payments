@@ -613,7 +613,7 @@ export default function PayClient() {
       ).catch(() => null)
 
       const detectData = detectRes
-        ? await detectRes.json().catch(() => null) as { detected?: boolean; status?: string; error?: string } | null
+        ? await detectRes.json().catch(() => null) as { detected?: boolean; status?: string; kind?: string; error?: string } | null
         : null
       const status = String(detectData?.status || "").toUpperCase()
 
@@ -641,10 +641,10 @@ export default function PayClient() {
 
       await loadIntentCallback()
 
-      if (status === "CONFIRMED" || detectData?.detected) return true
       if (status === "FAILED") {
         throw new Error("Base transaction failed. Please retry or choose another payment method.")
       }
+      if (status === "CONFIRMED" || detectData?.kind === "confirmed_payment") return true
 
       if (attempt < maxAttempts) {
         await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs))

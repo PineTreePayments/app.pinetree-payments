@@ -50,10 +50,32 @@ function basePayment(overrides: Record<string, unknown> = {}) {
   } as never
 }
 
+function baseUsdcPayment(overrides: Record<string, unknown> = {}) {
+  return basePayment({
+    metadata: {
+      paymentIntentId: "intent-1",
+      split: {
+        feeCaptureMethod: "contract_split",
+        asset: "USDC",
+        splitContract: "0x96484a59b0Aa16E4F95F0899B592F76a6A192c29",
+        merchantWallet: "0x50c619680b56382489429e8d382D520cfca95599",
+        pinetreeWallet: "0xDfB2EB3FccB76B8C7f7e352d5421654add5a7903",
+        expectedAmountNative: 0.26,
+        merchantNativeAmountAtomic: "110000",
+        feeNativeAmountAtomic: "150000"
+      }
+    },
+    ...overrides,
+  })
+}
+
 describe("runPaymentDetectForPayment — tx hash persistence ordering", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.ensurePaymentFresh.mockResolvedValue({ detected: false })
+    global.fetch = vi.fn(async () => ({
+      json: async () => ({ result: null })
+    })) as unknown as typeof fetch
   })
 
   it("persists the tx hash for a normal in-flight (PENDING) payment before running the watcher", async () => {
@@ -123,5 +145,33 @@ describe("runPaymentDetectForPayment — tx hash persistence ordering", () => {
       expect.objectContaining({ txHash: REAL_TX_HASH, forceWatcher: true })
     )
     expect(result.body.detected).toBe(true)
+  })
+
+  it("REGRESSION: a Base USDC allowance approval hash is not stored as the canonical payment transaction", async () => {
+    const approvalHash = "0x" + "b".repeat(64)
+    mocks.getPaymentById.mockResolvedValue(baseUsdcPayment({ status: "PROCESSING" }))
+    mocks.getTransactionByPaymentId.mockResolvedValue({ id: "txn-1", provider_transaction_id: null })
+    global.fetch = vi.fn(async () => ({
+      json: async () => ({
+        result: {
+          to: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          from: "0xb54205bb0076a314d55dd77a1ea957a15b3d77a5",
+          input: "0x095ea7b3" + "0".repeat(64)
+        }
+      })
+    })) as unknown as typeof fetch
+
+    const { runPaymentDetectForPayment } = await import("@/engine/paymentDetect")
+    const result = await runPaymentDetectForPayment(REAL_PAYMENT_ID, { txHash: approvalHash })
+
+    expect(result.body).toMatchObject({
+      detected: true,
+      status: "PROCESSING",
+      kind: "wrong_transaction_type",
+      reason: "allowance_approval_hash"
+    })
+    expect(mocks.updateTransactionProviderReference).not.toHaveBeenCalled()
+    expect(mocks.processPaymentEvent).not.toHaveBeenCalled()
+    expect(mocks.ensurePaymentFresh).not.toHaveBeenCalled()
   })
 })
