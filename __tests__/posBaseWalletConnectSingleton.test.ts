@@ -293,3 +293,95 @@ describe("initPosBaseWalletConnect — generation ownership across sequential at
     expect(mocks.init).toHaveBeenCalledTimes(1)
   })
 })
+
+/**
+ * Regression coverage for prewarming the shared WalletConnect provider on
+ * POS page mount, well before any customer selects Base — moving the Core
+ * init + relay handshake cost off the critical path of the first sale.
+ * prewarmPosBaseWalletConnect() must create no pairing/proposal/session
+ * (it never calls connect()) and must share the exact same dedup + retry
+ * semantics as the real payment path.
+ */
+describe("prewarmPosBaseWalletConnect", () => {
+  beforeEach(() => {
+    vi.resetModules()
+    mocks.init.mockReset()
+    vi.stubEnv("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID", "test-project-id")
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.pinetree-payments.com")
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("initializes the provider without ever calling connect() — no pairing, proposal, or session is created", async () => {
+    const fakeProvider = createFakeWcProvider()
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { prewarmPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    await prewarmPosBaseWalletConnect()
+
+    expect(mocks.init).toHaveBeenCalledTimes(1)
+    expect(fakeProvider.connect).not.toHaveBeenCalled()
+  })
+
+  it("a real payment attempt after prewarm reuses the already-initialized provider — no second EthereumProvider.init() call", async () => {
+    const fakeProvider = createFakeWcProvider()
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { prewarmPosBaseWalletConnect, initPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    await prewarmPosBaseWalletConnect()
+    const result = await initPosBaseWalletConnect()
+
+    expect(mocks.init).toHaveBeenCalledTimes(1)
+    expect(result.ok).toBe(true)
+    expect(fakeProvider.connect).toHaveBeenCalledTimes(1)
+  })
+
+  it("concurrent prewarm and payment-start calls share one initialization promise, not two", async () => {
+    const fakeProvider = createFakeWcProvider()
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { prewarmPosBaseWalletConnect, initPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    const [, paymentResult] = await Promise.all([
+      prewarmPosBaseWalletConnect(),
+      initPosBaseWalletConnect(),
+    ])
+
+    expect(mocks.init).toHaveBeenCalledTimes(1)
+    expect(paymentResult.ok).toBe(true)
+  })
+
+  it("never throws even if EthereumProvider.init() fails", async () => {
+    mocks.init.mockRejectedValueOnce(new Error("relay unreachable"))
+
+    const { prewarmPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    await expect(prewarmPosBaseWalletConnect()).resolves.toBeUndefined()
+  })
+
+  it("a failed prewarm does not block a later payment attempt from retrying init", async () => {
+    mocks.init.mockRejectedValueOnce(new Error("relay unreachable"))
+
+    const { prewarmPosBaseWalletConnect, initPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    await prewarmPosBaseWalletConnect()
+
+    const fakeProvider = createFakeWcProvider()
+    mocks.init.mockResolvedValueOnce(fakeProvider)
+    const result = await initPosBaseWalletConnect()
+
+    expect(result.ok).toBe(true)
+    expect(mocks.init).toHaveBeenCalledTimes(2)
+  })
+
+  it("calling prewarm multiple times (e.g. mount + a later defensive call) only initializes once", async () => {
+    const fakeProvider = createFakeWcProvider()
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { prewarmPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    await prewarmPosBaseWalletConnect()
+    await prewarmPosBaseWalletConnect()
+    await prewarmPosBaseWalletConnect()
+
+    expect(mocks.init).toHaveBeenCalledTimes(1)
+  })
+})

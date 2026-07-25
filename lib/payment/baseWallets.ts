@@ -61,6 +61,13 @@ export type BaseWalletEntry = {
   label: string
   iconSrc: string
   href: (pairingUri: string) => string
+  /**
+   * The resolved deep-link template this wallet's href is built from (empty
+   * if none was found). Exposed separately from href() so metadata can be
+   * fetched/cached once, independent of any specific payment's pairing URI
+   * — the actual href is only ever computed once a real pairingUri exists.
+   */
+  mobileLink: string
   enabled: boolean
   reliability: BaseWalletReliability
   explorerId: string
@@ -73,6 +80,23 @@ export type BaseWalletEntry = {
 
 export type BaseWalletApiEntry = Omit<BaseWalletEntry, "href"> & {
   href: string
+}
+
+/**
+ * Wire format for pairingUri-less metadata prefetch (GET /api/walletconnect/base-wallets
+ * with no pairingUri query param) — everything needed to render the wallet
+ * grid and, once a real pairingUri exists, compute each wallet's href
+ * locally via buildWalletHref() without another network round trip.
+ */
+export type BaseWalletMetadataEntry = Omit<BaseWalletEntry, "href">
+
+/**
+ * Compute a wallet's deep link from cached metadata plus a now-known
+ * pairingUri, without needing to re-fetch anything from the server. Mirrors
+ * exactly what createBaseWalletEntry(...).href(pairingUri) does internally.
+ */
+export function buildWalletHref(entry: Pick<BaseWalletMetadataEntry, "mobileLink">, pairingUri: string): string {
+  return entry.mobileLink ? formatWalletConnectMobileLink({ mobileLink: entry.mobileLink, pairingUri }) : ""
 }
 
 // Curated POS allow-list. Runtime wallet names, icons, supported chains, and
@@ -312,6 +336,7 @@ export function createBaseWalletEntry(
       mobileLink
         ? formatWalletConnectMobileLink({ mobileLink, pairingUri })
         : "",
+    mobileLink,
     enabled: target.enabled && Boolean(mobileLink),
     reliability: target.reliability,
     explorerId: target.explorerId,
@@ -334,3 +359,51 @@ const BASE_WALLETS: BaseWalletEntry[] = BASE_WALLET_TARGETS.map((target) =>
 )
 
 export default BASE_WALLETS
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Metadata prefetch cache
+//
+// Wallet metadata (names/icons/enabled/mobileLink) is not payment-specific —
+// it only changes when the WalletConnect Explorer catalog changes, which is
+// already cached server-side for 12h (see the route's `next.revalidate`).
+// Fetching it only starts once the customer has already tapped "Connect"
+// AND a pairingUri exists (the previous design) put an avoidable network
+// round trip directly in the wallet-picker's critical path. Prefetching as
+// soon as the checkout page is ready to accept a Base selection — and
+// caching for the rest of the browser session — means the wallet grid can
+// render from cache the instant it's needed, with buildWalletHref() filling
+// in each entry's real href once the actual pairingUri is known.
+let metadataCachePromise: Promise<BaseWalletMetadataEntry[]> | null = null
+
+function localFallbackMetadata(): BaseWalletMetadataEntry[] {
+  return BASE_WALLET_TARGETS.map((target) => createBaseWalletEntry(target))
+}
+
+/**
+ * Kick off (or return the already in-flight/completed) wallet metadata
+ * fetch. Safe to call multiple times — concurrent callers share one
+ * request. Never rejects: a failed fetch resolves with the local static
+ * fallback list instead, and clears the cache so a later call can retry
+ * against the network rather than being permanently stuck on the fallback.
+ */
+export function prefetchBaseWalletMetadata(): Promise<BaseWalletMetadataEntry[]> {
+  if (metadataCachePromise) return metadataCachePromise
+
+  metadataCachePromise = fetch("/api/walletconnect/base-wallets", { cache: "no-store" })
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`base-wallets metadata fetch failed: ${res.status}`)
+      const data = (await res.json()) as { wallets?: BaseWalletMetadataEntry[] }
+      if (!Array.isArray(data.wallets) || data.wallets.length === 0) {
+        throw new Error("base-wallets metadata response missing wallets")
+      }
+      return data.wallets
+    })
+    .catch(() => {
+      // Let the next call retry against the network instead of caching a
+      // failure forever, while still resolving *this* caller immediately.
+      metadataCachePromise = null
+      return localFallbackMetadata()
+    })
+
+  return metadataCachePromise
+}

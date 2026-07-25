@@ -4,6 +4,7 @@ import {
   createBaseWalletEntry,
   walletSupportsBase,
   type BaseWalletApiEntry,
+  type BaseWalletMetadataEntry,
   type BaseWalletTarget,
   type WalletConnectExplorerWallet,
 } from "@/lib/payment/baseWallets"
@@ -60,9 +61,26 @@ function toApiEntry(
   }
 }
 
+// Metadata-only variant (no pairingUri): everything except href, so a caller
+// can prefetch/cache this well before any specific payment's pairing URI
+// exists, and compute href locally later via buildWalletHref() — this is
+// what the customer-facing checkout page prefetches on mount so opening the
+// wallet picker never has to wait on this endpoint.
+function toMetadataEntry(
+  target: BaseWalletTarget,
+  wallet: WalletConnectExplorerWallet | null
+): BaseWalletMetadataEntry {
+  const entry = createBaseWalletEntry(target, wallet)
+  return {
+    ...entry,
+    enabled: entry.enabled && Boolean(entry.mobileLink) && (wallet ? walletSupportsBase(wallet) : true),
+  }
+}
+
 export async function GET(req: NextRequest) {
   const pairingUri = req.nextUrl.searchParams.get("pairingUri") || ""
-  if (!isValidPairingUri(pairingUri)) {
+  const hasPairingUri = pairingUri.length > 0
+  if (hasPairingUri && !isValidPairingUri(pairingUri)) {
     return NextResponse.json({ error: "Invalid pairingUri" }, { status: 400 })
   }
 
@@ -71,7 +89,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         source: "walletconnect-explorer-cache",
-        wallets: BASE_WALLET_TARGETS.map((target) => toApiEntry(target, null, pairingUri)),
+        wallets: BASE_WALLET_TARGETS.map((target) =>
+          hasPairingUri ? toApiEntry(target, null, pairingUri) : toMetadataEntry(target, null)
+        ),
       },
       { headers: { "Cache-Control": "no-store" } }
     )
@@ -81,9 +101,9 @@ export async function GET(req: NextRequest) {
     BASE_WALLET_TARGETS.map(async (target) => {
       try {
         const wallet = await fetchExplorerWallet(target, projectId)
-        return toApiEntry(target, wallet, pairingUri)
+        return hasPairingUri ? toApiEntry(target, wallet, pairingUri) : toMetadataEntry(target, wallet)
       } catch {
-        return toApiEntry(target, null, pairingUri)
+        return hasPairingUri ? toApiEntry(target, null, pairingUri) : toMetadataEntry(target, null)
       }
     })
   )

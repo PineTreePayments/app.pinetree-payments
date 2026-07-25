@@ -14,9 +14,11 @@ import PosCardPaymentExperience, {
 } from "./PosCardPaymentExperience"
 import {
   initPosBaseWalletConnect,
+  prewarmPosBaseWalletConnect,
   waitForWalletConnect,
   type PosWcProvider,
 } from "@/lib/pos/posBaseWalletConnect"
+import { markBaseCheckoutLatency } from "@/lib/payment/baseCheckoutLatencyTrace"
 
 type Props = {
   locked: boolean
@@ -363,6 +365,17 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   function isOwnedBaseAttempt(myAttempt: number): boolean {
     return posBaseAttemptRef.current === myAttempt
   }
+
+  // Warm the shared WalletConnect provider/Core as soon as the POS terminal
+  // is ready, well before any customer selects Base — this only opens the
+  // relay connection, it never creates a pairing/proposal/session (see
+  // lib/pos/posBaseWalletConnect.ts). By the time the first sale of the day
+  // reaches runPosBaseFlow, connect() can generate display_uri immediately
+  // instead of also paying for Core init + the relay handshake at that
+  // point.
+  useEffect(() => {
+    void prewarmPosBaseWalletConnect()
+  }, [])
 
   const subtotalNum = digitsToNumber(digits)
   const displayAmount = digitsToDisplay(digits)
@@ -739,14 +752,17 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     try {
       console.log("[POS Base WC] flow_owner_acquired", { intentId: iid, paymentId, asset, attemptId: myAttempt })
       console.log("[POS Base WC] session_created", { intentId: iid, paymentId, asset, attemptId: myAttempt })
+      markBaseCheckoutLatency("run_pos_base_flow_started", { intentId: iid, paymentId, attemptId: myAttempt })
       // Fire-and-forget: this write to our own session-mirror API has no
       // bearing on starting WalletConnect (initPosBaseWalletConnect doesn't
       // read it), so it no longer blocks WC init behind a network round trip
       // that was pure serialized latency.
       void updatePosBaseSession(iid, { step: "awaiting_wallet", selectedAsset: asset })
 
+      markBaseCheckoutLatency("walletconnect_provider_requested", { intentId: iid, paymentId, attemptId: myAttempt })
       const wcResult = await initPosBaseWalletConnect()
       if (!wcResult.ok) throw new Error(wcResult.error)
+      markBaseCheckoutLatency("display_uri_emitted", { intentId: iid, paymentId, attemptId: myAttempt })
 
       localProvider = wcResult.provider
       posWcProviderRef.current = wcResult.provider
@@ -757,10 +773,13 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       // publishing the pairing URI to the customer's mirror can happen
       // concurrently with (rather than strictly before) starting to wait for
       // the wallet to connect.
+      markBaseCheckoutLatency("pairing_uri_session_write_started", { intentId: iid, paymentId, attemptId: myAttempt })
       void updatePosBaseSession(iid, {
         step: "awaiting_wallet",
         pairingUri: wcResult.pairingUri,
         selectedAsset: asset,
+      }).then(() => {
+        markBaseCheckoutLatency("pairing_uri_session_write_completed", { intentId: iid, paymentId, attemptId: myAttempt })
       })
 
       // Wait for customer to open the wallet deep-link and approve pairing
@@ -778,6 +797,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         : ""
 
       console.log("[POS Base WC] wallet_connected", { intentId: iid, paymentId, asset, maskedAddress, attemptId: myAttempt })
+      markBaseCheckoutLatency("wallet_connected", { intentId: iid, paymentId, attemptId: myAttempt })
       walletConnectedForAttempt = true
       await updatePosBaseSession(iid, {
         step: "wallet_connected",
@@ -791,6 +811,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       }
 
       let txHash: string
+      markBaseCheckoutLatency("transaction_request_started", { intentId: iid, paymentId, attemptId: myAttempt, asset })
 
       if (asset === "ETH") {
         const parsed = parseEthereumUri(paymentUrl)
@@ -1087,6 +1108,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
 
         const net = String(data.selectedNetwork || "").toLowerCase()
         if (net === "base" && pid && !cancelled && !posBaseRunningRef.current) {
+          markBaseCheckoutLatency("pos_detected_base_selection", { intentId, paymentId: pid })
           const asset =
             String(data.selectedAsset || "ETH").toUpperCase() === "USDC" ? "USDC" : "ETH"
           const paymentUrl = String(data.paymentUrl || "")

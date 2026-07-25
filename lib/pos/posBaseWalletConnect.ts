@@ -40,6 +40,8 @@
  * once a newer generation has taken over.
  */
 
+import { markBaseCheckoutLatency } from "@/lib/payment/baseCheckoutLatencyTrace"
+
 const BASE_CHAIN_ID = 8453
 
 export type PosWcRequestArgs = {
@@ -128,6 +130,28 @@ async function getSharedPosWcProvider(): Promise<RawWcProvider> {
 }
 
 /**
+ * Warm the shared WalletConnect provider/Core (and its relay connection)
+ * before any payment begins — e.g. on POS page mount. This does exactly
+ * what getSharedPosWcProvider() above already does for the first real
+ * payment (dedup'd, retryable on failure) — calling this early just moves
+ * that cost off the critical path of the customer's first Base selection.
+ * It creates no pairing URI, no proposal, and no wallet connection: nothing
+ * here calls connect(). Safe to call multiple times (e.g. once on mount and
+ * again defensively later) — concurrent/repeated callers share one
+ * initialization.
+ */
+export async function prewarmPosBaseWalletConnect(): Promise<void> {
+  try {
+    await getSharedPosWcProvider()
+    console.log("[POS WC] provider_prewarmed")
+  } catch (err) {
+    console.warn("[POS WC] provider_prewarm_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/**
  * Get (initializing once per tab if needed) the shared WalletConnect
  * provider, then start a fresh connect() for this specific payment.
  *
@@ -152,6 +176,7 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
     }
   }
   console.log("[POS WC] provider_ready", { reused: providerAlreadyCached })
+  markBaseCheckoutLatency("walletconnect_provider_ready", { reused: providerAlreadyCached })
 
   // Claim ownership of the shared provider's session/pairing state before
   // doing anything else. Any earlier attempt's disconnect() call that runs
@@ -218,6 +243,7 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
     wcProvider.on("display_uri", onDisplayUri)
 
     console.log("[POS WC] connect_called", { generation: myGeneration })
+    markBaseCheckoutLatency("connect_called", { generation: myGeneration })
     // Kick off a fresh pairing for this payment (non-blocking — resolves above via event)
     wcProvider.connect().catch((err: unknown) => {
       if (!resolved) {

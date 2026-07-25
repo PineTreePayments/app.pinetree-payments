@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
-import BASE_WALLETS from "@/lib/payment/baseWallets"
-import type { BaseWalletApiEntry } from "@/lib/payment/baseWallets"
+import { supabase } from "@/lib/supabaseClient"
+import { buildWalletHref, prefetchBaseWalletMetadata } from "@/lib/payment/baseWallets"
+import type { BaseWalletMetadataEntry } from "@/lib/payment/baseWallets"
+import { markBaseCheckoutLatency } from "@/lib/payment/baseCheckoutLatencyTrace"
 
 type PosBaseStep =
   | "awaiting_wallet"
@@ -54,49 +56,46 @@ function normalizeTerminalStatus(status?: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type LauncherModalProps = {
+  intentId: string
   pairingUri: string
   onClose: () => void
   onWalletClick: () => void
 }
 
-function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherModalProps) {
+function WalletLauncherModal({ intentId, pairingUri, onClose, onWalletClick }: LauncherModalProps) {
   const [search, setSearch] = useState("")
-  const [explorerWallets, setExplorerWallets] = useState<BaseWalletApiEntry[] | null>(null)
+  const [metadata, setMetadata] = useState<BaseWalletMetadataEntry[] | null>(null)
 
+  // Wallet metadata is prefetched (and cached for the rest of the browser
+  // session) as soon as this component mounts — see the prefetch call
+  // below in BasePosCheckoutMirror. By the time the customer has gotten as
+  // far as opening this modal, prefetchBaseWalletMetadata() almost always
+  // resolves immediately from cache instead of making a fresh network call
+  // here, which used to sit directly in the wallet-picker's critical path.
   useEffect(() => {
     let cancelled = false
+    markBaseCheckoutLatency("wallet_list_request_started", { intentId })
 
-    const loadWallets = async () => {
-      try {
-        const res = await fetch(
-          `/api/walletconnect/base-wallets?pairingUri=${encodeURIComponent(pairingUri)}`,
-          { cache: "no-store" }
-        )
-        if (!res.ok) return
-        const data = (await res.json()) as { wallets?: BaseWalletApiEntry[] }
-        if (!cancelled && Array.isArray(data.wallets)) {
-          setExplorerWallets(data.wallets)
-        }
-      } catch {
-        // Keep the local Explorer cache fallback.
-      }
-    }
-
-    void loadWallets()
+    void prefetchBaseWalletMetadata().then((wallets) => {
+      if (cancelled) return
+      markBaseCheckoutLatency("wallet_list_request_completed", { intentId, count: wallets.length })
+      setMetadata(wallets)
+    })
 
     return () => {
       cancelled = true
     }
-  }, [pairingUri])
+  }, [intentId])
 
-  const fallbackWallets: BaseWalletApiEntry[] = BASE_WALLETS.map((w) => ({
-    ...w,
-    href: w.href(pairingUri),
-  }))
+  useEffect(() => {
+    if (metadata) markBaseCheckoutLatency("wallet_list_rendered", { intentId })
+  }, [metadata, intentId])
 
-  const enabledWallets = (explorerWallets || fallbackWallets).filter(
-    (w) => w.enabled !== false && Boolean(w.href)
-  )
+  const enabledWallets = (metadata ?? []).flatMap((entry) => {
+    const href = buildWalletHref(entry, pairingUri)
+    if (entry.enabled === false || !href) return []
+    return [{ ...entry, href }]
+  })
 
   const filtered = search.trim()
     ? enabledWallets.filter((w) =>
@@ -151,7 +150,12 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-5 py-5 pb-[calc(env(safe-area-inset-bottom)+24px)] sm:px-6">
 
           {/* Wallet grid */}
-          {filtered.length > 0 ? (
+          {metadata === null ? (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-400">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+              Loading wallets…
+            </div>
+          ) : filtered.length > 0 ? (
             <div className="space-y-3">
               <p className="px-1 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
                 Base-compatible wallets
@@ -161,7 +165,15 @@ function WalletLauncherModal({ pairingUri, onClose, onWalletClick }: LauncherMod
                 <a
                   key={w.id}
                   href={w.href}
-                  onClick={onWalletClick}
+                  onClick={() => {
+                    markBaseCheckoutLatency("wallet_selected", { intentId, walletId: w.id })
+                    // The href above was already fully constructed at render
+                    // time (buildWalletHref, above) — nothing async happens
+                    // between the tap and the browser following this link.
+                    markBaseCheckoutLatency("wallet_deeplink_constructed", { intentId, walletId: w.id })
+                    markBaseCheckoutLatency("wallet_deeplink_launched", { intentId, walletId: w.id })
+                    onWalletClick()
+                  }}
                   className="group flex min-h-[130px] w-full flex-col items-center justify-between overflow-hidden rounded-[22px] border border-white/10 bg-[#151922] px-2 py-3 text-center shadow-[0_14px_34px_rgba(0,0,0,0.22)] transition-all hover:-translate-y-0.5 hover:border-[#3b82f6]/55 hover:bg-[#1b2330] hover:shadow-[0_18px_44px_rgba(0,82,255,0.18)] sm:min-h-[136px] sm:px-2.5"
                 >
                   <span className="flex flex-col items-center gap-2">
@@ -222,6 +234,19 @@ export default function BasePosCheckoutMirror({
   const selectCalledRef = useRef(false)
   const executionStartedRef = useRef(false)
 
+  // This component only mounts once the customer has already tapped the
+  // Base asset card (see app/pay/PayClient.tsx), so mount time is the
+  // "base_option_tapped" moment. Kick off the wallet metadata prefetch
+  // immediately, in parallel with the select-network POST below rather than
+  // waiting until the customer later taps "Connect with WalletConnect" —
+  // that used to be the first time this fetch ever started (see
+  // WalletLauncherModal above), putting an avoidable network round trip
+  // directly in the wallet-picker's critical path.
+  useEffect(() => {
+    markBaseCheckoutLatency("base_option_tapped", { intentId })
+    void prefetchBaseWalletMetadata()
+  }, [intentId])
+
   // Create the payment record by calling select-network on mount
   useEffect(() => {
     if (selectCalledRef.current) return
@@ -229,6 +254,7 @@ export default function BasePosCheckoutMirror({
 
     const run = async () => {
       try {
+        markBaseCheckoutLatency("select_network_request_started", { intentId })
         const res = await fetch(
           `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
           {
@@ -240,6 +266,7 @@ export default function BasePosCheckoutMirror({
             body: JSON.stringify({ network: "base", asset: selectedAsset }),
           }
         )
+        markBaseCheckoutLatency("select_network_response_received", { intentId, ok: res.ok })
         if (!res.ok) {
           const err = (await res.json()) as { error?: string }
           throw new Error(err.error || "Failed to prepare Base payment")
@@ -284,6 +311,20 @@ export default function BasePosCheckoutMirror({
 
   // pairingReady switches from false → true exactly once; drives interval switching
   const pairingReady = !!(session?.pairingUri && isValidPairingUri(session.pairingUri))
+  const pairingReceivedLoggedRef = useRef(false)
+  useEffect(() => {
+    if (!pairingReady || pairingReceivedLoggedRef.current) return
+    pairingReceivedLoggedRef.current = true
+    markBaseCheckoutLatency("customer_pairing_uri_received", { intentId })
+  }, [pairingReady, intentId])
+
+  const walletConnectedLoggedRef = useRef(false)
+  useEffect(() => {
+    if (walletConnectedLoggedRef.current) return
+    if (session?.step !== "wallet_connected") return
+    walletConnectedLoggedRef.current = true
+    markBaseCheckoutLatency("wallet_connected", { intentId })
+  }, [session?.step, intentId])
 
   // Dynamic polling:
   //   1s — pairingUri not yet available (fast catch-up while POS generates URI)
@@ -302,6 +343,33 @@ export default function BasePosCheckoutMirror({
     return () => clearInterval(timer)
   }, [paymentReady, pollSession, pairingReady, burstUntil, terminalStatus])
 
+  // Realtime fast path: the POS terminal writes pairingUri/step updates into
+  // this same payment_intents row's metadata (see
+  // app/api/pos/base-session/[intentId]/route.ts), so reacting to postgres_changes
+  // on it lets this mirror pick up a new pairingUri or step transition at
+  // realtime latency instead of waiting up to the next poll tick. The
+  // interval above remains as the fallback if a realtime event is missed.
+  useEffect(() => {
+    if (!paymentReady) return
+    if (terminalStatus) return
+
+    const channel = supabase
+      .channel(`pos-mirror-session-${intentId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "payment_intents",
+          filter: `id=eq.${intentId}`
+        },
+        () => { void pollSession() }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [paymentReady, terminalStatus, intentId, pollSession])
+
   // Mobile browsers commonly suspend/throttle setInterval while a tab is
   // backgrounded - and switching to the wallet app to approve the
   // transaction backgrounds this exact tab. Without an explicit resume,
@@ -316,9 +384,16 @@ export default function BasePosCheckoutMirror({
     function handleResume(source: string) {
       if (source === "visibilitychange" && document.visibilityState !== "visible") return
       console.log("[POS Base Mirror] resume_poll", { intentId, source })
+      markBaseCheckoutLatency("browser_visibility_restored", { intentId, source })
       void pollSession()
     }
-    const handleVisibilityChange = () => handleResume("visibilitychange")
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        markBaseCheckoutLatency("browser_visibility_hidden", { intentId })
+        return
+      }
+      handleResume("visibilitychange")
+    }
     const handleFocus = () => handleResume("focus")
     const handlePageShow = () => handleResume("pageshow")
 
@@ -461,6 +536,7 @@ export default function BasePosCheckoutMirror({
 
         {showLauncher && (
           <WalletLauncherModal
+            intentId={intentId}
             pairingUri={pairingUri}
             onClose={() => setShowLauncher(false)}
             onWalletClick={handleWalletClick}
