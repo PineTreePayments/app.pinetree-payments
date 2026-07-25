@@ -1008,11 +1008,21 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         console.log("[POS Base WC] stale_attempt_error_suppressed", { intentId: iid, paymentId, asset, attemptId: myAttempt })
       }
     } finally {
-      console.log("[POS Base WC] flow_owner_released", { intentId: iid, paymentId, asset, attemptId: myAttempt })
-      // Always tear down the WalletConnect session this attempt created,
-      // whether or not it's still the current attempt — an abandoned
-      // attempt must never leave an orphaned WC session pairing/listening
-      // in the background.
+      console.log("[POS Base WC] flow_owner_released", {
+        intentId: iid,
+        paymentId,
+        asset,
+        attemptId: myAttempt,
+        stillOwned: isOwnedBaseAttempt(myAttempt),
+      })
+      // Always attempt to tear down the WalletConnect session this attempt
+      // created, whether or not it's still the current attempt — an
+      // abandoned attempt must never leave an orphaned WC session
+      // pairing/listening in the background. This is safe to call
+      // unconditionally even when superseded: the shared provider's own
+      // disconnect() (lib/pos/posBaseWalletConnect.ts) is generation-gated
+      // and silently no-ops if a newer attempt has since taken ownership of
+      // the shared session/pairing state, instead of tearing it down.
       if (localProvider) {
         localProvider.disconnect().catch(() => null)
       }

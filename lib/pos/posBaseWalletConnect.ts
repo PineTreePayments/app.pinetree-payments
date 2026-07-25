@@ -22,6 +22,22 @@
  * provider once per tab and reuses it for every subsequent payment — each
  * call still performs a fresh connect() (a new pairing/session), it just no
  * longer pays for a new Core/relay handshake each time.
+ *
+ * Generation ownership (added after the singleton change above): the shared
+ * EthereumProvider instance only ever tracks ONE session/pairing internally
+ * — it has no concept of "attempt A's session" vs "attempt B's session".
+ * Before this fix, every caller's disconnect() unconditionally tore down
+ * whatever the shared provider's *current* session/pairing was — which,
+ * once the provider became shared, was sometimes a newer attempt's
+ * still-pending proposal rather than the stale caller's own (abandoned)
+ * one. That produced exactly the "No matching key" / "Pending session not
+ * found" / 13-14s recovery symptom: a later attempt's proposal got deleted
+ * out from under it by an earlier attempt's delayed cleanup, and the wallet
+ * response that eventually arrived had nothing to correlate against until
+ * the SDK's own recovery/retry path (slow) kicked in. `currentGeneration`
+ * tracks which connect() cycle currently owns the shared provider's
+ * session/pairing state; a PosWcProvider's disconnect() is a safe no-op
+ * once a newer generation has taken over.
  */
 
 const BASE_CHAIN_ID = 8453
@@ -36,7 +52,7 @@ export type PosWcProvider = {
   accounts: string[]
   /** Send a JSON-RPC request through the WC session */
   request<T = unknown>(args: PosWcRequestArgs): Promise<T>
-  /** Tear down the WC session */
+  /** Tear down the WC session — safe no-op if this attempt has been superseded */
   disconnect(): Promise<void>
   /** Raw provider for advanced use */
   _provider: import("@walletconnect/ethereum-provider").default
@@ -53,6 +69,11 @@ type RawWcProvider = import("@walletconnect/ethereum-provider").default
 // itself fails, so a transient failure can be retried on the next attempt
 // instead of permanently wedging the terminal.
 let sharedProviderPromise: Promise<RawWcProvider> | null = null
+
+// See "Generation ownership" in the module doc comment above. Only ever
+// incremented, never reset — each increment marks a new connect() cycle as
+// the sole legitimate owner of the shared provider's session/pairing state.
+let currentGeneration = 0
 
 async function getSharedPosWcProvider(): Promise<RawWcProvider> {
   if (sharedProviderPromise) return sharedProviderPromise
@@ -94,6 +115,7 @@ async function getSharedPosWcProvider(): Promise<RawWcProvider> {
     // warning even though each listener is correctly removed after use.
     wcProvider.events.setMaxListeners(Number.POSITIVE_INFINITY)
 
+    console.log("[POS WC] provider_singleton_created")
     return wcProvider
   })().catch((err) => {
     // Let the next payment attempt retry init from scratch instead of
@@ -119,6 +141,7 @@ async function getSharedPosWcProvider(): Promise<RawWcProvider> {
  * payment's call reuses it instead of paying for another relay handshake.
  */
 export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
+  const providerAlreadyCached = sharedProviderPromise !== null
   let wcProvider: RawWcProvider
   try {
     wcProvider = await getSharedPosWcProvider()
@@ -127,6 +150,28 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
       ok: false,
       error: err instanceof Error ? err.message : "Failed to init WalletConnect provider",
     }
+  }
+  console.log("[POS WC] provider_ready", { reused: providerAlreadyCached })
+
+  // Claim ownership of the shared provider's session/pairing state before
+  // doing anything else. Any earlier attempt's disconnect() call that runs
+  // after this point (however delayed) will see it has been superseded and
+  // skip, instead of tearing down what we're about to build.
+  currentGeneration += 1
+  const myGeneration = currentGeneration
+  console.log("[POS WC] generation_claimed", { generation: myGeneration })
+
+  // A previous generation may have left a session behind — either because
+  // its own disconnect() correctly no-op'd as stale (see below), or because
+  // it never got the chance to run cleanup at all. Whatever exists on the
+  // shared provider at this exact point cannot be ours (we haven't called
+  // connect() yet), so it's always safe to clear before starting our own
+  // fresh pairing — this is what guarantees every attempt begins from a
+  // clean slate rather than the SDK ambiguously resuming leftover state
+  // from an unrelated payment.
+  if (wcProvider.session) {
+    console.log("[POS WC] stale_session_cleared_before_connect", { generation: myGeneration })
+    await wcProvider.disconnect().catch(() => null)
   }
 
   return new Promise<PosWcInitResult>((resolve) => {
@@ -138,6 +183,7 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
       resolved = true
       if (timeoutHandle) clearTimeout(timeoutHandle)
       wcProvider.off("display_uri", onDisplayUri)
+      console.log("[POS WC] display_uri_emitted", { generation: myGeneration })
 
       const posProvider: PosWcProvider = {
         get accounts() {
@@ -147,11 +193,20 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
           return wcProvider.request<T>(args as Parameters<typeof wcProvider.request>[0])
         },
         async disconnect() {
+          if (currentGeneration !== myGeneration) {
+            console.log("[POS WC] disconnect_skipped_stale_generation", {
+              generation: myGeneration,
+              currentGeneration,
+            })
+            return
+          }
+          console.log("[POS WC] disconnect_started", { generation: myGeneration })
           try {
             await wcProvider.disconnect()
           } catch {
             // ignore — session may already be gone
           }
+          console.log("[POS WC] disconnect_completed", { generation: myGeneration })
         },
         _provider: wcProvider,
       }
@@ -162,6 +217,7 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
     // display_uri fires before the wallet connects, carrying the pairing URI
     wcProvider.on("display_uri", onDisplayUri)
 
+    console.log("[POS WC] connect_called", { generation: myGeneration })
     // Kick off a fresh pairing for this payment (non-blocking — resolves above via event)
     wcProvider.connect().catch((err: unknown) => {
       if (!resolved) {
