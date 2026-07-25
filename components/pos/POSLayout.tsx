@@ -16,6 +16,7 @@ import {
   initPosBaseWalletConnect,
   prewarmPosBaseWalletConnect,
   waitForWalletConnect,
+  isPosWcGenerationCurrent,
   type PosWcProvider,
 } from "@/lib/pos/posBaseWalletConnect"
 import { markBaseCheckoutLatency } from "@/lib/payment/baseCheckoutLatencyTrace"
@@ -25,6 +26,17 @@ import {
   logStalePosSaleUpdate,
   type PosSaleUpdateSource,
 } from "@/lib/pos/posSaleCorrelationGuard"
+import { detectCapabilitiesFromProvider } from "@/lib/basePay/strategyOrchestrator"
+import { serializeWalletError } from "@/lib/pos/posBaseWalletError"
+import { classifyBaseUsdcSigningError } from "@/lib/pos/baseUsdcSigningErrorClassifier"
+import {
+  PosBaseUsdcWalletRequestStageGuard,
+  type BaseUsdcStageOwnership,
+} from "@/lib/pos/posBaseUsdcWalletRequestStage"
+import {
+  rememberBaseUsdcEip3009MethodUnsupported,
+  hasProvenBaseUsdcEip3009MethodUnsupported,
+} from "@/lib/pos/posBaseUsdcEip3009SessionMemory"
 
 type Props = {
   locked: boolean
@@ -180,10 +192,31 @@ async function waitForAllowanceSufficient(
   throw new Error("USDC allowance did not update after approval. Please try again.")
 }
 
-async function executePosBaseEip3009(
+/** Best-effort WalletConnect peer/wallet name — same extraction BaseWalletPayment.tsx uses, kept independent per this file's established convention of not sharing helpers across the two flows (POS owns its own session type, PosWcProvider). */
+function getPosWalletConnectPeerName(provider: PosWcProvider["_provider"]): string | null {
+  const source = provider as unknown as { session?: { peer?: { metadata?: { name?: unknown } } } }
+  const name = source.session?.peer?.metadata?.name
+  return typeof name === "string" && name ? name : null
+}
+
+/**
+ * A single "is this wallet request still worth acting on" check, run before
+ * every continuation past an await boundary inside the EIP-3009/allowance
+ * helpers below (Part 5's concurrency requirement). Verifies payment/intent
+ * identity is unchanged, this attempt still owns the POS Base flow, and the
+ * shared WalletConnect session hasn't been claimed by a newer generation —
+ * any one of those failing means a stale continuation must not send another
+ * wallet request or apply its result.
+ */
+type VerifyStillOwned = () => Promise<boolean>
+
+export async function executePosBaseEip3009(
   paymentId: string,
   walletAddress: string,
-  provider: PosWcProvider
+  provider: PosWcProvider,
+  stageGuard: PosBaseUsdcWalletRequestStageGuard,
+  owner: BaseUsdcStageOwnership,
+  verifyStillOwned: VerifyStillOwned
 ): Promise<string> {
   console.log("[POS Base USDC V7] relay_start", { paymentId })
   const prepareRes = await fetch(
@@ -207,18 +240,32 @@ async function executePosBaseEip3009(
     throw new Error(errMsg)
   }
 
-  const signature = await withPosWalletRequestTimeout(
-    provider.request<string>({
-      method: "eth_signTypedData_v4",
-      params: [walletAddress, JSON.stringify(prepared.typedData)],
-    }),
-    "Timed out waiting for wallet to respond to the signature request."
-  )
+  if (!(await verifyStillOwned())) {
+    throw new Error("Base payment attempt superseded before signature request")
+  }
+  if (!stageGuard.begin("typed_data_signing", owner)) {
+    throw new Error("A wallet request is already in progress for this payment")
+  }
+  let signature: string
+  try {
+    signature = await withPosWalletRequestTimeout(
+      provider.request<string>({
+        method: "eth_signTypedData_v4",
+        params: [walletAddress, JSON.stringify(prepared.typedData)],
+      }),
+      "Timed out waiting for wallet to respond to the signature request."
+    )
+  } finally {
+    stageGuard.end(owner)
+  }
   if (typeof signature !== "string" || !signature.startsWith("0x")) {
     console.error("[POS Base USDC V7] relay_start", { paymentId, ok: false, reason: "invalid_signature_format" })
     throw new Error("Wallet did not return a valid EIP-3009 signature")
   }
 
+  if (!(await verifyStillOwned())) {
+    throw new Error("Base payment attempt superseded before relay request")
+  }
   const relayRes = await fetch(
     `/api/payments/${encodeURIComponent(paymentId)}/base-v7/relay`,
     {
@@ -251,10 +298,13 @@ async function executePosBaseEip3009(
   return relayTxHash
 }
 
-async function executePosBaseAllowancePath(
+export async function executePosBaseAllowancePath(
   paymentId: string,
   walletAddress: string,
-  provider: PosWcProvider
+  provider: PosWcProvider,
+  stageGuard: PosBaseUsdcWalletRequestStageGuard,
+  owner: BaseUsdcStageOwnership,
+  verifyStillOwned: VerifyStillOwned
 ): Promise<string> {
   console.log("[POS Base USDC V7] allowance_build_start", { paymentId })
   const buildRes = await fetch(
@@ -279,21 +329,31 @@ async function executePosBaseAllowancePath(
   console.log("[POS Base USDC V7] allowance_build_resolved", { paymentId })
 
   if (!built.sufficient && built.approveTx) {
+    if (!(await verifyStillOwned())) {
+      throw new Error("Base payment attempt superseded before allowance approval")
+    }
+    if (!stageGuard.begin("allowance_approval", owner)) {
+      throw new Error("A wallet request is already in progress for this payment")
+    }
     console.log("[POS Base USDC V7] allowance_approve_start", { paymentId })
-    // from is required by WalletConnect v2 to route to the correct account
-    await withPosWalletRequestTimeout(
-      provider.request<string>({
-        method: "eth_sendTransaction",
-        params: [{
-          from: walletAddress,
-          to: built.approveTx.to,
-          data: built.approveTx.data,
-          value: "0x" + BigInt(built.approveTx.value || "0").toString(16),
-          chainId: "0x2105",
-        }],
-      }),
-      "Timed out waiting for wallet to respond to the allowance approval request."
-    )
+    try {
+      // from is required by WalletConnect v2 to route to the correct account
+      await withPosWalletRequestTimeout(
+        provider.request<string>({
+          method: "eth_sendTransaction",
+          params: [{
+            from: walletAddress,
+            to: built.approveTx.to,
+            data: built.approveTx.data,
+            value: "0x" + BigInt(built.approveTx.value || "0").toString(16),
+            chainId: "0x2105",
+          }],
+        }),
+        "Timed out waiting for wallet to respond to the allowance approval request."
+      )
+    } finally {
+      stageGuard.end(owner)
+    }
     console.log("[POS Base USDC V7] allowance_approve_submitted", { paymentId })
     // Wait for V7 approval to be mined before sending payment tx (~2 s block time on Base)
     await waitForAllowanceSufficient(paymentId, walletAddress)
@@ -302,20 +362,31 @@ async function executePosBaseAllowancePath(
     await new Promise<void>((resolve) => setTimeout(resolve, 1000))
   }
 
+  if (!(await verifyStillOwned())) {
+    throw new Error("Base payment attempt superseded before payment request")
+  }
+  if (!stageGuard.begin("payment_sending", owner)) {
+    throw new Error("A wallet request is already in progress for this payment")
+  }
   console.log("[POS Base USDC V7] payment_tx_request_start", { paymentId })
-  const paymentTxHash = await withPosWalletRequestTimeout(
-    provider.request<string>({
-      method: "eth_sendTransaction",
-      params: [{
-        from: walletAddress,
-        to: built.paymentTx.to,
-        data: built.paymentTx.data,
-        value: "0x" + BigInt(built.paymentTx.value || "0").toString(16),
-        chainId: "0x2105",
-      }],
-    }),
-    "Timed out waiting for wallet to respond to the payment request."
-  )
+  let paymentTxHash: string
+  try {
+    paymentTxHash = await withPosWalletRequestTimeout(
+      provider.request<string>({
+        method: "eth_sendTransaction",
+        params: [{
+          from: walletAddress,
+          to: built.paymentTx.to,
+          data: built.paymentTx.data,
+          value: "0x" + BigInt(built.paymentTx.value || "0").toString(16),
+          chainId: "0x2105",
+        }],
+      }),
+      "Timed out waiting for wallet to respond to the payment request."
+    )
+  } finally {
+    stageGuard.end(owner)
+  }
   if (typeof paymentTxHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(paymentTxHash)) {
     throw new Error("Wallet did not return a valid transaction hash for USDC payment")
   }
@@ -411,6 +482,15 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   }
   const posBaseDuplicateGuard = posBaseDuplicateGuardRef.current
 
+  // Explicit "at most one Base USDC wallet request in flight" guard — see
+  // lib/pos/posBaseUsdcWalletRequestStage.ts. Reset alongside every other
+  // Base attempt/session state in resetSale() below.
+  const posBaseUsdcStageGuardRef = useRef<PosBaseUsdcWalletRequestStageGuard | null>(null)
+  if (!posBaseUsdcStageGuardRef.current) {
+    posBaseUsdcStageGuardRef.current = new PosBaseUsdcWalletRequestStageGuard()
+  }
+  const posBaseUsdcStageGuard = posBaseUsdcStageGuardRef.current
+
   // Server-truth pre-flight check, run before any WalletConnect work starts.
   // The guard's local suppression set covers the common case cheaply, but
   // can't help a scenario it never observed directly (e.g. this component
@@ -484,6 +564,9 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     posBaseDuplicateGuard.setResetInProgress(true)
     posBaseAttemptRef.current += 1
     posBaseRunningRef.current = false
+    // No wallet request belonging to the torn-down attempt may still be
+    // treated as "in flight" once a new sale/attempt begins.
+    posBaseUsdcStageGuard.reset()
     if (posWcProviderRef.current) {
       posWcProviderRef.current.disconnect().catch(() => null)
       posWcProviderRef.current = null
@@ -1059,22 +1142,39 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
 
       } else {
         // ── USDC: resolve V7 strategy, try EIP-3009 relayer, fall back to allowance ──
-        console.log("[POS Base USDC V7] strategy_selected", { paymentId })
+        // Wallet capability evidence is derived from the actual WalletConnect
+        // session (approved namespaces, peer metadata) instead of the
+        // previous hardcoded `supportsTypedData: true, skipEip3009: false` —
+        // literals that claimed full capability regardless of which wallet
+        // actually paired, which is why the strategy endpoint kept selecting
+        // usdc_eip3009_relayer for a wallet that had already proven (in the
+        // production incident) it could not complete eth_signTypedData_v4.
+        const eip3009ProvenUnsupported = hasProvenBaseUsdcEip3009MethodUnsupported(paymentId)
+        const peerName = getPosWalletConnectPeerName(wcResult.provider._provider)
+        const detectedCapabilities = detectCapabilitiesFromProvider(peerName, wcResult.provider._provider)
+        const walletCapabilities = {
+          walletFamily: detectedCapabilities.walletFamily,
+          supportsTypedData: detectedCapabilities.supportsTypedData,
+          supportsSendCalls: detectedCapabilities.supportsSendCalls,
+          // Once this exact payment has proven eth_signTypedData_v4 is
+          // unsupported, a retry of the SAME payment must not re-attempt it —
+          // this is scoped per-payment, not a wallet-wide blacklist (see
+          // lib/pos/posBaseUsdcEip3009SessionMemory.ts).
+          skipEip3009: detectedCapabilities.skipEip3009 || eip3009ProvenUnsupported,
+          skipDelegatedBatch: true,
+        }
+        console.log("[POS Base USDC V7] strategy_selected", {
+          paymentId,
+          walletFamily: walletCapabilities.walletFamily,
+          supportsTypedData: walletCapabilities.supportsTypedData,
+          eip3009ProvenUnsupported,
+        })
         const strategyRes = await fetch(
           `/api/payments/${encodeURIComponent(paymentId)}/base-v7/strategy`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              payerAddress: walletAddress,
-              walletCapabilities: {
-                walletFamily: "walletconnect",
-                supportsTypedData: true,
-                supportsSendCalls: false,
-                skipEip3009: false,
-                skipDelegatedBatch: true,
-              },
-            }),
+            body: JSON.stringify({ payerAddress: walletAddress, walletCapabilities }),
           }
         )
         const strategyData = (await strategyRes.json()) as {
@@ -1085,34 +1185,97 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         if (!strategyData.ok) throw new Error(strategyData.error || "Strategy resolution failed")
         console.log("[POS Base USDC V7] strategy_selected", { paymentId, strategy: strategyData.strategy })
 
-        // Try EIP-3009 relayer path; on non-rejection failure fall back to allowance path
+        // Try EIP-3009 relayer path; only a conclusively classified
+        // "method_unsupported" failure may automatically fall back to the
+        // allowance two-step. Every other outcome (including a genuinely
+        // ambiguous one, like the production incident's "Failed to sign
+        // message") stops here instead of silently sending more wallet
+        // prompts — see lib/pos/baseUsdcSigningErrorClassifier.ts.
         let usdcTxHash: string | undefined
+        const stageOwner: BaseUsdcStageOwnership = { paymentId, intentId: iid, attemptId: myAttempt }
+        const wcGeneration = wcResult.provider.generation
+        const verifyStillOwned: VerifyStillOwned = async () =>
+          isOwnedBaseAttempt(myAttempt) &&
+          isPosWcGenerationCurrent(wcGeneration) &&
+          (await isCurrentBasePayment(iid, paymentId))
 
         if (strategyData.strategy === "usdc_eip3009_relayer") {
           try {
-            usdcTxHash = await executePosBaseEip3009(paymentId, walletAddress, wcResult.provider)
+            usdcTxHash = await executePosBaseEip3009(
+              paymentId,
+              walletAddress,
+              wcResult.provider,
+              posBaseUsdcStageGuard,
+              stageOwner,
+              verifyStillOwned
+            )
           } catch (eip3009Err) {
-            const errMsg = eip3009Err instanceof Error ? eip3009Err.message : String(eip3009Err)
-            const isUserRejection =
-              /reject|cancel|denied|user denied/i.test(errMsg) ||
-              (eip3009Err as { code?: number })?.code === 4001
-            if (isUserRejection) {
-              console.log("[POS Base WC] request_rejected", { paymentId, asset: "USDC", errorCode: "wallet_rejected" })
+            const classification = classifyBaseUsdcSigningError(eip3009Err)
+            const serialized = serializeWalletError(eip3009Err, {
+              walletName: peerName,
+              walletFamily: walletCapabilities.walletFamily,
+              requestedMethod: "eth_signTypedData_v4",
+              chainId: "0x2105",
+              paymentId,
+              intentId: iid,
+              attemptId: myAttempt,
+            })
+
+            if (classification === "user_rejected") {
+              console.log("[POS Base WC] request_rejected", {
+                paymentId,
+                asset: "USDC",
+                errorCode: "wallet_rejected",
+                error: serialized,
+              })
+              // Stop immediately — no fallback, no further wallet request.
               throw eip3009Err
             }
-            // Non-rejection error (e.g. wallet doesn't support eth_signTypedData_v4): fall back
+
             console.warn("[POS Base WC] request_failed", {
               paymentId,
               asset: "USDC",
-              errorCode: "eip3009_failed_fallback",
-              error: errMsg,
+              errorCode:
+                classification === "method_unsupported"
+                  ? "eip3009_method_unsupported_fallback"
+                  : "eip3009_failed_no_fallback",
+              classification,
+              error: serialized,
             })
+
+            if (classification !== "method_unsupported") {
+              // Not conclusively proven unsupported (unknown, timed out,
+              // malformed typed data, chain/account mismatch, session
+              // disconnected, transport error) — do not guess. Surface a
+              // recoverable failure instead of silently launching the
+              // allowance two-step's additional wallet prompts.
+              throw new Error("USDC payment approval could not be completed. Please try again.")
+            }
+
+            // Conclusively proven unsupported: re-verify ownership and that
+            // no wallet request is currently in flight before automatically
+            // starting the fallback (Part 4/5 requirement — a stale
+            // continuation must never trigger this).
+            if (!(await verifyStillOwned())) {
+              throw new Error("Base payment attempt superseded before allowance fallback")
+            }
+            if (posBaseUsdcStageGuard.getStage() !== "idle") {
+              throw new Error("A wallet request is already in progress for this payment")
+            }
+            rememberBaseUsdcEip3009MethodUnsupported(paymentId)
             // usdcTxHash remains undefined — allowance path runs below
           }
         }
 
         if (usdcTxHash === undefined) {
-          usdcTxHash = await executePosBaseAllowancePath(paymentId, walletAddress, wcResult.provider)
+          usdcTxHash = await executePosBaseAllowancePath(
+            paymentId,
+            walletAddress,
+            wcResult.provider,
+            posBaseUsdcStageGuard,
+            stageOwner,
+            verifyStillOwned
+          )
         }
 
         txHash = usdcTxHash
@@ -1169,7 +1332,10 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         (err as { code?: number })?.code === 4001
       const isAbandonedBeforeFinalTx =
         !finalTxHashSubmitted &&
-        (isRejection || /base payment attempt abandoned|timed out waiting for wallet to connect|wallet disconnected/i.test(message))
+        (isRejection ||
+          /base payment attempt abandoned|attempt superseded|wallet request is already in progress|timed out waiting for wallet to connect|wallet disconnected/i.test(
+            message
+          ))
       console.log(
         isRejection ? "[POS Base WC] request_rejected" : "[POS Base WC] request_failed",
         {
@@ -1295,6 +1461,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     // A genuinely new payment intent — the only point the terminal-attempt
     // suppression guard is cleared (see its declaration above).
     posBaseDuplicateGuard.reset()
+    posBaseUsdcStageGuard.reset()
     console.log("[POS Base WC] intent_attempt_reset", { intentId, attemptId: posBaseAttemptRef.current })
 
     let cancelled = false

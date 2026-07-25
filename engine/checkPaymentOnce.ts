@@ -67,6 +67,17 @@ export function buildBaseWatchInput(
 // lease for the same, documented limitation).
 const inFlightLogScanWatchers = new Map<string, Promise<boolean>>()
 
+// Throttles how often a *sequential* series of no-txHash chunked-log-scan
+// calls for the same payment may actually start a new scan — see the usage
+// site below (right where watcherPath is computed) for the full rationale.
+// Process-local, same caveat as inFlightLogScanWatchers above.
+const NO_HASH_EVM_SCAN_COOLDOWN_MS = 15_000
+const lastNoHashEvmScanStartedAt = new Map<string, number>()
+
+export function resetNoHashEvmScanCooldownForTests(): void {
+  lastNoHashEvmScanStartedAt.clear()
+}
+
 export async function runPaymentWatcher(
   paymentId: string,
   options?: { txHash?: string; maxAttempts?: number; sessionAttemptId?: string }
@@ -185,6 +196,32 @@ async function runPaymentWatcherInternal(
     }
   }
   const watcherPath = effectiveTxHash ? "txHash-fast-path" : "chunked-log-fallback"
+  const isEvmNetwork = isBase || String(payment.network || "").toLowerCase() === "ethereum"
+
+  // A generic status read (GET /api/payments/status, polled every few
+  // seconds by the POS terminal, the customer checkout page, and the Base
+  // mirror alike) must not re-trigger the expensive, no-txHash eth_getLogs
+  // scan on every single tick. Once a payment has a stored txHash the check
+  // above already routes it through the cheap receipt-based fast path, so
+  // this only ever throttles the genuinely expensive chunked-log fallback —
+  // never a caller with a real tx hash to check (engine/paymentDetect.ts's
+  // customer-facing POST /detect always bypasses this, since it always has
+  // one). This is additive to, not a replacement for, the same-process
+  // in-flight dedup above and engine/paymentMaintenance.ts's own 429
+  // cooldown — dedup collapses concurrent callers into one scan, this
+  // throttles how often a *sequential* series of scans for the same payment
+  // may start at all.
+  if (watcherPath === "chunked-log-fallback" && isEvmNetwork) {
+    const lastStarted = lastNoHashEvmScanStartedAt.get(paymentId)
+    if (typeof lastStarted === "number" && Date.now() - lastStarted < NO_HASH_EVM_SCAN_COOLDOWN_MS) {
+      console.info("[watcher:evm] scan skipped: no-hash scan cooldown active", {
+        paymentId,
+        cooldownRemainingMs: NO_HASH_EVM_SCAN_COOLDOWN_MS - (Date.now() - lastStarted)
+      })
+      return false
+    }
+    lastNoHashEvmScanStartedAt.set(paymentId, Date.now())
+  }
 
   if (isBase) {
     console.info("[watcher:evm] scan started", { paymentId, watcherPath, txHashSource })

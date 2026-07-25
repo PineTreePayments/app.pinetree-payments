@@ -263,11 +263,24 @@ export type PosWcProvider = {
   disconnect(): Promise<void>
   /** Raw provider for advanced use */
   _provider: import("@walletconnect/ethereum-provider").default
+  /** The generation this provider claimed ownership under — see currentGeneration below. */
+  generation: number
 }
 
 type PosWcInitResult =
   | { ok: true; provider: PosWcProvider; pairingUri: string }
   | { ok: false; error: string }
+
+/**
+ * True if `generation` still owns the shared provider's session/pairing
+ * state. Lets a long-running wallet request (signature, transaction) verify
+ * — at any await boundary, without needing to call disconnect() — that a
+ * newer attempt hasn't since claimed the shared WalletConnect session out
+ * from under it before acting on whatever the request resolves with.
+ */
+export function isPosWcGenerationCurrent(generation: number): boolean {
+  return currentGeneration === generation
+}
 
 type RawWcProvider = import("@walletconnect/ethereum-provider").default
 
@@ -455,6 +468,7 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
           console.log("[POS WC] disconnect_completed", { generation: myGeneration })
         },
         _provider: wcProvider,
+        generation: myGeneration,
       }
 
       resolve({ ok: true, provider: posProvider, pairingUri: uri })

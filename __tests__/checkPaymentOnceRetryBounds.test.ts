@@ -47,9 +47,11 @@ function payment(overrides: Record<string, unknown> = {}) {
 }
 
 describe("runPaymentWatcher - retry bounds", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
     vi.useFakeTimers()
+    const { resetNoHashEvmScanCooldownForTests } = await import("@/engine/checkPaymentOnce")
+    resetNoHashEvmScanCooldownForTests()
   })
 
   afterEach(() => {
@@ -136,9 +138,11 @@ describe("runPaymentWatcher - retry bounds", () => {
  * threads a fresh txHash through (e.g. the customer-facing /detect route).
  */
 describe("runPaymentWatcher - stored tx hash fast-path authority", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
     vi.useFakeTimers()
+    const { resetNoHashEvmScanCooldownForTests } = await import("@/engine/checkPaymentOnce")
+    resetNoHashEvmScanCooldownForTests()
   })
 
   afterEach(() => {

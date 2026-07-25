@@ -52,8 +52,10 @@ function payment(overrides: Record<string, unknown> = {}) {
 }
 
 describe("runPaymentWatcher — same-process scan deduplication (no txHash)", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    const { resetNoHashEvmScanCooldownForTests } = await import("@/engine/checkPaymentOnce")
+    resetNoHashEvmScanCooldownForTests()
   })
 
   it("9. two concurrent no-txHash calls for the same paymentId share one underlying scan instead of running two", async () => {
@@ -100,8 +102,16 @@ describe("runPaymentWatcher — same-process scan deduplication (no txHash)", ()
     mocks.getTransactionByPaymentId.mockResolvedValue(null)
     mocks.watchPaymentOnce.mockResolvedValue(false)
 
-    const { runPaymentWatcher } = await import("@/engine/checkPaymentOnce")
+    const { runPaymentWatcher, resetNoHashEvmScanCooldownForTests } = await import("@/engine/checkPaymentOnce")
     await runPaymentWatcher("pay-1")
+    // This test's own concern is the in-flight PROMISE-map dedup lifecycle
+    // (the first call's entry must be cleared once it resolves, not wedged
+    // forever) — a separate, time-based sequential-scan cooldown also exists
+    // now (see resetNoHashEvmScanCooldownForTests's definition site) and
+    // would otherwise suppress this second call outright since both run
+    // within the same test tick. Reset it here so the two concerns stay
+    // independently testable.
+    resetNoHashEvmScanCooldownForTests()
     await runPaymentWatcher("pay-1")
 
     expect(mocks.watchPaymentOnce).toHaveBeenCalledTimes(2)
