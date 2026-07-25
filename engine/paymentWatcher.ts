@@ -51,9 +51,21 @@ const PAYMENT_SPLIT_TOPIC = ethersId(
  * a real error rather than silently swallowed.
  */
 export class RpcTransportError extends Error {
-  constructor(message: string) {
+  // Set when the node's JSON-RPC error object (or, defensively, the HTTP
+  // response itself) carried a 429 — lets callers (engine/paymentMaintenance.ts)
+  // apply backoff/circuit-breaking specifically for rate-limit responses
+  // without re-parsing the error message string.
+  readonly rpcErrorCode?: number
+  // The provider's own Retry-After guidance in milliseconds, when the 429
+  // response included one — callers should prefer this over their own
+  // computed backoff when present.
+  readonly retryAfterMs?: number
+
+  constructor(message: string, rpcErrorCode?: number, retryAfterMs?: number) {
     super(message)
     this.name = "RpcTransportError"
+    this.rpcErrorCode = rpcErrorCode
+    this.retryAfterMs = retryAfterMs
   }
 }
 
@@ -943,6 +955,32 @@ async function matchAndConfirmPaymentSplitLogs(
 
 // ─── RPC helpers ─────────────────────────────────────────────────────────────
 
+// Shared 429 classifier for every RPC helper below — Alchemy signals its
+// per-second compute-unit rate limit as a 429 inside the JSON-RPC error
+// envelope (HTTP status is typically still 200); defensively also treat a
+// genuine HTTP 429 the same way. Reads the provider's own Retry-After
+// guidance when present (only ever sent on a real HTTP 429, which is why
+// this is still worth checking even though the common case is a 200 with a
+// JSON-RPC error body).
+function classifyRpc429(errorObj: unknown, response: Response): { rpcErrorCode?: number; retryAfterMs?: number } {
+  const code = (errorObj as { code?: unknown } | null)?.code
+  const is429 = Number(code) === 429 || response.status === 429
+  if (!is429) return {}
+
+  let retryAfterMs: number | undefined
+  const header = response.headers.get("retry-after")
+  if (header) {
+    const seconds = Number(header)
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      retryAfterMs = seconds * 1000
+    } else {
+      const dateMs = Date.parse(header)
+      if (Number.isFinite(dateMs)) retryAfterMs = Math.max(0, dateMs - Date.now())
+    }
+  }
+  return { rpcErrorCode: 429, retryAfterMs }
+}
+
 async function getCurrentBlockHeight(rpcUrl: string): Promise<number> {
   const response = await fetch(rpcUrl, {
     method: "POST",
@@ -957,7 +995,12 @@ async function getCurrentBlockHeight(rpcUrl: string): Promise<number> {
   const data = await response.json()
   if (data?.error) {
     console.error("[watcher:evm] eth_blockNumber rpc error", { rpcError: data.error })
-    throw new RpcTransportError(`eth_blockNumber RPC error: ${JSON.stringify(data.error)}`)
+    const rpc429 = classifyRpc429(data.error, response)
+    throw new RpcTransportError(
+      `eth_blockNumber RPC error: ${JSON.stringify(data.error)}`,
+      rpc429.rpcErrorCode,
+      rpc429.retryAfterMs
+    )
   }
   const blockHeight = parseInt(data.result, 16)
   if (!Number.isFinite(blockHeight)) {
@@ -982,7 +1025,12 @@ async function getBlockByNumber(rpcUrl: string, blockNumber: number): Promise<Ev
   const data = await response.json()
   if (data?.error) {
     console.error("[watcher:evm] eth_getBlockByNumber rpc error", { blockNumber, rpcError: data.error })
-    throw new RpcTransportError(`eth_getBlockByNumber RPC error: ${JSON.stringify(data.error)}`)
+    const rpc429 = classifyRpc429(data.error, response)
+    throw new RpcTransportError(
+      `eth_getBlockByNumber RPC error: ${JSON.stringify(data.error)}`,
+      rpc429.rpcErrorCode,
+      rpc429.retryAfterMs
+    )
   }
   return (data?.result || null) as EvmBlock | null
 }
@@ -1015,7 +1063,12 @@ async function getTransactionReceipt(rpcUrl: string, txHash: string): Promise<Ev
     // result), or a genuinely confirmed transaction can never be verified
     // for as long as the RPC endpoint is broken, with no error ever surfaced.
     console.error("[watcher:evm] eth_getTransactionReceipt rpc error", { txHash, rpcError: data.error })
-    throw new RpcTransportError(`eth_getTransactionReceipt RPC error: ${JSON.stringify(data.error)}`)
+    const rpc429 = classifyRpc429(data.error, response)
+    throw new RpcTransportError(
+      `eth_getTransactionReceipt RPC error: ${JSON.stringify(data.error)}`,
+      rpc429.rpcErrorCode,
+      rpc429.retryAfterMs
+    )
   }
   return (data?.result || null) as EvmTransactionReceipt | null
 }
@@ -1069,11 +1122,21 @@ async function getContractEventLogs(
   }
   const data = await response.json()
   if (data?.error) {
-    console.error("[watcher:evm] eth_getLogs rpc error", { rpcError: data.error })
-    throw new RpcTransportError(`eth_getLogs RPC error: ${JSON.stringify(data.error)}`)
+    console.error("[watcher:evm] eth_getLogs rpc error", { rpcError: data.error, httpStatus: response.status })
+    const rpc429 = classifyRpc429(data.error, response)
+    throw new RpcTransportError(
+      `eth_getLogs RPC error: ${JSON.stringify(data.error)}`,
+      rpc429.rpcErrorCode,
+      rpc429.retryAfterMs
+    )
   }
   if (!Array.isArray(data?.result)) return []
   return data.result as EvmLog[]
+}
+
+/** True when the given error represents an RPC provider rate limit (HTTP or JSON-RPC 429). */
+export function isRpc429Error(error: unknown): error is RpcTransportError {
+  return error instanceof RpcTransportError && error.rpcErrorCode === 429
 }
 
 function decodePaymentSplitLog(data: string): DecodedPaymentSplitLog | null {

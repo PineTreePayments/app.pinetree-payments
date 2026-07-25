@@ -20,6 +20,11 @@ import {
 } from "@/lib/pos/posBaseWalletConnect"
 import { markBaseCheckoutLatency } from "@/lib/payment/baseCheckoutLatencyTrace"
 import { PosBaseDuplicateGuard, type PosBaseFlowGateResult } from "@/lib/pos/posBaseDuplicateGuard"
+import {
+  evaluatePosSaleUpdate,
+  logStalePosSaleUpdate,
+  type PosSaleUpdateSource,
+} from "@/lib/pos/posSaleCorrelationGuard"
 
 type Props = {
   locked: boolean
@@ -349,6 +354,29 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   const resetTimerRef = useRef<NodeJS.Timeout | null>(null)
   const hasScheduledResetRef = useRef(false)
 
+  // ── Sale correlation ────────────────────────────────────────────────────────
+  // Bumped by resetSale() (and therefore by cancelSale()/the auto-reset timer,
+  // which both call it) every time the terminal moves on from the current
+  // sale. Every async status-update pathway below (poll tick, realtime
+  // payload) captures the generation value that was live when IT started
+  // listening, not when it resolves - a poll request already in flight, or a
+  // realtime message already dispatched by Supabase, when resetSale() runs
+  // cannot be cancelled retroactively, but its generation snapshot will no
+  // longer match saleGenerationRef.current by the time its callback actually
+  // executes. This is the primary guard: unlike correlating on
+  // activePaymentId/intentId alone, it still works during the window where a
+  // brand new sale has an intent but no child payment yet (activePaymentId is
+  // ""), which is exactly the window a stale update from the *previous* sale
+  // was able to slip through in before this fix.
+  const saleGenerationRef = useRef(0)
+  // Mirrors the intentId state into a ref so async callbacks compare against
+  // the LATEST active intent rather than the value closed over when they were
+  // created (React state itself is a snapshot per-render, not live).
+  const intentIdRef = useRef("")
+  useEffect(() => {
+    intentIdRef.current = intentId
+  }, [intentId])
+
   // ── POS Base WC controller ─────────────────────────────────────────────────
   const posBaseRunningRef = useRef(false)
   const posWcProviderRef = useRef<PosWcProvider | null>(null)
@@ -448,6 +476,10 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       resetTimerRef.current = null
     }
     hasScheduledResetRef.current = false
+    // Invalidate every async status-update pathway belonging to the sale
+    // being torn down (see saleGenerationRef declaration above) before
+    // touching any other state.
+    saleGenerationRef.current += 1
     // Tear down any active POS Base WC session
     posBaseDuplicateGuard.setResetInProgress(true)
     posBaseAttemptRef.current += 1
@@ -518,8 +550,37 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     resetSale()
   }
 
-  function applyPaymentStatus(dbStatus: string, sourcePaymentId?: string) {
-    if (sourcePaymentId && activePaymentIdRef.current && sourcePaymentId !== activePaymentIdRef.current) {
+  // Single choke point for every pathway that can move the POS screen based
+  // on a payment/intent status: polling, both realtime subscriptions, and
+  // (indirectly, via the same three) the auto-reset timer. Callers must pass
+  // the generation their listener/request was set up under, plus whatever
+  // intentId/paymentId the event is actually about. The actual staleness
+  // decision lives in lib/pos/posSaleCorrelationGuard.ts (a pure function,
+  // unit-tested directly there) — see its module doc comment for why the
+  // generation check is the primary guard (it's the only one that still
+  // works during the window a fresh sale has an intent but no child payment
+  // yet, which is exactly where the production incident this closes slipped
+  // through).
+  function applyPaymentStatus(
+    dbStatus: string,
+    opts: {
+      source: PosSaleUpdateSource
+      generation: number
+      sourcePaymentId?: string
+      sourceIntentId?: string
+    }
+  ) {
+    const result = evaluatePosSaleUpdate(
+      { ...opts, status: dbStatus },
+      {
+        generation: saleGenerationRef.current,
+        intentId: intentIdRef.current,
+        paymentId: activePaymentIdRef.current
+      }
+    )
+
+    if (result.stale) {
+      logStalePosSaleUpdate(result)
       return
     }
 
@@ -528,7 +589,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
 
     setStatus(next)
     logConfirmationTrace("pos_ui_updated", {
-      paymentId: sourcePaymentId || activePaymentIdRef.current,
+      paymentId: opts.sourcePaymentId || activePaymentIdRef.current,
       payload: { dbStatus, uiStatus: next }
     })
 
@@ -584,6 +645,13 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   useEffect(() => {
     const pid = activePaymentId
     const iid = intentId
+    // Captured once, at the moment this poll loop is set up for the CURRENT
+    // sale — not re-read per tick. A request already in flight when
+    // resetSale() runs (and clearInterval below only stops FUTURE ticks, not
+    // a fetch that already fired) still resolves with this stale value, so
+    // its result gets rejected by applyPaymentStatus regardless of when the
+    // response actually arrives.
+    const myGeneration = saleGenerationRef.current
     // Build the query param: prefer paymentId, fall back to intentId
     const pollParam = pid
       ? `paymentId=${encodeURIComponent(pid)}`
@@ -597,19 +665,43 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       try {
         const res = await fetch(`/api/payments/status?${pollParam}`)
         if (!res.ok) return
+        const preReadCheck = evaluatePosSaleUpdate(
+          {
+            source: "poll",
+            generation: myGeneration,
+            status: "response_discarded_before_read",
+            sourcePaymentId: pid || undefined,
+            sourceIntentId: iid || undefined,
+          },
+          {
+            generation: saleGenerationRef.current,
+            intentId: intentIdRef.current,
+            paymentId: activePaymentIdRef.current
+          }
+        )
+        if (preReadCheck.stale) {
+          logStalePosSaleUpdate(preReadCheck)
+          return
+        }
         const data = await res.json() as {
           status?: string
           paymentId?: string
         }
         // If polling by intent and we just learned the paymentId, store it so
         // the direct-payment realtime subscription can start (and future polls
-        // use the faster paymentId path).
-        if (!pid && data.paymentId) {
+        // use the faster paymentId path). Still generation-gated: a stale
+        // response must never attach an old sale's paymentId to the current one.
+        if (!pid && data.paymentId && myGeneration === saleGenerationRef.current) {
           const nextPaymentId = String(data.paymentId)
           activePaymentIdRef.current = nextPaymentId
           setActivePaymentId(nextPaymentId)
         }
-        applyPaymentStatus(String(data?.status || ""), pid || String(data.paymentId || ""))
+        applyPaymentStatus(String(data?.status || ""), {
+          source: "poll",
+          generation: myGeneration,
+          sourcePaymentId: pid || String(data.paymentId || ""),
+          sourceIntentId: iid || undefined,
+        })
       } catch {
         // non-fatal — realtime is the primary update path
       }
@@ -626,6 +718,12 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   useEffect(() => {
     if (!activePaymentId || intentId) return
 
+    // Captured once at subscribe time — see saleGenerationRef declaration.
+    // removeChannel() below only stops FUTURE messages; a payload Supabase
+    // already dispatched to this handler before unsubscribing still runs it.
+    const myGeneration = saleGenerationRef.current
+    const myPaymentId = activePaymentId
+
     const channel = supabase
       .channel(`pos-payment-${activePaymentId}`)
       .on(
@@ -641,7 +739,11 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
             paymentId: activePaymentId,
             payload: { newStatus: String(payload.new.status || ""), via: "direct_payment" }
           })
-          applyPaymentStatus(String(payload.new.status || ""), activePaymentId)
+          applyPaymentStatus(String(payload.new.status || ""), {
+            source: "realtime_direct_payment",
+            generation: myGeneration,
+            sourcePaymentId: myPaymentId,
+          })
         }
       )
       .subscribe()
@@ -657,9 +759,34 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   useEffect(() => {
     if (!intentId) return
 
+    // Captured once at subscribe time — shared by both channels this effect
+    // owns (the intent channel and whichever payment channel it later
+    // resolves to), so a payload dispatched for either just as resetSale()
+    // runs is still rejected downstream even though removeChannel() below
+    // can only stop future messages.
+    const myGeneration = saleGenerationRef.current
+    const myIntentId = intentId
     let paymentChannel: ReturnType<typeof supabase.channel> | null = null
 
     function subscribeToPayment(pid: string) {
+      const linkCheck = evaluatePosSaleUpdate(
+        {
+          source: "realtime_intent_resolved_payment",
+          generation: myGeneration,
+          status: "intent_link_discarded",
+          sourcePaymentId: pid,
+          sourceIntentId: myIntentId,
+        },
+        {
+          generation: saleGenerationRef.current,
+          intentId: intentIdRef.current,
+          paymentId: activePaymentIdRef.current
+        }
+      )
+      if (linkCheck.stale) {
+        logStalePosSaleUpdate(linkCheck)
+        return
+      }
       if (resolvedPaymentIdRef.current === pid) return
       hasScheduledResetRef.current = false
       if (resetTimerRef.current) {
@@ -689,7 +816,12 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
               paymentId: pid,
               payload: { newStatus: String(payload.new.status || ""), via: "intent_resolved_payment" }
             })
-            applyPaymentStatus(String(payload.new.status || ""), pid)
+            applyPaymentStatus(String(payload.new.status || ""), {
+              source: "realtime_intent_resolved_payment",
+              generation: myGeneration,
+              sourcePaymentId: pid,
+              sourceIntentId: myIntentId,
+            })
           }
         )
         .subscribe()

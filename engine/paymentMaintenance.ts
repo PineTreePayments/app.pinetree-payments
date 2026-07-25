@@ -11,6 +11,7 @@ import { getTransactionByPaymentId } from "@/database/transactions"
 import { CHECKOUT_TIMEOUT_MS } from "./config"
 import { runPaymentWatcher } from "./checkPaymentOnce"
 import { reconcileBasePaymentFromChain } from "./baseChainReconciliation"
+import { isRpc429Error } from "./paymentWatcher"
 import { reconcileSpeedLightningPayment, reconcileConfirmedLightningFeeSettlement } from "./lightningSpeedReconciliation"
 import { paymentHasProcessingEvidence } from "./paymentEvidence"
 import { markPaymentIncomplete } from "./paymentStateActions"
@@ -56,6 +57,65 @@ function getMaintenanceLease(): MaintenanceLease {
     running: false
   }
   return globalWithMaintenance.__pinetreePaymentMaintenanceLease
+}
+
+// Process-local (NOT cross-instance — see the maintenance lease above for
+// the same documented limitation) circuit breaker for the EVM RPC provider's
+// per-second rate limit. Alchemy's 429 ("exceeded compute units per second")
+// means the endpoint just told us to slow down; the worst possible response
+// is to immediately move on to the next candidate and hit it again. Once any
+// EVM scan in a sweep observes a 429, every remaining EVM candidate in this
+// tick (and the next, until the cooldown elapses) is skipped without making
+// an RPC call at all, instead of retried.
+type Rpc429CooldownState = { until: number; consecutive429s: number }
+
+const globalWithRpcCooldown = globalThis as typeof globalThis & {
+  __pinetreeEvmRpc429Cooldown?: Rpc429CooldownState
+}
+
+function getRpc429CooldownState(): Rpc429CooldownState {
+  globalWithRpcCooldown.__pinetreeEvmRpc429Cooldown ??= { until: 0, consecutive429s: 0 }
+  return globalWithRpcCooldown.__pinetreeEvmRpc429Cooldown
+}
+
+// A clean check proves the endpoint is healthy right now — un-escalate the
+// backoff so a transient burst doesn't leave the cooldown growing long after
+// the provider has recovered. Does not clear an already-scheduled `until`;
+// that still runs its own course.
+function noteRpc429RecoveryOnSuccess(): void {
+  getRpc429CooldownState().consecutive429s = 0
+}
+
+const RPC_429_BASE_BACKOFF_MS = 2_000
+const RPC_429_MAX_BACKOFF_MS = 30_000
+
+function isRpc429CooldownActive(): boolean {
+  return Date.now() < getRpc429CooldownState().until
+}
+
+// Bounded exponential backoff with jitter — consecutive429s resets to 0 the
+// next time a check succeeds (noteRpc429RecoveryOnSuccess above). When the
+// provider sent its own Retry-After guidance, that is used verbatim instead
+// of the computed delay (still bounded to RPC_429_MAX_BACKOFF_MS).
+function scheduleRpc429Backoff(retryAfterMs?: number): void {
+  const state = getRpc429CooldownState()
+  state.consecutive429s += 1
+  let delayMs: number
+  let usedProviderGuidance = false
+  if (typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs >= 0) {
+    delayMs = Math.min(RPC_429_MAX_BACKOFF_MS, retryAfterMs)
+    usedProviderGuidance = true
+  } else {
+    const exponential = RPC_429_BASE_BACKOFF_MS * (2 ** (state.consecutive429s - 1))
+    const jitterMs = Math.floor(Math.random() * exponential * 0.5)
+    delayMs = Math.min(RPC_429_MAX_BACKOFF_MS, exponential + jitterMs)
+  }
+  state.until = Date.now() + delayMs
+  console.warn("[watcher:evm] 429 backoff scheduled", {
+    delayMs,
+    consecutive429s: state.consecutive429s,
+    usedProviderGuidance
+  })
 }
 
 export type PaymentMaintenanceSummary = {
@@ -252,19 +312,19 @@ export async function runPaymentMaintenanceTick(options?: {
 
     const watcherLimit = Math.max(1, Math.min(options?.watcherLimit ?? 3, 10))
     const candidates = await getPaymentMaintenanceCandidates(watcherLimit * 3)
-    const watchable: string[] = []
+    const watchable: Array<{ id: string; network: string }> = []
 
     for (const payment of candidates) {
       const status = String(payment.status || "").toUpperCase()
       if (status === "PROCESSING") {
-        watchable.push(payment.id)
+        watchable.push({ id: payment.id, network: String(payment.network || "") })
       } else if (status === "PENDING") {
         const [transaction, events] = await Promise.all([
           getTransactionByPaymentId(payment.id),
           getPaymentEvents(payment.id).catch(() => [])
         ])
         if (paymentHasProcessingEvidence({ payment, transaction, events })) {
-          watchable.push(payment.id)
+          watchable.push({ id: payment.id, network: String(payment.network || "") })
         }
       }
       if (watchable.length >= watcherLimit) break
@@ -276,12 +336,21 @@ export async function runPaymentMaintenanceTick(options?: {
       500,
       options?.watcherTimeoutMs ?? DEFAULT_WATCHER_TIMEOUT_MS
     )
-    await Promise.all(watchable.map(async (paymentId) => {
+    await Promise.all(watchable.map(async ({ id: paymentId, network }) => {
+      // The 429 cooldown is specific to the EVM/Alchemy RPC endpoint — never
+      // let it skip a Solana (or any other non-EVM) candidate's check.
+      const isEvm = network === "base" || network === "ethereum"
+      if (isEvm && isRpc429CooldownActive()) {
+        console.warn("[watcher:evm] scan skipped: rate-limit cooldown active", { paymentId })
+        return
+      }
       try {
         await runWatcherWithTimeout(paymentId, watcherTimeoutMs)
         watcherChecks += 1
+        if (isEvm) noteRpc429RecoveryOnSuccess()
       } catch (error) {
         watcherErrors += 1
+        if (isEvm && isRpc429Error(error)) scheduleRpc429Backoff(error.retryAfterMs)
         console.warn("[payment-maintenance] watcher recheck failed", {
           paymentId,
           error: error instanceof Error ? error.message : String(error)
@@ -370,11 +439,30 @@ export async function runPaymentMaintenanceTick(options?: {
       since: baseReconcileSince
     })
     for (const candidate of baseReconcileCandidates) {
+      if (isRpc429CooldownActive()) {
+        console.warn("[watcher:evm] scan skipped: rate-limit cooldown active", {
+          paymentId: candidate.id
+        })
+        continue
+      }
       try {
         const result = await reconcileBasePaymentFromChain(candidate.id)
         if (result.detected) baseReconciled += 1
+        noteRpc429RecoveryOnSuccess()
       } catch (error) {
         baseReconcileErrors += 1
+        if (isRpc429Error(error)) {
+          scheduleRpc429Backoff(error.retryAfterMs)
+          console.warn("[payment-maintenance] base chain reconciliation failed", {
+            paymentId: candidate.id,
+            error: error instanceof Error ? error.message : String(error)
+          })
+          // Sequential loop over a batch of up to 25 candidates against the
+          // SAME rate-limited endpoint — stop here rather than immediately
+          // re-attempting the next one; it will be picked up on a later tick
+          // once the cooldown elapses.
+          break
+        }
         console.warn("[payment-maintenance] base chain reconciliation failed", {
           paymentId: candidate.id,
           error: error instanceof Error ? error.message : String(error)
@@ -425,4 +513,8 @@ export function resetPaymentMaintenanceLeaseForTests(): void {
     lastStartedAt: 0,
     running: false
   }
+}
+
+export function resetRpc429CooldownForTests(): void {
+  globalWithRpcCooldown.__pinetreeEvmRpc429Cooldown = { until: 0, consecutive429s: 0 }
 }

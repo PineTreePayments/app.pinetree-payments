@@ -200,13 +200,17 @@ function buildInstallUrl(wallet: WalletCatalogItem): string {
   return wallet.installUrl
 }
 
-async function logSolana(stage: string, payload: Record<string, unknown> = {}): Promise<void> {
-  console.log("[SOLANA DEBUG]", stage, payload)
-  await fetch("/api/debug/solana", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ stage, payload }),
-  }).catch(() => null)
+// /api/debug/solana intentionally 404s in production (see
+// docs/security/route-auth-matrix.md) - this used to POST to it
+// unconditionally anyway, so every production Solana checkout generated
+// several logged 404s for a route that will never answer. Matches the
+// pattern already used by components/payment/LightningPayment.tsx's
+// logLightning(): local console output only, no network call, in every
+// environment except local development.
+function logSolana(stage: string, payload: Record<string, unknown> = {}): void {
+  if (process.env.NODE_ENV !== "production") {
+    console.debug("[SOLANA DEBUG]", stage, payload)
+  }
 }
 
 export default function SolanaWalletPayment({

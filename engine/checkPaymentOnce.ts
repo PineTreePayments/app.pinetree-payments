@@ -56,7 +56,43 @@ export function buildBaseWatchInput(
  * Returns true if a matching on-chain transaction was found, false otherwise.
  * Never throws — all errors are caught and logged so callers can fire-and-forget.
  */
+// Payments currently running the expensive, no-txHash chunked-eth_getLogs
+// fallback path (see watcherPath below) via THIS process. Keyed by
+// paymentId. A caller that supplies its OWN options.txHash always runs
+// immediately and standalone — it is never delayed behind, and never
+// registers itself in, this map — so the fast receipt-check path (the one
+// customer-facing callers depend on) can never be slowed down by dedup.
+// This only dedupes overlap within a single warm serverless instance; it
+// is not a cross-instance lock (see engine/paymentMaintenance.ts's own
+// lease for the same, documented limitation).
+const inFlightLogScanWatchers = new Map<string, Promise<boolean>>()
+
 export async function runPaymentWatcher(
+  paymentId: string,
+  options?: { txHash?: string; maxAttempts?: number; sessionAttemptId?: string }
+): Promise<boolean> {
+  if (!options?.txHash) {
+    const existing = inFlightLogScanWatchers.get(paymentId)
+    if (existing) {
+      console.info("[watcher:evm] scan deduplicated", {
+        paymentId,
+        reason: "already_in_flight_same_process"
+      })
+      return existing
+    }
+    const runPromise = runPaymentWatcherInternal(paymentId, options)
+    inFlightLogScanWatchers.set(paymentId, runPromise)
+    runPromise.finally(() => {
+      if (inFlightLogScanWatchers.get(paymentId) === runPromise) {
+        inFlightLogScanWatchers.delete(paymentId)
+      }
+    })
+    return runPromise
+  }
+  return runPaymentWatcherInternal(paymentId, options)
+}
+
+async function runPaymentWatcherInternal(
   paymentId: string,
   options?: { txHash?: string; maxAttempts?: number; sessionAttemptId?: string }
 ): Promise<boolean> {
@@ -80,6 +116,7 @@ export async function runPaymentWatcher(
   // Nothing left to do for terminal states.
   const status = String(payment.status || "").toUpperCase()
   if (status === "CONFIRMED" || status === "FAILED" || status === "INCOMPLETE") {
+    console.info("[watcher:evm] scan stopped: payment already terminal", { paymentId, status })
     return false
   }
 
@@ -150,6 +187,7 @@ export async function runPaymentWatcher(
   const watcherPath = effectiveTxHash ? "txHash-fast-path" : "chunked-log-fallback"
 
   if (isBase) {
+    console.info("[watcher:evm] scan started", { paymentId, watcherPath, txHashSource })
     console.info("[PineTreeBaseTrace] watcher engine started", {
       step: "watcher-entry",
       paymentId,
