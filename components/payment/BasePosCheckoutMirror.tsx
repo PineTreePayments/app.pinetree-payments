@@ -242,18 +242,37 @@ export default function BasePosCheckoutMirror({
   const [burstUntil, setBurstUntil] = useState(0)
   const selectCalledRef = useRef(false)
   const executionStartedRef = useRef(false)
+  // A tap on "Connect with WalletConnect" before pairingUri is ready is
+  // remembered here and auto-opens the chooser the instant pairingReady
+  // flips true — the customer never has to tap twice. buttonPreparing
+  // mirrors this ref into render state so the button can show a short
+  // loading state and refuse duplicate taps while pending.
+  const pendingConnectRef = useRef(false)
+  const [buttonPreparing, setButtonPreparing] = useState(false)
 
   // This component only mounts once the customer has already tapped the
   // Base asset card (see app/pay/PayClient.tsx), so mount time is the
-  // "base_option_tapped" moment. Kick off the wallet metadata prefetch
-  // immediately, in parallel with the select-network POST below rather than
-  // waiting until the customer later taps "Connect with WalletConnect" —
-  // that used to be the first time this fetch ever started (see
-  // WalletLauncherModal above), putting an avoidable network round trip
-  // directly in the wallet-picker's critical path.
+  // "base_option_tapped"/"asset_selected" moment. Kick off the wallet
+  // metadata prefetch immediately, in parallel with the select-network POST
+  // below rather than waiting until the customer later taps "Connect with
+  // WalletConnect" — that used to be the first time this fetch ever started
+  // (see WalletLauncherModal above), putting an avoidable network round
+  // trip directly in the wallet-picker's critical path.
   useEffect(() => {
     markBaseCheckoutLatency("base_option_tapped", { intentId, paymentId })
+    markBaseCheckoutLatency("asset_selected", { intentId, paymentId, asset: selectedAsset })
     void prefetchBaseWalletMetadata()
+  }, [intentId, paymentId, selectedAsset])
+
+  // The "Connect with WalletConnect" button renders unconditionally as soon
+  // as this component mounts (see the render logic below — it no longer
+  // waits on paymentReady, session, or pairingUri), so this fires on first
+  // render, independent of any network round trip.
+  const buttonRenderedLoggedRef = useRef(false)
+  useEffect(() => {
+    if (buttonRenderedLoggedRef.current) return
+    buttonRenderedLoggedRef.current = true
+    markBaseCheckoutLatency("walletconnect_button_rendered", { intentId, paymentId })
   }, [intentId, paymentId])
 
   // Create the payment record by calling select-network on mount
@@ -325,6 +344,7 @@ export default function BasePosCheckoutMirror({
     if (!pairingReady || pairingReceivedLoggedRef.current) return
     pairingReceivedLoggedRef.current = true
     markBaseCheckoutLatency("customer_pairing_uri_received", { intentId, paymentId })
+    markBaseCheckoutLatency("pairing_uri_received", { intentId, paymentId })
   }, [pairingReady, intentId, paymentId])
 
   const walletConnectedLoggedRef = useRef(false)
@@ -432,12 +452,43 @@ export default function BasePosCheckoutMirror({
   }, [session?.step, onExecutionStarted])
 
   // Open the launcher and enable burst polling for 30s so the UI transitions
-  // as soon as the POS registers the wallet connection event.
-  function handleConnectTapped() {
+  // as soon as the POS registers the wallet connection event. Guarded with
+  // the functional setState form so it only actually opens (and only logs
+  // wallet_chooser_opened) once, however many times it's called — the
+  // direct-tap path and the auto-open-once-ready path below both funnel
+  // through this single function.
+  const openWalletChooser = useCallback(() => {
+    setShowLauncher((alreadyOpen) => {
+      if (alreadyOpen) return alreadyOpen
+      markBaseCheckoutLatency("wallet_chooser_opened", { intentId, paymentId })
+      return true
+    })
     setBurstUntil(Date.now() + 30_000)
-    setShowLauncher(true)
     void pollSession()
     setTimeout(() => setBurstUntil(0), 30_000)
+  }, [intentId, paymentId, pollSession])
+
+  // Auto-open the chooser the instant pairingUri arrives, if the customer
+  // already tapped Connect while it wasn't ready yet — no second tap needed.
+  useEffect(() => {
+    if (!pairingReady || !pendingConnectRef.current) return
+    pendingConnectRef.current = false
+    setButtonPreparing(false)
+    openWalletChooser()
+  }, [pairingReady, openWalletChooser])
+
+  function handleConnectTapped() {
+    markBaseCheckoutLatency("walletconnect_button_tapped", { intentId, paymentId, pairingReady })
+    if (!pairingReady) {
+      // Remember the tap and show a short loading state on the same button
+      // instead of doing nothing — prevents duplicate taps (the button is
+      // disabled while buttonPreparing) without requiring the customer to
+      // tap again once pairingUri actually arrives.
+      pendingConnectRef.current = true
+      setButtonPreparing(true)
+      return
+    }
+    openWalletChooser()
   }
 
   // After the customer taps a wallet deep-link, poll immediately and close modal
@@ -489,43 +540,17 @@ export default function BasePosCheckoutMirror({
     )
   }
 
-  // ── Waiting for payment to be created ───────────────────────────────────────
-
-  if (!paymentReady || !session) {
-    return (
-      <div className="space-y-4 py-4 text-center">
-        <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
-        <p className="text-sm text-gray-600">Preparing secure WalletConnect session…</p>
-        <p className="text-xs text-gray-400">
-          The payment terminal is getting your wallet connection ready.
-        </p>
-      </div>
-    )
-  }
-
-  const { step, pairingUri } = session
+  const step = session?.step
+  const pairingUri = session?.pairingUri
 
   // ── Awaiting wallet connection ───────────────────────────────────────────────
+  // Renders immediately on mount — never gated on paymentReady, session, or
+  // pairingUri (all of that preparation continues invisibly in the
+  // background). The button itself carries the "not ready yet" state (see
+  // buttonPreparing / the inline hint below) instead of blocking the whole
+  // card behind a large spinner panel.
 
-  if (!step || step === "awaiting_wallet") {
-
-    // Spinner while POS is still generating the pairing URI
-    if (!pairingUri || !isValidPairingUri(pairingUri)) {
-      return (
-        <div className="space-y-4 py-4 text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
-          <p className="text-sm text-gray-600">Preparing secure WalletConnect session…</p>
-          <p className="text-xs text-gray-400">
-            The payment terminal is getting your wallet connection ready.
-          </p>
-          <Button variant="danger" fullWidth onClick={onCancel}>
-            Cancel
-          </Button>
-        </div>
-      )
-    }
-
-    // Pairing URI ready — clean card: title, Connect button, Cancel only
+  if (!session || !step || step === "awaiting_wallet") {
     return (
       <div className="space-y-4">
         <div className="space-y-1 text-center">
@@ -535,15 +560,30 @@ export default function BasePosCheckoutMirror({
           </p>
         </div>
 
-        <Button fullWidth onClick={handleConnectTapped}>
-          Connect with WalletConnect
-        </Button>
+        <div className="space-y-2">
+          <Button fullWidth onClick={handleConnectTapped} disabled={buttonPreparing}>
+            {buttonPreparing ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-transparent" />
+                Connecting…
+              </span>
+            ) : (
+              "Connect with WalletConnect"
+            )}
+          </Button>
+          {!pairingReady && !buttonPreparing && (
+            <p className="flex items-center justify-center gap-1.5 text-xs text-gray-400">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-transparent" />
+              Preparing secure connection…
+            </p>
+          )}
+        </div>
 
         <Button variant="danger" fullWidth onClick={onCancel}>
           Cancel
         </Button>
 
-        {showLauncher && (
+        {showLauncher && pairingReady && pairingUri && (
           <WalletLauncherModal
             intentId={intentId}
             paymentId={paymentId}
@@ -555,6 +595,11 @@ export default function BasePosCheckoutMirror({
       </div>
     )
   }
+
+  // From here on step is one of the later, session-backed states, so session
+  // itself is guaranteed non-null — this satisfies TypeScript's narrowing
+  // for the property accesses below without repeating the check everywhere.
+  if (!session) return null
 
   // ── Wallet connected — POS is preparing the transaction request ─────────────
 

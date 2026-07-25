@@ -27,7 +27,11 @@ describe("BasePosCheckoutMirror — canonical status overrides stale session ste
 
   it("checks terminalStatus before any session.step-based branch", () => {
     const terminalCheckIndex = src.indexOf('if (terminalStatus === "CONFIRMED")')
-    const stepDestructureIndex = src.indexOf("const { step, pairingUri } = session")
+    // "const pairingUri = session?.pairingUri" only appears once, right next
+    // to the render-time "const step = session?.step" — unlike "const step
+    // = session?.step" alone, which also appears earlier inside the
+    // onExecutionStarted effect.
+    const stepDestructureIndex = src.indexOf("const pairingUri = session?.pairingUri")
     expect(terminalCheckIndex).toBeGreaterThan(-1)
     expect(stepDestructureIndex).toBeGreaterThan(-1)
     // The terminal-status check must come first, so it can override the
@@ -44,15 +48,16 @@ describe("BasePosCheckoutMirror — canonical status overrides stale session ste
 
   it("renders a non-CONFIRMED terminal status (FAILED/INCOMPLETE/EXPIRED/CANCELED) driven by canonical status alone", () => {
     const start = src.indexOf("if (terminalStatus) {")
-    const end = src.indexOf("// ── Waiting for payment to be created", start)
+    const end = src.indexOf("const step = session?.step", start)
     const block = src.slice(start, end)
     expect(block).toContain("<PaymentStatusVisual status={terminalStatus}")
   })
 
-  it("this override sits before the paymentReady/session guard, so it applies even if the POS session mirror never loaded", () => {
+  it("this override sits before the awaiting-wallet card render, so it applies even if the POS session mirror never loaded", () => {
     const overrideIndex = src.indexOf('if (terminalStatus === "CONFIRMED")')
-    const sessionGuardIndex = src.indexOf("if (!paymentReady || !session)")
-    expect(overrideIndex).toBeLessThan(sessionGuardIndex)
+    const awaitingCardGuardIndex = src.indexOf('if (!session || !step || step === "awaiting_wallet")')
+    expect(awaitingCardGuardIndex).toBeGreaterThan(-1)
+    expect(overrideIndex).toBeLessThan(awaitingCardGuardIndex)
   })
 
   it("the WalletConnect-in-progress step branches (payment_sending, wallet_connected, etc.) remain unchanged below the override — they still exist for the non-terminal case", () => {

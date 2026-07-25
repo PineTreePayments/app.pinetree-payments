@@ -26,6 +26,7 @@
 
 export type BaseLatencyMilestone =
   | "base_option_tapped"
+  | "asset_selected"
   | "select_network_request_started"
   | "select_network_response_received"
   | "pos_detected_base_selection"
@@ -37,6 +38,10 @@ export type BaseLatencyMilestone =
   | "pairing_uri_session_write_started"
   | "pairing_uri_session_write_completed"
   | "customer_pairing_uri_received"
+  | "pairing_uri_received"
+  | "walletconnect_button_rendered"
+  | "walletconnect_button_tapped"
+  | "wallet_chooser_opened"
   | "wallet_list_request_started"
   | "wallet_list_request_completed"
   | "wallet_list_rendered"

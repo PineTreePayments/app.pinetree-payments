@@ -18,7 +18,7 @@ describe("BasePosCheckoutMirror — wallet metadata prefetch", () => {
 
   it("prefetches wallet metadata as soon as the component mounts, not gated on pairingUri", () => {
     const mountEffectStart = src.indexOf('markBaseCheckoutLatency("base_option_tapped"')
-    const mountEffectBlock = src.slice(mountEffectStart, mountEffectStart + 200)
+    const mountEffectBlock = src.slice(mountEffectStart, mountEffectStart + 400)
     expect(mountEffectStart).toBeGreaterThan(-1)
     expect(mountEffectBlock).toContain("prefetchBaseWalletMetadata()")
   })
