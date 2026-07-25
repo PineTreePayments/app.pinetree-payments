@@ -241,6 +241,26 @@ export default function SolanaWalletPayment({
   const walletLaunchedRef = useRef(false)
   const [walletLaunched, setWalletLaunched] = useState(false)
   const [noTxAfterReturn, setNoTxAfterReturn] = useState(false)
+  // Guards the "app didn't open, fall back to the app/play store" timer
+  // armed by openMobileWalletBrowser. A background setTimeout can be
+  // throttled by mobile browsers while the wallet app has focus and only
+  // actually run once the tab is foregrounded again — which is also the
+  // exact moment the customer returns and PROCESSING/CONFIRMED become
+  // visible. This must be cancelled by every signal that the wallet did
+  // open or the payment progressed, not just the one-shot "pagehide" event
+  // (which does not reliably fire for an OS-level app hand-off).
+  const fallbackTimerRef = useRef<number | null>(null)
+  const clearWalletFallbackTimer = useCallback(() => {
+    if (fallbackTimerRef.current !== null) {
+      window.clearTimeout(fallbackTimerRef.current)
+      fallbackTimerRef.current = null
+    }
+  }, [])
+  // Single-use guard: a wallet-launch deep link must never fire twice
+  // concurrently (e.g. a rapid double-tap on the same wallet card). Reset
+  // once the customer returns to the tab (handleReturn below) so a
+  // legitimate second, explicit attempt is never permanently blocked.
+  const walletLaunchInFlightRef = useRef(false)
   const [paymentData, setPaymentData] = useState<PaymentData | null>(() => {
     const paymentId = String(directPaymentId || parsePaymentIdFromUrl(directPaymentUrl)).trim()
     const paymentUrl = String(directPaymentUrl || "").trim()
@@ -282,8 +302,12 @@ export default function SolanaWalletPayment({
 
   // When the customer returns to this page after being sent to a wallet app,
   // detect the return and surface recovery actions if no tx was submitted.
+  // Also the primary cancellation point for the app-store fallback timer:
+  // returning to this tab must never leave that timer able to fire later.
   useEffect(() => {
     function handleReturn() {
+      clearWalletFallbackTimer()
+      walletLaunchInFlightRef.current = false
       if (!walletLaunchedRef.current) return
       setNoTxAfterReturn(true)
       void logSolana("wallet_returned_without_signature", { rail: "solana" })
@@ -294,15 +318,24 @@ export default function SolanaWalletPayment({
       })
     }
     function handleVisibility() {
-      if (document.visibilityState === "visible") handleReturn()
+      if (document.visibilityState === "visible") {
+        handleReturn()
+        return
+      }
+      // The tab backgrounding is the expected signal that the wallet app
+      // opened — the fallback timer's whole job is done, cancel it here
+      // rather than waiting for the unreliable one-shot "pagehide" event.
+      clearWalletFallbackTimer()
     }
     document.addEventListener("visibilitychange", handleVisibility)
     window.addEventListener("pageshow", handleReturn)
+    window.addEventListener("focus", handleReturn)
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility)
       window.removeEventListener("pageshow", handleReturn)
+      window.removeEventListener("focus", handleReturn)
     }
-  }, [])
+  }, [clearWalletFallbackTimer])
 
   useEffect(() => {
     setError(initialError)
@@ -311,6 +344,7 @@ export default function SolanaWalletPayment({
   const confirmedLoggedRef = useRef(false)
   useEffect(() => {
     if (terminalStatus !== "CONFIRMED") return
+    clearWalletFallbackTimer()
     setExecStage("confirmed")
     if (confirmedLoggedRef.current) return
     confirmedLoggedRef.current = true
@@ -318,14 +352,22 @@ export default function SolanaWalletPayment({
       paymentId: paymentData?.paymentId,
       sessionAttemptId: sessionAttemptIdRef.current
     })
-  }, [terminalStatus, paymentData?.paymentId])
+  }, [terminalStatus, paymentData?.paymentId, clearWalletFallbackTimer])
 
   useEffect(() => {
     const normalized = String(paymentStatus || "").toUpperCase()
-    if (normalized === "PROCESSING" && execStage === "idle") {
+    if (normalized !== "PROCESSING") return
+    clearWalletFallbackTimer()
+    if (execStage === "idle") {
       setExecStage("detecting")
     }
-  }, [execStage, paymentStatus])
+  }, [execStage, paymentStatus, clearWalletFallbackTimer])
+
+  // Belt-and-suspenders: clear on unmount too, independent of any status
+  // transition ever being observed (e.g. the customer navigates away).
+  useEffect(() => {
+    return () => clearWalletFallbackTimer()
+  }, [clearWalletFallbackTimer])
 
   const walletCatalog = useMemo(() => {
     const catalogIds = new Set([...POPULAR_WALLETS, ...MORE_WALLETS].map((wallet) => wallet.id))
@@ -464,6 +506,12 @@ export default function SolanaWalletPayment({
   }
 
   const startPayment = useCallback(async (wallet: DetectedSolanaWallet) => {
+    // Single-use guard, shared with openMobileWalletBrowser: one wallet
+    // launch (of either kind) must never be able to execute twice
+    // concurrently.
+    if (walletLaunchInFlightRef.current) return
+    walletLaunchInFlightRef.current = true
+
     setError("")
     setSelectedWalletId(wallet.id)
     setActiveWalletName(wallet.name)
@@ -486,6 +534,11 @@ export default function SolanaWalletPayment({
       })
       setExecStage("connecting_wallet")
       const signature = await sendWalletTransaction(wallet.provider, preparedPayment.paymentId)
+      // Defense in depth: this injected-provider path doesn't arm the
+      // mobile-deep-link fallback timer itself, but a signature is an
+      // unambiguous "the wallet opened and responded" signal, so clear it
+      // regardless of which path is live.
+      clearWalletFallbackTimer()
 
       setExecStage("payment_submitted")
       void logSolana("detect_called", { paymentId: preparedPayment.paymentId, rail: "solana", signaturePrefix: signature.slice(0, 8) })
@@ -512,10 +565,20 @@ export default function SolanaWalletPayment({
       onError?.(message)
     } finally {
       setPendingWalletId("")
+      // Unlike the mobile deep-link path, this whole call is one
+      // request/response cycle with the injected provider (no navigating
+      // away) - always release the guard so a rejected/failed attempt can
+      // be retried immediately.
+      walletLaunchInFlightRef.current = false
     }
-  }, [getPaymentData, onError, onExecutionStarted, onPaymentCreated])
+  }, [getPaymentData, onError, onExecutionStarted, onPaymentCreated, clearWalletFallbackTimer])
 
   const openMobileWalletBrowser = useCallback(async (wallet: WalletCatalogItem) => {
+    // Single-use guard: refuse a second concurrent launch (e.g. a rapid
+    // double-tap on the wallet card) rather than racing two deep links.
+    if (walletLaunchInFlightRef.current) return
+    walletLaunchInFlightRef.current = true
+
     setError("")
     setSelectedWalletId(wallet.id)
     setActiveWalletName(wallet.name)
@@ -548,14 +611,16 @@ export default function SolanaWalletPayment({
           throw new Error(data.error || "Failed to open Solflare")
         }
         void logSolana("deep_link_generated", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", strategy: "solflare_universal" })
-        const fallbackTimer = window.setTimeout(() => {
+        clearWalletFallbackTimer()
+        fallbackTimerRef.current = window.setTimeout(() => {
+          fallbackTimerRef.current = null
           if (document.visibilityState === "visible") {
             void logSolana("timeout", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", fallback: "install_page" })
             window.location.href = buildInstallUrl(wallet)
           }
         }, 1400)
 
-        window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer), { once: true })
+        window.addEventListener("pagehide", clearWalletFallbackTimer, { once: true })
         void logSolana("wallet_open_attempted", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", strategy: "solflare_universal" })
         logPaymentSession("solana", "wallet_opened", {
           paymentId: preparedPayment.paymentId,
@@ -584,14 +649,16 @@ export default function SolanaWalletPayment({
 
       void logSolana("deep_link_generated", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", strategy: wallet.mobileDeepLink ?? "deep_link" })
 
-      const fallbackTimer = window.setTimeout(() => {
+      clearWalletFallbackTimer()
+      fallbackTimerRef.current = window.setTimeout(() => {
+        fallbackTimerRef.current = null
         if (document.visibilityState === "visible") {
           void logSolana("timeout", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", fallback: "install_page" })
           window.location.href = buildInstallUrl(wallet)
         }
       }, 1400)
 
-      window.addEventListener("pagehide", () => window.clearTimeout(fallbackTimer), { once: true })
+      window.addEventListener("pagehide", clearWalletFallbackTimer, { once: true })
       void logSolana("wallet_open_attempted", { walletId: wallet.id, paymentId: preparedPayment.paymentId, rail: "solana", strategy: wallet.mobileDeepLink ?? "deep_link" })
       logPaymentSession("solana", "wallet_opened", {
         paymentId: preparedPayment.paymentId,
@@ -606,8 +673,12 @@ export default function SolanaWalletPayment({
       setExecStage("retryable_error")
       onError?.(message)
       setPendingWalletId("")
+      // The launch never actually navigated away, so no visibility-return
+      // will ever fire to release the guard — release it here so the
+      // customer can retry immediately.
+      walletLaunchInFlightRef.current = false
     }
-  }, [getPaymentData, intentId, onError, onExecutionStarted, selectedAsset])
+  }, [getPaymentData, intentId, onError, onExecutionStarted, selectedAsset, clearWalletFallbackTimer])
 
   const openInstallPage = useCallback((wallet: WalletCatalogItem) => {
     setError("")

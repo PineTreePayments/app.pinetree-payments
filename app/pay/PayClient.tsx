@@ -1722,6 +1722,24 @@ export default function PayClient() {
                         {/* ── Other networks: unavailable in hosted checkout ─────── */}
                         {asset.network === "bitcoin_lightning" ? (
                           <LightningPayment
+                            // Forces a full remount whenever intentId changes (e.g. the
+                            // same tab is reused for a second back-to-back payment,
+                            // whether via a soft client-side navigation or the browser
+                            // reusing an existing tab for a second QR scan) instead of
+                            // React updating the existing instance in place. Without
+                            // this, LightningPayment's own useState/useRef values -
+                            // most importantly its cached Idempotency-Key
+                            // (getLightningCreationIdempotencyKey, keyed by intentId in
+                            // sessionStorage but only ever read once via a lazy
+                            // useState initializer) - survive across the intentId prop
+                            // change and get resent for the new payment. The server
+                            // trusts a client-supplied Idempotency-Key verbatim
+                            // (engine/paymentIntents.ts) and createPayment() throws
+                            // "Duplicate idempotency key" the moment it sees a key
+                            // already claimed by the first (already-confirmed) payment
+                            // (engine/createPayment.ts) - this is the exact failure
+                            // reported as "Failed to create Lightning invoice."
+                            key={intentId}
                             intentId={intentId!}
                             usdAmount={displayAmount}
                             paymentStatus={normalizedPaymentStatus}

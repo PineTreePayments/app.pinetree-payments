@@ -158,8 +158,12 @@ function logLightning(stage: string, payload: Record<string, unknown> = {}): voi
   }
 }
 
-function getLightningCreationIdempotencyKey(intentId: string): string {
-  const storageKey = `pinetree:lightning:create:${intentId}`
+export function lightningCreationIdempotencyStorageKey(intentId: string): string {
+  return `pinetree:lightning:create:${intentId}`
+}
+
+export function getLightningCreationIdempotencyKey(intentId: string): string {
+  const storageKey = lightningCreationIdempotencyStorageKey(intentId)
   if (typeof window !== "undefined") {
     try {
       const existing = window.sessionStorage.getItem(storageKey)
@@ -173,6 +177,28 @@ function getLightningCreationIdempotencyKey(intentId: string): string {
     }
   }
   return crypto.randomUUID()
+}
+
+// Once an invoice has actually been created, this key has done its job -
+// the server has already durably claimed it (database/idempotency.ts) and
+// linked it to a real payment. Clearing it here (rather than letting it
+// live in sessionStorage for the rest of the tab's lifetime) means a
+// genuinely new attempt for the SAME intentId - the customer cancels or
+// abandons this unpaid invoice and re-selects Bitcoin Lightning - mints a
+// FRESH key instead of resending the one already claimed by the invoice
+// just created, which the server would otherwise reject with "Duplicate
+// idempotency key" (engine/createPayment.ts). Deliberately NOT cleared on
+// failure: a failed request whose outcome is uncertain (the network dropped
+// but Speed may have already created the invoice) must keep reusing the
+// same key so a retry cannot create a second, duplicate Speed invoice for
+// what might already be a successful attempt.
+export function clearLightningCreationIdempotencyKey(intentId: string): void {
+  if (typeof window === "undefined") return
+  try {
+    window.sessionStorage.removeItem(lightningCreationIdempotencyStorageKey(intentId))
+  } catch {
+    // Storage can be unavailable in privacy-restricted browsers - nothing to clean up.
+  }
 }
 
 export default function LightningPayment({
@@ -262,6 +288,7 @@ export default function LightningPayment({
       }
 
       setPayment(data)
+      clearLightningCreationIdempotencyKey(intentId)
       setWalletSearch("")
       logPaymentSession("lightning", "transaction_submitted", {
         paymentId: String(data.paymentId || "") || undefined,
