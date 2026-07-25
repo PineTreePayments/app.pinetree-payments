@@ -739,7 +739,11 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     try {
       console.log("[POS Base WC] flow_owner_acquired", { intentId: iid, paymentId, asset, attemptId: myAttempt })
       console.log("[POS Base WC] session_created", { intentId: iid, paymentId, asset, attemptId: myAttempt })
-      await updatePosBaseSession(iid, { step: "awaiting_wallet", selectedAsset: asset })
+      // Fire-and-forget: this write to our own session-mirror API has no
+      // bearing on starting WalletConnect (initPosBaseWalletConnect doesn't
+      // read it), so it no longer blocks WC init behind a network round trip
+      // that was pure serialized latency.
+      void updatePosBaseSession(iid, { step: "awaiting_wallet", selectedAsset: asset })
 
       const wcResult = await initPosBaseWalletConnect()
       if (!wcResult.ok) throw new Error(wcResult.error)
@@ -748,7 +752,12 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       posWcProviderRef.current = wcResult.provider
 
       console.log("[POS Base WC] pairing_uri_published", { intentId: iid, paymentId, asset, attemptId: myAttempt })
-      await updatePosBaseSession(iid, {
+      // Also fire-and-forget: waitForWalletConnect below listens directly on
+      // the local WC provider object, not on this session-mirror record, so
+      // publishing the pairing URI to the customer's mirror can happen
+      // concurrently with (rather than strictly before) starting to wait for
+      // the wallet to connect.
+      void updatePosBaseSession(iid, {
         step: "awaiting_wallet",
         pairingUri: wcResult.pairingUri,
         selectedAsset: asset,
@@ -1087,7 +1096,34 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     }
 
     void poll()
-    return () => { cancelled = true }
+
+    // Realtime fast path: the 3s poll above is a correctness fallback, but
+    // in the common case the customer's selectedNetwork write commits well
+    // before the next scheduled tick. Reacting to the same postgres_changes
+    // UPDATE event the "REALTIME: INTENT FLOW" subscription above already
+    // listens for (this is a second, independent channel — Supabase allows
+    // multiple subscriptions on the same table/row) collapses that wait to
+    // realtime latency instead of up to a full POLL_MS. poll() re-checks the
+    // full intent record itself, so this is safe to fire on every UPDATE
+    // regardless of which column actually changed.
+    const baseSelectionChannel = supabase
+      .channel(`pos-base-selection-${intentId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "payment_intents",
+          filter: `id=eq.${intentId}`
+        },
+        () => { void poll() }
+      )
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      supabase.removeChannel(baseSelectionChannel)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intentId])
 

@@ -8,6 +8,20 @@
  * hosted checkout purely so the customer can deep-link into their wallet.
  *
  * Dynamic import keeps the heavy WC bundle out of any server path.
+ *
+ * Provider lifecycle: a POS terminal handles many sequential sales in a
+ * single browser tab lifetime. EthereumProvider.init() (and the WalletConnect
+ * Core it creates internally) is meant to be a per-tab singleton — calling it
+ * fresh for every payment is what produced the SDK's own "Core is already
+ * initialized. Init() was called N times." warning, plus "No matching key" /
+ * "Pending session not found" noise from a previous, now-abandoned Core
+ * instance's leftover pairing/session storage. Establishing the relay
+ * WebSocket connection this performs is also the dominant cost of the
+ * multi-second "Preparing secure WalletConnect session…" delay customers saw
+ * on every single sale. initPosBaseWalletConnect() now initializes the
+ * provider once per tab and reuses it for every subsequent payment — each
+ * call still performs a fresh connect() (a new pairing/session), it just no
+ * longer pays for a new Core/relay handshake each time.
  */
 
 const BASE_CHAIN_ID = 8453
@@ -32,25 +46,24 @@ type PosWcInitResult =
   | { ok: true; provider: PosWcProvider; pairingUri: string }
   | { ok: false; error: string }
 
-/**
- * Initialize a fresh WalletConnect session owned by the POS terminal.
- *
- * Resolves once the pairing URI is available (display_uri event), before the
- * customer connects. The caller should then publish the URI to the API bridge
- * so the hosted checkout can surface deep-link wallet buttons.
- *
- * The returned PosWcProvider stays active until the caller calls disconnect()
- * or the wallet disconnects.
- */
-export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
-  const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || ""
-  if (!projectId) {
-    return { ok: false, error: "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not configured" }
-  }
+type RawWcProvider = import("@walletconnect/ethereum-provider").default
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"
+// Shared across every payment attempt in this browser tab — see the module
+// doc comment above. Never reset between payments; only cleared if init
+// itself fails, so a transient failure can be retried on the next attempt
+// instead of permanently wedging the terminal.
+let sharedProviderPromise: Promise<RawWcProvider> | null = null
 
-  try {
+async function getSharedPosWcProvider(): Promise<RawWcProvider> {
+  if (sharedProviderPromise) return sharedProviderPromise
+
+  sharedProviderPromise = (async () => {
+    const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || ""
+    if (!projectId) {
+      throw new Error("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is not configured")
+    }
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://app.pinetree-payments.com"
+
     const { default: EthereumProvider } = await import("@walletconnect/ethereum-provider")
 
     const wcProvider = await EthereumProvider.init({
@@ -75,61 +88,102 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
       },
     })
 
-    return new Promise<PosWcInitResult>((resolve) => {
-      let resolved = false
+    // Every payment attempt adds and removes its own one-shot display_uri
+    // listener below. Reusing this provider across many sales in a day would
+    // otherwise eventually trip the EventEmitter's default max-listener
+    // warning even though each listener is correctly removed after use.
+    wcProvider.events.setMaxListeners(Number.POSITIVE_INFINITY)
 
-      const onDisplayUri = (uri: string) => {
-        if (resolved) return
-        resolved = true
+    return wcProvider
+  })().catch((err) => {
+    // Let the next payment attempt retry init from scratch instead of
+    // permanently caching a failed provider.
+    sharedProviderPromise = null
+    throw err
+  })
 
-        const posProvider: PosWcProvider = {
-          get accounts() {
-            return wcProvider.accounts
-          },
-          async request<T = unknown>(args: PosWcRequestArgs): Promise<T> {
-            return wcProvider.request<T>(args as Parameters<typeof wcProvider.request>[0])
-          },
-          async disconnect() {
-            try {
-              await wcProvider.disconnect()
-            } catch {
-              // ignore — session may already be gone
-            }
-          },
-          _provider: wcProvider,
-        }
+  return sharedProviderPromise
+}
 
-        resolve({ ok: true, provider: posProvider, pairingUri: uri })
-      }
-
-      // display_uri fires before the wallet connects, carrying the pairing URI
-      wcProvider.on("display_uri", onDisplayUri)
-
-      // Kick off the connection flow (non-blocking — resolves above via event)
-      wcProvider.connect().catch((err: unknown) => {
-        if (!resolved) {
-          resolved = true
-          resolve({
-            ok: false,
-            error: err instanceof Error ? err.message : "WalletConnect connect() failed",
-          })
-        }
-      })
-
-      // Safety timeout: if display_uri never fires, fail cleanly
-      setTimeout(() => {
-        if (!resolved) {
-          resolved = true
-          resolve({ ok: false, error: "Timed out waiting for WalletConnect pairing URI" })
-        }
-      }, 20_000)
-    })
+/**
+ * Get (initializing once per tab if needed) the shared WalletConnect
+ * provider, then start a fresh connect() for this specific payment.
+ *
+ * Resolves once the pairing URI is available (display_uri event), before the
+ * customer connects. The caller should then publish the URI to the API bridge
+ * so the hosted checkout can surface deep-link wallet buttons.
+ *
+ * The returned PosWcProvider stays active until the caller calls disconnect()
+ * or the wallet disconnects — disconnecting ends this payment's session only;
+ * the underlying shared provider/Core is never torn down, so the next
+ * payment's call reuses it instead of paying for another relay handshake.
+ */
+export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
+  let wcProvider: RawWcProvider
+  try {
+    wcProvider = await getSharedPosWcProvider()
   } catch (err) {
     return {
       ok: false,
       error: err instanceof Error ? err.message : "Failed to init WalletConnect provider",
     }
   }
+
+  return new Promise<PosWcInitResult>((resolve) => {
+    let resolved = false
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+
+    const onDisplayUri = (uri: string) => {
+      if (resolved) return
+      resolved = true
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+      wcProvider.off("display_uri", onDisplayUri)
+
+      const posProvider: PosWcProvider = {
+        get accounts() {
+          return wcProvider.accounts
+        },
+        async request<T = unknown>(args: PosWcRequestArgs): Promise<T> {
+          return wcProvider.request<T>(args as Parameters<typeof wcProvider.request>[0])
+        },
+        async disconnect() {
+          try {
+            await wcProvider.disconnect()
+          } catch {
+            // ignore — session may already be gone
+          }
+        },
+        _provider: wcProvider,
+      }
+
+      resolve({ ok: true, provider: posProvider, pairingUri: uri })
+    }
+
+    // display_uri fires before the wallet connects, carrying the pairing URI
+    wcProvider.on("display_uri", onDisplayUri)
+
+    // Kick off a fresh pairing for this payment (non-blocking — resolves above via event)
+    wcProvider.connect().catch((err: unknown) => {
+      if (!resolved) {
+        resolved = true
+        if (timeoutHandle) clearTimeout(timeoutHandle)
+        wcProvider.off("display_uri", onDisplayUri)
+        resolve({
+          ok: false,
+          error: err instanceof Error ? err.message : "WalletConnect connect() failed",
+        })
+      }
+    })
+
+    // Safety timeout: if display_uri never fires, fail cleanly
+    timeoutHandle = setTimeout(() => {
+      if (!resolved) {
+        resolved = true
+        wcProvider.off("display_uri", onDisplayUri)
+        resolve({ ok: false, error: "Timed out waiting for WalletConnect pairing URI" })
+      }
+    }, 20_000)
+  })
 }
 
 /**

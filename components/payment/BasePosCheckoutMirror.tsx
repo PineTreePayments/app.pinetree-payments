@@ -256,8 +256,17 @@ export default function BasePosCheckoutMirror({
     void run()
   }, [intentId, selectedAsset, checkoutToken, onPaymentCreated])
 
-  // Poll the POS-owned session for the pairing URI and status updates
+  // Poll the POS-owned session for the pairing URI and status updates.
+  // Coalesced against overlapping callers (the steady interval, a burst
+  // interval, and the visibilitychange/focus/pageshow resume handlers below
+  // can all fire within the same tick — e.g. switching back from the wallet
+  // app commonly fires visibilitychange and focus together) so only one
+  // fetch is in flight at a time instead of several simultaneous identical
+  // requests.
+  const pollInFlightRef = useRef(false)
   const pollSession = useCallback(async () => {
+    if (pollInFlightRef.current) return
+    pollInFlightRef.current = true
     try {
       const res = await fetch(
         `/api/pos/base-session/${encodeURIComponent(intentId)}`,
@@ -268,6 +277,8 @@ export default function BasePosCheckoutMirror({
       if (data.session) setSession(data.session)
     } catch {
       // best-effort — ignore transient errors
+    } finally {
+      pollInFlightRef.current = false
     }
   }, [intentId])
 
