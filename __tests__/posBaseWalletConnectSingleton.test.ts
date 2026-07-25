@@ -22,9 +22,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 type FakeListener = (...args: unknown[]) => void
 
-function createFakeWcProvider() {
+function createFakeWcProvider(opts: { includeStoreDiagnostics?: boolean } = {}) {
+  const { includeStoreDiagnostics = true } = opts
   const listeners = new Map<string, Set<FakeListener>>()
   let pairingCounter = 0
+  // Simulates the SDK's own internal proposal.set(id, ...) — a fresh id is
+  // "stored" the moment connect() emits display_uri, mirroring (a simplified
+  // version of) the real Engine.connect() -> sendRequest -> setProposal order.
+  let proposalKeys: number[] = []
 
   const fake = {
     accounts: [] as string[],
@@ -47,6 +52,7 @@ function createFakeWcProvider() {
     // display_uri listener is registered.
     connect: vi.fn().mockImplementation(async () => {
       pairingCounter += 1
+      proposalKeys = [...proposalKeys, 9_000_000 + pairingCounter]
       fake.emit("display_uri", `wc:pairing-${pairingCounter}`)
     }),
     disconnect: vi.fn().mockImplementation(async () => {
@@ -57,6 +63,29 @@ function createFakeWcProvider() {
     _simulateSessionEstablished(topic: string) {
       fake.session = { topic }
     },
+    ...(includeStoreDiagnostics
+      ? {
+          signer: {
+            client: {
+              core: {
+                name: "client",
+                context: "client",
+                relayer: { connected: true },
+                pairing: { pairings: { length: 0 } },
+              },
+              proposal: {
+                get length() {
+                  return proposalKeys.length
+                },
+                get keys() {
+                  return [...proposalKeys]
+                },
+              },
+              session: { length: 0 },
+            },
+          },
+        }
+      : {}),
   }
   return fake
 }
@@ -383,5 +412,181 @@ describe("prewarmPosBaseWalletConnect", () => {
     await prewarmPosBaseWalletConnect()
 
     expect(mocks.init).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * Regression coverage for the "No matching key. proposal" / "Pending session
+ * not found for topic" production incident that occurred with NO disconnect
+ * of any kind in the window before it — ruling out the generation-ownership
+ * hazard covered above. Source audit of the installed WalletConnect SDK
+ * traced both error strings to the generic Store's NO_MATCHING_KEY lookup
+ * failure and a linear pendingSessions search inside Engine.ts, and found
+ * that this POS page (app/dashboard/pos) is nested inside the same
+ * app/dashboard/layout.tsx that mounts PineTreeDynamicProvider — Dynamic
+ * Labs' SDK, which bundles its own, differently-versioned WalletConnect Core
+ * instances. Neither side customized WalletConnect's default storage
+ * naming, so both would persist proposal/session/keychain state under
+ * identical storage keys on the same origin. customStoragePrefix gives this
+ * Core a private namespace, closing off that hazard regardless of what any
+ * other WalletConnect Core on the page does.
+ */
+describe("initPosBaseWalletConnect — WalletConnect Core storage isolation", () => {
+  beforeEach(() => {
+    vi.resetModules()
+    mocks.init.mockReset()
+    vi.stubEnv("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID", "test-project-id")
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.pinetree-payments.com")
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("passes a customStoragePrefix to EthereumProvider.init() that is not the SDK's shared default, so this Core never reads/writes the same storage keys as any other WalletConnect Core on the origin (e.g. Dynamic Labs' connectors)", async () => {
+    const fakeProvider = createFakeWcProvider()
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { initPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    await initPosBaseWalletConnect()
+
+    expect(mocks.init).toHaveBeenCalledTimes(1)
+    const initOpts = mocks.init.mock.calls[0][0]
+    expect(typeof initOpts.customStoragePrefix).toBe("string")
+    expect(initOpts.customStoragePrefix.length).toBeGreaterThan(0)
+    // "wc@2" is the SDK's own default customStoragePrefix — using it here
+    // would recreate exactly the shared-storage hazard this fix closes off.
+    expect(initOpts.customStoragePrefix).not.toBe("wc@2")
+  })
+
+  it("uses the same customStoragePrefix across every payment attempt in the tab (the singleton is only constructed once)", async () => {
+    const fakeProvider = createFakeWcProvider()
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { initPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    await initPosBaseWalletConnect()
+    fakeProvider._simulateSessionEstablished("topic-1")
+    await initPosBaseWalletConnect()
+
+    expect(mocks.init).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * Regression coverage for the safe, production-facing SDK-store diagnostics
+ * added to help root-cause any future recurrence of the incident above. Logs
+ * proposal/session/pairing store *counts* (and, distinctly, a numeric
+ * proposal id — never a topic, URI, key, address, or payload) at the
+ * lifecycle points needed to tell "never stored" apart from "stored, then
+ * vanished." Must degrade to a harmless no-op if the SDK's internal store
+ * surface isn't present or throws — this instrumentation must never be able
+ * to break a real payment.
+ */
+describe("initPosBaseWalletConnect / waitForWalletConnect — SDK store diagnostics", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    vi.resetModules()
+    mocks.init.mockReset()
+    vi.stubEnv("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID", "test-project-id")
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.pinetree-payments.com")
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    logSpy.mockRestore()
+  })
+
+  function storeSnapshotCalls(stage: string) {
+    return logSpy.mock.calls.filter((call) => call[0] === "[POS WC][store]" && call[1] === stage)
+  }
+
+  it("logs the proposal-store count before connect() and again once display_uri fires, and identifies the newly created proposal id by diffing store keys", async () => {
+    const fakeProvider = createFakeWcProvider()
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { initPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    await initPosBaseWalletConnect()
+
+    const beforeCalls = storeSnapshotCalls("before_connect")
+    const afterCalls = storeSnapshotCalls("display_uri_emitted")
+    expect(beforeCalls).toHaveLength(1)
+    expect(afterCalls).toHaveLength(1)
+    expect(beforeCalls[0][2]).toMatchObject({ proposalStoreCount: 0 })
+    expect(afterCalls[0][2]).toMatchObject({ proposalStoreCount: 1, newProposalId: 9_000_001 })
+  })
+
+  it("gives every sequential payment attempt its own newly-diffed proposal id, never reusing a prior attempt's", async () => {
+    const fakeProvider = createFakeWcProvider()
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { initPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    await initPosBaseWalletConnect()
+    fakeProvider._simulateSessionEstablished("topic-1")
+    await initPosBaseWalletConnect()
+
+    const afterCalls = storeSnapshotCalls("display_uri_emitted")
+    expect(afterCalls).toHaveLength(2)
+    expect(afterCalls[0][2]).toMatchObject({ newProposalId: 9_000_001 })
+    expect(afterCalls[1][2]).toMatchObject({ newProposalId: 9_000_002 })
+  })
+
+  it("logs a final snapshot when the wallet connects and stops ticking afterward (no periodic-snapshot leak past resolution)", async () => {
+    vi.useFakeTimers()
+    try {
+      const fakeProvider = createFakeWcProvider()
+      mocks.init.mockResolvedValue(fakeProvider)
+
+      const { initPosBaseWalletConnect, waitForWalletConnect } = await import(
+        "@/lib/pos/posBaseWalletConnect"
+      )
+      const initResult = await initPosBaseWalletConnect()
+      if (!initResult.ok) throw new Error("setup failed")
+
+      const waitPromise = waitForWalletConnect(initResult.provider)
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(storeSnapshotCalls("waiting_for_wallet_tick").length).toBeGreaterThanOrEqual(1)
+
+      fakeProvider.accounts = ["0xabc"]
+      fakeProvider.emit("accountsChanged", ["0xabc"])
+      await waitPromise
+
+      expect(storeSnapshotCalls("wallet_connected")).toHaveLength(1)
+      const tickCountAtResolve = storeSnapshotCalls("waiting_for_wallet_tick").length
+
+      // Advance well past another would-be tick — if the interval weren't
+      // cleared on resolve, this would log more ticks after the promise
+      // already settled.
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(storeSnapshotCalls("waiting_for_wallet_tick").length).toBe(tickCountAtResolve)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("never throws and still completes the payment flow when the SDK's internal store surface is entirely absent", async () => {
+    const fakeProvider = createFakeWcProvider({ includeStoreDiagnostics: false })
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { initPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    const result = await initPosBaseWalletConnect()
+
+    expect(result.ok).toBe(true)
+  })
+
+  it("never throws and still completes the payment flow when reading the SDK's internal store surface itself throws", async () => {
+    const fakeProvider = createFakeWcProvider()
+    Object.defineProperty(fakeProvider.signer!.client, "proposal", {
+      get() {
+        throw new Error("simulated internal SDK read failure")
+      },
+    })
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { initPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    const result = await initPosBaseWalletConnect()
+
+    expect(result.ok).toBe(true)
   })
 })

@@ -38,11 +38,115 @@
  * tracks which connect() cycle currently owns the shared provider's
  * session/pairing state; a PosWcProvider's disconnect() is a safe no-op
  * once a newer generation has taken over.
+ *
+ * Storage isolation (added after a production trace showed "No matching
+ * key. proposal" / "Pending session not found for topic" with NO disconnect
+ * of any kind in the window before them — ruling out the generation-ownership
+ * hazard above for that incident): this page (POS terminal, under
+ * app/dashboard/pos) is nested inside app/dashboard/layout.tsx, which also
+ * mounts PineTreeDynamicProvider — Dynamic Labs' own SDK, which bundles its
+ * OWN independent WalletConnect Core instances for its Ethereum and Solana
+ * connectors (verified in node_modules: different @walletconnect/* versions
+ * entirely from the ones this file uses). Neither this wrapper's
+ * EthereumProvider.init() call nor Dynamic's connector customizes WalletConnect
+ * Core's storage naming, so both would default to the SAME
+ * customStoragePrefix ("wc@2") and store name ("client") on the same origin —
+ * exactly the anti-pattern WalletConnect's own docs warn against ("avoid
+ * multiple Core instances on one page"), since every persisted
+ * keychain/proposal/session row in IndexedDB/localStorage is written and
+ * read under identical keys by two unrelated SignClient instances. This does
+ * not by itself explain every symptom in the incident (see the audit report
+ * for the parts that could not be confirmed without a live relay), but it is
+ * a real, fully-avoidable hazard: POS_WC_STORAGE_PREFIX below gives this
+ * Core its own private storage namespace, verified supported by the
+ * installed SDK (EthereumProvider.initialize() forwards
+ * `customStoragePrefix` through to UniversalProvider.init() -> SignClient ->
+ * Core unchanged).
+ *
+ * Diagnostic instrumentation (logWcStoreSnapshot below): development/production
+ * -safe logging of proposal/session/pairing store *counts* (never topics, URIs,
+ * keys, addresses, or payloads) at the key lifecycle points a future incident
+ * would need to distinguish "the proposal was never stored" from "it was
+ * stored, then disappeared" from "a different Core instance answered." Reads
+ * only the public Store surface (IStore.length) — never private engine
+ * internals — so it cannot break on an unrelated SDK patch update.
  */
 
 import { markBaseCheckoutLatency } from "@/lib/payment/baseCheckoutLatencyTrace"
 
 const BASE_CHAIN_ID = 8453
+
+// Unique to this app's POS WalletConnect Core — never shared with any other
+// WalletConnect/Reown Core that might exist elsewhere on the same origin
+// (e.g. Dynamic Labs' own connectors, mounted app-wide via
+// PineTreeDynamicProvider). See module doc comment above.
+const POS_WC_STORAGE_PREFIX = "pinetree-pos-wc@2"
+
+type WcDiagnosticProvider = {
+  signer?: {
+    client?: {
+      core?: {
+        name?: string
+        context?: string
+        relayer?: { connected?: boolean }
+        pairing?: { pairings?: { length?: number } }
+      }
+      proposal?: { length?: number; keys?: number[] }
+      session?: { length?: number }
+    }
+  }
+}
+
+// Short random token identifying this tab's singleton Core instance across
+// every diagnostic log line, so separate log lines can be correlated back to
+// "the same live object" without needing to log anything sensitive.
+let coreInstanceId: string | null = null
+
+function generateCoreInstanceId(): string {
+  return Math.random().toString(36).slice(2, 10)
+}
+
+/**
+ * Safe, best-effort snapshot of the WalletConnect SDK's own internal store
+ * state — counts only, never topics/URIs/keys/addresses/payloads. Every
+ * field is read defensively: this must never throw or block the payment
+ * flow, since it reaches into semi-internal (public-but-not-guaranteed)
+ * SDK surface that could legitimately be absent depending on SDK version
+ * or connection state.
+ */
+function logWcStoreSnapshot(
+  stage: string,
+  wcProvider: WcDiagnosticProvider,
+  extra: Record<string, unknown> = {}
+): void {
+  try {
+    const client = wcProvider.signer?.client
+    console.log("[POS WC][store]", stage, {
+      coreInstanceId,
+      coreName: client?.core?.name,
+      coreContext: client?.core?.context,
+      relayerConnected: client?.core?.relayer?.connected,
+      proposalStoreCount: client?.proposal?.length,
+      sessionStoreCount: client?.session?.length,
+      pairingStoreCount: client?.core?.pairing?.pairings?.length,
+      ...extra,
+    })
+  } catch (err) {
+    console.warn("[POS WC][store] snapshot_failed", {
+      stage,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/** Same defensive-read guarantee as logWcStoreSnapshot, for the proposal-id diff below. */
+function safeProposalKeys(wcProvider: WcDiagnosticProvider): number[] {
+  try {
+    return wcProvider.signer?.client?.proposal?.keys ?? []
+  } catch {
+    return []
+  }
+}
 
 export type PosWcRequestArgs = {
   method: string
@@ -94,6 +198,7 @@ async function getSharedPosWcProvider(): Promise<RawWcProvider> {
       chains: [BASE_CHAIN_ID],
       optionalChains: [BASE_CHAIN_ID],
       showQrModal: false,
+      customStoragePrefix: POS_WC_STORAGE_PREFIX,
       methods: [
         "eth_sendTransaction",
         "eth_signTypedData_v4",
@@ -117,7 +222,9 @@ async function getSharedPosWcProvider(): Promise<RawWcProvider> {
     // warning even though each listener is correctly removed after use.
     wcProvider.events.setMaxListeners(Number.POSITIVE_INFINITY)
 
-    console.log("[POS WC] provider_singleton_created")
+    coreInstanceId = generateCoreInstanceId()
+    console.log("[POS WC] provider_singleton_created", { coreInstanceId })
+    logWcStoreSnapshot("provider_singleton_created", wcProvider)
     return wcProvider
   })().catch((err) => {
     // Let the next payment attempt retry init from scratch instead of
@@ -203,12 +310,22 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
     let resolved = false
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null
 
+    const diagProvider = wcProvider as unknown as WcDiagnosticProvider
+    const proposalKeysBeforeConnect = new Set(safeProposalKeys(diagProvider))
+
     const onDisplayUri = (uri: string) => {
       if (resolved) return
       resolved = true
       if (timeoutHandle) clearTimeout(timeoutHandle)
       wcProvider.off("display_uri", onDisplayUri)
       console.log("[POS WC] display_uri_emitted", { generation: myGeneration })
+      const newProposalKeys = safeProposalKeys(diagProvider).filter(
+        (key) => !proposalKeysBeforeConnect.has(key)
+      )
+      logWcStoreSnapshot("display_uri_emitted", diagProvider, {
+        generation: myGeneration,
+        newProposalId: newProposalKeys[0],
+      })
 
       const posProvider: PosWcProvider = {
         get accounts() {
@@ -244,6 +361,7 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
 
     console.log("[POS WC] connect_called", { generation: myGeneration })
     markBaseCheckoutLatency("connect_called", { generation: myGeneration })
+    logWcStoreSnapshot("before_connect", diagProvider, { generation: myGeneration })
     // Kick off a fresh pairing for this payment (non-blocking — resolves above via event)
     wcProvider.connect().catch((err: unknown) => {
       if (!resolved) {
@@ -279,23 +397,39 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
 export function waitForWalletConnect(provider: PosWcProvider): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const wcProvider = provider._provider
+    const diagProvider = wcProvider as unknown as WcDiagnosticProvider
     let settled = false
+
+    // Periodic store snapshot while waiting on the wallet's (human-speed,
+    // sometimes 10+ second) approval — this is the window the production
+    // incident's "No matching key" / "Pending session not found" errors
+    // occurred in. Ticking here gives a before/after trail across that
+    // window without hooking any private SDK internals.
+    const snapshotInterval = setInterval(() => {
+      logWcStoreSnapshot("waiting_for_wallet_tick", diagProvider)
+    }, 3_000)
 
     function settle(address: string) {
       if (settled) return
       settled = true
+      clearInterval(snapshotInterval)
       wcProvider.off("connect", onConnect)
       wcProvider.off("accountsChanged", onAccountsChanged)
       wcProvider.off("disconnect", onDisconnect)
+      logWcStoreSnapshot("wallet_connected", diagProvider)
       resolve(address)
     }
 
     function fail(err: Error) {
       if (settled) return
       settled = true
+      clearInterval(snapshotInterval)
       wcProvider.off("connect", onConnect)
       wcProvider.off("accountsChanged", onAccountsChanged)
       wcProvider.off("disconnect", onDisconnect)
+      logWcStoreSnapshot("wallet_connect_failed", diagProvider, {
+        error: err.message,
+      })
       reject(err)
     }
 
@@ -314,7 +448,7 @@ export function waitForWalletConnect(provider: PosWcProvider): Promise<string> {
 
     // If already connected (session resumed), resolve immediately
     if (wcProvider.connected && wcProvider.accounts.length > 0) {
-      resolve(wcProvider.accounts[0])
+      settle(wcProvider.accounts[0])
       return
     }
 
