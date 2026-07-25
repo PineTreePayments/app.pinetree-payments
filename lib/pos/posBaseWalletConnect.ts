@@ -148,6 +148,107 @@ function safeProposalKeys(wcProvider: WcDiagnosticProvider): number[] {
   }
 }
 
+type WcRelayerControl = {
+  connected?: boolean
+  transportOpen?: () => Promise<void>
+  on?: (event: string, listener: () => void) => void
+  off?: (event: string, listener: () => void) => void
+}
+
+function getRelayerControl(wcProvider: WcDiagnosticProvider): WcRelayerControl | undefined {
+  try {
+    return wcProvider.signer?.client?.core?.relayer as WcRelayerControl | undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Guards against attaching relayer_connect/relayer_disconnect listeners more
+// than once across repeated prewarm calls (mount + a later defensive call
+// both hit this) — the shared Core/relayer only ever needs one set.
+let relayerLifecycleLoggingAttached = false
+let relayerDisconnectedAt: number | null = null
+
+/**
+ * Verified against the installed SDK's own source (@walletconnect/core):
+ * Relayer.init() (run once, automatically, inside Core.start()) already
+ * fire-and-forgets a transportOpen() call — but transportOpen() itself
+ * unconditionally no-ops ("Starting WS connection skipped because the
+ * client has no topics to work with.") whenever subscriber.hasAnyTopics is
+ * false, which is guaranteed true for a freshly-constructed Core with no
+ * persisted pairing/session. The only thing that flips hasAnyTopics is a
+ * real subscribe() call for an actual topic — which today only happens
+ * inside connect()'s pairing.create(). There is no other publicly typed,
+ * documented hook to force the relay socket open before a topic exists.
+ * Calling connect()/pairing.create() during prewarm is explicitly out of
+ * scope (it would create a pairing URI), and reaching past Relayer into its
+ * raw internal transport (bypassing this gate) would rely on undocumented,
+ * untyped internals — not "verified supported."
+ *
+ * So this call cannot warm the relay ahead of the very first cold
+ * connect() in a tab — that gate is a deliberate SDK design choice, not a
+ * PineTree bug. What it DOES do, verifiably: (1) it is the same
+ * already-public, documented, idempotent Relayer.transportOpen() call the
+ * SDK itself performs automatically, so calling it again here is safe and
+ * side-effect-free when it no-ops; (2) once this tab's Core has ever
+ * subscribed to any topic (i.e. after the first payment's connect()),
+ * hasAnyTopics stays true for the rest of the tab's life, so calling this
+ * again on every later prewarm (POS mount is only once per tab, but this
+ * export is safe to call repeatedly) gives every payment *after* the first
+ * a real chance to reuse an already-open — or freshly reopened — socket
+ * instead of paying a relay handshake mid-connect().
+ */
+async function attemptRelayerPrewarm(wcProvider: RawWcProvider): Promise<void> {
+  const diagProvider = wcProvider as unknown as WcDiagnosticProvider
+  const relayer = getRelayerControl(diagProvider)
+  if (!relayer) return
+
+  if (!relayerLifecycleLoggingAttached && relayer.on) {
+    relayerLifecycleLoggingAttached = true
+    relayer.on("relayer_connect", () => {
+      const durationMs = relayerDisconnectedAt ? Date.now() - relayerDisconnectedAt : null
+      relayerDisconnectedAt = null
+      console.log("[POS WC][relay] prewarm_relayer_connected", {
+        coreInstanceId,
+        reconnectDurationMs: durationMs,
+      })
+    })
+    relayer.on("relayer_disconnect", () => {
+      relayerDisconnectedAt = Date.now()
+      console.log("[POS WC][relay] prewarm_relayer_closed", { coreInstanceId })
+    })
+  }
+
+  if (relayer.connected) {
+    console.log("[POS WC][relay] prewarm_relayer_connect_started", {
+      coreInstanceId,
+      alreadyConnected: true,
+    })
+    return
+  }
+
+  console.log("[POS WC][relay] prewarm_relayer_connect_started", {
+    coreInstanceId,
+    alreadyConnected: false,
+  })
+  try {
+    await relayer.transportOpen?.()
+    console.log("[POS WC][relay] prewarm_relayer_transport_open_call_completed", {
+      coreInstanceId,
+      connected: relayer.connected,
+    })
+  } catch (err) {
+    // transportOpen() throws if a real connection attempt (topics existed)
+    // failed — never let a relay-warming failure block the terminal from
+    // starting a real payment later; the real connect() will simply pay for
+    // its own handshake as before.
+    console.warn("[POS WC][relay] prewarm_relayer_connect_failed", {
+      coreInstanceId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
 export type PosWcRequestArgs = {
   method: string
   params?: unknown[]
@@ -224,6 +325,7 @@ async function getSharedPosWcProvider(): Promise<RawWcProvider> {
 
     coreInstanceId = generateCoreInstanceId()
     console.log("[POS WC] provider_singleton_created", { coreInstanceId })
+    console.log("[POS WC][relay] prewarm_core_initialized", { coreInstanceId })
     logWcStoreSnapshot("provider_singleton_created", wcProvider)
     return wcProvider
   })().catch((err) => {
@@ -248,9 +350,11 @@ async function getSharedPosWcProvider(): Promise<RawWcProvider> {
  * initialization.
  */
 export async function prewarmPosBaseWalletConnect(): Promise<void> {
+  console.log("[POS WC][relay] prewarm_started")
   try {
-    await getSharedPosWcProvider()
+    const wcProvider = await getSharedPosWcProvider()
     console.log("[POS WC] provider_prewarmed")
+    await attemptRelayerPrewarm(wcProvider)
   } catch (err) {
     console.warn("[POS WC] provider_prewarm_failed", {
       error: err instanceof Error ? err.message : String(err),
@@ -362,6 +466,11 @@ export async function initPosBaseWalletConnect(): Promise<PosWcInitResult> {
     console.log("[POS WC] connect_called", { generation: myGeneration })
     markBaseCheckoutLatency("connect_called", { generation: myGeneration })
     logWcStoreSnapshot("before_connect", diagProvider, { generation: myGeneration })
+    console.log("[POS WC][relay] before_payment_relayer_connected", {
+      coreInstanceId,
+      generation: myGeneration,
+      connected: getRelayerControl(diagProvider)?.connected ?? null,
+    })
     // Kick off a fresh pairing for this payment (non-blocking — resolves above via event)
     wcProvider.connect().catch((err: unknown) => {
       if (!resolved) {

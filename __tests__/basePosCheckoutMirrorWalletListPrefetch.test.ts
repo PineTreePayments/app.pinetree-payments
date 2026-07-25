@@ -42,11 +42,11 @@ describe("BasePosCheckoutMirror — wallet metadata prefetch", () => {
     expect(block).toContain("buildWalletHref(entry, pairingUri)")
   })
 
-  it("the WalletLauncherModal effect only depends on intentId, not on pairingUri — it does not re-fetch every time pairingUri changes", () => {
+  it("the WalletLauncherModal effect only depends on intentId/paymentId, not on pairingUri — it does not re-fetch every time pairingUri changes", () => {
     const effectStart = src.indexOf('markBaseCheckoutLatency("wallet_list_request_started"')
-    const effectDepsEnd = src.indexOf("}, [intentId])", effectStart)
+    const effectDepsEnd = src.indexOf("}, [intentId, paymentId])", effectStart)
     // If this indexOf failed (-1), the effect's dependency array isn't
-    // exactly [intentId] as expected.
+    // exactly [intentId, paymentId] as expected — notably, not pairingUri.
     expect(effectDepsEnd).toBeGreaterThan(-1)
   })
 

@@ -19,6 +19,7 @@ import {
   type PosWcProvider,
 } from "@/lib/pos/posBaseWalletConnect"
 import { markBaseCheckoutLatency } from "@/lib/payment/baseCheckoutLatencyTrace"
+import { PosBaseDuplicateGuard, type PosBaseFlowGateResult } from "@/lib/pos/posBaseDuplicateGuard"
 
 type Props = {
   locked: boolean
@@ -366,6 +367,62 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     return posBaseAttemptRef.current === myAttempt
   }
 
+  // A completed/failed/abandoned attempt must never be allowed to restart
+  // the WalletConnect flow for the same intent+payment. posBaseRunningRef
+  // alone cannot guard against this: it is reset to false by the attempt's
+  // own cleanup the moment it finishes, and a stale poll tick or realtime
+  // UPDATE event (fired by this component's own updatePosBaseSession writes
+  // to the same payment_intents row) can arrive after that reset and
+  // rediscover selectedNetwork="base" as if the payment had never been
+  // attempted. See lib/pos/posBaseDuplicateGuard.ts for the (unit-tested)
+  // decision logic — kept as a plain class here rather than a hook so it can
+  // be tested without rendering this component.
+  const posBaseDuplicateGuardRef = useRef<PosBaseDuplicateGuard | null>(null)
+  if (!posBaseDuplicateGuardRef.current) {
+    posBaseDuplicateGuardRef.current = new PosBaseDuplicateGuard()
+  }
+  const posBaseDuplicateGuard = posBaseDuplicateGuardRef.current
+
+  // Server-truth pre-flight check, run before any WalletConnect work starts.
+  // The guard's local suppression set covers the common case cheaply, but
+  // can't help a scenario it never observed directly (e.g. this component
+  // remounted); this reads the same two already-existing, already-used
+  // endpoints (base-session mirror + payment status) that the rest of this
+  // flow already calls, so it adds no new API surface.
+  async function isBaseFlowStartBlocked(
+    iid: string,
+    paymentId: string,
+    attemptId: number
+  ): Promise<PosBaseFlowGateResult> {
+    const localGate = posBaseDuplicateGuard.evaluateLocalStart(iid, paymentId, attemptId)
+    if (localGate.blocked) return localGate
+
+    const [sessionRes, statusRes] = await Promise.all([
+      fetch(`/api/pos/base-session/${encodeURIComponent(iid)}`, { cache: "no-store" }).catch(() => null),
+      fetch(`/api/payments/status?paymentId=${encodeURIComponent(paymentId)}`, { cache: "no-store" }).catch(
+        () => null
+      ),
+    ])
+
+    let sessionStep: string | null = null
+    let sessionTxHash: string | null = null
+    if (sessionRes?.ok) {
+      const sessionData = (await sessionRes.json().catch(() => null)) as {
+        session?: { step?: string | null; txHash?: string | null } | null
+      } | null
+      sessionStep = sessionData?.session?.step || null
+      sessionTxHash = sessionData?.session?.txHash || null
+    }
+
+    let paymentStatus: string | null = null
+    if (statusRes?.ok) {
+      const statusData = (await statusRes.json().catch(() => null)) as { status?: string } | null
+      paymentStatus = statusData?.status || null
+    }
+
+    return posBaseDuplicateGuard.evaluateServerState({ sessionStep, sessionTxHash, paymentStatus })
+  }
+
   // Warm the shared WalletConnect provider/Core as soon as the POS terminal
   // is ready, well before any customer selects Base — this only opens the
   // relay connection, it never creates a pairing/proposal/session (see
@@ -392,6 +449,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     }
     hasScheduledResetRef.current = false
     // Tear down any active POS Base WC session
+    posBaseDuplicateGuard.setResetInProgress(true)
     posBaseAttemptRef.current += 1
     posBaseRunningRef.current = false
     if (posWcProviderRef.current) {
@@ -419,9 +477,19 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     setCashRecording(false)
     setAvailableMethods({ cash: true, crypto: false, card: false })
     resolvedPaymentIdRef.current = ""
+    posBaseDuplicateGuard.setResetInProgress(false)
   }
 
   async function cancelSale() {
+    posBaseDuplicateGuard.setResetInProgress(true)
+    try {
+      await cancelSaleInternal()
+    } finally {
+      posBaseDuplicateGuard.setResetInProgress(false)
+    }
+  }
+
+  async function cancelSaleInternal() {
     if (paymentMode === "card" && activePaymentId) {
       setCanceling(true)
       try {
@@ -750,6 +818,18 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     // its own provider.
     let localProvider: PosWcProvider | null = null
     try {
+      const gate = await isBaseFlowStartBlocked(iid, paymentId, myAttempt)
+      if (gate.blocked) {
+        console.log("[POS Base WC] base_flow_start_blocked", {
+          intentId: iid,
+          paymentId,
+          asset,
+          attemptId: myAttempt,
+          reason: gate.reason,
+        })
+        return
+      }
+
       console.log("[POS Base WC] flow_owner_acquired", { intentId: iid, paymentId, asset, attemptId: myAttempt })
       console.log("[POS Base WC] session_created", { intentId: iid, paymentId, asset, attemptId: myAttempt })
       markBaseCheckoutLatency("run_pos_base_flow_started", { intentId: iid, paymentId, attemptId: myAttempt })
@@ -1029,6 +1109,11 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         console.log("[POS Base WC] stale_attempt_error_suppressed", { intentId: iid, paymentId, asset, attemptId: myAttempt })
       }
     } finally {
+      // This exact attemptId is done, one way or another (blocked before
+      // starting, succeeded, rejected, or errored) — never let it restart a
+      // WalletConnect session again. A genuinely new attempt always gets a
+      // freshly incremented attemptId, so this can never suppress it.
+      posBaseDuplicateGuard.markTerminal(iid, paymentId, myAttempt)
       console.log("[POS Base WC] flow_owner_released", {
         intentId: iid,
         paymentId,
@@ -1075,6 +1160,9 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     // by an attempt that hasn't reached its own cleanup yet.
     posBaseAttemptRef.current += 1
     posBaseRunningRef.current = false
+    // A genuinely new payment intent — the only point the terminal-attempt
+    // suppression guard is cleared (see its declaration above).
+    posBaseDuplicateGuard.reset()
     console.log("[POS Base WC] intent_attempt_reset", { intentId, attemptId: posBaseAttemptRef.current })
 
     let cancelled = false
@@ -1108,14 +1196,28 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
 
         const net = String(data.selectedNetwork || "").toLowerCase()
         if (net === "base" && pid && !cancelled && !posBaseRunningRef.current) {
-          markBaseCheckoutLatency("pos_detected_base_selection", { intentId, paymentId: pid })
-          const asset =
-            String(data.selectedAsset || "ETH").toUpperCase() === "USDC" ? "USDC" : "ETH"
-          const paymentUrl = String(data.paymentUrl || "")
-          posBaseRunningRef.current = true
           const myAttempt = posBaseAttemptRef.current
-          void runPosBaseFlow(pid, intentId, asset, paymentUrl, myAttempt)
-          return
+          // Cheap, synchronous first line of defense — the same completed
+          // payment's own row keeps satisfying selectedNetwork==="base"
+          // forever, and this poll/realtime handler has no other way to
+          // tell "never started" apart from "already finished." The fuller
+          // server-truth check (session step, payment status) runs inside
+          // runPosBaseFlow itself before any WalletConnect work begins.
+          if (posBaseDuplicateGuard.evaluateLocalStart(intentId, pid, myAttempt).blocked) {
+            console.log("[POS Base WC] base_flow_start_suppressed_locally", {
+              intentId,
+              paymentId: pid,
+              attemptId: myAttempt,
+            })
+          } else {
+            markBaseCheckoutLatency("pos_detected_base_selection", { intentId, paymentId: pid })
+            const asset =
+              String(data.selectedAsset || "ETH").toUpperCase() === "USDC" ? "USDC" : "ETH"
+            const paymentUrl = String(data.paymentUrl || "")
+            posBaseRunningRef.current = true
+            void runPosBaseFlow(pid, intentId, asset, paymentUrl, myAttempt)
+            return
+          }
         }
       } catch {
         // non-fatal — retry

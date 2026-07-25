@@ -29,6 +29,13 @@ type PosBaseSession = {
 
 type Props = {
   intentId: string
+  // May be empty until this component's own select-network call (below)
+  // creates the payment — passed through purely so the customer-side
+  // approval-timing logs below can be correlated with the POS terminal's
+  // own paymentId-keyed trace, on a separate device with no shared JS
+  // context. Never logged before it's known; markBaseCheckoutLatency simply
+  // omits it from the log line until then.
+  paymentId?: string
   selectedAsset: "ETH" | "USDC"
   usdAmount: number
   checkoutToken: string
@@ -57,12 +64,13 @@ function normalizeTerminalStatus(status?: string): string {
 
 type LauncherModalProps = {
   intentId: string
+  paymentId?: string
   pairingUri: string
   onClose: () => void
   onWalletClick: () => void
 }
 
-function WalletLauncherModal({ intentId, pairingUri, onClose, onWalletClick }: LauncherModalProps) {
+function WalletLauncherModal({ intentId, paymentId, pairingUri, onClose, onWalletClick }: LauncherModalProps) {
   const [search, setSearch] = useState("")
   const [metadata, setMetadata] = useState<BaseWalletMetadataEntry[] | null>(null)
 
@@ -74,22 +82,22 @@ function WalletLauncherModal({ intentId, pairingUri, onClose, onWalletClick }: L
   // here, which used to sit directly in the wallet-picker's critical path.
   useEffect(() => {
     let cancelled = false
-    markBaseCheckoutLatency("wallet_list_request_started", { intentId })
+    markBaseCheckoutLatency("wallet_list_request_started", { intentId, paymentId })
 
     void prefetchBaseWalletMetadata().then((wallets) => {
       if (cancelled) return
-      markBaseCheckoutLatency("wallet_list_request_completed", { intentId, count: wallets.length })
+      markBaseCheckoutLatency("wallet_list_request_completed", { intentId, paymentId, count: wallets.length })
       setMetadata(wallets)
     })
 
     return () => {
       cancelled = true
     }
-  }, [intentId])
+  }, [intentId, paymentId])
 
   useEffect(() => {
-    if (metadata) markBaseCheckoutLatency("wallet_list_rendered", { intentId })
-  }, [metadata, intentId])
+    if (metadata) markBaseCheckoutLatency("wallet_list_rendered", { intentId, paymentId })
+  }, [metadata, intentId, paymentId])
 
   const enabledWallets = (metadata ?? []).flatMap((entry) => {
     const href = buildWalletHref(entry, pairingUri)
@@ -166,12 +174,12 @@ function WalletLauncherModal({ intentId, pairingUri, onClose, onWalletClick }: L
                   key={w.id}
                   href={w.href}
                   onClick={() => {
-                    markBaseCheckoutLatency("wallet_selected", { intentId, walletId: w.id })
+                    markBaseCheckoutLatency("wallet_selected", { intentId, paymentId, walletId: w.id })
                     // The href above was already fully constructed at render
                     // time (buildWalletHref, above) — nothing async happens
                     // between the tap and the browser following this link.
-                    markBaseCheckoutLatency("wallet_deeplink_constructed", { intentId, walletId: w.id })
-                    markBaseCheckoutLatency("wallet_deeplink_launched", { intentId, walletId: w.id })
+                    markBaseCheckoutLatency("wallet_deeplink_constructed", { intentId, paymentId, walletId: w.id })
+                    markBaseCheckoutLatency("wallet_deeplink_launched", { intentId, paymentId, walletId: w.id })
                     onWalletClick()
                   }}
                   className="group flex min-h-[130px] w-full flex-col items-center justify-between overflow-hidden rounded-[22px] border border-white/10 bg-[#151922] px-2 py-3 text-center shadow-[0_14px_34px_rgba(0,0,0,0.22)] transition-all hover:-translate-y-0.5 hover:border-[#3b82f6]/55 hover:bg-[#1b2330] hover:shadow-[0_18px_44px_rgba(0,82,255,0.18)] sm:min-h-[136px] sm:px-2.5"
@@ -217,6 +225,7 @@ function WalletLauncherModal({ intentId, pairingUri, onClose, onWalletClick }: L
 
 export default function BasePosCheckoutMirror({
   intentId,
+  paymentId,
   selectedAsset,
   checkoutToken,
   paymentStatus,
@@ -243,9 +252,9 @@ export default function BasePosCheckoutMirror({
   // WalletLauncherModal above), putting an avoidable network round trip
   // directly in the wallet-picker's critical path.
   useEffect(() => {
-    markBaseCheckoutLatency("base_option_tapped", { intentId })
+    markBaseCheckoutLatency("base_option_tapped", { intentId, paymentId })
     void prefetchBaseWalletMetadata()
-  }, [intentId])
+  }, [intentId, paymentId])
 
   // Create the payment record by calling select-network on mount
   useEffect(() => {
@@ -254,7 +263,7 @@ export default function BasePosCheckoutMirror({
 
     const run = async () => {
       try {
-        markBaseCheckoutLatency("select_network_request_started", { intentId })
+        markBaseCheckoutLatency("select_network_request_started", { intentId, paymentId })
         const res = await fetch(
           `/api/payment-intents/${encodeURIComponent(intentId)}/select-network`,
           {
@@ -266,7 +275,7 @@ export default function BasePosCheckoutMirror({
             body: JSON.stringify({ network: "base", asset: selectedAsset }),
           }
         )
-        markBaseCheckoutLatency("select_network_response_received", { intentId, ok: res.ok })
+        markBaseCheckoutLatency("select_network_response_received", { intentId, paymentId, ok: res.ok })
         if (!res.ok) {
           const err = (await res.json()) as { error?: string }
           throw new Error(err.error || "Failed to prepare Base payment")
@@ -281,7 +290,7 @@ export default function BasePosCheckoutMirror({
     }
 
     void run()
-  }, [intentId, selectedAsset, checkoutToken, onPaymentCreated])
+  }, [intentId, paymentId, selectedAsset, checkoutToken, onPaymentCreated])
 
   // Poll the POS-owned session for the pairing URI and status updates.
   // Coalesced against overlapping callers (the steady interval, a burst
@@ -315,16 +324,16 @@ export default function BasePosCheckoutMirror({
   useEffect(() => {
     if (!pairingReady || pairingReceivedLoggedRef.current) return
     pairingReceivedLoggedRef.current = true
-    markBaseCheckoutLatency("customer_pairing_uri_received", { intentId })
-  }, [pairingReady, intentId])
+    markBaseCheckoutLatency("customer_pairing_uri_received", { intentId, paymentId })
+  }, [pairingReady, intentId, paymentId])
 
   const walletConnectedLoggedRef = useRef(false)
   useEffect(() => {
     if (walletConnectedLoggedRef.current) return
     if (session?.step !== "wallet_connected") return
     walletConnectedLoggedRef.current = true
-    markBaseCheckoutLatency("wallet_connected", { intentId })
-  }, [session?.step, intentId])
+    markBaseCheckoutLatency("wallet_connected", { intentId, paymentId })
+  }, [session?.step, intentId, paymentId])
 
   // Dynamic polling:
   //   1s — pairingUri not yet available (fast catch-up while POS generates URI)
@@ -383,13 +392,13 @@ export default function BasePosCheckoutMirror({
 
     function handleResume(source: string) {
       if (source === "visibilitychange" && document.visibilityState !== "visible") return
-      console.log("[POS Base Mirror] resume_poll", { intentId, source })
-      markBaseCheckoutLatency("browser_visibility_restored", { intentId, source })
+      console.log("[POS Base Mirror] resume_poll", { intentId, paymentId, source })
+      markBaseCheckoutLatency("browser_visibility_restored", { intentId, paymentId, source })
       void pollSession()
     }
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
-        markBaseCheckoutLatency("browser_visibility_hidden", { intentId })
+        markBaseCheckoutLatency("browser_visibility_hidden", { intentId, paymentId })
         return
       }
       handleResume("visibilitychange")
@@ -405,7 +414,7 @@ export default function BasePosCheckoutMirror({
       window.removeEventListener("focus", handleFocus)
       window.removeEventListener("pageshow", handlePageShow)
     }
-  }, [paymentReady, pollSession, terminalStatus, intentId])
+  }, [paymentReady, pollSession, terminalStatus, intentId, paymentId])
 
   // Notify parent when the POS enters active execution (wallet connected or beyond)
   useEffect(() => {
@@ -537,6 +546,7 @@ export default function BasePosCheckoutMirror({
         {showLauncher && (
           <WalletLauncherModal
             intentId={intentId}
+            paymentId={paymentId}
             pairingUri={pairingUri}
             onClose={() => setShowLauncher(false)}
             onWalletClick={handleWalletClick}

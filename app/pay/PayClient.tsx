@@ -1672,6 +1672,7 @@ export default function PayClient() {
                           intentPayload?.terminalId ? (
                             <BasePosCheckoutMirror
                               intentId={intentId!}
+                              paymentId={intentPayload?.paymentId || undefined}
                               selectedAsset={asset.symbol === "USDC" ? "USDC" : "ETH"}
                               usdAmount={displayAmount}
                               paymentStatus={normalizedPaymentStatus}

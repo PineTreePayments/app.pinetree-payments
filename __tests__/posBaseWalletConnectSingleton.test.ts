@@ -22,8 +22,42 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 type FakeListener = (...args: unknown[]) => void
 
-function createFakeWcProvider(opts: { includeStoreDiagnostics?: boolean } = {}) {
+function createFakeRelayer(opts: { connected?: boolean; transportOpenImpl?: () => Promise<void> } = {}) {
+  const listeners = new Map<string, Set<FakeListener>>()
+  const relayer = {
+    connected: opts.connected ?? false,
+    on(event: string, listener: FakeListener) {
+      if (!listeners.has(event)) listeners.set(event, new Set())
+      listeners.get(event)!.add(listener)
+    },
+    off(event: string, listener: FakeListener) {
+      listeners.get(event)?.delete(listener)
+    },
+    transportOpen: vi.fn().mockImplementation(async () => {
+      if (opts.transportOpenImpl) {
+        await opts.transportOpenImpl()
+        return
+      }
+      relayer.connected = true
+    }),
+    // Test-only helpers to simulate the SDK's own relayer_connect/relayer_disconnect events.
+    _simulateConnect() {
+      relayer.connected = true
+      for (const listener of listeners.get("relayer_connect") ?? []) listener()
+    },
+    _simulateDisconnect() {
+      relayer.connected = false
+      for (const listener of listeners.get("relayer_disconnect") ?? []) listener()
+    },
+  }
+  return relayer
+}
+
+function createFakeWcProvider(
+  opts: { includeStoreDiagnostics?: boolean; relayer?: ReturnType<typeof createFakeRelayer> } = {}
+) {
   const { includeStoreDiagnostics = true } = opts
+  const relayer = opts.relayer ?? createFakeRelayer()
   const listeners = new Map<string, Set<FakeListener>>()
   let pairingCounter = 0
   // Simulates the SDK's own internal proposal.set(id, ...) — a fresh id is
@@ -70,7 +104,7 @@ function createFakeWcProvider(opts: { includeStoreDiagnostics?: boolean } = {}) 
               core: {
                 name: "client",
                 context: "client",
-                relayer: { connected: true },
+                relayer,
                 pairing: { pairings: { length: 0 } },
               },
               proposal: {
@@ -86,6 +120,7 @@ function createFakeWcProvider(opts: { includeStoreDiagnostics?: boolean } = {}) 
           },
         }
       : {}),
+    _relayer: relayer,
   }
   return fake
 }
@@ -588,5 +623,156 @@ describe("initPosBaseWalletConnect / waitForWalletConnect — SDK store diagnost
     const result = await initPosBaseWalletConnect()
 
     expect(result.ok).toBe(true)
+  })
+})
+
+/**
+ * Regression coverage for making prewarm actually retain the relay
+ * connection, not just construct the Core. Source audit of the installed
+ * @walletconnect/core found Relayer.init() (run once inside Core.start())
+ * already fire-and-forgets its own transportOpen() call — but
+ * transportOpen() itself unconditionally no-ops whenever
+ * subscriber.hasAnyTopics is false, which is guaranteed true for a
+ * freshly-constructed Core with no persisted pairing/session. There is no
+ * other publicly typed hook to force the socket open before a topic exists
+ * without calling connect() (out of scope for prewarm — it would create a
+ * pairing). So prewarm calls the same public, documented, idempotent
+ * Relayer.transportOpen() again itself: a safe no-op on the very first cold
+ * sale of a tab (matches the SDK's own by-design behavior), but a real
+ * warm-up for every payment *after* the first, once any topic exists.
+ */
+describe("prewarmPosBaseWalletConnect — relay connection retention", () => {
+  beforeEach(() => {
+    vi.resetModules()
+    mocks.init.mockReset()
+    vi.stubEnv("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID", "test-project-id")
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.pinetree-payments.com")
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("calls relayer.transportOpen() once Core init completes", async () => {
+    const relayer = createFakeRelayer({ connected: false })
+    const fakeProvider = createFakeWcProvider({ relayer })
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { prewarmPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+    await prewarmPosBaseWalletConnect()
+
+    expect(relayer.transportOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not call transportOpen() again if the relayer is already connected — logs alreadyConnected instead", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    try {
+      const relayer = createFakeRelayer({ connected: true })
+      const fakeProvider = createFakeWcProvider({ relayer })
+      mocks.init.mockResolvedValue(fakeProvider)
+
+      const { prewarmPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+      await prewarmPosBaseWalletConnect()
+
+      expect(relayer.transportOpen).not.toHaveBeenCalled()
+      expect(logSpy.mock.calls).toContainEqual([
+        "[POS WC][relay] prewarm_relayer_connect_started",
+        expect.objectContaining({ alreadyConnected: true }),
+      ])
+    } finally {
+      logSpy.mockRestore()
+    }
+  })
+
+  it("never throws and does not block the terminal from starting later if transportOpen() itself fails (e.g. cold Core, no topics yet)", async () => {
+    const relayer = createFakeRelayer({
+      connected: false,
+      transportOpenImpl: async () => {
+        throw new Error("Couldn't establish socket connection to the relay server")
+      },
+    })
+    const fakeProvider = createFakeWcProvider({ relayer })
+    mocks.init.mockResolvedValue(fakeProvider)
+
+    const { prewarmPosBaseWalletConnect, initPosBaseWalletConnect } = await import(
+      "@/lib/pos/posBaseWalletConnect"
+    )
+    await expect(prewarmPosBaseWalletConnect()).resolves.toBeUndefined()
+
+    // A real payment attempt afterward must still work normally.
+    const result = await initPosBaseWalletConnect()
+    expect(result.ok).toBe(true)
+  })
+
+  it("tracks a relayer_connect/relayer_disconnect reconnect duration and only attaches its listeners once across repeated prewarm calls", async () => {
+    vi.useFakeTimers()
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    try {
+      const relayer = createFakeRelayer({ connected: false })
+      const fakeProvider = createFakeWcProvider({ relayer })
+      mocks.init.mockResolvedValue(fakeProvider)
+
+      const { prewarmPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+      await prewarmPosBaseWalletConnect()
+      await prewarmPosBaseWalletConnect()
+      await prewarmPosBaseWalletConnect()
+
+      relayer._simulateDisconnect()
+      await vi.advanceTimersByTimeAsync(5_000)
+      relayer._simulateConnect()
+
+      const connectedLogs = logSpy.mock.calls.filter(
+        (call) => call[0] === "[POS WC][relay] prewarm_relayer_connected"
+      )
+      expect(connectedLogs).toHaveLength(1)
+      expect(connectedLogs[0][1]).toMatchObject({ reconnectDurationMs: expect.any(Number) })
+      expect((connectedLogs[0][1] as { reconnectDurationMs: number }).reconnectDurationMs).toBeGreaterThanOrEqual(
+        5_000
+      )
+
+      const closedLogs = logSpy.mock.calls.filter((call) => call[0] === "[POS WC][relay] prewarm_relayer_closed")
+      expect(closedLogs).toHaveLength(1)
+    } finally {
+      logSpy.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+})
+
+/**
+ * Regression coverage for the before_payment_relayer_connected diagnostic —
+ * needed to distinguish, in a future production trace, whether the relay
+ * was already warm by the time connect() was actually called for a payment.
+ */
+describe("initPosBaseWalletConnect — before_payment_relayer_connected diagnostic", () => {
+  beforeEach(() => {
+    vi.resetModules()
+    mocks.init.mockReset()
+    vi.stubEnv("NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID", "test-project-id")
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.pinetree-payments.com")
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("logs the relayer's connected state immediately before connect() is called", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    try {
+      const relayer = createFakeRelayer({ connected: true })
+      const fakeProvider = createFakeWcProvider({ relayer })
+      mocks.init.mockResolvedValue(fakeProvider)
+
+      const { initPosBaseWalletConnect } = await import("@/lib/pos/posBaseWalletConnect")
+      await initPosBaseWalletConnect()
+
+      const calls = logSpy.mock.calls.filter(
+        (call) => call[0] === "[POS WC][relay] before_payment_relayer_connected"
+      )
+      expect(calls).toHaveLength(1)
+      expect(calls[0][1]).toMatchObject({ connected: true, generation: 1 })
+    } finally {
+      logSpy.mockRestore()
+    }
   })
 })
