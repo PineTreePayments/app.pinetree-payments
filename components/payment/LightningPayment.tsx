@@ -550,7 +550,7 @@ export default function LightningPayment({
               setWalletPickerOpen(true)
             }}
           >
-            Choose Lightning Wallet
+            Choose Wallet
           </Button>
 
           <Button fullWidth onClick={() => {
@@ -561,7 +561,7 @@ export default function LightningPayment({
             onExecutionStarted?.()
             window.location.href = invoiceUri
           }}>
-            Pay with installed Lightning wallet
+            Open Installed Wallet
           </Button>
         </>
       )}

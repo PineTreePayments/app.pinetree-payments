@@ -856,7 +856,7 @@ export default function SolanaWalletPayment({
             setWalletPickerOpen(true)
           }}
         >
-          Pay with {selectedAsset} on Solana
+          Choose Wallet
         </Button>
       )}
 

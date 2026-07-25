@@ -3888,7 +3888,7 @@ export default function BaseWalletPayment({
         <div className="space-y-2">
           {walletConnectConnector ? (
             <Button fullWidth onClick={() => startWalletConnectPayment()}>
-              Pay with {selectedAsset} on Base
+              Choose Wallet
             </Button>
           ) : (
             <div className="text-[11px] text-gray-500 text-center">

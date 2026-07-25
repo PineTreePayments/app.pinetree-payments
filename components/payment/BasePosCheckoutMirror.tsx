@@ -242,7 +242,7 @@ export default function BasePosCheckoutMirror({
   const [burstUntil, setBurstUntil] = useState(0)
   const selectCalledRef = useRef(false)
   const executionStartedRef = useRef(false)
-  // A tap on "Connect with WalletConnect" before pairingUri is ready is
+  // A tap on "Choose Wallet" before pairingUri is ready is
   // remembered here and auto-opens the chooser the instant pairingReady
   // flips true — the customer never has to tap twice. buttonPreparing
   // mirrors this ref into render state so the button can show a short
@@ -254,8 +254,8 @@ export default function BasePosCheckoutMirror({
   // Base asset card (see app/pay/PayClient.tsx), so mount time is the
   // "base_option_tapped"/"asset_selected" moment. Kick off the wallet
   // metadata prefetch immediately, in parallel with the select-network POST
-  // below rather than waiting until the customer later taps "Connect with
-  // WalletConnect" — that used to be the first time this fetch ever started
+  // below rather than waiting until the customer later taps "Choose
+  // Wallet" — that used to be the first time this fetch ever started
   // (see WalletLauncherModal above), putting an avoidable network round
   // trip directly in the wallet-picker's critical path.
   useEffect(() => {
@@ -264,7 +264,7 @@ export default function BasePosCheckoutMirror({
     void prefetchBaseWalletMetadata()
   }, [intentId, paymentId, selectedAsset])
 
-  // The "Connect with WalletConnect" button renders unconditionally as soon
+  // The "Choose Wallet" button renders unconditionally as soon
   // as this component mounts (see the render logic below — it no longer
   // waits on paymentReady, session, or pairingUri), so this fires on first
   // render, independent of any network round trip.
@@ -568,15 +568,9 @@ export default function BasePosCheckoutMirror({
                 Connecting…
               </span>
             ) : (
-              "Connect with WalletConnect"
+              "Choose Wallet"
             )}
           </Button>
-          {!pairingReady && !buttonPreparing && (
-            <p className="flex items-center justify-center gap-1.5 text-xs text-gray-400">
-              <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-transparent" />
-              Preparing secure connection…
-            </p>
-          )}
         </div>
 
         <Button variant="danger" fullWidth onClick={onCancel}>

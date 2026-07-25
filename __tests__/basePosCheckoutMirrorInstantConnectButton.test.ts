@@ -3,9 +3,12 @@ import path from "node:path"
 import { describe, expect, it } from "vitest"
 
 /**
- * Regression coverage for restoring the instant "Connect with WalletConnect"
- * button. The intended UX: tap a Base asset -> the card expands -> the
- * Connect button appears immediately -> WalletConnect pairing/session prep
+ * Regression coverage for restoring the instant "Choose Wallet" button
+ * (renamed from "Connect with WalletConnect" for consistency with the
+ * primary wallet-selection button label used across SOL, USDC on Solana,
+ * ETH on Base, USDC on Base, and Bitcoin Lightning). The intended UX: tap a
+ * Base asset -> the card expands -> the Connect button appears
+ * immediately -> WalletConnect pairing/session prep
  * continues invisibly in the background -> once pairingUri arrives, the
  * button either opens the wallet chooser right away, or (if the customer
  * already tapped it while still preparing) auto-opens it without a second
@@ -38,7 +41,7 @@ describe("BasePosCheckoutMirror — instant Connect button", () => {
     expect(guardIndex).toBeGreaterThan(-1)
     const cardBlock = src.slice(guardIndex, src.indexOf("From here on step is one of the later", guardIndex))
     expect(cardBlock).toContain("Connect your wallet")
-    expect(cardBlock).toContain("Connect with WalletConnect")
+    expect(cardBlock).toContain("Choose Wallet")
     // The card's own rendering condition and body never reference
     // selectedAsset or an ETH/USDC-specific branch — it is identical for
     // both assets, so there's no code path where one asset gets the
@@ -48,10 +51,7 @@ describe("BasePosCheckoutMirror — instant Connect button", () => {
   })
 
   it("3. the button is present in JSX unconditionally on pairingUri — only buttonPreparing (which starts false) can disable it", () => {
-    // lastIndexOf, not indexOf: "Connect with WalletConnect" also appears in
-    // two doc comments earlier in the file — the actual JSX text is the
-    // last occurrence.
-    const buttonIndex = src.lastIndexOf("Connect with WalletConnect")
+    const buttonIndex = src.lastIndexOf("Choose Wallet")
     expect(buttonIndex).toBeGreaterThan(-1)
     const precedingButtonTag = src.lastIndexOf("<Button", buttonIndex)
     const buttonOpenTag = src.slice(precedingButtonTag, src.indexOf(">", precedingButtonTag) + 1)

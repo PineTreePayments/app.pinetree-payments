@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
  * Regression coverage for moving the Base wallet list off the checkout
  * critical path. Previously, GET /api/walletconnect/base-wallets required a
  * pairingUri and was only ever called once the customer had already tapped
- * "Connect with WalletConnect" (which itself could only appear after
- * pairingUri existed) — putting a full network round trip directly between
+ * "Choose Wallet" (which itself could only appear after pairingUri existed)
+ * — putting a full network round trip directly between
  * the customer opening the wallet picker and seeing any wallets. Wallet
  * metadata (names/icons/enabled/mobileLink) is not payment-specific and the
  * server already caches the underlying WalletConnect Explorer lookup for
