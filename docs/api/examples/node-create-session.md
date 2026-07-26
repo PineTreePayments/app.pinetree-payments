@@ -17,7 +17,7 @@ import PineTree from "@pinetreepayments/node"
 const client = new PineTree(process.env.PINETREE_API_KEY!)
 
 const session = await client.checkout.sessions.create({
-  amount: 2500,           // cents — $25.00 USD
+  amount: 49.99,          // $49.99 USD
   currency: "USD",
   reference: "order_abc123",
   successUrl: "https://example.com/success",
@@ -35,7 +35,7 @@ console.log(session.expiresAt)    // ISO-8601 expiry timestamp
 ```typescript
 const session = await client.checkout.sessions.create({
   // Required
-  amount: 2500,
+  amount: 49.99,
 
   // Optional — defaults to "USD"
   currency: "USD",
@@ -73,7 +73,7 @@ creating duplicate sessions:
 ```typescript
 const session = await client.checkout.sessions.create(
   {
-    amount: 2500,
+    amount: 49.99,
     currency: "USD",
     reference: "order_abc123",
   },
@@ -99,7 +99,7 @@ import PineTree, {
 
 try {
   const session = await client.checkout.sessions.create(
-    { amount: 2500, currency: "USD" },
+    { amount: 49.99, currency: "USD" },
     { idempotencyKey: "order_abc123_attempt_1" }
   )
   res.redirect(session.checkoutUrl)
@@ -199,7 +199,7 @@ type CheckoutSession = {
   id: string
   object: "checkout.session"
   status: "open" | "processing" | "paid" | "failed" | "expired" | "canceled"
-  amount: number                  // smallest currency unit (cents for USD)
+  amount: number                  // major currency units
   currency: string                // ISO-4217 uppercase ("USD")
   reference: string | null        // your order reference
   customer: { email: string | null }

@@ -42,7 +42,7 @@
       <tr><td>Authentication</td><td>Secret API keys for server requests.</td></tr>
       <tr><td>Webhook schema</td><td><code>payments-v1</code></td></tr>
       <tr><td>Supported rails</td><td>Solana, Base, Bitcoin Lightning. Shift4 card processing for approved merchants.</td></tr>
-      <tr><td>Successful state</td><td>Confirmed (<code>status: "paid"</code> in API response).</td></tr>
+      <tr><td>Confirmed state</td><td>Confirmed (<code>status: "paid"</code> in API response).</td></tr>
     </tbody>
   </table>
 
@@ -75,7 +75,7 @@
 const pinetree = new PineTree(process.env.PINETREE_API_KEY)
 
 const session = await pinetree.checkout.sessions.create({
-  amount: 2500,
+  amount: 49.99,
   currency: "USD",
   reference: "order_1042",
   successUrl: "https://yoursite.com/paid",
@@ -135,7 +135,7 @@ Content-Type: application/json</code></pre>
 <section data-doc-label="API Keys">
   <h2>API Keys</h2>
   <p>
-    Create narrowly scoped keys from the Developer area. Use the smallest scope set required
+    Create permission-limited keys from the Developer area. Use the smallest permission set required
     for the integration.
   </p>
 
@@ -190,7 +190,7 @@ Content-Type: application/json</code></pre>
 
   <h3>Create Session Request</h3>
   <pre><code>{
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "reference": "order_1042",
   "customer": { "email": "jane@example.com" },
@@ -203,7 +203,7 @@ Content-Type: application/json</code></pre>
   "id": "cs_01abc",
   "object": "checkout.session",
   "status": "open",
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "reference": "order_1042",
   "customer": { "email": "jane@example.com" },
@@ -290,7 +290,7 @@ Content-Type: application/json</code></pre>
   "id": "pay_01abc",
   "object": "payment",
   "status": "paid",
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "rail": "solana",
   "asset": "USDC",
@@ -355,7 +355,7 @@ Content-Type: application/json</code></pre>
 <section data-doc-label="Payment States">
   <h2>Payment States</h2>
   <p>
-    Confirmed is the successful visible payment state. Failed, Expired, and Incomplete are separate
+    Confirmed is the positive visible payment state. Failed, Expired, and Incomplete are separate
     terminal outcomes. The Payment API object uses <code>status: "paid"</code> for the confirmed state.
   </p>
 
@@ -364,7 +364,7 @@ Content-Type: application/json</code></pre>
     <tbody>
       <tr><td><strong class="pt-blue">Waiting</strong></td><td>Payment request open, no funds detected</td><td>No</td><td>Blue</td></tr>
       <tr><td><strong class="pt-blue">Processing</strong></td><td>Payment detected, awaiting final confirmation</td><td>No</td><td>Blue</td></tr>
-      <tr><td><strong class="pt-green">Confirmed</strong></td><td>Payment completed</td><td>Yes</td><td>Green</td></tr>
+      <tr><td><strong class="pt-green">Confirmed</strong></td><td>Payment confirmed</td><td>Yes</td><td>Green</td></tr>
       <tr><td><strong class="pt-red">Failed</strong></td><td>Provider, network, or payment attempt failed</td><td>Yes</td><td>Red</td></tr>
       <tr><td><strong class="pt-red">Expired</strong></td><td>Payment window timed out</td><td>Yes</td><td>Red</td></tr>
       <tr><td><strong class="pt-red">Incomplete</strong></td><td>Customer abandoned or backed out or no funds were sent</td><td>Yes</td><td>Red</td></tr>
@@ -425,7 +425,7 @@ const event = pinetree.webhooks.constructEvent(
       "object":     "payment",
       "status":     "paid",
       "network":    "solana",
-      "amount":     2500,
+      "amount":     49.99,
       "currency":   "USD",
       "reference":  "order_1042",
       "confirmedAt": "2026-06-22T18:00:05.000Z",
@@ -454,7 +454,7 @@ const event = pinetree.webhooks.constructEvent(
       <tr><td><code>payment.created</code></td><td>payment</td><td>Payment object created.</td></tr>
       <tr><td><code>payment.pending</code></td><td>payment</td><td>Waiting for customer or network action.</td></tr>
       <tr><td><code>payment.processing</code></td><td>payment</td><td>Payment detected, awaiting confirmation.</td></tr>
-      <tr><td><code>payment.confirmed</code></td><td>payment</td><td>Payment completed — fulfill the order.</td></tr>
+      <tr><td><code>payment.confirmed</code></td><td>payment</td><td>Payment confirmed — fulfill the order.</td></tr>
       <tr><td><code>payment.failed</code></td><td>payment</td><td>Payment failed.</td></tr>
       <tr><td><code>payment.expired</code></td><td>payment</td><td>Payment timed out.</td></tr>
       <tr><td><code>payment.canceled</code></td><td>payment</td><td>Payment canceled.</td></tr>
@@ -462,7 +462,7 @@ const event = pinetree.webhooks.constructEvent(
       <tr><td><code>payment.refunded</code></td><td>payment</td><td>Payment refunded.</td></tr>
       <tr><td><code>checkout.session.created</code></td><td>checkout.session</td><td>Checkout Session created.</td></tr>
       <tr><td><code>checkout.session.processing</code></td><td>checkout.session</td><td>Checkout Session payment in progress.</td></tr>
-      <tr><td><code>checkout.session.completed</code></td><td>checkout.session</td><td>Checkout Session completed.</td></tr>
+      <tr><td><code>checkout.session.completed</code></td><td>checkout.session</td><td>Checkout Session payment confirmed.</td></tr>
       <tr><td><code>checkout.session.failed</code></td><td>checkout.session</td><td>Checkout Session payment failed.</td></tr>
       <tr><td><code>checkout.session.expired</code></td><td>checkout.session</td><td>Checkout Session expired.</td></tr>
       <tr><td><code>checkout.session.canceled</code></td><td>checkout.session</td><td>Checkout Session canceled.</td></tr>
@@ -546,7 +546,7 @@ const event = pinetree.webhooks.constructEvent(
   </p>
 
   <pre><code>const session = await pinetree.checkout.sessions.create(
-  { amount: 2500, reference: "order_1042" },
+  { amount: 49.99, reference: "order_1042" },
   { idempotencyKey: "order_1042" }
 )</code></pre>
 

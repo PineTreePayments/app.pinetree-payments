@@ -1,8 +1,8 @@
 # Payment States
 
-PineTree separates public API status values from merchant-facing labels. The authoritative presentation contract is the [Merchant Status Architecture](../architecture.md#merchant-status-architecture-authoritative).
+PineTree separates strict engine states, public API status values, provider states, and merchant-facing labels. The authoritative presentation contract is the [Merchant Status Architecture](../architecture.md#merchant-status-architecture-authoritative).
 
-The visible successful terminal label is **Confirmed**. Do not use **Success** as a payment state label.
+The visible positive terminal label is **Confirmed**. Do not use **Success** as a payment state label.
 
 ## Visible lifecycle
 
@@ -10,12 +10,24 @@ The visible successful terminal label is **Confirmed**. Do not use **Success** a
 |---|---|---:|---|
 | Waiting | Payment request open, no funds detected | No | Blue |
 | Processing | Payment detected, awaiting final confirmation | No | Darker blue |
-| Confirmed | Payment completed | Yes | Green |
+| Confirmed | Payment confirmed | Yes | Green |
 | Failed | Provider/network/payment attempt failed | Yes | Red |
 | Expired | Payment window timed out | Yes | Red |
 | Canceled | Customer canceled or abandoned the payment | Yes | Gray |
 | Refunded | Settled funds were returned | Yes | Orange |
 | Unknown | Status is not recognized | No | Neutral gray |
+
+## Strict engine lifecycle
+
+The PineTree Engine owns canonical payment state and accepts these strict lifecycle states:
+
+```text
+CREATED -> PENDING -> PROCESSING -> CONFIRMED
+                 \-> INCOMPLETE
+                         PROCESSING -> FAILED
+```
+
+`CONFIRMED`, `FAILED`, and `INCOMPLETE` are terminal engine states. `EXPIRED`, `CANCELED`/`CANCELLED`, provider-specific success/failure words, and refund adjustments are normalized or displayed around that strict model; they are not separate forward-transition states in the payment state machine.
 
 ## Internal and public mapping
 
@@ -26,12 +38,12 @@ The visible successful terminal label is **Confirmed**. Do not use **Success** a
 | `PROCESSING` | `processing` | Processing | `payment.processing` |
 | `CONFIRMED` | `paid` | Confirmed | `payment.confirmed` |
 | `FAILED` | `failed` | Failed | `payment.failed` |
-| `EXPIRED` | `expired` | Expired | `payment.expired` |
+| `EXPIRED` provider/display input | `expired` | Expired | `payment.expired` |
 | `INCOMPLETE` | `canceled` | Canceled, or Expired with explicit expiry evidence | `payment.incomplete` or `payment.expired` |
-| `CANCELED` or `CANCELLED` | `canceled` | Canceled | `payment.canceled` |
+| `CANCELED` or `CANCELLED` provider/display input | `canceled` | Canceled | `payment.canceled` |
 | `REFUNDED` transaction adjustment | refund-specific object/event | Refunded | `payment.refunded` |
 
-Public checkout sessions currently expose `open`, `processing`, `paid`, `failed`, `expired`, and `canceled`. Payment objects use the same mapper in code, so the successful public value is `paid` while the visible product label is **Confirmed**.
+Public checkout sessions currently expose `open`, `processing`, `paid`, `failed`, `expired`, and `canceled`. Payment objects use the same mapper in code, so the positive public value is `paid` while the visible product label is **Confirmed**.
 
 ## Terminal behavior
 

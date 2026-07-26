@@ -11,7 +11,7 @@ A checkout session represents a single customer payment intent. Creating a sessi
   id: string                    // "cs_01abc..."
   object: "checkout.session"
   status: CheckoutSessionStatus // "open" | "processing" | "paid" | "failed" | "expired" | "canceled"
-  amount: number                // amount in smallest currency unit (cents for USD)
+  amount: number                // amount in major currency units (49.99 = $49.99 USD)
   currency: string              // "USD"
   reference: string | null      // your order/reference ID
   customer: {
@@ -59,7 +59,7 @@ Idempotency-Key: order_1042   (optional — see Idempotency)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `amount` | number | Yes | Amount in smallest currency unit (e.g., cents). Must be > 0. |
+| `amount` | number | Yes | Amount in major currency units. For USD, `49.99` means $49.99. Must be > 0. |
 | `currency` | string | No | ISO 4217 currency code. Defaults to `"USD"`. |
 | `reference` | string | No | Your internal order or reference ID. Returned in webhook events. |
 | `customer.email` | string | No | Customer email for receipt or display purposes. |
@@ -76,7 +76,7 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: order_1042" \
   -d '{
-    "amount": 2500,
+    "amount": 49.99,
     "currency": "USD",
     "reference": "order_1042",
     "customer": { "email": "jane@example.com" },
@@ -109,7 +109,7 @@ and USDC on Solana when those assets are enabled for the merchant.
   "id": "cs_01abc123...",
   "object": "checkout.session",
   "status": "open",
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "reference": "order_1042",
   "customer": { "email": "jane@example.com" },
@@ -173,7 +173,7 @@ curl "https://app.pinetree-payments.com/api/v1/checkout/sessions?status=paid&lim
       "id": "cs_01abc...",
       "object": "checkout.session",
       "status": "paid",
-      "amount": 2500,
+      "amount": 49.99,
       "currency": "USD",
       "reference": "order_1042",
       ...
@@ -206,7 +206,7 @@ curl "https://app.pinetree-payments.com/api/v1/checkout/sessions/cs_01abc..." \
   "id": "cs_01abc...",
   "object": "checkout.session",
   "status": "paid",
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "reference": "order_1042",
   "customer": { "email": "jane@example.com" },
@@ -280,7 +280,7 @@ const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
 
 // Create
 const session = await pinetree.checkout.sessions.create(
-  { amount: 2500, currency: "USD", reference: "order_1042" },
+  { amount: 49.99, currency: "USD", reference: "order_1042" },
   { idempotencyKey: "order_1042" }
 )
 

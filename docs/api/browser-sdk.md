@@ -56,7 +56,7 @@ const pinetree = new PineTree({
 
 ```typescript
 const result = await pinetree.checkout.open({
-  amount: 2500,          // in cents — $25.00
+  amount: 49.99,         // $49.99 USD
   currency: "USD",
   reference: "order_1042",
   customer: { email: "jane@example.com" },
@@ -71,7 +71,7 @@ const result = await pinetree.checkout.open({
 
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
-| `amount` | number | Yes | Amount in smallest unit (cents for USD) |
+| `amount` | number | Yes | Amount in major currency units. For USD, `49.99` means $49.99. |
 | `currency` | string | No | ISO 4217 currency code. Defaults to `"USD"` |
 | `reference` | string | No | Your internal order ID — passed through to webhooks |
 | `customer.email` | string | No | Customer email |
@@ -97,7 +97,7 @@ Navigates the current page to the PineTree hosted checkout. On completion, the c
 
 ```typescript
 await pinetree.checkout.open({
-  amount: 2500,
+  amount: 49.99,
   mode: "redirect",
   successUrl: "https://yoursite.com/success",
 })
@@ -110,7 +110,7 @@ Opens a centered popup window containing the hosted checkout. The parent page st
 
 ```typescript
 const result = await pinetree.checkout.open({
-  amount: 2500,
+  amount: 49.99,
   mode: "popup",
 })
 
@@ -130,7 +130,7 @@ Renders an iframe inside a container element you provide. Lifecycle events are d
 
 ```typescript
 const result = await pinetree.checkout.open({
-  amount: 2500,
+  amount: 49.99,
   mode: "embedded",
   container: "#checkout-container", // CSS selector or HTMLElement
 })

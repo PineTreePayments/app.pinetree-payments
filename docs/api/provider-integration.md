@@ -34,7 +34,7 @@ Creates a payment on your system and returns a result containing enough informat
 |-------|------|-------------|
 | `paymentId` | string | PineTree internal payment ID |
 | `merchantId` | string | Merchant's PineTree account ID |
-| `amount` | number | Amount in cents (USD) |
+| `amount` | number | Amount in major currency units (USD) |
 | `currency` | string | Currency code, e.g. `"USD"` |
 | `pinetreeFee` | number | PineTree's flat fee ($0.15) |
 | `feeCaptureMethod` | string | How the fee is captured (see below) |
@@ -201,7 +201,7 @@ Relevant fields in `createPayment` input for POS:
 
 ## Settlement and payout
 
-For Solana and Base, funds go directly to merchant-configured wallet addresses. Canonical Bitcoin Lightning is different: Speed receives into PineTree's Speed account, PineTree retains its service fee, and the payout processor sends merchant net sats to the merchant's PineTree Bitcoin wallet address. Provide the following to support settlement:
+For Solana and Base, funds go directly to merchant-configured wallet addresses. Canonical Bitcoin Lightning is different: Speed receives into PineTree's Speed account, PineTree retains the Platform Fee, and the payout processor sends merchant net sats to the merchant's PineTree Bitcoin wallet address. Provide the following to support settlement:
 
 - **Settlement account setup** — how does the merchant connect their wallet or bank account?
 - **Split payment support** — does your SDK support atomic fee split at the transaction level?

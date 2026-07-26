@@ -54,7 +54,7 @@ All API errors return a consistent JSON structure with an `error` object. HTTP s
 
 | Code | Description |
 |------|-------------|
-| `missing_permission` | API key does not have the required scope for this endpoint |
+| `missing_permission` | API key does not have the required permission for this endpoint |
 
 ---
 
@@ -131,7 +131,7 @@ When using `@pinetreepayments/node`, API errors are thrown as typed exceptions:
 | Class | Condition |
 |-------|-----------|
 | `AuthenticationError` | `401` — invalid or missing key |
-| `PermissionError` | `403` — insufficient scope |
+| `PermissionError` | `403` — insufficient permission |
 | `InvalidRequestError` | `400`, `404`, `409` (non-idempotency) — validation or not-found |
 | `IdempotencyConflictError` | `409` with `code: idempotency_key_conflict` |
 | `APIConnectionError` | Network failure or request timeout |
@@ -154,7 +154,7 @@ import {
 } from "@pinetreepayments/node"
 
 try {
-  const session = await pinetree.checkout.sessions.create({ amount: 2500 })
+  const session = await pinetree.checkout.sessions.create({ amount: 49.99 })
 } catch (err) {
   if (err instanceof AuthenticationError) {
     // Rotate API key, check env vars

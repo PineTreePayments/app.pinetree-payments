@@ -21,7 +21,7 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
   -H "Authorization: Bearer pt_live_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "amount": 2500,
+    "amount": 49.99,
     "currency": "USD",
     "reference": "order_abc123",
     "successUrl": "https://example.com/success",
@@ -41,7 +41,7 @@ const response = await fetch(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      amount: 2500,           // $25.00 USD
+      amount: 49.99,          // $49.99 USD
       currency: "USD",
       reference: "order_abc123",
       successUrl: "https://example.com/success",
@@ -63,7 +63,7 @@ const session = await response.json()
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `amount` | integer | Yes | Amount in smallest currency unit (cents for USD) |
+| `amount` | number | Yes | Amount in major currency units. For USD, `49.99` means $49.99. |
 | `currency` | string | No | ISO-4217 code, uppercase. Defaults to `"USD"` |
 | `reference` | string | No | Your internal order ID. Returned on the session and payment |
 | `customer.email` | string | No | Customer email address |
@@ -79,7 +79,7 @@ const session = await response.json()
   "id": "cs_01j...",
   "object": "checkout.session",
   "status": "open",
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "reference": "order_abc123",
   "customer": { "email": null },
@@ -111,7 +111,7 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
   -H "Authorization: Bearer pt_live_..." \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: order_abc123_attempt_1" \
-  -d '{ "amount": 2500, "currency": "USD", "reference": "order_abc123" }'
+  -d '{ "amount": 49.99, "currency": "USD", "reference": "order_abc123" }'
 ```
 
 - If the key is reused with identical parameters, the original response is returned.

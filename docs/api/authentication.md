@@ -133,7 +133,7 @@ HTTP/1.1 403 Forbidden
 |-------------|---------|---------|-------|
 | `pt_live_*` API key | Your server | Yes — keep secret | REST API |
 | `pk_live_*` public key | Browser / frontend | No — safe to expose | Browser checkout sessions only |
-| Webhook signing secret (`whsec_*`) | Your webhook handler | Yes — keep secret | Webhook verification only |
+| Webhook signing secret | Your webhook handler | Yes — keep secret | Webhook verification only |
 | Supabase JWT | Dashboard browser session | Cookie-scoped | Dashboard routes only |
 | Terminal session token (`pts_*`) | PineTree POS terminal | Device-scoped | POS routes only |
 

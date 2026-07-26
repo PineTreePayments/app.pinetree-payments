@@ -24,7 +24,7 @@ Webhook settings are managed by internal dashboard APIs. Public server integrati
     "object": {
       "id": "pay_123",
       "object": "payment",
-      "amount": 2600,
+      "amount": 49.99,
       "currency": "USD",
       "status": "CONFIRMED",
       "network": "solana",

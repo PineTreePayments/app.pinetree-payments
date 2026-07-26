@@ -74,7 +74,7 @@ set.  The key value is shown only once.
 $env:PINETREE_RUN_INTEGRATION         = "true"
 $env:PINETREE_INTEGRATION_BASE_URL    = "http://localhost:3000"
 $env:PINETREE_INTEGRATION_API_KEY     = "pt_live_<value from setup script>"
-$env:PINETREE_INTEGRATION_WEBHOOK_SECRET = "whsec_<value from setup script>"
+$env:PINETREE_INTEGRATION_WEBHOOK_SECRET = "<value from setup script>"
 ```
 
 ### Step 4 — Run integration tests
@@ -91,7 +91,7 @@ as the default.  Override it if the server uses a different port.
 ```powershell
 $env:PINETREE_INTEGRATION_BASE_URL       = "https://staging.example.com"
 $env:PINETREE_INTEGRATION_API_KEY        = "pt_live_..."
-$env:PINETREE_INTEGRATION_WEBHOOK_SECRET = "whsec_..."
+$env:PINETREE_INTEGRATION_WEBHOOK_SECRET = "your_webhook_signing_secret"
 npm run test:integration --workspace packages/pinetree-node
 ```
 
@@ -106,7 +106,7 @@ unless the confirmation flag is present:
 ```powershell
 $env:PINETREE_INTEGRATION_BASE_URL           = "https://app.pinetree-payments.com"
 $env:PINETREE_INTEGRATION_API_KEY            = "pt_live_..."
-$env:PINETREE_INTEGRATION_WEBHOOK_SECRET     = "whsec_..."
+$env:PINETREE_INTEGRATION_WEBHOOK_SECRET     = "your_webhook_signing_secret"
 $env:PINETREE_ALLOW_PRODUCTION_INTEGRATION   = "true"
 npm run test:integration --workspace packages/pinetree-node
 ```

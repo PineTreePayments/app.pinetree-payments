@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
-import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import { TransactionResult } from "@/components/payment/TransactionResult"
 import { supabase } from "@/lib/supabaseClient"
 import { buildWalletHref, prefetchBaseWalletMetadata } from "@/lib/payment/baseWallets"
 import type { BaseWalletMetadataEntry } from "@/lib/payment/baseWallets"
@@ -525,17 +525,18 @@ export default function BasePosCheckoutMirror({
   if (terminalStatus === "CONFIRMED") {
     return (
       <div className="py-3">
-        <PaymentStatusVisual status="CONFIRMED" variant="card" />
+        <TransactionResult state="CONFIRMED" compact />
       </div>
     )
   }
   if (terminalStatus) {
     return (
       <div className="flex flex-col items-center gap-3 py-3">
-        <PaymentStatusVisual status={terminalStatus} variant="card" />
-        <Button variant="secondary" fullWidth onClick={onCancel}>
-          Back
-        </Button>
+        <TransactionResult
+          state={terminalStatus}
+          compact
+          actions={[{ label: terminalStatus === "FAILED" ? "Try Again" : "Return", onClick: onCancel, variant: terminalStatus === "FAILED" ? "primary" : "secondary" }]}
+        />
       </div>
     )
   }

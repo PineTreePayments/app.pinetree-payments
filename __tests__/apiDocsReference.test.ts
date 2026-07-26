@@ -148,7 +148,7 @@ describe("API reference documentation", () => {
     }
     expect(squarespace).toContain("payment_link.disabled")
     expect(squarespace).not.toContain("payment_link.archived")
-    expect(squarespace).toContain("<td><strong class=\"pt-green\">Confirmed</strong></td><td>Payment completed</td><td>Yes</td><td>Green</td>")
+    expect(squarespace).toContain("<td><strong class=\"pt-green\">Confirmed</strong></td><td>Payment confirmed</td><td>Yes</td><td>Green</td>")
     expect(squarespace).not.toMatch(/<td>\s*Success\s*<\/td>/)
     expect(squarespace).toContain("<td><code>solana</code></td><td>SOL, USDC</td>")
     expect(squarespace).toContain("<td><code>base</code></td><td>ETH, USDC</td>")

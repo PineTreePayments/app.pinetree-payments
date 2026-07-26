@@ -11,7 +11,7 @@ This guide covers how to test your PineTree integration locally, run the platfor
 ```bash
 # PineTree API
 PINETREE_API_KEY="pt_live_..."              # Server API key
-PINETREE_WEBHOOK_SECRET="whsec_..."         # Webhook signing secret
+PINETREE_WEBHOOK_SECRET="your_webhook_signing_secret"
 
 # Supabase (for the PineTree app itself)
 NEXT_PUBLIC_SUPABASE_URL="..."
@@ -66,9 +66,9 @@ npm run build
 
 All keys are `pt_live_*` keys connected to real accounts. For testing:
 
-- Use **small amounts** (e.g., $0.01 = `amount: 1`)
-- Perform real transactions on real networks (Solana devnet, Base Sepolia, or Lightning testnet depending on your provider config)
-- Monitor the Dashboard for real-time session and payment status
+- Use **small real amounts** and remember that `amount` is expressed in major currency units.
+- Use provider test-mode or simulated-reader behavior only where your connected provider and PineTree environment are explicitly configured for it.
+- Monitor the Dashboard for current session and payment status.
 
 ---
 
@@ -81,7 +81,7 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
   -H "Authorization: Bearer $PINETREE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "amount": 1,
+    "amount": 1.00,
     "currency": "USD",
     "reference": "test_order_001",
     "successUrl": "https://yoursite.com/success?test=1",
@@ -99,7 +99,7 @@ import { PineTree } from "@pinetreepayments/node"
 const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
 
 const session = await pinetree.checkout.sessions.create({
-  amount: 1,
+  amount: 1.00,
   currency: "USD",
   reference: `test_${Date.now()}`,
 })
@@ -205,7 +205,7 @@ Include the SDK in a local HTML file:
     const pinetree = new PineTree("pk_live_your_public_key")
     document.getElementById("pay").onclick = async () => {
       await pinetree.checkout.open({
-        amount: 2500,
+        amount: 25.00,
         currency: "USD",
         mode: "popup",
       })

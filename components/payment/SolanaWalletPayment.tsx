@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
-import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import { TransactionResult } from "@/components/payment/TransactionResult"
 import WalletPickerModal, { type WalletPickerSection } from "@/components/payment/WalletPickerModal"
 import {
   buildPhantomWalletBrowserUrl,
@@ -817,10 +817,7 @@ export default function SolanaWalletPayment({
   if (terminalStatus) {
     return (
       <div className="space-y-3" onClick={(event) => event.stopPropagation()}>
-        <div className="text-center text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
-          Solana Network Payment
-        </div>
-        <PaymentStatusVisual status={terminalStatus} variant="card" />
+        <TransactionResult state={terminalStatus} compact />
       </div>
     )
   }

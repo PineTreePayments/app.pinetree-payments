@@ -86,7 +86,7 @@ const pinetree = new PineTree({
 })
 
 const checkout = await pinetree.checkout.open({
-  amount: 100,
+  amount: 1.00,
   currency: "USD",
   reference: `local-browser-${Date.now()}`,
   redirect: false,

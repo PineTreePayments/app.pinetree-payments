@@ -49,7 +49,7 @@ export function ShopifyIntegrationCardView({
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-gray-950">Shopify</h2>
           <p className="mt-1 text-xs leading-5 text-gray-500">
-            Connect a Shopify store to use PineTree Checkout.
+            Connect a Shopify store when PineTree Shopify checkout is enabled for this deployment.
           </p>
         </div>
         <ProviderStatusPill

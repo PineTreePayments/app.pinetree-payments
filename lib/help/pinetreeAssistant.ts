@@ -480,7 +480,7 @@ function withContextAnswer(
         body: "Here are the steps to take your first POS payment end-to-end.",
         bullets: [
           `Step 1 — Check your terminal: ${terminalStep}`,
-          "Step 2 — Enter the sale amount: Type the customer's total. Review the service fee and the amount you will receive, then proceed.",
+          "Step 2 — Enter the sale amount: Type the customer's total. Review the Platform Fee and the amount you will receive, then proceed.",
           `Step 3 — Choose a payment rail: ${railStep}`,
           "Step 4 — Let the customer pay: The customer approves the wallet or provider step on their device. PineTree watches for the transaction.",
           "Step 5 — Wait for CONFIRMED: Do not treat PENDING or PROCESSING as a completed payment. Only CONFIRMED means PineTree has finalized the payment.",
@@ -609,7 +609,7 @@ function setupAnswer(): Omit<PineTreeAssistantAnswer, "matchedArticles"> {
 function railAnswer(): Omit<PineTreeAssistantAnswer, "matchedArticles"> {
   return {
     title: "Connect a payment rail from Providers",
-    body: "PineTree routes payments through configured rails. Solana Pay, Base Pay, and Bitcoin Lightning use PineTree Wallet, while Shift4 uses provider credentials.",
+    body: "PineTree routes payments through configured rails. Solana Pay, Base Pay, and Bitcoin Lightning use PineTree Wallet readiness, while Stripe, Shift4, and Fluid Pay require provider setup and approval.",
     bullets: [
       "Connected means PineTree has enough configuration to attempt that rail; it does not guarantee every customer payment will succeed.",
       "Run a small test payment after saving provider or wallet details.",
@@ -621,7 +621,7 @@ function railAnswer(): Omit<PineTreeAssistantAnswer, "matchedArticles"> {
 function posAnswer(): Omit<PineTreeAssistantAnswer, "matchedArticles"> {
   return {
     title: "Run your first PineTree POS payment",
-    body: "In PineTree POS, create or launch a terminal, enter the sale amount, review the service fee and total, then let the customer choose an available payment method.",
+    body: "In PineTree POS, create or launch a terminal, enter the sale amount, review the Platform Fee and total, then let the customer choose an available payment method.",
     bullets: [
       "For crypto POS, PineTree creates the payment request and watches for status changes.",
       "Use a small test amount before using a new terminal with customers.",

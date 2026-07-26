@@ -12,7 +12,7 @@ PineTree is a crypto-native payment infrastructure layer for merchants. It accep
 
 - A hosted checkout page where customers select a network and complete payment
 - A REST API for merchants to create sessions and retrieve payments
-- A webhook system for real-time payment event delivery
+- A signed webhook system for payment event delivery
 - A Node SDK and Browser SDK for easy integration
 - A merchant dashboard for key management, webhook configuration, and reporting
 - A POS terminal for in-person crypto payments

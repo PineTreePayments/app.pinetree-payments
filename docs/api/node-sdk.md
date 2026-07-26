@@ -43,7 +43,7 @@ The `apiKey` must be set. The constructor throws `AuthenticationError` immediate
 ```typescript
 const session = await pinetree.checkout.sessions.create(
   {
-    amount: 2500,
+    amount: 49.99,
     currency: "USD",
     reference: "order_1042",
     customer: { email: "jane@example.com" },
@@ -216,7 +216,7 @@ import {
 } from "@pinetreepayments/node"
 
 try {
-  const session = await pinetree.checkout.sessions.create({ amount: 2500 })
+  const session = await pinetree.checkout.sessions.create({ amount: 49.99 })
 } catch (err) {
   if (err instanceof AuthenticationError) {
     // Invalid or revoked API key (401)

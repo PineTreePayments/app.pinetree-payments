@@ -45,7 +45,7 @@ Use rail identifiers in the `rails` array:
 
 ```json
 {
-  "amount": 2600,
+  "amount": 49.99,
   "currency": "USD",
   "rails": ["solana", "base", "bitcoin_lightning"]
 }

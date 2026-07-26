@@ -4,7 +4,7 @@ import { useAccount, useConnect, useSwitchChain, useWalletClient } from "wagmi"
 import type { Connector } from "wagmi"
 import { base } from "wagmi/chains"
 import Button from "@/components/ui/Button"
-import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import { TransactionResult } from "@/components/payment/TransactionResult"
 import { classifyWalletFamily, detectCapabilitiesFromProvider } from "@/lib/basePay/strategyOrchestrator"
 import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
 import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
@@ -3447,11 +3447,8 @@ export default function BaseWalletPayment({
   // ── Render helpers ────────────────────────────────────────────────────────
   if (terminalStatus) {
     return (
-      <div className="space-y-3">
-        <div className="text-center text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
-          Base Network Payment
-        </div>
-        <PaymentStatusVisual status={terminalStatus} variant="card" />
+      <div className="py-3">
+        <TransactionResult state={terminalStatus} compact />
       </div>
     )
   }

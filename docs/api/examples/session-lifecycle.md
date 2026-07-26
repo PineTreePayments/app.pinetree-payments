@@ -52,7 +52,7 @@ sessions return the existing session without error (idempotent).
 
 ```typescript
 const session = await client.checkout.sessions.create({
-  amount: 2500,
+  amount: 49.99,
   currency: "USD",
   reference: "order_abc123",
   successUrl: "https://example.com/success",

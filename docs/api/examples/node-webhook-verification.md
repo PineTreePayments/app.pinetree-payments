@@ -133,7 +133,7 @@ export async function POST(req: NextRequest) {
   // Process the event
   switch (event.type) {
     case "checkout.session.completed":
-      await handlePaid(event)
+      await handleConfirmed(event)
       break
     case "checkout.session.expired":
       await handleExpired(event)
@@ -185,7 +185,7 @@ against:
 ```typescript
 import { createHmac } from "node:crypto"
 
-const secret = "whsec_test"
+const secret = "your_webhook_signing_secret"
 const timestamp = new Date().toISOString()
 const payload = JSON.stringify({
   eventId: "evt_test_001",

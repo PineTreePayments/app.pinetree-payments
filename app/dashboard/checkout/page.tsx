@@ -133,7 +133,7 @@ const ALL_WEBHOOK_EVENTS = [
   { id: "payment.refunded", label: "payment.refunded", description: "Fires when a payment is refunded" },
   { id: "checkout.session.created", label: "checkout.session.created", description: "Fires when a new checkout session is created" },
   { id: "checkout.session.processing", label: "checkout.session.processing", description: "Fires when session payment processing begins" },
-  { id: "checkout.session.completed", label: "checkout.session.completed", description: "Fires when the session payment is completed" },
+  { id: "checkout.session.completed", label: "checkout.session.completed", description: "Fires when the session payment is confirmed" },
   { id: "checkout.session.failed", label: "checkout.session.failed", description: "Fires when the session payment fails" },
   { id: "checkout.session.expired", label: "checkout.session.expired", description: "Fires when the session expires" },
   { id: "checkout.session.canceled", label: "checkout.session.canceled", description: "Fires when the session is canceled" },
@@ -1176,7 +1176,7 @@ export function CheckoutWorkspace({
     const vol = fmtUsd(stats.volumeUsd)
     insights.push(`${stats.confirmedPayments} confirmed online payment${stats.confirmedPayments !== 1 ? "s" : ""} — ${vol} total volume.`)
   } else if (!statsLoading && stats && stats.totalPayments === 0 && nonArchivedLinks.length > 0) {
-    insights.push("No successful online payments yet — share your payment links to get started.")
+    insights.push("No confirmed online payments yet — share your payment links to get started.")
   }
 
   if (!loading && activeLinks === 0) {

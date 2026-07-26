@@ -41,10 +41,12 @@ Before publishing, verify each `package.json` contains correct values for:
 
 - [ ] `"repository"` — update to the actual GitHub URL:
       ```json
-      "repository": {
-        "type": "git",
-        "url": "https://github.com/<org>/<repo>.git",
-        "directory": "packages/pinetree-node"
+      {
+        "repository": {
+          "type": "git",
+          "url": "https://github.com/<org>/<repo>.git",
+          "directory": "packages/pinetree-node"
+        }
       }
       ```
 - [ ] `"homepage"` — canonical docs or landing page URL
@@ -74,7 +76,9 @@ Before publishing, verify each `package.json` contains correct values for:
 - [ ] For `@pinetreepayments/react`: if `@pinetreepayments/js` was bumped, update the
       `"dependencies"` entry from the `file:` reference to a semver range:
       ```json
-      "dependencies": { "@pinetreepayments/js": "^0.4.0" }
+      {
+        "dependencies": { "@pinetreepayments/js": "^0.4.0" }
+      }
       ```
 - [ ] Commit the version bump (do not tag yet):
       ```bash

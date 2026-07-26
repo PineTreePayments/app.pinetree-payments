@@ -408,14 +408,14 @@ function DocSectionOverview() {
       <h1 className="mb-2 text-2xl font-semibold leading-tight tracking-tight text-gray-950 md:text-[1.7rem]">PineTree API</h1>
       <p className="mb-6 max-w-2xl text-sm leading-5 text-gray-600">
         Accept crypto payments across Solana, Base, Lightning, and more. The PineTree API gives you checkout sessions,
-        real-time webhooks, and a hosted payment page — so your customers can pay with any wallet in under 60 seconds.
+        signed webhooks, and a hosted payment page — so customers can pay with enabled wallets and rails.
       </p>
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
           ["Base URL", "app.pinetree-payments.com"],
           ["API prefix", "Versioned REST routes"],
           ["Auth", "Bearer pt_live_..."],
-          ["Service fee", "$0.15 / tx"],
+          ["Platform Fee", "$0.15 / tx"],
         ].map(([label, value]) => (
           <div key={label} className="rounded-2xl border border-gray-200/80 bg-gradient-to-br from-white to-blue-50/35 p-3 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">{label}</p>
@@ -432,7 +432,7 @@ function DocSectionOverview() {
           ["ETH on Base", "base", "Ready"],
           ["USDC on Base", "base", "Ready"],
           ["BTC over Lightning", "bitcoin_lightning", "Ready"],
-          ["Cards / Shift4", "shift4", "Approved merchants"],
+          ["Cards / Shift4", "shift4", "Enabled merchants"],
         ]}
       />
       <DocH2>Core concepts</DocH2>
@@ -471,7 +471,7 @@ function DocSectionQuickstart() {
 const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
 
 const session = await pinetree.checkout.sessions.create({
-  amount: 2500,    // $25.00 in cents
+  amount: 49.99,   // $49.99 USD
   currency: "USD",
   reference: "order_1042",
   successUrl: "https://yoursite.com/success",
@@ -598,7 +598,7 @@ function DocSectionCheckoutSessions() {
       <DocH2>Create session example</DocH2>
       <CodeBlock>{`const session = await pinetree.checkout.sessions.create(
   {
-    amount: 2500,
+    amount: 49.99,
     currency: "USD",
     reference: "order_1042",
     customer: { email: "jane@example.com" },
@@ -636,7 +636,7 @@ function DocSectionPayments() {
   "id": "pay_01abc...",
   "object": "payment",
   "status": "paid",
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "network": "solana",
   "rail": "solana",
@@ -645,9 +645,9 @@ function DocSectionPayments() {
   "updatedAt": "2026-06-16T12:02:30Z"
 }`}</CodeBlock>
       <DocH2>Payment lifecycle</DocH2>
-      <CodeBlock>{`CREATED → PENDING → PROCESSING → CONFIRMED (status: "paid")
-                             └→ FAILED    (status: "failed")
-              └→ INCOMPLETE               (status: "incomplete")`}</CodeBlock>
+      <CodeBlock>{`CREATED → PENDING → PROCESSING → CONFIRMED (public status: "paid")
+                             └→ FAILED    (public status: "failed")
+              └→ INCOMPLETE               (public status: "canceled")`}</CodeBlock>
       <div className="mt-3 rounded-2xl border border-amber-200/80 bg-amber-50/70 p-3.5 text-xs leading-5 text-amber-800">
         <strong>Status naming:</strong> The API returns <code className="rounded bg-amber-100 px-1 text-xs">status: &quot;paid&quot;</code> when a payment is confirmed — not <code className="rounded bg-amber-100 px-1 text-xs">&quot;confirmed&quot;</code>.
         The visible merchant state is called <strong>Confirmed</strong>. For fulfillment use the <code className="rounded bg-amber-100 px-1 text-xs">payment.confirmed</code> webhook. For polling, check <code className="rounded bg-amber-100 px-1 text-xs">status === &quot;paid&quot;</code>.
@@ -689,7 +689,7 @@ function DocSectionRailsAssets() {
 function DocSectionPaymentStates() {
   return (
     <div>
-      <DocH1 eyebrow="Lifecycle" description="Confirmed is the successful visible payment state. Public API objects use paid for compatibility.">
+      <DocH1 eyebrow="Lifecycle" description="Confirmed is the positive visible payment state. Public API objects use paid for compatibility.">
         Payment States
       </DocH1>
       <DocTable
@@ -697,7 +697,7 @@ function DocSectionPaymentStates() {
         rows={[
           ["Waiting", "Payment request open, no funds detected", "No", "Blue"],
           ["Processing", "Payment detected, awaiting final confirmation", "No", "Darker blue"],
-          ["Confirmed", "Payment completed", "Yes", "Green"],
+          ["Confirmed", "Payment confirmed", "Yes", "Green"],
           ["Failed", "Provider/network/payment attempt failed", "Yes", "Red"],
           ["Expired", "Payment window timed out", "Yes", "Red"],
           ["Canceled", "Customer abandoned/backed out/no funds sent", "Yes", "Gray"],
@@ -870,7 +870,7 @@ try {
   const session = await pinetree.checkout.sessions.create(...)
 } catch (err) {
   if (err instanceof AuthenticationError) { /* invalid key */ }
-  if (err instanceof PermissionError)     { /* wrong scope */ }
+  if (err instanceof PermissionError)     { /* missing permission */ }
   if (err instanceof IdempotencyConflictError) { /* don't retry */ }
   if (err instanceof APIConnectionError)  { /* safe to retry */ }
 }`}</CodeBlock>
@@ -887,7 +887,7 @@ function DocSectionIdempotency() {
       <DocH2>Idempotency-Key header</DocH2>
       <p className="mb-2 text-xs leading-5 text-gray-600">Add to <code className="rounded-lg bg-blue-50 px-1 text-xs text-blue-800 ring-1 ring-blue-100">POST /checkout/sessions</code>. Use your order ID as the key.</p>
       <CodeBlock>{`const session = await pinetree.checkout.sessions.create(
-  { amount: 2500, reference: "order_1042" },
+  { amount: 49.99, reference: "order_1042" },
   { idempotencyKey: "order_1042" }  // same key + same body = same session`}</CodeBlock>
       <DocH2>Behavior</DocH2>
       <DocTable
@@ -930,7 +930,7 @@ function DocSectionTesting() {
         Testing
       </DocH1>
       <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50/60 p-3.5 text-xs leading-5 text-blue-800">
-        <strong>No sandbox mode.</strong> Use amounts like <code className="rounded bg-blue-100 px-1 text-xs">1</code> ($0.01) for integration testing.
+        <strong>No sandbox mode.</strong> Use small real amounts for integration testing and confirm status in the Dashboard.
       </div>
       <DocH2>Platform test suite</DocH2>
       <CodeBlock>{`npm run lint       # 0 errors
@@ -1021,7 +1021,7 @@ Content-Type: application/json`}</CodeBlock>
 const ptjs = new PineTreeJS("pk_live_your_public_key_here")
 
 const session = await ptjs.checkout.createSession({
-  amount: 2500,
+  amount: 49.99,
   currency: "USD",
   reference: "order_1042",
   successUrl: window.location.origin + "/paid",
@@ -1033,7 +1033,7 @@ ptjs.checkout.open(session)  // redirects to hosted checkout`}</CodeBlock>
 
 <PineTreeProvider publicKey="pk_live_your_public_key_here">
   <PineTreeCheckoutButton
-    amount={2500}
+    amount={49.99}
     currency="USD"
     reference="order_1042"
     successUrl={window.location.origin + "/paid"}
@@ -1094,9 +1094,9 @@ function DocSectionWebhookPayload() {
   "id":             "pay_01abc",
   "object":         "payment",
   "merchantId":     "mer_01abc",
-  "amount":         2500,
+  "amount":         49.99,
   "currency":       "USD",
-  "status":         "paid",
+  "status":         "CONFIRMED",
   "network":        "solana",      // rail identifier in webhook events
   "reference":      "order_1042",
   "checkoutLinkId": "cs_01abc",
@@ -1222,7 +1222,7 @@ function ApiReferencePanel({
             <p className={dashboardSectionLabelClass}>Documents</p>
             <h2 className={`mt-2 ${dashboardCardTitleClass}`}>PineTree API Reference</h2>
             <p className={`mt-1 max-w-2xl ${dashboardSupportingTextClass}`}>
-              Accept crypto payments using API keys, checkout sessions, real-time webhooks, and SDKs for Node and browsers.
+              Accept payments using API keys, checkout sessions, signed webhooks, and SDKs for Node and browsers.
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
               {["REST API", "Webhooks", "Node SDK", "Browser SDK"].map((pill) => (

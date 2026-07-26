@@ -15,7 +15,7 @@ Store it as an environment variable. Never commit it to version control.
 
 ```bash
 export PINETREE_API_KEY="pt_live_..."
-export PINETREE_WEBHOOK_SECRET="whsec_..."
+export PINETREE_WEBHOOK_SECRET="your_webhook_signing_secret"
 ```
 
 ---
@@ -36,7 +36,7 @@ import { PineTree } from "@pinetreepayments/node"
 const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
 
 const session = await pinetree.checkout.sessions.create({
-  amount: 2500,           // in USD cents — $25.00
+  amount: 49.99,          // $49.99 USD
   currency: "USD",
   reference: "order_1042",
   customer: { email: "customer@example.com" },
@@ -59,7 +59,7 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
   -H "Authorization: Bearer $PINETREE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "amount": 2500,
+    "amount": 49.99,
     "currency": "USD",
     "reference": "order_1042",
     "customer": { "email": "customer@example.com" },
@@ -75,7 +75,7 @@ curl -X POST https://app.pinetree-payments.com/api/v1/checkout/sessions \
   "id": "cs_01abc...",
   "object": "checkout.session",
   "status": "open",
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "checkoutUrl": "https://app.pinetree-payments.com/pay?token=...",
   "createdAt": "2026-06-16T12:00:00.000Z"
@@ -170,7 +170,7 @@ Then set your webhook URL in the dashboard to `https://your-ngrok-url.ngrok-free
 
 Create a test checkout session, complete a real (small-amount) payment in the checkout, and confirm the webhook fires and your order is fulfilled.
 
-> **Note:** PineTree issues `pt_live_*` keys only. There is no sandbox mode. Use small amounts (e.g., $0.01) for testing and monitor the Dashboard for real-time status.
+> **Note:** PineTree issues `pt_live_*` keys only. There is no sandbox mode. Use small real amounts for testing and monitor the Dashboard for current status.
 
 ---
 

@@ -60,7 +60,7 @@ paths:
             schema:
               $ref: "#/components/schemas/CheckoutSessionCreateParams"
             example:
-              amount: 2500
+              amount: 49.99
               currency: USD
               reference: order_1042
               customer:
@@ -433,9 +433,9 @@ components:
         status:
           $ref: "#/components/schemas/CheckoutSessionStatus"
         amount:
-          type: integer
-          description: Amount in smallest currency unit (cents for USD)
-          example: 2500
+          type: number
+          description: Amount in major currency units. For USD, 49.99 means $49.99.
+          example: 49.99
         currency:
           type: string
           example: USD
@@ -484,10 +484,10 @@ components:
       required: [amount]
       properties:
         amount:
-          type: integer
-          minimum: 1
-          description: Amount in smallest currency unit (cents for USD)
-          example: 2500
+          type: number
+          exclusiveMinimum: 0
+          description: Amount in major currency units. For USD, 49.99 means $49.99.
+          example: 49.99
         currency:
           type: string
           default: USD
@@ -557,8 +557,8 @@ components:
           type: string
           enum: [open, processing, paid, failed, expired, canceled]
         amount:
-          type: integer
-          example: 2500
+          type: number
+          example: 49.99
         currency:
           type: string
           example: USD

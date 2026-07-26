@@ -1,7 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
-import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import { TransactionResult } from "@/components/payment/TransactionResult"
 
 export default function TransactionStatus({
   status,
@@ -11,48 +10,36 @@ export default function TransactionStatus({
   resetPOS: () => void
 }) {
 
-  useEffect(() => {
-
-    if (status === "confirmed") {
-      const timer = setTimeout(() => {
-        resetPOS()
-      }, 3000)
-
-      return () => clearTimeout(timer)
-    }
-
-  }, [status, resetPOS])
-
   if (status === "pending" || status === "waiting") {
-    return <PaymentStatusVisual status="PENDING" iconSize={34} />
+    return <TransactionResult state="PENDING" compact />
   }
 
   if (status === "processing") {
-    return <PaymentStatusVisual status="PROCESSING" iconSize={34} />
+    return <TransactionResult state="PROCESSING" compact />
   }
 
   if (status === "confirmed") {
-    return <PaymentStatusVisual status="CONFIRMED" iconSize={34} />
+    return <TransactionResult state="CONFIRMED" compact actions={[{ label: "New Sale", onClick: resetPOS }]} />
   }
 
   if (status === "error" || status === "failed") {
-    return <PaymentStatusVisual status="FAILED" iconSize={34} />
+    return <TransactionResult state="FAILED" compact actions={[{ label: "Try Again", onClick: resetPOS }]} />
   }
 
   if (status === "incomplete") {
-    return <PaymentStatusVisual status="INCOMPLETE" iconSize={34} />
+    return <TransactionResult state="INCOMPLETE" compact actions={[{ label: "New Sale", onClick: resetPOS }]} />
   }
 
   if (status === "expired") {
-    return <PaymentStatusVisual status="EXPIRED" iconSize={34} />
+    return <TransactionResult state="EXPIRED" compact actions={[{ label: "Create New Payment", onClick: resetPOS }]} />
   }
 
   if (status === "canceled" || status === "cancelled") {
-    return <PaymentStatusVisual status="CANCELED" iconSize={34} />
+    return <TransactionResult state="CANCELED" compact actions={[{ label: "New Sale", onClick: resetPOS }]} />
   }
 
   if (status === "refunded") {
-    return <PaymentStatusVisual status="REFUNDED" iconSize={34} />
+    return <TransactionResult state="INCOMPLETE" compact actions={[{ label: "New Sale", onClick: resetPOS }]} />
   }
 
   return null

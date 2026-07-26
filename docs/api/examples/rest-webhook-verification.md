@@ -94,7 +94,9 @@ app.post(
 import hashlib
 import hmac
 import json
+import os
 import time
+from datetime import datetime, timezone
 from flask import Flask, request, abort
 
 app = Flask(__name__)
@@ -169,7 +171,7 @@ if ($age > $REPLAY_WINDOW) {
 
 // Strip "sha256=" prefix
 $actual   = preg_replace('/^sha256=/i', '', $signatureHeader);
-$expected = hash_hmac('sha256', $rawBody, $WEBHOOK_SECRET);
+$expected = hash_hmac('sha256', $timestampHeader . '.' . $rawBody, $WEBHOOK_SECRET);
 
 if (!hash_equals($expected, $actual)) {
     http_response_code(400);
@@ -203,7 +205,7 @@ http_response_code(200);
       "id": "cs_01j...",
       "object": "checkout.session",
       "status": "paid",
-      "amount": 2500,
+      "amount": 49.99,
       "currency": "USD",
       "reference": "order_abc123",
       "paymentId": "pay_01j...",
@@ -218,7 +220,7 @@ http_response_code(200);
 | Event type | Trigger |
 |---|---|
 | `checkout.session.created` | Session was created |
-| `checkout.session.completed` | Payment completed |
+| `checkout.session.completed` | Session payment confirmed |
 | `checkout.session.failed` | Payment attempt failed |
 | `checkout.session.expired` | Session expired without payment |
 | `checkout.session.canceled` | Session was canceled by the merchant |

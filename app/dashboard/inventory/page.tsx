@@ -184,10 +184,10 @@ function connectorStatus(
 }
 
 function connectorSummary(provider: string) {
-  if (provider === "SHIFT4_SKYTAB") return "Shift4 and SkyTab inventory connection."
-  if (provider === "CLOVER") return "Clover merchant catalog connection."
-  if (provider === "SQUARE") return "Square merchant catalog connection."
-  if (provider === "SHOPIFY") return "Shopify store inventory connection."
+  if (provider === "SHIFT4_SKYTAB") return "Shift4/SkyTab catalog setup; requires partner inventory API access."
+  if (provider === "CLOVER") return "Clover catalog setup; requires merchant OAuth before sync."
+  if (provider === "SQUARE") return "Square catalog setup; requires merchant OAuth before sync."
+  if (provider === "SHOPIFY") return "Shopify store connection; inventory sync remains catalog-access gated."
   return "Import catalog items from a CSV file."
 }
 

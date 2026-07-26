@@ -31,7 +31,7 @@ const pinetree = new PineTree(process.env.NEXT_PUBLIC_PINETREE_PUBLIC_KEY)
 
 // Redirect mode (default) — navigates to the PineTree hosted checkout:
 await pinetree.checkout.open({
-  amount: 2500,
+  amount: 49.99,
   currency: "USD",
   reference: "order_abc123",
 })
@@ -47,7 +47,7 @@ Redirect, popup, and embedded iframe modes are ready.
 
 ```javascript
 await pinetree.checkout.open({
-  amount: 2500,
+  amount: 49.99,
   mode: "redirect",   // default — omit for the same behavior
   successUrl: "https://example.com/success",
   cancelUrl: "https://example.com/cancel",
@@ -58,7 +58,7 @@ await pinetree.checkout.open({
 
 ```javascript
 const result = await pinetree.checkout.open({
-  amount: 2500,
+  amount: 49.99,
   mode: "popup",
 })
 // result.popup — the Window reference
@@ -72,7 +72,7 @@ blocks the popup.
 
 ```javascript
 const result = await pinetree.checkout.open({
-  amount: 2500,
+  amount: 49.99,
   mode: "embedded",
   container: "#checkout-container",  // CSS selector or HTMLElement
 })
@@ -152,7 +152,7 @@ const pinetree = new PineTree({
 
 | Field | Type | Description |
 |---|---|---|
-| `amount` | `number` | **Required.** Amount in smallest currency unit (cents for USD) |
+| `amount` | `number` | **Required.** Amount in major currency units. For USD, `49.99` means $49.99. |
 | `currency` | `string` | ISO-4217 code, uppercase. Defaults to `"USD"` |
 | `reference` | `string` | Your internal order ID |
 | `customer.email` | `string` | Customer email address |

@@ -4,7 +4,7 @@ PineTree can connect a Shopify store, store its authorization securely, create
 PineTree Checkout sessions for that merchant, and process signed Shopify
 webhooks.
 
-## Available now
+## Merchant-facing flow
 
 - Merchant-scoped Shopify connection status
 - Shopify authorization with CSRF and HMAC verification

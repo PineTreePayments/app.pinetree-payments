@@ -350,7 +350,7 @@ export default function ReportsPage() {
           eyebrow={`${PERIODS.find((option) => option.value === period)?.label || "Report"}${summary.isInProgress ? " · In progress" : ""}`}
           title="Confirmed gross sales"
           value={currency(summary.grossVolume)}
-          secondary={<div className="grid min-w-[300px] grid-cols-2 divide-x divide-blue-200/80"><InlineMetric label="Merchant net" value={currency(summary.netSettlements)} className="pr-4" /><InlineMetric label="PineTree fees" value={currency(summary.pineTreeFees)} className="pl-4" /></div>}
+          secondary={<div className="grid min-w-[300px] grid-cols-2 divide-x divide-blue-200/80"><InlineMetric label="Merchant net" value={currency(summary.netSettlements)} className="pr-4" /><InlineMetric label="Platform Fees" value={currency(summary.pineTreeFees)} className="pl-4" /></div>}
         />
       ) : null}
 

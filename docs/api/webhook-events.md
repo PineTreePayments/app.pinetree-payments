@@ -19,7 +19,7 @@ Use `eventId` for idempotency. Fulfill orders from `payment.confirmed` or `check
 | `payment.refunded` | Payment was refunded | `payment` | Refunded state emitted by engine or test delivery |
 | `checkout.session.created` | Checkout session was created | `checkout.session` | Session creation succeeds |
 | `checkout.session.processing` | Checkout session has a processing payment | `checkout.session` | Session aggregate state becomes processing |
-| `checkout.session.completed` | Checkout session completed successfully | `checkout.session` | Session aggregate state becomes paid |
+| `checkout.session.completed` | Checkout session payment is confirmed | `checkout.session` | Session aggregate state becomes paid |
 | `checkout.session.failed` | Checkout session failed | `checkout.session` | Session aggregate state becomes failed |
 | `checkout.session.expired` | Checkout session expired | `checkout.session` | Session lifecycle is expired |
 | `checkout.session.canceled` | Checkout session was canceled | `checkout.session` | Session lifecycle is canceled |
@@ -44,7 +44,7 @@ Legacy compatibility: `checkout.session.paid` is accepted and normalized to `che
       "id": "pay_123",
       "object": "payment",
       "merchantId": "mer_123",
-      "amount": 2600,
+      "amount": 49.99,
       "currency": "USD",
       "status": "CONFIRMED",
       "network": "solana",
@@ -64,7 +64,7 @@ Legacy compatibility: `checkout.session.paid` is accepted and normalized to `che
 | `id` | string | Payment ID. In live payment events this is the same as `paymentId`. |
 | `object` | string | Always `payment`. |
 | `merchantId` | string or null | Merchant owner. |
-| `amount` | number | Amount in cents for USD payments. |
+| `amount` | number | Payment amount in major currency units for USD payments. |
 | `currency` | string | Fiat currency, usually `USD`. |
 | `status` | string | Canonical internal status such as `PENDING`, `PROCESSING`, `CONFIRMED`, `FAILED`, `EXPIRED`, or `INCOMPLETE`. |
 | `network` | string or null | Rail/network such as `solana`, `base`, `bitcoin_lightning`, or `shift4`. |
@@ -90,7 +90,7 @@ Checkout session events contain the public `checkout.session` object.
       "id": "cs_123",
       "object": "checkout.session",
       "status": "open",
-      "amount": 2600,
+      "amount": 49.99,
       "currency": "USD",
       "reference": "order_123",
       "customer": { "email": "buyer@example.com" },
@@ -123,7 +123,7 @@ Fires when payment activity has been detected and PineTree is waiting for final 
 
 ### payment.confirmed
 
-Fires when a payment reaches the successful terminal state. Object type: `payment`. Retryable: yes. Status mapping: visible `Confirmed`. This is the primary fulfillment event.
+Fires when a payment reaches `CONFIRMED`. Object type: `payment`. Retryable: yes. Status mapping: visible `Confirmed`. This is the primary fulfillment event.
 
 ### payment.failed
 
@@ -155,7 +155,7 @@ Fires when a session aggregate state becomes `processing`. Object type: `checkou
 
 ### checkout.session.completed
 
-Fires when the session aggregate state becomes `paid`. Object type: `checkout.session`. Retryable: yes. This is the canonical replacement for legacy `checkout.session.paid`.
+Fires when the session aggregate state becomes `paid`, which maps to PineTree's visible Confirmed state. Object type: `checkout.session`. Retryable: yes. This is the canonical replacement for legacy `checkout.session.paid`.
 
 ### checkout.session.failed
 

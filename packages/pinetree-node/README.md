@@ -23,7 +23,7 @@ const client = new PineTree(process.env.PINETREE_API_KEY!)
 
 // Create a checkout session
 const session = await client.checkout.sessions.create({
-  amount: 2500,           // $25.00 USD (amount in cents)
+  amount: 49.99,          // $49.99 USD
   currency: "USD",
   reference: "order_abc123",
   successUrl: "https://example.com/success",
@@ -72,7 +72,7 @@ const client = new PineTree({
 
 ```typescript
 const session = await client.checkout.sessions.create({
-  amount: 2500,               // required — smallest currency unit (cents for USD)
+  amount: 49.99,              // required — major currency units
   currency: "USD",            // optional; defaults to "USD"
   reference: "order_abc123",  // optional — your internal order ID
   customer: {
@@ -100,7 +100,7 @@ The `rails` option restricts network rails; it does not preselect a token.
 
 ```typescript
 const session = await client.checkout.sessions.create(
-  { amount: 2500, currency: "USD", reference: "order_abc123" },
+  { amount: 49.99, currency: "USD", reference: "order_abc123" },
   { idempotencyKey: "order_abc123_attempt_1" }
 )
 ```
@@ -295,7 +295,7 @@ import PineTree, {
 } from "@pinetreepayments/node"
 
 try {
-  await client.checkout.sessions.create({ amount: 2500, currency: "USD" })
+  await client.checkout.sessions.create({ amount: 49.99, currency: "USD" })
 } catch (err) {
   if (err instanceof AuthenticationError) {
     // HTTP 401 — invalid or revoked API key

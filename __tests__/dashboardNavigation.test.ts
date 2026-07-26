@@ -128,7 +128,7 @@ describe("dashboard checkout and developer navigation", () => {
     expect(wooCommerceCard).toContain('className="mt-auto"')
     expect(wooCommerceCard).toContain('id="woocommerce-setup-guide" className="mt-4 border-t border-gray-100 pt-3"')
     // Shopify card: clean Connected/Not connected pattern, no ugly warning labels
-    expect(shopifyCard).toContain("Connect a Shopify store to use PineTree Checkout.")
+    expect(shopifyCard).toContain("Connect a Shopify store when PineTree Shopify checkout is enabled for this deployment.")
     expect(shopifyCard).toContain('label={connected ? "Connected" : "Not connected"}')
     expect(shopifyCard).toContain('tone={connected ? "blue" : "slate"}')
     expect(shopifyCard).toContain("Connect Shopify")

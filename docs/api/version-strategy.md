@@ -73,8 +73,10 @@ Until npm publication, the dependency is a workspace `file:` reference.
 On publish, change it to a semver range:
 
 ```json
-"dependencies": {
-  "@pinetreepayments/js": "^0.4.0"
+{
+  "dependencies": {
+    "@pinetreepayments/js": "^0.4.0"
+  }
 }
 ```
 

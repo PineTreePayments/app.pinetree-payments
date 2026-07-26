@@ -27,7 +27,7 @@ never require any of these.
 |---|---|---|
 | `PINETREE_RUN_INTEGRATION` | All integration tests | Must be `"true"` |
 | `PINETREE_INTEGRATION_BASE_URL` | All integration tests | e.g. `http://localhost:3000` or staging URL |
-| `PINETREE_INTEGRATION_API_KEY` | All integration tests | Must be `pt_test_*` against non-production |
+| `PINETREE_INTEGRATION_API_KEY` | All integration tests | Must be a `pt_live_*` key created for the target local/staging merchant. PineTree does not issue `pt_test_*` keys. |
 | `PINETREE_INTEGRATION_WEBHOOK_SECRET` | Webhook tests | Matching signing secret |
 | `PINETREE_ALLOW_PRODUCTION_INTEGRATION` | Production runs only | Must be `"true"`; never set in normal CI |
 | `PINETREE_INTEGRATION_PAYMENT_ID` | Payment retrieve test | Optional; skipped if absent |
@@ -93,12 +93,12 @@ stable Node built-ins and standard Web APIs available since Node 18.
 - Run package typecheck, lint, and tests.
 - Run the root API and full repository test suites.
 - Review README and API documentation examples.
-- Run a sandbox integration test using a non-production API key:
+- Run an integration test against local or staging using a dedicated `pt_live_*` key for that environment:
   ```
   PINETREE_RUN_INTEGRATION=true \
   PINETREE_INTEGRATION_BASE_URL=http://localhost:3000 \
-  PINETREE_INTEGRATION_API_KEY=pt_test_... \
-  PINETREE_INTEGRATION_WEBHOOK_SECRET=whsec_... \
+  PINETREE_INTEGRATION_API_KEY=pt_live_... \
+  PINETREE_INTEGRATION_WEBHOOK_SECRET=your_webhook_signing_secret \
   npm run test:integration --workspace packages/pinetree-node
   ```
 - Run `npm pack --dry-run` and confirm no unexpected files (src/, test/,

@@ -147,7 +147,7 @@ metadata.  Retry is idempotent against already-successful deliveries.
 | Component | State |
 |---|---|
 | Test suite | `test/integration/sdk.integration.test.ts` — full CRUD + webhook coverage |
-| Safety guards | `loadIntegrationEnvironment()` — rejects missing env vars, production without explicit flag, live keys against localhost |
+| Safety guards | `loadIntegrationEnvironment()` — rejects missing env vars and production runs without the explicit production flag |
 | Guard tests | `test/integration/environment.test.ts` — 3 assertions, no credentials required, runs in CI |
 | Helper utilities | `integrationReference()`, `createSignedWebhookFixture()` |
 | CI trigger | `workflow_dispatch` only; never automatic |
@@ -157,8 +157,8 @@ Integration tests are run via:
 ```
 PINETREE_RUN_INTEGRATION=true \
 PINETREE_INTEGRATION_BASE_URL=<url> \
-PINETREE_INTEGRATION_API_KEY=pt_test_... \
-PINETREE_INTEGRATION_WEBHOOK_SECRET=whsec_... \
+PINETREE_INTEGRATION_API_KEY=pt_live_... \
+PINETREE_INTEGRATION_WEBHOOK_SECRET=your_webhook_signing_secret \
 npm run test:integration --workspace packages/pinetree-node
 ```
 

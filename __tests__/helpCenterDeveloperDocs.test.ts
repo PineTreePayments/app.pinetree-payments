@@ -30,9 +30,7 @@ describe("Help Center Developer documentation", () => {
   })
 
   it("documents the dashboard-first WooCommerce setup without internal references", () => {
-    expect(developerCopy).toContain(
-      "Open Developer → Integrations and download the PineTree WooCommerce plugin from the dashboard"
-    )
+    expect(developerCopy).toContain("download the PineTree WooCommerce plugin from the dashboard")
     expect(developerCopy).toContain("?wc-api=pinetree_webhook")
     expect(developerCopy).toContain("Duplicate webhook events should not duplicate order notes or status changes.")
     expect(developerCopy).toContain("Manual sync")
@@ -40,7 +38,7 @@ describe("Help Center Developer documentation", () => {
   })
 
   it("documents the Shopify Connected and Not connected merchant flow", () => {
-    expect(developerCopy).toContain("Open Developer → Integrations.")
+    expect(developerCopy).toContain("Open Developer > Integrations.")
     expect(developerCopy).toContain("Not connected")
     expect(developerCopy).toContain("Connect Shopify")
     expect(developerCopy).toContain("approve the PineTree app in Shopify")
@@ -52,7 +50,8 @@ describe("Help Center Developer documentation", () => {
 
   it("keeps Help Center Developer content current and merchant-facing", () => {
     expect(helpPage).toContain('title: "Developer Tools"')
-    expect(helpPage).toContain('articleIds: ["api-keys", "webhooks", "sdks", "woocommerce", "shopify"]')
+    expect(helpPage).toContain('"inventory-catalog-syncing"')
+    expect(helpPage).toContain('"merchant-onboarding-kyb"')
     expect(visibleHelpCopy).not.toMatch(
       /publication pending|Foundation|Private Beta|Preview|backend checklist|internal checklist/i
     )

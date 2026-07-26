@@ -13,7 +13,7 @@ Merchant labels and colors follow the [Merchant Status Architecture](../architec
   id: string                     // "pay_01abc..."
   object: "payment"
   status: string                 // see statuses below
-  amount: number                 // merchant amount in cents (USD)
+  amount: number                 // merchant amount in major currency units
   currency: string               // "USD"
   network: string | null         // "solana" | "base" | "bitcoin_lightning" | ...
   rail: string | null            // public rail label, e.g. "solana" or "base"
@@ -65,7 +65,7 @@ CREATED ──► PENDING ──► PROCESSING ──► CONFIRMED (paid)
 
 ### Terminal states
 
-`paid`, `failed`, `expired`, `canceled`, and refund adjustments are terminal for merchant fulfillment decisions. The public API uses `paid` for compatibility; PineTree's visible label is **Confirmed**.
+Strict engine terminal states are `CONFIRMED`, `FAILED`, and `INCOMPLETE`. Public API and display layers may show `paid`, `failed`, `expired`, `canceled`, or refund adjustments depending on lifecycle metadata and provider evidence. The public API uses `paid` for compatibility; PineTree's visible label is **Confirmed**.
 
 ### Idempotency note
 
@@ -93,7 +93,7 @@ curl "https://app.pinetree-payments.com/api/v1/payments/pay_01abc..." \
   "id": "pay_01abc...",
   "object": "payment",
   "status": "paid",
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "network": "solana",
   "rail": "solana",

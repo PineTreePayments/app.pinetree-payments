@@ -28,13 +28,13 @@ If you send the same `Idempotency-Key` with the same request body, PineTree retu
 ```typescript
 // First request — creates session cs_01abc...
 const session1 = await pinetree.checkout.sessions.create(
-  { amount: 2500, reference: "order_1042" },
+  { amount: 49.99, reference: "order_1042" },
   { idempotencyKey: "order_1042" }
 )
 
 // Second request (identical body) — returns same session
 const session2 = await pinetree.checkout.sessions.create(
-  { amount: 2500, reference: "order_1042" },
+  { amount: 49.99, reference: "order_1042" },
   { idempotencyKey: "order_1042" }
 )
 
@@ -82,13 +82,13 @@ Once a session is created, retrying the same request with the same `Idempotency-
 ```typescript
 // Good: order ID as key, safe to retry on timeout
 const session = await pinetree.checkout.sessions.create(
-  { amount: order.totalCents, reference: order.id },
+  { amount: order.totalAmount, reference: order.id },
   { idempotencyKey: order.id }
 )
 
 // Bad: new UUID for each call — no idempotency protection
 const session = await pinetree.checkout.sessions.create(
-  { amount: order.totalCents, reference: order.id },
+  { amount: order.totalAmount, reference: order.id },
   { idempotencyKey: crypto.randomUUID() } // unique each time = no protection
 )
 ```

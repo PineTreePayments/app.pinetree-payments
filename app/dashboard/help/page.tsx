@@ -109,9 +109,9 @@ const supportHubSections = [
   },
   {
     title: "Accept Payments",
-    description: "Use PineTree POS, hosted checkout, payment links, and supported wallet or provider payment paths.",
+    description: "Use PineTree POS, card readers, manual entry, hosted checkout, payment links, cash, and supported wallet or provider paths.",
     icon: CreditCard,
-    articleIds: ["how-pos-works", "hosted-checkout-works", "online-checkout-links"]
+    articleIds: ["how-pos-works", "pos-card-reader-setup", "pos-manual-card-and-fallback", "cash-transactions", "hosted-checkout-works", "online-checkout-links"]
   },
   {
     title: "Transactions & Statuses",
@@ -121,9 +121,9 @@ const supportHubSections = [
   },
   {
     title: "Wallets & Providers",
-    description: "Manage Solana Pay, Base Pay, Bitcoin Lightning, Shift4, and wallet rails.",
+    description: "Manage Stripe, Shift4, Fluid Pay, Solana Pay, Base Pay, Bitcoin Lightning, and PineTree Wallet readiness.",
     icon: WalletCards,
-    articleIds: ["providers-page-overview", "solana-provider-behavior", "base-wallet-payment-behavior"]
+    articleIds: ["providers-page-overview", "stripe-provider-status", "shift4-provider-status", "fluidpay-provider-status", "lightning-managed-provider-status", "withdrawals-support-status"]
   },
   {
     title: "Dashboard & Reports",
@@ -133,15 +133,15 @@ const supportHubSections = [
   },
   {
     title: "Developer Tools",
-    description: "Set up API keys, webhooks, SDKs, WooCommerce, and Shopify from the Developer dashboard.",
+    description: "Set up API keys, webhooks, SDKs, WooCommerce, Shopify, inventory, and onboarding from the Developer dashboard.",
     icon: Code2,
-    articleIds: ["api-keys", "webhooks", "sdks", "woocommerce", "shopify"]
+    articleIds: ["api-keys", "webhooks", "sdks", "woocommerce", "shopify", "inventory-catalog-syncing", "merchant-onboarding-kyb"]
   },
   {
     title: "Contact Support",
-    description: "Open tickets with payment ID, provider, network, timestamp, amount, and transaction hash when available.",
+    description: "Troubleshoot payment, provider, wallet, POS, webhook, withdrawal, and inventory issues before opening a ticket.",
     icon: LifeBuoy,
-    articleIds: ["open-support-ticket", "support-escalation-boundaries", "payment-stuck-processing"]
+    articleIds: ["payment-stuck-pending", "payment-stuck-processing", "provider-disabled", "reader-or-terminal-unavailable", "wallet-wrong-network-or-rejected", "withdrawal-submitted-not-confirmed", "webhook-delivery-failed", "inventory-connector-disconnected", "open-support-ticket", "support-escalation-boundaries"]
   }
 ]
 

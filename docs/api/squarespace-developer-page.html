@@ -217,7 +217,7 @@
       <tr><td><code>solana</code></td><td>SOL, USDC</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
       <tr><td><code>base</code></td><td>ETH, USDC</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
       <tr><td><code>bitcoin_lightning</code></td><td>BTC</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
-      <tr><td><code>shift4</code></td><td>Card / USD</td><td><span class="ptd-pill ptd-pill-blue">Approved merchants</span></td></tr>
+      <tr><td><code>shift4</code></td><td>Card / USD</td><td><span class="ptd-pill ptd-pill-blue">Enabled merchants</span></td></tr>
     </tbody>
   </table></div>
 
@@ -258,7 +258,7 @@ const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
 app.post("/create-checkout", async (req, res) => {
   const session = await pinetree.checkout.sessions.create(
     {
-      amount: 2500,           // $25.00 in cents
+      amount: 49.99,          // $49.99 USD
       currency: "USD",
       reference: "order_1042",
       customer: { email: req.body.email },
@@ -382,7 +382,7 @@ Content-Type: application/json</code></pre><button class="ptd-copy-btn">Copy</bu
       <tr><td>No Authorization header</td><td>401</td><td><code>missing_api_key</code></td></tr>
       <tr><td>Key does not start with <code>pt_live_</code></td><td>401</td><td><code>invalid_api_key</code></td></tr>
       <tr><td>Key revoked or not found</td><td>401</td><td><code>invalid_api_key</code></td></tr>
-      <tr><td>Key lacks required scope</td><td>403</td><td><code>missing_permission</code></td></tr>
+      <tr><td>Key lacks required permission</td><td>403</td><td><code>missing_permission</code></td></tr>
     </tbody>
   </table></div>
   <p class="ptd-p" style="color:#64748b;font-size:12.5px">Note: PineTree issues <code>pt_live_*</code> keys only. There is no <code>pt_test_*</code> variant. All keys operate against live payment infrastructure.</p>
@@ -401,7 +401,7 @@ Content-Type: application/json</code></pre><button class="ptd-copy-btn">Copy</bu
 
   <div class="ptd-code-wrap"><pre><code># .env
 PINETREE_API_KEY=pt_live_a1b2c3d4e5f6...
-PINETREE_WEBHOOK_SECRET=whsec_...</code></pre><button class="ptd-copy-btn">Copy</button></div>
+PINETREE_WEBHOOK_SECRET=your_webhook_signing_secret</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
   <h2 class="ptd-h2">Public Browser Keys</h2>
   <p class="ptd-p">Public keys (<code>pk_live_*</code>) are safe to embed in browser JavaScript. They can only create checkout sessions and cannot access payments, webhook deliveries, or any private merchant data.</p>
@@ -445,11 +445,11 @@ PINETREE_WEBHOOK_SECRET=whsec_...</code></pre><button class="ptd-copy-btn">Copy<
 
   <!-- POST create -->
   <h2 class="ptd-h2">Create a Session</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions</span></div><p>Creates a hosted Checkout Session and returns a <code>checkoutUrl</code> to redirect the customer to. Requires scope <span class="ptd-scope">checkout.sessions:create</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions</span></div><p>Creates a hosted Checkout Session and returns a <code>checkoutUrl</code> to redirect the customer to. Requires permission <span class="ptd-scope">checkout.sessions:create</span></p></div>
 
   <h3 class="ptd-h3">Request body</h3>
   <div class="ptd-code-wrap"><pre><code>{
-  "amount": 2500,                      // required — positive integer in cents (USD)
+  "amount": 49.99,                     // required — positive number in major currency units
   "currency": "USD",                   // optional — defaults to "USD"
   "reference": "order_1042",           // optional — your order/cart ID
   "customer": {
@@ -468,7 +468,7 @@ PINETREE_WEBHOOK_SECRET=whsec_...</code></pre><button class="ptd-copy-btn">Copy<
   "id": "cs_01abc",
   "object": "checkout.session",
   "status": "open",
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "reference": "order_1042",
   "customer": { "email": "jane@example.com" },
@@ -497,7 +497,7 @@ PINETREE_WEBHOOK_SECRET=whsec_...</code></pre><button class="ptd-copy-btn">Copy<
 
   <!-- GET list -->
   <h2 class="ptd-h2">List Sessions</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/checkout/sessions</span></div><p>Returns a paginated list of Checkout Sessions. Requires scope <span class="ptd-scope">checkout.sessions:read</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/checkout/sessions</span></div><p>Returns a paginated list of Checkout Sessions. Requires permission <span class="ptd-scope">checkout.sessions:read</span></p></div>
 
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Query parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -521,15 +521,15 @@ PINETREE_WEBHOOK_SECRET=whsec_...</code></pre><button class="ptd-copy-btn">Copy<
 
   <!-- GET retrieve -->
   <h2 class="ptd-h2">Retrieve a Session</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}</span></div><p>Retrieves a single Checkout Session. Requires scope <span class="ptd-scope">checkout.sessions:read</span> or <span class="ptd-scope">checkout.sessions:create</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}</span></div><p>Retrieves a single Checkout Session. Requires permission <span class="ptd-scope">checkout.sessions:read</span> or <span class="ptd-scope">checkout.sessions:create</span></p></div>
 
   <!-- POST cancel -->
   <h2 class="ptd-h2">Cancel a Session</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}/cancel</span></div><p>Cancels an open Checkout Session. Emits <code>checkout.session.canceled</code>. Requires scope <span class="ptd-scope">checkout.sessions:write</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}/cancel</span></div><p>Cancels an open Checkout Session. Emits <code>checkout.session.canceled</code>. Requires permission <span class="ptd-scope">checkout.sessions:write</span></p></div>
 
   <!-- POST expire -->
   <h2 class="ptd-h2">Expire a Session</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}/expire</span></div><p>Immediately expires an open Checkout Session. Emits <code>checkout.session.expired</code>. Requires scope <span class="ptd-scope">checkout.sessions:write</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}/expire</span></div><p>Immediately expires an open Checkout Session. Emits <code>checkout.session.expired</code>. Requires permission <span class="ptd-scope">checkout.sessions:write</span></p></div>
 
   <p class="ptd-p" style="margin-top:16px">Sessions that are not explicitly canceled or expired will expire automatically after 24 hours.</p>
 </section>
@@ -560,7 +560,7 @@ PINETREE_WEBHOOK_SECRET=whsec_...</code></pre><button class="ptd-copy-btn">Copy<
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      amount: 2500,
+      amount: 49.99,
       currency: "USD",
       reference: "order_1042",
       successUrl: window.location.origin + "/paid",
@@ -579,7 +579,7 @@ const ptjs = new PineTreeJS("pk_live_your_public_key_here")
 
 // Open hosted checkout in the same tab
 const session = await ptjs.checkout.createSession({
-  amount: 2500,
+  amount: 49.99,
   currency: "USD",
   reference: "order_1042",
   successUrl: window.location.origin + "/paid",
@@ -604,7 +604,7 @@ function App() {
 function CheckoutPage() {
   return (
     &lt;PineTreeCheckoutButton
-      amount={2500}
+      amount={49.99}
       currency="USD"
       reference="order_1042"
       successUrl={window.location.origin + "/paid"}
@@ -629,7 +629,7 @@ function CheckoutPage() {
   <p class="ptd-lead">Payment objects represent on-chain or provider payment activity. Use them for reconciliation and back-office lookups. Use <code>payment.confirmed</code> webhooks — not polling — for order fulfillment.</p>
 
   <h2 class="ptd-h2">Retrieve a Payment</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/payments/{id}</span></div><p>Retrieves a Payment object by ID. Requires scope <span class="ptd-scope">payments:read</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/payments/{id}</span></div><p>Retrieves a Payment object by ID. Requires permission <span class="ptd-scope">payments:read</span></p></div>
 
   <h2 class="ptd-h2">Payment Object Fields</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
@@ -638,7 +638,7 @@ function CheckoutPage() {
       <tr><td><code>id</code></td><td>string</td><td>PineTree payment ID.</td></tr>
       <tr><td><code>object</code></td><td>string</td><td>Always <code>"payment"</code>.</td></tr>
       <tr><td><code>status</code></td><td>string</td><td>Current payment status. See status mapping below.</td></tr>
-      <tr><td><code>amount</code></td><td>integer</td><td>Amount in cents (USD).</td></tr>
+      <tr><td><code>amount</code></td><td>number</td><td>Amount in major currency units (USD).</td></tr>
       <tr><td><code>currency</code></td><td>string</td><td>Fiat currency, e.g. <code>"USD"</code>.</td></tr>
       <tr><td><code>rail</code></td><td>string</td><td>Payment rail, e.g. <code>"solana"</code>, <code>"base"</code>, <code>"bitcoin_lightning"</code>.</td></tr>
       <tr><td><code>asset</code></td><td>string</td><td>Asset paid, e.g. <code>"USDC"</code>, <code>"SOL"</code>, <code>"BTC"</code>.</td></tr>
@@ -682,7 +682,7 @@ function CheckoutPage() {
     <tbody>
       <tr><td><code>open</code></td><td>Session created and the checkout page is waiting for the customer to begin payment.</td><td class="ptd-no">No</td></tr>
       <tr><td><code>processing</code></td><td>Customer has submitted payment; PineTree is awaiting on-chain or provider confirmation.</td><td class="ptd-no">No</td></tr>
-      <tr><td><code>paid</code></td><td>Payment confirmed. Session completed successfully. Fulfill the order on the corresponding <code>payment.confirmed</code> event.</td><td class="ptd-yes">Yes</td></tr>
+      <tr><td><code>paid</code></td><td>Payment confirmed. Fulfill the order on the corresponding <code>payment.confirmed</code> event.</td><td class="ptd-yes">Yes</td></tr>
       <tr><td><code>failed</code></td><td>Payment attempt failed. Customer may need to retry if a new session is created.</td><td class="ptd-yes">Yes</td></tr>
       <tr><td><code>expired</code></td><td>Session expired without a confirmed payment. Sessions expire automatically after 24 hours.</td><td class="ptd-yes">Yes</td></tr>
       <tr><td><code>canceled</code></td><td>Session was explicitly canceled by the merchant via the API or dashboard.</td><td class="ptd-yes">Yes</td></tr>
@@ -723,7 +723,7 @@ function CheckoutPage() {
       <tr><td><code>solana</code></td><td>SOL, USDC</td><td>Solana Pay — wallet QR code or deep link.</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
       <tr><td><code>base</code></td><td>ETH, USDC</td><td>Base network — wallet QR code or WalletConnect.</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
       <tr><td><code>bitcoin_lightning</code></td><td>BTC</td><td>Bitcoin Lightning Network invoice payments.</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
-      <tr><td><code>shift4</code></td><td>Card / USD</td><td>Card payments via Shift4 gateway.</td><td><span class="ptd-pill ptd-pill-blue">Approved merchants</span></td></tr>
+      <tr><td><code>shift4</code></td><td>Card / USD</td><td>Card payments via Shift4 gateway.</td><td><span class="ptd-pill ptd-pill-blue">Enabled merchants</span></td></tr>
     </tbody>
   </table></div>
 
@@ -753,7 +753,7 @@ function CheckoutPage() {
   <h2 class="ptd-h2">Restricting Rails on a Session</h2>
   <p class="ptd-p">Pass the optional <code>rails</code> array when creating a session to limit which payment methods are offered on the hosted checkout page:</p>
   <div class="ptd-code-wrap"><pre><code>{
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "rails": ["solana", "base"]    // only show Solana and Base options
 }</code></pre><button class="ptd-copy-btn">Copy</button></div>
@@ -765,7 +765,7 @@ function CheckoutPage() {
 <section class="ptd-sec" id="ptd-sec-payment-states">
   <span class="ptd-eyebrow">Lifecycle</span>
   <h1 class="ptd-h1">Payment States</h1>
-  <p class="ptd-lead"><strong>Confirmed</strong> is the successful visible payment state and the only state that should trigger order fulfillment. All other terminal states — Failed, Expired, Incomplete — must never trigger fulfillment.</p>
+  <p class="ptd-lead"><strong>Confirmed</strong> is the positive visible payment state and the only state that should trigger order fulfillment. All other terminal states — Failed, Expired, Incomplete — must never trigger fulfillment.</p>
 
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Visible state</th><th>API <code>status</code></th><th>Webhook event</th><th>Terminal</th><th>Fulfill?</th></tr></thead>
@@ -908,7 +908,7 @@ app.post(
       "id":             "pay_01abc",
       "object":         "payment",
       "merchantId":     "mer_01abc",
-      "amount":         2500,
+      "amount":         49.99,
       "currency":       "USD",
       "status":         "paid",
       "network":        "solana",        // rail identifier in webhook events
@@ -938,7 +938,7 @@ app.post(
       "id":             "cs_01abc",
       "object":         "checkout.session",
       "status":         "paid",
-      "amount":         2500,
+      "amount":         49.99,
       "currency":       "USD",
       "reference":      "order_1042",
       "customer":       { "email": "jane@example.com" },
@@ -961,7 +961,7 @@ app.post(
       <tr><td><code>id</code></td><td>string</td><td>Payment ID.</td></tr>
       <tr><td><code>object</code></td><td>string</td><td>Always <code>"payment"</code>.</td></tr>
       <tr><td><code>merchantId</code></td><td>string</td><td>Merchant account.</td></tr>
-      <tr><td><code>amount</code></td><td>integer</td><td>Amount in cents.</td></tr>
+      <tr><td><code>amount</code></td><td>number</td><td>Amount in major currency units.</td></tr>
       <tr><td><code>currency</code></td><td>string</td><td>Fiat currency.</td></tr>
       <tr><td><code>status</code></td><td>string</td><td>Payment status at time of event.</td></tr>
       <tr><td><code>network</code></td><td>string</td><td>Rail identifier (e.g., <code>solana</code>, <code>base</code>).</td></tr>
@@ -1039,7 +1039,7 @@ app.post(
   <h1 class="ptd-h1">Webhook Deliveries</h1>
   <p class="ptd-lead">Use Webhook Deliveries to inspect delivery history, debug failed events, and manually trigger retries from your server tooling or automation.</p>
 
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/webhook-deliveries</span></div><p>Lists Webhook Deliveries. Requires scope <span class="ptd-scope">webhooks:read</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/webhook-deliveries</span></div><p>Lists Webhook Deliveries. Requires permission <span class="ptd-scope">webhooks:read</span></p></div>
 
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Query parameter</th><th>Description</th></tr></thead>
@@ -1051,7 +1051,7 @@ app.post(
     </tbody>
   </table></div>
 
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/webhook-deliveries/{id}/retry</span></div><p>Manually retries a failed or dead-letter delivery. Requires scope <span class="ptd-scope">webhooks:write</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/webhook-deliveries/{id}/retry</span></div><p>Manually retries a failed or dead-letter delivery. Requires permission <span class="ptd-scope">webhooks:write</span></p></div>
 
   <div class="ptd-code-wrap"><pre><code>// Node SDK — manual retry
 const delivery = await pinetree.webhookDeliveries.retry("wdel_01abc...")
@@ -1111,7 +1111,7 @@ console.log(delivery.attemptCount)  // total attempts including this retry</code
     <thead><tr><th>Type</th><th>HTTP status</th><th>Meaning</th></tr></thead>
     <tbody>
       <tr><td><code>authentication_error</code></td><td>401</td><td>Missing or invalid API key.</td></tr>
-      <tr><td><code>authorization_error</code></td><td>403</td><td>Key lacks a required permission scope.</td></tr>
+      <tr><td><code>authorization_error</code></td><td>403</td><td>Key lacks a required permission.</td></tr>
       <tr><td><code>invalid_request_error</code></td><td>400</td><td>Malformed request or invalid field value.</td></tr>
       <tr><td><code>idempotency_error</code></td><td>409</td><td>Idempotency key conflict or request in progress.</td></tr>
       <tr><td><code>not_found_error</code></td><td>404</td><td>Resource does not exist or is not accessible.</td></tr>
@@ -1125,7 +1125,7 @@ console.log(delivery.attemptCount)  // total attempts including this retry</code
     <tbody>
       <tr><td><code>missing_api_key</code></td><td>No Authorization header provided.</td></tr>
       <tr><td><code>invalid_api_key</code></td><td>Key not found, revoked, or wrong format.</td></tr>
-      <tr><td><code>missing_permission</code></td><td>Key does not have the required scope for this endpoint.</td></tr>
+      <tr><td><code>missing_permission</code></td><td>Key does not have the required permission for this endpoint.</td></tr>
       <tr><td><code>invalid_amount</code></td><td><code>amount</code> is missing, zero, or not a positive number.</td></tr>
       <tr><td><code>invalid_json</code></td><td>Request body is not valid JSON.</td></tr>
       <tr><td><code>invalid_rails</code></td><td>Unrecognized rail value in the <code>rails</code> array.</td></tr>
@@ -1150,10 +1150,10 @@ console.log(delivery.attemptCount)  // total attempts including this retry</code
 } from "@pinetreepayments/node"
 
 try {
-  const session = await pinetree.checkout.sessions.create({ amount: 2500 })
+  const session = await pinetree.checkout.sessions.create({ amount: 49.99 })
 } catch (err) {
   if (err instanceof AuthenticationError)    { /* invalid or missing key */ }
-  if (err instanceof PermissionError)        { /* scope not granted */ }
+  if (err instanceof PermissionError)        { /* permission not granted */ }
   if (err instanceof InvalidRequestError)    { /* bad request body */ }
   if (err instanceof IdempotencyConflictError) { /* don't retry */ }
   if (err instanceof NotFoundError)          { /* resource missing */ }
@@ -1187,7 +1187,7 @@ Content-Type: application/json
 Idempotency-Key: order_1042          ← use your stable order ID
 
 {
-  "amount": 2500,
+  "amount": 49.99,
   "currency": "USD",
   "reference": "order_1042"
 }</code></pre><button class="ptd-copy-btn">Copy</button></div>
@@ -1195,7 +1195,7 @@ Idempotency-Key: order_1042          ← use your stable order ID
   <h2 class="ptd-h2">Node SDK Example</h2>
   <div class="ptd-code-wrap"><pre><code>const session = await pinetree.checkout.sessions.create(
   {
-    amount: 2500,
+    amount: 49.99,
     currency: "USD",
     reference: "order_1042",
     successUrl: "https://yoursite.com/paid",
@@ -1236,7 +1236,7 @@ const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
 
 // Create a checkout session
 const session = await pinetree.checkout.sessions.create({
-  amount: 2500,
+  amount: 49.99,
   currency: "USD",
   reference: "order_1042",
   successUrl: "https://yoursite.com/paid",
@@ -1272,7 +1272,7 @@ const ptjs = new PineTreeJS("pk_live_your_public_key_here")
 
 // Create and open a checkout session in the current tab
 const session = await ptjs.checkout.createSession({
-  amount: 2500,
+  amount: 49.99,
   currency: "USD",
   reference: "order_1042",
   successUrl: window.location.origin + "/paid",
@@ -1301,7 +1301,7 @@ export function Providers({ children }) {
 export function BuyButton({ orderId, amount }) {
   return (
     &lt;PineTreeCheckoutButton
-      amount={amount}          // in cents
+      amount={amount}          // major currency units
       currency="USD"
       reference={orderId}
       successUrl={`${window.location.origin}/paid`}
@@ -1323,7 +1323,7 @@ export function BuyButton({ orderId, amount }) {
 
   <div class="ptd-callout ptd-callout-amber">
     <b>Live keys only</b>
-    PineTree does not issue <code>pt_test_*</code> keys. All API keys operate against live payment infrastructure. Test with the smallest possible amounts — $0.01 (<code>amount: 1</code>) is valid.
+    PineTree does not issue <code>pt_test_*</code> keys. All API keys operate against live payment infrastructure. Test with small real amounts and remember that <code>amount</code> uses major currency units.
   </div>
 
   <h2 class="ptd-h2">Test Webhooks Locally</h2>
@@ -1348,7 +1348,7 @@ https://abc123.ngrok-free.app/webhooks/pinetree</code></pre><button class="ptd-c
 
   <h2 class="ptd-h2">Useful Environment Variables</h2>
   <div class="ptd-code-wrap"><pre><code>PINETREE_API_KEY=pt_live_a1b2c3d4...
-PINETREE_WEBHOOK_SECRET=whsec_...
+PINETREE_WEBHOOK_SECRET=your_webhook_signing_secret
 NEXT_PUBLIC_PINETREE_PUBLIC_KEY=pk_live_...  # browser usage</code></pre><button class="ptd-copy-btn">Copy</button></div>
 </section>
 

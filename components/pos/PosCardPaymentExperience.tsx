@@ -2,9 +2,7 @@
 
 import { useState } from "react"
 import {
-  Check,
   ChevronLeft,
-  CircleAlert,
   CreditCard,
   ExternalLink,
   Link2,
@@ -17,6 +15,7 @@ import {
 } from "lucide-react"
 import Button from "@/components/ui/Button"
 import { StripeCardPayment } from "@/components/payment/StripeCardPayment"
+import { TransactionResult } from "@/components/payment/TransactionResult"
 
 export type PosCardReader = {
   id: string
@@ -84,16 +83,6 @@ type Props = {
 
 function Amount({ children }: { children: string }) {
   return <p className="mt-2 text-4xl font-bold tracking-[-0.04em] text-[#0B1F3A]">{children}</p>
-}
-
-function StatusMark({ kind }: { kind: "waiting" | "processing" | "approved" | "declined" }) {
-  const config = {
-    waiting: { className: "bg-blue-100 text-[#1652f0]", icon: <Nfc className="h-8 w-8" /> },
-    processing: { className: "bg-blue-100 text-[#1652f0]", icon: <LoaderCircle className="h-8 w-8 animate-spin" /> },
-    approved: { className: "bg-emerald-100 text-emerald-700", icon: <Check className="h-8 w-8" /> },
-    declined: { className: "bg-red-100 text-red-600", icon: <CircleAlert className="h-8 w-8" /> },
-  }[kind]
-  return <div className={`mx-auto flex h-16 w-16 items-center justify-center rounded-full ${config.className}`}>{config.icon}</div>
 }
 
 export default function PosCardPaymentExperience(props: Props) {
@@ -223,19 +212,46 @@ export default function PosCardPaymentExperience(props: Props) {
   }
 
   if (props.view === "waiting") {
-    return <section className="space-y-6 py-4 text-center"><StatusMark kind="waiting" /><div><h1 className="text-2xl font-bold text-[#0B1F3A]">Waiting for Customer</h1><Amount>{props.amount}</Amount><p className="mt-4 font-semibold text-slate-700">{selectedReader?.label || "Stripe Card Reader"}</p><p className="mt-1 text-sm text-slate-500">Tap, insert, or swipe card</p></div><div className="flex justify-center gap-1.5" aria-hidden="true"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#1652f0]" /><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#1652f0] [animation-delay:150ms]" /><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#1652f0] [animation-delay:300ms]" /></div>{props.error && <p className="text-sm text-red-600" role="alert">{props.error}</p>}<Button variant="danger" fullWidth className="h-11 rounded-xl" disabled={props.loading} onClick={props.onCancel}>Cancel Payment</Button></section>
+    return (
+      <TransactionResult
+        state="PENDING"
+        compact
+        description="Awaiting customer action."
+        actions={[{ label: props.loading ? "Cancelling..." : "Cancel Payment", onClick: props.onCancel, variant: "danger", disabled: props.loading }]}
+      />
+    )
   }
 
   if (props.view === "processing") {
-    return <section className="space-y-5 py-12 text-center"><StatusMark kind="processing" /><div><h1 className="text-2xl font-bold text-[#0B1F3A]">Processing Payment</h1><p className="mt-2 text-sm text-slate-500">Keep the card near the reader.</p></div></section>
+    return <TransactionResult state="PROCESSING" compact description="Payment is processing." />
   }
 
   if (props.view === "approved") {
-    return <section className="space-y-6 py-6 text-center"><StatusMark kind="approved" /><div><h1 className="text-2xl font-bold text-[#0B1F3A]">Payment Approved</h1><Amount>{props.amount}</Amount></div><div className="space-y-2"><Button fullWidth className="h-11 rounded-xl" onClick={props.onDone}>Done</Button><Button variant="secondary" fullWidth className="h-11 rounded-xl" disabled={!props.paymentId} onClick={props.onViewReceipt}>View Receipt</Button></div></section>
+    return (
+      <TransactionResult
+        state="CONFIRMED"
+        compact
+        description="Payment successfully completed."
+        actions={[
+          { label: "New Sale", onClick: props.onDone },
+          { label: "View Receipt", onClick: props.onViewReceipt, variant: "secondary", disabled: !props.paymentId },
+        ]}
+      />
+    )
   }
 
   if (props.view === "declined") {
-    return <section className="space-y-6 py-5 text-center"><StatusMark kind="declined" /><div><h1 className="text-2xl font-bold text-[#0B1F3A]">Payment Declined</h1><p className="mt-2 text-sm text-slate-500">Try again or choose another payment method.</p></div>{props.error && <p className="text-sm text-red-600" role="alert">{props.error}</p>}<div className="space-y-2"><Button fullWidth className="h-11 rounded-xl" onClick={props.onTryAgain}>Try Again</Button>{props.capabilities?.manualEntryEnabled && <Button variant="secondary" fullWidth className="h-11 rounded-xl" onClick={props.onOpenManual}>Enter Card Manually</Button>}<Button variant="secondary" fullWidth className="border-0 bg-transparent shadow-none" onClick={props.onCancel}>Cancel</Button></div></section>
+    return (
+      <TransactionResult
+        state="FAILED"
+        compact
+        description={props.error || "Payment could not be completed. Please try again."}
+        actions={[
+          { label: "Try Again", onClick: props.onTryAgain },
+          { label: "New Sale", onClick: props.onDone, variant: "secondary" },
+        ]}
+      />
+    )
   }
 
   if (props.view === "manual") {
