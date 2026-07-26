@@ -255,10 +255,13 @@ describe("PineTree Wallet reconnect flow", () => {
     )
     expect(submitFn).toContain("tx_hash: dynamicSubmission.txHash || \"\"")
     expect(submitFn).toContain("provider_reference: dynamicSubmission.providerReference || dynamicSubmission.txHash || \"\"")
-    expect(submitFn).toContain("setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)")
-    expect(submitFn).toContain('setWithdrawalScreen("submitted")')
+    expect(submitFn).toContain("setWithdrawalSubmitResult({")
+    expect(submitFn).toContain("...submittedResult")
+    expect(submitFn).toContain("lifecycle")
+    expect(submitFn).toContain('setWithdrawalScreen(lifecycle === "FAILED" ? "failed" : "submitted")')
     expect(submitFn).toContain("void syncPineTreeWallet()")
-    expect(submitFn).toContain("void pollWithdrawalRequest(withdrawalId, submitted as WithdrawalSubmitResponse)")
+    expect(submitFn).toContain("if (!isTerminalWithdrawalResult(withdrawalLifecycleStatusCopy(lifecycle)))")
+    expect(submitFn).toContain("void pollWithdrawalRequest(withdrawalId, {")
   })
 
   it("SOL success state uses the shared result copy (no rail-specific success layout) and does not leave approving visible", () => {
@@ -266,7 +269,8 @@ describe("PineTree Wallet reconnect flow", () => {
     // rail (Bitcoin, Base, Solana) - no per-asset "success" branch like the old
     // isSolanaSolWithdrawal special case, which showed a different title/copy for SOL.
     expect(page).not.toContain("isSolanaSolWithdrawal")
-    expect(page).toContain("Your withdrawal is still being processed. You can safely leave this screen.")
+    expect(page).toContain("Your withdrawal was submitted and is being confirmed. You can safely leave this screen.")
+    expect(page).toContain("Your withdrawal was submitted. You can safely leave this screen.")
     expect(page).toContain('kind === "authorizing"')
   })
 

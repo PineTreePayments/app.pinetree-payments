@@ -52,11 +52,11 @@ describe("Withdrawal result card copy (this session's exact required wording)", 
     return sliceBetween(page, "function WithdrawalResultCard(", "function WithdrawalFormShell(")
   }
 
-  it("uses 'Withdrawal failed' as the failed-state title and 'Your withdrawal has been completed.' for confirmed", () => {
+  it("uses canonical failed and confirmed withdrawal result copy", () => {
     const src = resultCardSrc()
     expect(src).toContain("Withdrawal failed")
     expect(src).not.toContain("Withdrawal couldn't be completed")
-    expect(src).toContain("Your withdrawal has been completed.")
+    expect(src).toContain("Your withdrawal has been confirmed.")
   })
 
   it("shows Submitted/Confirmed timestamps when available on the request record", () => {

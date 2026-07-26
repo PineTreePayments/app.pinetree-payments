@@ -101,13 +101,13 @@ describe("canonicalWithdrawalStatus", () => {
 
   describe("mapWalletWithdrawalRequestStatusToMerchantLabel", () => {
     it("maps the three known raw statuses to their display label", () => {
-      expect(mapWalletWithdrawalRequestStatusToMerchantLabel("confirmed", "Processing")).toBe("Confirmed")
-      expect(mapWalletWithdrawalRequestStatusToMerchantLabel("processing", "Processing")).toBe("Processing")
+      expect(mapWalletWithdrawalRequestStatusToMerchantLabel("confirmed", "Processing")).toBe("Withdrawal confirmed")
+      expect(mapWalletWithdrawalRequestStatusToMerchantLabel("processing", "Processing")).toBe("Submitting withdrawal")
       expect(mapWalletWithdrawalRequestStatusToMerchantLabel("failed", "Processing")).toBe("Withdrawal failed")
     })
 
     it("falls back to the caller-supplied label for any other raw status", () => {
-      expect(mapWalletWithdrawalRequestStatusToMerchantLabel("pending", "Processing")).toBe("Processing")
+      expect(mapWalletWithdrawalRequestStatusToMerchantLabel("pending", "Processing")).toBe("Authorize withdrawal in your wallet")
     })
   })
 })

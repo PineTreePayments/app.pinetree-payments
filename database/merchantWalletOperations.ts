@@ -1,4 +1,5 @@
 import { supabaseAdmin, supabase as supabaseAnon } from "./supabase"
+import { shouldPreserveTerminalOperationStatus } from "@/engine/withdrawals/withdrawalLifecycle"
 
 const supabase = supabaseAdmin || supabaseAnon
 
@@ -294,6 +295,31 @@ export async function updateWalletOperation(
   if (patch.status === "COMPLETED") {
     if (patch.completed_at === undefined) patch.completed_at = terminalTimestamp
     if (patch.confirmed_at === undefined) patch.confirmed_at = terminalTimestamp
+  }
+
+  if (
+    input.status !== undefined ||
+    input.providerReference === null ||
+    input.providerTransactionId === null ||
+    input.providerSecondaryReference === null ||
+    input.txHash === null
+  ) {
+    const existing = await getWalletOperationForMerchant(merchantId, operationId)
+    if (!existing) {
+      throw new Error("Failed to update wallet operation: not found")
+    }
+    if (shouldPreserveTerminalOperationStatus(existing.status, input.status)) {
+      delete patch.status
+      if (input.status === "FAILED") {
+        delete patch.failure_code
+        delete patch.failure_reason
+        delete patch.failed_at
+      }
+    }
+    if (input.providerReference === null && existing.provider_reference) delete patch.provider_reference
+    if (input.providerTransactionId === null && existing.provider_transaction_id) delete patch.provider_transaction_id
+    if (input.providerSecondaryReference === null && existing.provider_secondary_reference) delete patch.provider_secondary_reference
+    if (input.txHash === null && existing.tx_hash) delete patch.tx_hash
   }
 
   let { data, error } = await supabase

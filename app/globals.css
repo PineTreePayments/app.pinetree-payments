@@ -31,6 +31,18 @@ body.pinetree-modal-open {
   overscroll-behavior: contain;
 }
 
+body.pinetree-wallet-provider-authorizing {
+  overflow: auto !important;
+  overscroll-behavior: auto;
+}
+
+body.pinetree-wallet-provider-authorizing [data-dynamic-modal],
+body.pinetree-wallet-provider-authorizing [data-testid*="dynamic" i],
+body.pinetree-wallet-provider-authorizing [id*="dynamic" i],
+body.pinetree-wallet-provider-authorizing [class*="dynamic" i] {
+  z-index: 2147483646 !important;
+}
+
 @media (max-width: 767px) {
   input,
   select,

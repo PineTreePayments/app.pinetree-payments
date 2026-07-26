@@ -1704,11 +1704,12 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("keeps accepted Speed processing withdrawals on the normal submitted screen", () => {
-    expect(page).toContain('merchantStatus: "Processing"')
-    expect(page).toContain("Your Bitcoin Lightning withdrawal was submitted.")
+    expect(page).toContain("const merchantStatus = withdrawalLifecycleStatusCopy(lifecycle)")
+    expect(page).toContain("message: merchantStatus")
+    expect(page).toContain("Your withdrawal was submitted. You can safely leave this screen.")
     expect(page).toContain('setWithdrawalScreen("submitted")')
     expect(page.indexOf('["REQUIRES_ACTION", "ACTION_REQUIRED"].includes')).toBeLessThan(
-      page.indexOf("Your Bitcoin Lightning withdrawal was submitted.")
+      page.indexOf("const bitcoinSubmitResult: WithdrawalSubmitResponse")
     )
   })
 
@@ -2524,7 +2525,9 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("buildWithdrawalExplorerUrl(review?.review.rail, txHash)")
     expect(page).toContain("View transaction")
     expect(page).toContain("Withdrawal submitted")
-    expect(page).toContain("setWithdrawalSubmitResult(submitted as WithdrawalSubmitResponse)")
+    expect(page).toContain("setWithdrawalSubmitResult({")
+    expect(page).toContain("...submittedResult")
+    expect(page).toContain("lifecycle")
   })
 
   it("missing Dynamic signer does not show Approve withdrawal", () => {

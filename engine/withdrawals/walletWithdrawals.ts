@@ -36,6 +36,11 @@ import {
 } from "@/providers/wallets/withdrawalSigner"
 import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
 import { isDynamicBtcLegacyEnabled } from "@/lib/pinetreeDynamicBtcLegacy"
+import {
+  normalizeWalletWithdrawalRequestLifecycle,
+  withdrawalLifecycleLabel,
+  type WithdrawalMerchantStatusLabel,
+} from "@/engine/withdrawals/withdrawalLifecycle"
 
 export type CreateWalletWithdrawalReviewInput = {
   rail: string
@@ -70,7 +75,8 @@ type WithdrawalFallbackDiagnostics = {
 
 export type SubmitWalletWithdrawalResult = {
   request: WalletWithdrawalRequestRecord
-  merchantStatus: "Processing" | "Withdrawal failed"
+  lifecycle?: ReturnType<typeof normalizeWalletWithdrawalRequestLifecycle>
+  merchantStatus: "Processing" | "Confirmed" | "Withdrawal failed" | WithdrawalMerchantStatusLabel
   message: string
 }
 
@@ -126,6 +132,30 @@ export type CompleteDynamicWithdrawalInput = {
   providerReference?: string | null
   signedPayload?: Record<string, unknown> | null
   signedPsbtBase64?: string | null
+}
+
+function submitResultForRequest(
+  request: WalletWithdrawalRequestRecord,
+  fallbackMessage = "Withdrawal submitted."
+): SubmitWalletWithdrawalResult {
+  const lifecycle = normalizeWalletWithdrawalRequestLifecycle({
+    status: request.status,
+    txHash: request.tx_hash,
+    providerReference: request.provider_reference,
+    signedPayload: request.signed_payload,
+  })
+  const merchantStatus =
+    request.status === "failed"
+      ? "Withdrawal failed"
+      : lifecycle === "CONFIRMED"
+        ? "Withdrawal confirmed"
+        : withdrawalLifecycleLabel(lifecycle)
+  return {
+    request,
+    lifecycle,
+    merchantStatus,
+    message: merchantStatus === "Withdrawal failed" ? "Withdrawal failed." : fallbackMessage,
+  }
 }
 
 const SUPPORTED_ASSETS: Record<WalletWithdrawalRail, WalletWithdrawalAsset[]> = {
@@ -507,11 +537,7 @@ export async function submitWalletWithdrawalRequest(
       status: "processing",
       metadata: { tx_hash: submitted.txHash || null, provider: submitted.provider },
     })
-    return {
-      request: accepted,
-      merchantStatus: "Processing",
-      message: "Withdrawal submitted.",
-    }
+    return submitResultForRequest(accepted)
   } catch (error) {
     const presented = presentWithdrawalError({
       rawMessage: error instanceof Error ? error.message : undefined,
@@ -672,11 +698,7 @@ export async function completeDynamicWalletWithdrawal(
       txHashPresent: Boolean(persistedTxHash),
       providerReferencePresent: Boolean(persistedProviderReference),
     })
-    return {
-      request,
-      merchantStatus: request.status === "failed" ? "Withdrawal failed" : "Processing",
-      message: request.status === "failed" ? "Withdrawal failed." : "Withdrawal submitted.",
-    }
+    return submitResultForRequest(request)
   }
   if (!request.unsigned_transaction_payload) {
     throw Object.assign(new Error("Withdrawal request has not been prepared for wallet approval."), { status: 409 })
@@ -751,11 +773,7 @@ export async function completeDynamicWalletWithdrawal(
       status: "processing",
       metadata: { tx_hash: broadcast.txid, provider: "dynamic", submitted_at: submittedAt },
     })
-    return {
-      request: updated,
-      merchantStatus: "Processing",
-      message: "Withdrawal submitted.",
-    }
+    return submitResultForRequest(updated)
   }
 
   const txHash = submittedTxHash
@@ -785,11 +803,7 @@ export async function completeDynamicWalletWithdrawal(
     metadata: { tx_hash: txHash, provider: "dynamic", submitted_at: submittedAt },
   })
 
-  return {
-    request: updated,
-    merchantStatus: "Processing",
-    message: "Withdrawal submitted.",
-  }
+  return submitResultForRequest(updated)
 }
 
 function getSourceAddressForRail(

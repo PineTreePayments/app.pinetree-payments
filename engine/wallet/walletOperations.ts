@@ -619,6 +619,16 @@ async function createWalletWrite(
         : operationType === "PAYOUT"
           ? capabilities.payouts
           : capabilities.swaps
+    if (operationType === "WITHDRAWAL") {
+      console.info("[pinetree-withdrawals] DUPLICATE_RESTORED", {
+        merchantId,
+        provider: resolution.provider,
+        operationId: operation.id,
+        status: operation.status,
+        idempotencyKey: input.idempotencyKey,
+        providerReferencePresent: Boolean(operation.provider_reference || operation.provider_transaction_id || operation.tx_hash),
+      })
+    }
     return { operation: toPineTreeWalletOperation(operation), capabilityAvailable }
   }
 

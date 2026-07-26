@@ -417,7 +417,7 @@ describe("PineTree Wallet withdrawals", () => {
 
     const result = await submitWalletWithdrawalRequest("merchant_1", "withdrawal_1", signer)
 
-    expect(result.merchantStatus).toBe("Processing")
+    expect(result.merchantStatus).toBe("Withdrawal confirming")
     expect(signer.submitWithdrawal).toHaveBeenCalledTimes(1)
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
       "merchant_1",
@@ -1024,7 +1024,7 @@ describe("PineTree Wallet withdrawals", () => {
       signedPayload: { dynamic_wallet_address: "0x9999999999999999999999999999999999999999" },
     })
 
-    expect(result.merchantStatus).toBe("Processing")
+    expect(result.merchantStatus).toBe("Withdrawal confirming")
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
       "merchant_1",
       "withdrawal_1",
@@ -1058,7 +1058,7 @@ describe("PineTree Wallet withdrawals", () => {
       signedPayload: { dynamic_wallet_address: "0x9999999999999999999999999999999999999999" },
     })
 
-    expect(result.merchantStatus).toBe("Processing")
+    expect(result.merchantStatus).toBe("Withdrawal confirming")
     expect(result.request).toBe(existing)
     expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
   })
@@ -1117,7 +1117,7 @@ describe("PineTree Wallet withdrawals", () => {
       signedPsbtBase64: "signed-psbt-base64",
       preparedPayload: expect.objectContaining({ kind: "bitcoin_psbt" }),
     }))
-    expect(result.merchantStatus).toBe("Processing")
+    expect(result.merchantStatus).toBe("Withdrawal confirming")
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
       "merchant_1",
       "withdrawal_1",
@@ -1202,7 +1202,7 @@ describe("PineTree Wallet withdrawals", () => {
       providerReference: "dynamic:solana-transfer",
     })
 
-    expect(result.merchantStatus).toBe("Processing")
+    expect(result.merchantStatus).toBe("Withdrawal confirming")
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith(
       "merchant_1",
       "withdrawal_1",

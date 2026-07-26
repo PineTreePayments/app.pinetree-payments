@@ -1,4 +1,5 @@
 import { supabase, supabaseAdmin } from "./supabase"
+import { shouldPreserveTerminalWithdrawalStatus } from "@/engine/withdrawals/withdrawalLifecycle"
 
 const db = supabaseAdmin || supabase
 const TABLE = "wallet_withdrawal_requests"
@@ -227,6 +228,39 @@ export async function updateWalletWithdrawalRequest(
   if (input.submittedAt !== undefined) update.submitted_at = input.submittedAt
   if (input.confirmedAt !== undefined) update.confirmed_at = input.confirmedAt
   if (input.failedAt !== undefined) update.failed_at = input.failedAt
+
+  if (
+    input.status !== undefined ||
+    input.providerReference === null ||
+    input.txHash === null ||
+    input.providerRequestId === null
+  ) {
+    const { data: currentData, error: currentError } = await db
+      .from(TABLE)
+      .select("*")
+      .eq("merchant_id", merchantId)
+      .eq("id", id)
+      .maybeSingle()
+
+    if (currentError) {
+      throw new Error(`Failed to guard wallet withdrawal request update: ${currentError.message}`)
+    }
+
+    if (currentData) {
+      const current = normalize(currentData as Record<string, unknown>)
+      if (shouldPreserveTerminalWithdrawalStatus(current.status, input.status)) {
+        delete update.status
+        if (input.status === "failed") {
+          delete update.error_message
+          delete update.error_code
+          delete update.failed_at
+        }
+      }
+      if (input.providerReference === null && current.provider_reference) delete update.provider_reference
+      if (input.txHash === null && current.tx_hash) delete update.tx_hash
+      if (input.providerRequestId === null && current.provider_request_id) delete update.provider_request_id
+    }
+  }
 
   let { data, error } = await db
     .from(TABLE)

@@ -11,6 +11,11 @@
  */
 
 import type { WalletOperationStatus } from "@/database/merchantWalletOperations"
+import {
+  normalizeWalletWithdrawalRequestLifecycle,
+  withdrawalLifecycleLabel,
+  type WithdrawalMerchantStatusLabel as CanonicalWithdrawalMerchantStatusLabel,
+} from "@/engine/withdrawals/withdrawalLifecycle"
 
 export type CanonicalWithdrawalActivityStatus =
   | "pending"
@@ -100,15 +105,19 @@ export function mapWalletOperationStatusToActivity(
   return OPERATION_STATUS_TO_ACTIVITY[status] ?? "pending"
 }
 
-/** Display label used by the post-submit review/confirmation screen (a narrower 3-state UI, not the Activity list). */
-export type WithdrawalMerchantStatusLabel = "Processing" | "Confirmed" | "Withdrawal failed"
+/** Display label used by the post-submit review/confirmation screen. */
+export type WithdrawalMerchantStatusLabel =
+  | "Processing"
+  | "Confirmed"
+  | "Withdrawal failed"
+  | CanonicalWithdrawalMerchantStatusLabel
 
 export function mapWalletWithdrawalRequestStatusToMerchantLabel(
   status: string,
   fallback: WithdrawalMerchantStatusLabel
 ): WithdrawalMerchantStatusLabel {
-  if (status === "confirmed") return "Confirmed"
-  if (status === "processing") return "Processing"
-  if (status === "failed") return "Withdrawal failed"
-  return fallback
+  const normalized = normalizeWalletWithdrawalRequestLifecycle({ status })
+  const label = withdrawalLifecycleLabel(normalized)
+  if (label === "Review withdrawal") return fallback
+  return label
 }

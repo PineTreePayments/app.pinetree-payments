@@ -123,10 +123,10 @@ describe("Withdrawal approval/result flow unification repair", () => {
       const src = resultCardSrc()
       expect(src).toContain("Authorizing withdrawal")
       expect(src).toContain("Confirm this withdrawal in PineTree Wallet.")
-      expect(src).toContain('"Withdrawal complete"')
-      expect(src).toContain("Your withdrawal has been completed.")
+      expect(src).toContain('"Withdrawal confirmed"')
+      expect(src).toContain("Your withdrawal has been confirmed.")
       expect(src).toContain('"Withdrawal submitted"')
-      expect(src).toContain("Your withdrawal is still being processed. You can safely leave this screen.")
+      expect(src).toContain("Your withdrawal was submitted. You can safely leave this screen.")
       expect(src).toContain("Withdrawal failed")
       expect(src).toContain("View transaction")
       expect(src).toContain(">\n            Done\n          </button>")
@@ -160,6 +160,14 @@ describe("Withdrawal approval/result flow unification repair", () => {
       expect(page.match(/env\(safe-area-inset-bottom\)/g)?.length ?? 0).toBeGreaterThanOrEqual(3)
       expect(page.match(/scroll-mt-24/g)?.length ?? 0).toBeGreaterThanOrEqual(4)
     })
+
+    it("uses an explicit provider-authorization handoff so PineTree does not block Dynamic", () => {
+      expect(page).toContain("withdrawalProviderAuthorizationActive")
+      expect(page).toContain("pinetree-wallet-provider-authorizing")
+      expect(page).toContain("setWithdrawalProviderAuthorizationActive(true)")
+      expect(page).toContain("setWithdrawalProviderAuthorizationActive(false)")
+      expect(page).toContain("Authorize withdrawal in your wallet")
+    })
   })
 
   describe("active-withdrawal recovery across refresh", () => {
@@ -180,10 +188,12 @@ describe("Withdrawal approval/result flow unification repair", () => {
 
     it("clears the marker once a polled status reaches a terminal state (confirmed/failed) for both rails", () => {
       const dynamicPoll = sliceBetween(page, "async function pollWithdrawalRequest(", "async function pollBitcoinWithdrawalOperation(")
-      expect(dynamicPoll).toContain('json.request.status === "confirmed" || json.request.status === "failed"')
+      expect(dynamicPoll).toContain("isTerminalWithdrawalResult(nextStatus)")
+      expect(dynamicPoll).toContain("activeWithdrawalAttemptRef.current !== attemptKey")
       expect(dynamicPoll).toContain("clearActiveWithdrawalMarker(merchantId)")
       const bitcoinPoll = sliceBetween(page, "async function pollBitcoinWithdrawalOperation(", "async function handleSubmitWithdrawal(")
-      expect(bitcoinPoll).toContain('nextStatus === "Confirmed" || nextStatus === "Withdrawal failed"')
+      expect(bitcoinPoll).toContain("isTerminalWithdrawalResult(nextStatus)")
+      expect(bitcoinPoll).toContain("activeWithdrawalAttemptRef.current !== attemptKey")
       expect(bitcoinPoll).toContain("clearActiveWithdrawalMarker(merchantId)")
     })
 

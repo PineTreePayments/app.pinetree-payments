@@ -5,6 +5,7 @@ import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/mer
 import { scheduleWalletWithdrawalMaintenance } from "@/lib/api/walletWithdrawalMaintenance"
 import { getDeploymentBuildId } from "@/lib/deploymentInfo"
 import { syncPineTreeWalletBalances } from "@/engine/pineTreeWalletSync"
+import type { WalletApiErrorCode } from "@/engine/wallet/walletErrors"
 
 export async function POST(
   req: NextRequest,
@@ -79,6 +80,7 @@ export async function POST(
     })
   } catch (error) {
     const presented = presentWithdrawalError({
+      code: error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code || "") as WalletApiErrorCode : undefined,
       rawMessage: error instanceof Error ? error.message : "Failed to submit wallet approval",
     })
     console.warn("[pinetree-withdrawals] SUBMIT_FAILED", { correlationId, requestId: id, buildId, routeStage: "submit_failed", code: presented.code })

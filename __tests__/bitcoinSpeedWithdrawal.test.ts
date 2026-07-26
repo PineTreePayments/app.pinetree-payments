@@ -186,7 +186,7 @@ describe("Bitcoin withdrawals via connected Speed account", () => {
       withdrawRequest: MAINNET_BOLT11,
       idempotencyKey: "withdrawal_btc_1",
     })
-    expect(result.merchantStatus).toBe("Processing")
+    expect(result.merchantStatus).toBe("Submitting withdrawal")
     expect(mocks.updateWalletWithdrawalRequest).toHaveBeenCalledWith("merchant_1", "withdrawal_btc_1", {
       status: "processing",
       provider: "speed",
