@@ -4,14 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
-import StatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import { PrimaryActionButton } from "@/components/ui/PrimaryActionButton"
+import TransactionActivityTable, { type DashboardTransactionRow } from "../TransactionActivityTable"
 import {
   DashboardHeroCard,
   DashboardSection,
   GroupedMetricSurface,
   InlineMetric,
+  PineTreeInsightsCard,
   dashboardPageTitleClass,
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
@@ -99,11 +100,65 @@ function reportQuery(period: ReportPeriod, startDate: string, endDate: string) {
 
 const reportPageSizeOptions = [25, 50, 100]
 
-const lightBlueControlClass =
-  "inline-flex h-9 items-center justify-center rounded-lg border border-blue-100 bg-blue-50/40 px-3 text-sm font-semibold text-blue-700 transition hover:border-blue-200 hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:border-blue-50 disabled:bg-blue-50/30 disabled:text-blue-300"
+const paginationButtonClass =
+  "inline-flex h-9 items-center justify-center rounded-lg border border-[#0052FF]/45 bg-blue-50/80 px-3 text-sm font-semibold text-[#0052FF] transition hover:border-[#0052FF] hover:bg-blue-100/80 focus:outline-none focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:border-blue-100 disabled:bg-blue-50/20 disabled:text-blue-200 disabled:shadow-none"
+
+const paginationIndicatorClass =
+  "inline-flex h-9 items-center justify-center rounded-lg border border-blue-100 bg-white px-3 text-sm font-medium text-gray-700"
 
 const lightBlueSelectClass =
-  "h-9 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-blue-700 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+  "h-9 appearance-none rounded-lg border border-[#0052FF]/35 bg-blue-50/80 pl-3 pr-7 text-sm font-medium text-gray-700 outline-none transition hover:border-[#0052FF]/60 hover:bg-blue-100/70 focus:border-[#0052FF] focus:bg-white focus:ring-4 focus:ring-blue-50"
+
+function topTotalLabel(totals: Record<string, number>, formatter = (value: string) => value) {
+  const [label, value] = Object.entries(totals).sort((a, b) => b[1] - a[1])[0] || []
+  return label ? `${formatter(label)} (${currency(Number(value || 0))})` : ""
+}
+
+function reportInsights(summary: ReportSummary | null) {
+  if (!summary) return []
+  const topProvider = topTotalLabel(summary.providerTotals, formatDashboardProvider)
+  const topRail = topTotalLabel(summary.railTotals)
+  const topAsset = topTotalLabel(summary.assetTotals)
+  const mix = [
+    summary.cardVolume > 0 ? `card ${currency(summary.cardVolume)}` : "",
+    summary.cryptoVolume > 0 ? `crypto ${currency(summary.cryptoVolume)}` : "",
+    summary.cashVolume > 0 ? `cash ${currency(summary.cashVolume)}` : ""
+  ].filter(Boolean).join(", ")
+
+  return [
+    `${summary.confirmedCount} confirmed transactions produced ${currency(summary.grossVolume)} in confirmed gross sales for this period.`,
+    topProvider ? `${topProvider} leads provider volume${topRail ? `, with ${topRail} leading rail volume` : ""}.` : "",
+    topAsset ? `${topAsset} is the top confirmed asset in this reporting period.` : "",
+    mix ? `Volume mix: ${mix}.` : "",
+    summary.reconciliation.variance !== 0
+      ? `Report totals need review: variance is ${currency(summary.reconciliation.variance)}.`
+      : "Provider, rail, and asset totals are aligned for the current report."
+  ]
+}
+
+function toDashboardTransactionRows(rows: LedgerRow[]): DashboardTransactionRow[] {
+  return rows.map((row) => ({
+    id: row.paymentId || row.reference,
+    payment_id: row.paymentId,
+    provider: row.provider,
+    status: row.canonicalStatus || row.status,
+    provider_transaction_id: row.reference,
+    network: row.network,
+    created_at: row.dateTime,
+    payments: {
+      id: row.paymentId,
+      created_at: row.dateTime,
+      gross_amount: row.gross,
+      pinetree_fee: row.pinetreeFee,
+      currency: "USD",
+      status: row.canonicalStatus || row.status,
+      provider_reference: row.reference,
+      metadata: {
+        selectedAsset: row.asset
+      }
+    }
+  }))
+}
 
 function Breakdown({
   title,
@@ -292,6 +347,8 @@ export default function ReportsPage() {
   )
   const ledgerTotalPages = summary?.pagination?.totalPages || Math.max(1, Math.ceil((summary?.totalLedgerRows || 0) / ledgerPageSize))
   const ledgerCurrentPage = summary?.pagination?.page || ledgerPage
+  const reportTransactionRows = toDashboardTransactionRows(summary?.transactionsTable || [])
+  const insights = reportInsights(summary)
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -306,38 +363,21 @@ export default function ReportsPage() {
         />
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <button onClick={() => void download("csv")} disabled={!summary || loading || Boolean(exporting)} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50">
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+        <PrimaryActionButton onClick={() => void download("csv")} disabled={!summary || loading || Boolean(exporting)} className="w-full sm:w-auto">
           {exporting === "csv" ? "Exporting…" : "Export CSV"}
-        </button>
-        <button onClick={() => void download("pdf")} disabled={!summary || loading || Boolean(exporting)} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50">
+        </PrimaryActionButton>
+        <PrimaryActionButton onClick={() => void download("pdf")} disabled={!summary || loading || Boolean(exporting)} className="w-full sm:w-auto">
           {exporting === "pdf" ? "Exporting…" : "Download PDF"}
-        </button>
-        <PrimaryActionButton onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading}>
+        </PrimaryActionButton>
+        <PrimaryActionButton onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading} className="w-full sm:w-auto">
           Email report
         </PrimaryActionButton>
       </div>
 
       <div className="space-y-3">
         <h2 className={dashboardSectionLabelClass}>PineTree Insights</h2>
-        <SegmentedButtons
-          ariaLabel="Report period"
-          className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-          value={period}
-          onChange={(value) => {
-            setPeriod(value)
-            setLedgerPage(1)
-            setError(null)
-          }}
-          options={PERIODS.map((option) => ({ value: option.value, label: option.label }))}
-        />
-        {period === "custom" ? (
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <label className="text-xs font-semibold text-gray-600">Start date<input type="date" value={customStart} onChange={(event) => { setCustomStart(event.target.value); setLedgerPage(1) }} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900" /></label>
-            <label className="text-xs font-semibold text-gray-600">End date<input type="date" value={customEnd} onChange={(event) => { setCustomEnd(event.target.value); setLedgerPage(1) }} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900" /></label>
-            <PrimaryActionButton onClick={applyCustomRange} className="mt-auto">Apply range</PrimaryActionButton>
-          </div>
-        ) : null}
+        <PineTreeInsightsCard title="PINETREE INSIGHTS" insights={insights} />
       </div>
 
       {error ? (
@@ -377,6 +417,27 @@ export default function ReportsPage() {
             </div>
           </DashboardSection>
 
+          <div className="space-y-3">
+            <SegmentedButtons
+              ariaLabel="Report period"
+              className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+              value={period}
+              onChange={(value) => {
+                setPeriod(value)
+                setLedgerPage(1)
+                setError(null)
+              }}
+              options={PERIODS.map((option) => ({ value: option.value, label: option.label }))}
+            />
+            {period === "custom" ? (
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                <label className="text-xs font-semibold text-gray-600">Start date<input type="date" value={customStart} onChange={(event) => { setCustomStart(event.target.value); setLedgerPage(1) }} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900" /></label>
+                <label className="text-xs font-semibold text-gray-600">End date<input type="date" value={customEnd} onChange={(event) => { setCustomEnd(event.target.value); setLedgerPage(1) }} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900" /></label>
+                <PrimaryActionButton onClick={applyCustomRange} className="mt-auto">Apply range</PrimaryActionButton>
+              </div>
+            ) : null}
+          </div>
+
           <DashboardSection title="Breakdowns" titleTone="blue">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <Breakdown title="Providers" totals={summary.providerTotals} formatLabel={formatDashboardProvider} />
@@ -398,13 +459,13 @@ export default function ReportsPage() {
             {summary.totalLedgerRows === 0 ? (
               <div className="rounded-2xl border border-gray-200 bg-white px-5 py-10 text-center text-sm text-gray-500">No transactions were recorded in this period.</div>
             ) : (
-              <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
-                <table className="min-w-[880px] w-full text-left text-sm">
-                  <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500"><tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Reference</th><th className="px-4 py-3">Provider</th><th className="px-4 py-3">Rail</th><th className="px-4 py-3">Network / asset</th><th className="px-4 py-3 text-right">Gross</th><th className="px-4 py-3 text-right">Fee</th><th className="px-4 py-3">Status</th></tr></thead>
-                  <tbody className="divide-y divide-gray-100">{summary.transactionsTable.map((row) => (
-                    <tr key={`${row.paymentId}-${row.reference}`}><td className="whitespace-nowrap px-4 py-3 text-gray-600">{new Intl.DateTimeFormat("en-US", { timeZone: summary.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(row.dateTime))}</td><td className="max-w-[180px] truncate px-4 py-3 font-mono text-xs text-gray-600">{row.reference}</td><td className="px-4 py-3">{formatDashboardProvider(row.provider)}</td><td className="px-4 py-3">{row.rail}</td><td className="px-4 py-3">{formatDashboardNetwork(row.network)} · {row.asset}</td><td className="px-4 py-3 text-right font-semibold">{currency(row.gross)}</td><td className="px-4 py-3 text-right">{currency(row.pinetreeFee)}</td><td className="px-4 py-3"><StatusBadge status={row.canonicalStatus} /></td></tr>
-                  ))}</tbody>
-                </table>
+              <div>
+                <div className="md:rounded-2xl md:border md:border-gray-200/80 md:bg-white md:p-2.5 md:shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                  <TransactionActivityTable
+                    transactions={reportTransactionRows}
+                    emptyMessage="No transactions were recorded in this period."
+                  />
+                </div>
                 <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-3 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
                   <span>{summary.totalLedgerRows} transactions</span>
                   <div className="flex flex-wrap items-center gap-2">
@@ -429,16 +490,16 @@ export default function ReportsPage() {
                       type="button"
                       disabled={ledgerCurrentPage <= 1}
                       onClick={() => setLedgerPage((value) => Math.max(1, value - 1))}
-                      className={lightBlueControlClass}
+                      className={paginationButtonClass}
                     >
                       Previous
                     </button>
-                    <span className={lightBlueControlClass} aria-live="polite">Page {ledgerCurrentPage} of {ledgerTotalPages}</span>
+                    <span className={paginationIndicatorClass} aria-live="polite">Page {ledgerCurrentPage} of {ledgerTotalPages}</span>
                     <button
                       type="button"
                       disabled={ledgerCurrentPage >= ledgerTotalPages}
                       onClick={() => setLedgerPage((value) => Math.min(ledgerTotalPages, value + 1))}
-                      className={lightBlueControlClass}
+                      className={paginationButtonClass}
                     >
                       Next
                     </button>

@@ -422,9 +422,11 @@ export default function TransactionsPage() {
     "h-9 w-full min-w-0 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-gray-600 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
 
   const pageSizeSelectClass =
-    "h-9 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-gray-600 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+    "h-9 appearance-none rounded-lg border border-[#0052FF]/35 bg-blue-50/80 pl-3 pr-7 text-sm font-medium text-gray-700 outline-none transition hover:border-[#0052FF]/60 hover:bg-blue-100/70 focus:border-[#0052FF] focus:bg-white focus:ring-4 focus:ring-blue-50"
   const paginationControlClass =
-    "inline-flex h-9 items-center justify-center rounded-lg border border-blue-100 bg-blue-50/40 px-3 text-sm font-semibold text-blue-700 transition hover:border-blue-200 hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:border-blue-50 disabled:bg-blue-50/30 disabled:text-blue-300"
+    "inline-flex h-9 items-center justify-center rounded-lg border border-[#0052FF]/45 bg-blue-50/80 px-3 text-sm font-semibold text-[#0052FF] transition hover:border-[#0052FF] hover:bg-blue-100/80 focus:outline-none focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:border-blue-100 disabled:bg-blue-50/20 disabled:text-blue-200 disabled:shadow-none"
+  const paginationIndicatorClass =
+    "inline-flex h-9 items-center justify-center rounded-lg border border-blue-100 bg-white px-3 text-sm font-medium text-gray-700"
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -600,7 +602,7 @@ export default function TransactionsPage() {
             >
               Previous
             </button>
-            <span className={paginationControlClass} aria-live="polite">Page {page} of {totalPages}</span>
+            <span className={paginationIndicatorClass} aria-live="polite">Page {page} of {totalPages}</span>
             <button
               type="button"
               disabled={page >= totalPages}

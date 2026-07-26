@@ -375,19 +375,39 @@ export default function POSPage() {
 
       </div>
 
-      <DashboardHeroCard
-        eyebrow="ACTIVE TERMINALS"
-        title="Manage terminals and launch POS sessions."
-        value={terminals.length}
-        action={
+      <div className="rounded-2xl border border-blue-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] px-3.5 py-3 shadow-[0_10px_30px_rgba(37,99,235,0.1)] md:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className={dashboardSectionLabelClass}>ACTIVE TERMINALS</p>
+            <div className="mt-1 flex items-baseline gap-2">
+              <p className="text-3xl font-semibold leading-none text-gray-950">{terminals.length}</p>
+              <p className="truncate text-xs font-medium text-gray-600">Manage and launch POS sessions</p>
+            </div>
+          </div>
           <button
             onClick={startCreatingTerminal}
-            className={`${primaryActionButtonClass} self-end`}
+            className={`${primaryActionButtonClass} h-9 px-3 text-xs`}
           >
             + New Terminal
           </button>
-        }
-      />
+        </div>
+      </div>
+
+      <div className="hidden md:block">
+        <DashboardHeroCard
+          eyebrow="ACTIVE TERMINALS"
+          title="Manage terminals and launch POS sessions."
+          value={terminals.length}
+          action={
+            <button
+              onClick={startCreatingTerminal}
+              className={`${primaryActionButtonClass} self-end`}
+            >
+              + New Terminal
+            </button>
+          }
+        />
+      </div>
 
       {/* CREATE TERMINAL */}
 
@@ -583,13 +603,13 @@ export default function POSPage() {
 
       {/* TERMINAL LIST */}
 
-      <section className="space-y-3">
+      <section className="space-y-2.5 md:space-y-3">
 
         <p className={dashboardSectionLabelClass}>
           Active Terminals
         </p>
 
-        <div className="space-y-3">
+        <div className="space-y-2.5 md:space-y-3">
 
           {terminals.length === 0 && (
             <div className="p-4 text-sm text-gray-500 sm:p-5">
@@ -605,7 +625,7 @@ export default function POSPage() {
 
               <div
                 key={t.id}
-                className="relative flex flex-col gap-4 rounded-2xl border border-gray-200/80 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.045)] transition hover:border-blue-200 hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)] sm:px-5 md:flex-row md:items-center md:justify-between"
+                className="relative flex flex-col gap-2.5 rounded-2xl border border-gray-200/80 bg-white px-3.5 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.045)] transition hover:border-blue-200 hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)] sm:px-5 md:flex-row md:items-center md:justify-between md:gap-4 md:py-4"
               >
 
                 <div className="min-w-0">
@@ -614,17 +634,17 @@ export default function POSPage() {
                     {t.name}
                   </div>
 
-                  <div className="mt-1 truncate font-mono text-xs text-gray-500" title={t.id}>
+                  <div className="mt-0.5 truncate font-mono text-[11px] text-gray-500 md:mt-1 md:text-xs" title={t.id}>
                     {t.id}
                   </div>
 
-                  <div className="mt-2 text-xs font-semibold uppercase tracking-[0.13em] text-blue-600">
+                  <div className="mt-1 text-[11px] font-semibold uppercase tracking-[0.13em] text-blue-600 md:mt-2 md:text-xs">
                     ● Active
                   </div>
 
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center md:justify-end">
+                <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center md:w-auto md:justify-end">
 
                   <Button
                     variant="secondary"
