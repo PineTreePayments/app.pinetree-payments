@@ -107,4 +107,6 @@ export type PineTreeWalletPreferences = {
 export type PineTreeWalletWriteResult = {
   operation: PineTreeWalletOperation
   capabilityAvailable: boolean
+  reusedExisting?: boolean
+  canonicalStatus?: PineTreeWalletOperationStatus
 }

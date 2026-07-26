@@ -1884,9 +1884,7 @@ type WalletSetupDebugEventLogEntry = {
   details: WalletSetupDebugDetails
   at: string
 }
-type WithdrawalSubmitContext = {
-  irreversibleAckChecked?: boolean
-}
+type WithdrawalSubmitContext = Record<string, never>
 type WalletSetupStageDiagnosticEvent =
   | "wallet_create_dynamic_auth_complete"
   | "wallet_create_runtime_hydration_started"
@@ -2670,7 +2668,7 @@ function WithdrawalResultCard({
         ) : review && !withdrawalOutcomePending ? (
           <button
             type="button"
-            onClick={() => onSubmit({ irreversibleAckChecked: true })}
+            onClick={() => onSubmit()}
             disabled={submitting}
             className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
           >
@@ -2783,14 +2781,6 @@ function WithdrawalFormShell({
   const [saveDestinationLabel, setSaveDestinationLabel] = useState("")
   const [savingDestination, setSavingDestination] = useState(false)
   const [saveDestinationError, setSaveDestinationError] = useState("")
-  const [irreversibleAckChecked, setIrreversibleAckChecked] = useState(false)
-
-  // Reset the irreversibility acknowledgment whenever a new review appears -
-  // it must be re-confirmed per withdrawal, never carried over.
-  useEffect(() => {
-    setIrreversibleAckChecked(false)
-  }, [review?.request.id])
-
   const savedDestinationsMethod = rail === "bitcoin" ? bitcoinTransferType : undefined
 
   const fetchSavedDestinations = useCallback(async () => {
@@ -2865,7 +2855,7 @@ function WithdrawalFormShell({
   const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
-  const reviewActionLabel = review?.review.approvalMethod === "dynamic_browser" ? "Approve withdrawal" : "Submit withdrawal request"
+  const reviewActionLabel = review?.review.approvalMethod === "dynamic_browser" ? "Authorize withdrawal" : "Submit withdrawal"
   const blockingMessage =
     error ||
     (missingDestination
@@ -2888,7 +2878,7 @@ function WithdrawalFormShell({
 
   if (providerAuthorizationActive) {
     return (
-      <div className="scroll-mt-24 rounded-lg border border-blue-100 bg-blue-50/70 px-4 py-4">
+      <div className="pointer-events-none relative z-0 scroll-mt-24 rounded-lg border border-blue-100 bg-blue-50/70 px-4 py-4">
         <p className="text-sm font-semibold text-blue-950">Authorize withdrawal in your wallet</p>
         <p className="mt-1 text-sm leading-6 text-blue-900">PineTree will update this panel when wallet authorization closes.</p>
       </div>
@@ -2900,7 +2890,7 @@ function WithdrawalFormShell({
       <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <div className="rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.10),transparent_45%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.97))] px-4 py-4 shadow-[0_18px_42px_rgba(37,99,235,0.10)] sm:px-5 sm:py-5">
           <p className="text-base font-semibold text-gray-950">Review withdrawal</p>
-          <p className="mt-1 text-xs leading-5 text-gray-500">Confirm the withdrawal details before approving.</p>
+          <p className="mt-1 text-xs leading-5 text-gray-500">Review the withdrawal details before authorizing.</p>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5">
               <dt className="text-xs font-semibold text-gray-500">Asset</dt>
@@ -2942,22 +2932,9 @@ function WithdrawalFormShell({
             </div>
           </div>
         ) : null}
-        <label className="flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50/50 px-3 py-2.5">
-          <input
-            type="checkbox"
-            checked={irreversibleAckChecked}
-            onChange={(event) => setIrreversibleAckChecked(event.target.checked)}
-            className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300"
-          />
-          <span className="text-xs leading-5 text-blue-900">
-            I verified that this destination supports the selected asset and network. Cryptocurrency transfers are irreversible, and PineTree cannot recover funds sent to an incorrect or unsupported destination.
-          </span>
-        </label>
         {!submitting && review.canSubmit ? (
           <p className="text-xs font-medium text-blue-700">
-            {irreversibleAckChecked
-              ? "Ready to approve withdrawal."
-              : "Confirm the acknowledgment above to enable withdrawal approval."}
+            Ready to authorize withdrawal.
           </p>
         ) : null}
         {!submitting && !review.canSubmit ? (
@@ -2968,8 +2945,8 @@ function WithdrawalFormShell({
         <div className="flex flex-col gap-2 sm:flex-row">
           <button
             type="button"
-            onClick={() => onSubmit({ irreversibleAckChecked })}
-            disabled={submitting || !review.canSubmit || !irreversibleAckChecked}
+            onClick={() => onSubmit()}
+            disabled={submitting || !review.canSubmit}
             className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-3"
           >
             {reviewActionLabel}
@@ -9879,7 +9856,9 @@ function PineTreeWalletRuntime() {
           amountDecimal: amount,
           estimatedStatus: "Ready to submit",
           approvalMethod: "manual_review",
-          message: "Confirm this Bitcoin Lightning withdrawal.",
+          message: withdrawalBitcoinTransferType === "onchain"
+            ? "Review this Bitcoin Network withdrawal."
+            : "Review this Lightning withdrawal.",
         },
         canSubmit: true,
       })
@@ -10192,7 +10171,7 @@ function PineTreeWalletRuntime() {
     }
   }
 
-  async function handleSubmitWithdrawal(context: WithdrawalSubmitContext = {}) {
+  async function handleSubmitWithdrawal() {
     const token = accessTokenRef.current
     const review = withdrawalReview
     const withdrawalId = review?.request.id
@@ -10229,14 +10208,6 @@ function PineTreeWalletRuntime() {
       const reason = "SUBMIT_ALREADY_RUNNING"
       console.warn("[pinetree-withdrawals] handleSubmitWithdrawal_blocked", { reason })
       emitSubmitBlocked(reason)
-      return
-    }
-    if (!context.irreversibleAckChecked) {
-      const reason = "CHECKBOX_NOT_CONFIRMED"
-      console.warn("[pinetree-withdrawals] handleSubmitWithdrawal_blocked", { reason })
-      emitSubmitBlocked(reason)
-      setWithdrawalApprovalError("Confirm the acknowledgment above to enable withdrawal approval.")
-      setWithdrawalScreen("review")
       return
     }
     if (!token) {
@@ -11044,7 +11015,7 @@ function PineTreeWalletRuntime() {
                   type="button"
                   onClick={() => {
                     setWithdrawalAuthorizationRecoveryOpen(false)
-                    void handleSubmitWithdrawal({ irreversibleAckChecked: true })
+                    void handleSubmitWithdrawal()
                   }}
                   disabled={submittingWithdrawal}
                   className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-2"
@@ -11209,7 +11180,7 @@ function PineTreeWalletRuntime() {
                 onDone={handleDoneWithdrawal}
                 onCancel={handleCancelWithdrawal}
                 onReview={() => void handleReviewWithdrawal()}
-                onSubmit={(context) => void handleSubmitWithdrawal(context)}
+                onSubmit={() => void handleSubmitWithdrawal()}
                 onOpenWallet={handleWithdrawalReconnect}
                 onOpenAddressBook={() => setActiveView("address-book")}
                 onFinishSetup={handleFinishWalletSetup}

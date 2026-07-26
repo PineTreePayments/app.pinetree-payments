@@ -233,6 +233,49 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     )
   })
 
+  it("stamps Bitcoin Network withdrawals with a distinct on-chain network", async () => {
+    const createWithdrawal = vi.fn().mockResolvedValue({
+      providerReference: "fake_ref_onchain",
+      providerStatus: "processing",
+      status: "PROCESSING",
+    })
+    const adapter = fakeAdapter({
+      provider: "speed",
+      providerDisplayName: "Speed",
+      getCapabilities: vi.fn().mockResolvedValue({
+        balances: false,
+        withdrawals: true,
+        payouts: false,
+        swaps: false,
+        automaticPayouts: false,
+        automaticConversion: false,
+      }),
+      createWithdrawal,
+    })
+    const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "speed", adapter, context: fakeContext })
+    const created = operationRow({ network: "bitcoin_onchain" })
+    const createWalletOperation = vi.fn().mockResolvedValue({ operation: created, created: true })
+    vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
+    vi.doMock("@/database/merchantWalletOperations", () => ({
+      createWalletOperation,
+      updateWalletOperation: vi.fn().mockResolvedValue(operationRow({ status: "PROCESSING", network: "bitcoin_onchain" })),
+      getWalletOperationForMerchant: vi.fn(),
+      listWalletOperations: vi.fn(),
+    }))
+
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+    await createWalletWithdrawal("merchant-1", {
+      asset: "SATS",
+      amountDecimal: "1000",
+      destination: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+      idempotencyKey: "key-onchain",
+    })
+
+    expect(createWalletOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ network: "bitcoin_onchain" })
+    )
+  })
+
   it("stamps confirmedAt (and completedAt) when the adapter reports COMPLETED, and failedAt when it reports FAILED", async () => {
     const confirmedResult = {
       providerReference: "fake_ref_2",
@@ -346,12 +389,17 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     expect(createWithdrawal).not.toHaveBeenCalled()
   })
 
-  it("returns the existing operation unchanged on a duplicate idempotency key without calling the adapter again", async () => {
+  it("safely retries an unsubmitted duplicate idempotency row without creating a second operation", async () => {
+    const createWithdrawal = vi.fn().mockResolvedValue({
+      providerReference: "fake_ref_1",
+      providerStatus: "processing",
+      status: "PROCESSING",
+    })
     const adapter = fakeAdapter({
-      createWithdrawal: vi.fn(),
+      createWithdrawal,
       getCapabilities: vi.fn().mockResolvedValue({
         balances: false,
-        withdrawals: false,
+        withdrawals: true,
         payouts: false,
         swaps: false,
         automaticPayouts: false,
@@ -363,9 +411,11 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
       status: "FAILED",
       failure_code: "WALLET_CAPABILITY_UNAVAILABLE",
       destination_summary: "lnbc1q...qqqq",
+      provider_request_attempted: false,
+      dispatch_started_at: null,
     })
     const createWalletOperation = vi.fn().mockResolvedValue({ operation: existing, created: false })
-    const updateWalletOperation = vi.fn()
+    const updateWalletOperation = vi.fn().mockResolvedValue(operationRow({ status: "PROCESSING" }))
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
@@ -383,8 +433,71 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     })
 
     expect(result.operation.id).toBe(existing.id)
-    expect(updateWalletOperation).not.toHaveBeenCalled()
-    expect(adapter.createWithdrawal).not.toHaveBeenCalled()
+    expect(createWalletOperation).toHaveBeenCalledTimes(1)
+    expect(createWithdrawal).toHaveBeenCalledTimes(1)
+    expect(updateWalletOperation).toHaveBeenCalledWith(
+      "merchant-1",
+      existing.id,
+      expect.objectContaining({ status: "PROCESSING", providerReference: "fake_ref_1" })
+    )
+  })
+
+  it("reconciles an already submitted duplicate idempotency row instead of calling createWithdrawal again", async () => {
+    const createWithdrawal = vi.fn()
+    const getWithdrawalStatus = vi.fn().mockResolvedValue({
+      providerReference: "fake_ref_1",
+      providerStatus: "completed",
+      status: "COMPLETED",
+    })
+    const adapter = fakeAdapter({
+      createWithdrawal,
+      getWithdrawalStatus,
+      getCapabilities: vi.fn().mockResolvedValue({
+        balances: false,
+        withdrawals: true,
+        payouts: false,
+        swaps: false,
+        automaticPayouts: false,
+        automaticConversion: false,
+      }),
+    })
+    const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "fake-provider", adapter, context: fakeContext })
+    const existing = operationRow({
+      status: "PROCESSING",
+      destination_summary: "lnbc1q...qqqq",
+      provider_reference: "fake_ref_1",
+      provider_transaction_id: "fake_ref_1",
+      submitted_at: "2026-07-22T00:00:00.000Z",
+    })
+    const completed = operationRow({
+      ...existing,
+      status: "COMPLETED",
+      completed_at: "2026-07-22T00:01:00.000Z",
+      confirmed_at: "2026-07-22T00:01:00.000Z",
+    })
+    const createWalletOperation = vi.fn().mockResolvedValue({ operation: existing, created: false })
+    const updateWalletOperation = vi.fn().mockResolvedValue(completed)
+    vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
+    vi.doMock("@/database/merchantWalletOperations", () => ({
+      createWalletOperation,
+      updateWalletOperation,
+      getWalletOperationForMerchant: vi.fn(),
+      listWalletOperations: vi.fn(),
+    }))
+
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+    const result = await createWalletWithdrawal("merchant-1", {
+      asset: "SATS",
+      amountDecimal: "1000",
+      destination: "lnbc1qqqqqqqqqqqqqqqqqqqq",
+      idempotencyKey: "key-1",
+    })
+
+    expect(createWithdrawal).not.toHaveBeenCalled()
+    expect(getWithdrawalStatus).toHaveBeenCalledWith(fakeContext, "fake_ref_1")
+    expect(result.reusedExisting).toBe(true)
+    expect(result.canonicalStatus).toBe("COMPLETED")
+    expect(result.operation.status).toBe("COMPLETED")
   })
 
   it("looking up a wallet operation that does not belong to the merchant returns WALLET_OPERATION_NOT_FOUND, never another merchant's row", async () => {

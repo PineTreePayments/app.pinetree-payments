@@ -408,6 +408,73 @@ function hasProviderReconciliationIdentifier(result: WalletAdapterOperationResul
   )
 }
 
+function operationProviderAccountId(operation: MerchantWalletOperation): string {
+  return operation.provider_account_id
+    || String(operation.raw_provider_status?.providerAccountId || "")
+}
+
+function operationProviderLookupReference(operation: MerchantWalletOperation): string {
+  return String(operation.provider_reference || operation.provider_transaction_id || operation.tx_hash || "").trim()
+}
+
+function operationHasProviderEvidence(operation: MerchantWalletOperation): boolean {
+  return Boolean(
+    operationProviderLookupReference(operation)
+    || operation.provider_request_attempted
+    || operation.dispatch_started_at
+    || operation.submitted_at
+    || operation.provider_response_received
+  )
+}
+
+function canSafelyRetryExistingOperation(operation: MerchantWalletOperation): boolean {
+  if (operation.operation_type !== "WITHDRAWAL") return false
+  if (operationHasProviderEvidence(operation)) return false
+  return operation.status === "CREATED" || operation.status === "FAILED"
+}
+
+function networkForWriteInput(input: WalletAdapterWriteInput): string | undefined {
+  if (input.asset !== "SATS") return undefined
+  const classified = classifyBitcoinWithdrawalDestination(input.destination)
+  if (!classified.valid) return "bitcoin"
+  return classified.method === "onchain" ? "bitcoin_onchain" : "bitcoin_lightning"
+}
+
+async function reconcileExistingSubmittedOperation(input: {
+  merchantId: string
+  operation: MerchantWalletOperation
+  resolution: Awaited<ReturnType<typeof resolveMerchantWalletProvider>>
+  operationType: "WITHDRAWAL" | "PAYOUT" | "SWAP_OUT"
+}): Promise<MerchantWalletOperation> {
+  const reference = operationProviderLookupReference(input.operation)
+  if (!reference) return input.operation
+  const statusCall =
+    input.operationType === "WITHDRAWAL"
+      ? input.resolution.adapter.getWithdrawalStatus
+      : input.operationType === "PAYOUT"
+        ? input.resolution.adapter.getPayoutStatus
+        : input.resolution.adapter.getSwapStatus
+  if (!statusCall) return input.operation
+  try {
+    const result = await statusCall(input.resolution.context, reference)
+    return await reconcileOperationWithAdapterResult(
+      input.merchantId,
+      input.operation.id,
+      input.resolution.context.providerAccountId,
+      result
+    )
+  } catch (error) {
+    console.warn("[wallet-operations] duplicate withdrawal reconciliation skipped", {
+      merchantId: input.merchantId,
+      operationId: input.operation.id,
+      provider: input.resolution.provider,
+      operationType: input.operationType,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return input.operation
+  }
+}
+
 async function failOperationAsCapabilityUnavailable(
   merchantId: string,
   operationId: string,
@@ -593,43 +660,65 @@ async function createWalletWrite(
     direction: "debit",
     status: "CREATED",
     asset: input.asset,
+    network: networkForWriteInput(input),
     amountBaseUnits: input.amountBaseUnits,
     destinationSummary,
     idempotencyKey: input.idempotencyKey,
   })
 
   if (!created) {
-    const operationProviderAccountId = operation.provider_account_id
-      || String(operation.raw_provider_status?.providerAccountId || "")
+    const existingProviderAccountId = operationProviderAccountId(operation)
     if (
       operation.asset !== input.asset ||
       operation.amount_base_units !== input.amountBaseUnits.toString() ||
       operation.destination_summary !== destinationSummary ||
-      (operationProviderAccountId && operationProviderAccountId !== resolution.context.providerAccountId)
+      (existingProviderAccountId && existingProviderAccountId !== resolution.context.providerAccountId)
     ) {
       throw new WalletApiRouteError(
         "IDEMPOTENCY_KEY_CONFLICT",
         "This Idempotency-Key was already used for a different wallet operation."
       )
     }
-    const capabilities = await resolution.adapter.getCapabilities(resolution.context)
-    const capabilityAvailable =
-      operationType === "WITHDRAWAL"
-        ? capabilities.withdrawals
-        : operationType === "PAYOUT"
-          ? capabilities.payouts
-          : capabilities.swaps
-    if (operationType === "WITHDRAWAL") {
-      console.info("[pinetree-withdrawals] DUPLICATE_RESTORED", {
+    if (canSafelyRetryExistingOperation(operation)) {
+      console.info("[pinetree-withdrawals] DUPLICATE_SAFE_RETRY", {
         merchantId,
         provider: resolution.provider,
         operationId: operation.id,
         status: operation.status,
         idempotencyKey: input.idempotencyKey,
-        providerReferencePresent: Boolean(operation.provider_reference || operation.provider_transaction_id || operation.tx_hash),
       })
+    } else {
+      const capabilities = await resolution.adapter.getCapabilities(resolution.context)
+      const capabilityAvailable =
+        operationType === "WITHDRAWAL"
+          ? capabilities.withdrawals
+          : operationType === "PAYOUT"
+            ? capabilities.payouts
+            : capabilities.swaps
+      if (operationType === "WITHDRAWAL") {
+        console.info("[pinetree-withdrawals] DUPLICATE_RESTORED", {
+          merchantId,
+          provider: resolution.provider,
+          operationId: operation.id,
+          status: operation.status,
+          idempotencyKey: input.idempotencyKey,
+          providerReferencePresent: Boolean(operation.provider_reference || operation.provider_transaction_id || operation.tx_hash),
+        })
+      }
+      const reconciled = await reconcileExistingSubmittedOperation({
+        merchantId,
+        operation,
+        resolution,
+        operationType,
+      })
+      const normalized = toPineTreeWalletOperation(reconciled)
+      return {
+        operation: normalized,
+        capabilityAvailable,
+        reusedExisting: true,
+        canonicalStatus: normalized.status,
+      }
     }
-    return { operation: toPineTreeWalletOperation(operation), capabilityAvailable }
   }
 
   try {

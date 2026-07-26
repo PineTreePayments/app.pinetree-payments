@@ -483,7 +483,13 @@ describe("account-scoped withdrawal safeguards", () => {
     arranged.createWalletOperation
       .mockResolvedValueOnce({ operation: operation(), created: true })
       .mockResolvedValueOnce({
-        operation: { ...operation("CREATED"), destination_summary: "lnbc1q...qqqq" },
+        operation: {
+          ...operation("REQUIRES_ACTION"),
+          destination_summary: "lnbc1q...qqqq",
+          failure_code: "STATUS_UNKNOWN",
+          provider_acceptance_unknown: true,
+          persistence_after_acceptance_failed: true,
+        },
         created: false,
       })
     const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")

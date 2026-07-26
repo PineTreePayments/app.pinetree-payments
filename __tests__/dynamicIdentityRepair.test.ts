@@ -227,7 +227,9 @@ describe("Speed Bitcoin withdrawals are unaffected by the Dynamic identity fix",
     // Bitcoin withdrawals are prepared with approvalMethod "manual_review",
     // never "dynamic_browser".
     expect(page).toContain('approvalMethod: "manual_review",')
-    expect(page).toContain('message: "Confirm this Bitcoin Lightning withdrawal."')
+    expect(page).toContain('message: withdrawalBitcoinTransferType === "onchain"')
+    expect(page).toContain('"Review this Bitcoin Network withdrawal."')
+    expect(page).toContain('"Review this Lightning withdrawal."')
     // ensureDynamicWalletRuntimeReady (the function this fix changes) is only
     // ever invoked once in the whole file, and only inside the
     // approvalMethod === "dynamic_browser" branch of submit - i.e. never for

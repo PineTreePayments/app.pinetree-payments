@@ -33,7 +33,7 @@ describe("Dynamic in-modal stuck withdrawal repair (EVM/PSBT signing timeout)", 
   })
 
   it("handleSubmitWithdrawal treats DYNAMIC_SIGNING_TIMEOUT the same as a post-sign submission timeout - status unknown, no retry-invite, no duplicate-submission dialog", () => {
-    const handleSubmit = sliceBetween(page, "async function handleSubmitWithdrawal(context", "\n  // Early returns")
+    const handleSubmit = sliceBetween(page, "async function handleSubmitWithdrawal()", "\n  // Early returns")
     expect(handleSubmit).toContain('const isAmbiguousSigningTimeout = errorCode === "DYNAMIC_SIGNING_TIMEOUT"')
     expect(handleSubmit).toContain("const isAmbiguousOutcome = isPostSignSubmissionTimeout || isAmbiguousSigningTimeout")
     expect(handleSubmit).toContain("isAmbiguousOutcome\n        ? withdrawalStatusUnknownMessage")

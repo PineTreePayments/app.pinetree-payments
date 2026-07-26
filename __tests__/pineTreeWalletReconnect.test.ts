@@ -69,7 +69,7 @@ describe("PineTree Wallet reconnect flow", () => {
     expect(modal).toContain("{withdrawalReview ? (")
     expect(modal).toContain("Confirm this withdrawal in PineTree Wallet to continue.")
     expect(modal).toContain("Review the withdrawal details again before authorizing.")
-    expect(modal).toContain("void handleSubmitWithdrawal({ irreversibleAckChecked: true })")
+    expect(modal).toContain("void handleSubmitWithdrawal()")
     expect(modal).toContain("disabled={submittingWithdrawal}")
     expect(modal).not.toContain("disabled={submittingWithdrawal || !withdrawalReview}")
     expect(modal).toContain('{submittingWithdrawal ? "Authorizing..." : "Authorize withdrawal"}')

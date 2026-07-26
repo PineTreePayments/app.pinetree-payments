@@ -89,7 +89,7 @@ describe("Withdrawal approval/result flow unification repair", () => {
     })
 
     it("a submit-stage timeout after Dynamic already signed is treated as status-unknown, not authorization failure", () => {
-      const handleSubmit = sliceBetween(page, "async function handleSubmitWithdrawal(context", "\n  // Early returns")
+      const handleSubmit = sliceBetween(page, "async function handleSubmitWithdrawal()", "\n  // Early returns")
       expect(handleSubmit).toContain("let signedBeforeSubmitCall = false")
       expect(handleSubmit).toContain("signedBeforeSubmitCall = Boolean(dynamicSubmission.txHash || dynamicSubmission.signedPsbtBase64)")
       expect(handleSubmit).toContain('const isPostSignSubmissionTimeout = signedBeforeSubmitCall && errorCode === "PROVIDER_SUBMISSION_TIMEOUT"')

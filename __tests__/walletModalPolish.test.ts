@@ -367,7 +367,7 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(reviewScreen).toContain("Network fee may apply")
   })
 
-  it("review screen has Approve withdrawal and a Back secondary action, not a generic browser-confirm layout", () => {
+  it("review screen has Authorize withdrawal and a Back secondary action, not a generic browser-confirm layout", () => {
     const src = withdrawalFormSrc().replace(/\r\n/g, "\n")
     const reviewScreen = src.slice(
       src.indexOf('if (screen === "review" && review)'),
@@ -375,7 +375,7 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     )
     expect(reviewScreen).toContain("{reviewActionLabel}")
     expect(reviewScreen).toContain(">\n            Back\n          </button>")
-    expect(reviewScreen).toContain("onClick={() => onSubmit({ irreversibleAckChecked })}")
+    expect(reviewScreen).toContain("onClick={() => onSubmit()}")
     expect(reviewScreen).toContain("onClick={onEdit}")
     expect(reviewScreen).toContain("flex-col gap-2 sm:flex-row")
     expect(reviewScreen).not.toContain("window.confirm")
