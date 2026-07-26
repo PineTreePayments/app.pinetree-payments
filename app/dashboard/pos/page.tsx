@@ -2,16 +2,16 @@
 
 import Link from "next/link"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Eye, EyeOff } from "lucide-react"
+import { Eye, EyeOff, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import Button from "@/components/ui/Button"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
+import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import Card from "@/components/ui/Card"
 import {
   DashboardHeroCard,
   dashboardCardTitleClass,
-  dashboardMetricValueClass,
   dashboardPageTitleClass,
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
@@ -599,7 +599,9 @@ export default function POSPage() {
 
           <div className="grid gap-3">
 
-            {terminals.map((t)=>(
+            {terminals.map((t) => {
+              const drawer = drawerBalances[t.id]
+              return (
 
               <div
                 key={t.id}
@@ -622,7 +624,7 @@ export default function POSPage() {
 
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center md:justify-end">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center md:justify-end">
 
                   <Button
                     variant="secondary"
@@ -631,6 +633,16 @@ export default function POSPage() {
                   >
                     Details
                   </Button>
+
+                  {drawer?.active ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => { setCloseoutTerminalId(t.id); setCloseoutAmount(""); setCloseoutResult(null) }}
+                      className="w-full rounded-md px-3 text-xs sm:w-auto"
+                    >
+                      Close Drawer
+                    </Button>
+                  ) : null}
 
                   <Link href={`/terminal?tid=${t.id}`} className="block sm:inline-block">
                     <Button variant="primary" className="w-full rounded-md px-5 sm:w-auto">
@@ -653,7 +665,8 @@ export default function POSPage() {
 
               </div>
 
-            ))}
+              )
+            })}
 
           </div>
 
@@ -685,9 +698,10 @@ export default function POSPage() {
               <button
                 type="button"
                 onClick={() => setExpandedTerminalId(null)}
-                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-600 transition hover:bg-gray-50"
+                aria-label="Close terminal details"
+                className={modalCloseButtonClass}
               >
-                Close
+                <X size={18} aria-hidden="true" />
               </button>
             </div>
 
@@ -722,7 +736,7 @@ export default function POSPage() {
                   </p>
                 </div>
                 <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Current Drawer Balance</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Current / Expected Drawer Balance</p>
                   <p className="mt-1 text-sm font-semibold text-gray-950">
                     {selectedDrawer ? fmtUsd(selectedDrawer.balance) : "-"}
                   </p>
@@ -781,7 +795,7 @@ export default function POSPage() {
               </div>
             </div>
 
-            <div className="grid shrink-0 grid-cols-3 gap-2 border-t border-gray-100 bg-white px-5 py-4 sm:flex sm:justify-end sm:px-6">
+            <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-gray-100 bg-white px-5 py-4 sm:flex sm:justify-end sm:px-6">
               <Link href={`/terminal?tid=${selectedTerminal.id}`} className="block sm:inline-block">
                 <Button variant="primary" className="w-full rounded-xl px-5 sm:w-auto">
                   Launch
@@ -798,87 +812,10 @@ export default function POSPage() {
               >
                 Delete
               </Button>
-              <Button
-                variant="secondary"
-                onClick={() => setExpandedTerminalId(null)}
-                className="w-full rounded-xl px-3 text-xs sm:w-auto"
-              >
-                Close
-              </Button>
             </div>
           </section>
         </div>
       )}
-
-      {/* DRAWER BALANCES */}
-
-      {terminals.length > 0 && (
-
-        <section className="space-y-3">
-
-          <p className={dashboardSectionLabelClass}>
-            Drawer Balances
-          </p>
-
-          <div className="space-y-2">
-
-            <div className="hidden grid-cols-[minmax(0,1fr)_150px_140px] rounded-xl border border-blue-100 bg-blue-50/80 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500 sm:grid">
-              <span>Terminal / drawer status</span>
-              <span className="text-right">Expected balance</span>
-              <span className="text-right">Action</span>
-            </div>
-
-            <div className="grid gap-2">
-              {terminals.map((t) => {
-                const drawer = drawerBalances[t.id]
-                const balance = drawer?.balance ?? null
-                const lastEntry = drawer?.lastEntry
-                return (
-                  <div key={t.id} className="grid gap-3 rounded-2xl border border-gray-200/80 bg-white px-4 py-3.5 shadow-[0_8px_24px_rgba(15,23,42,0.045)] transition hover:border-blue-200 hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)] sm:grid-cols-[minmax(0,1fr)_150px_140px] sm:items-center sm:px-5">
-                    <div className="min-w-0">
-                      <p className={dashboardCardTitleClass}>{t.name}</p>
-                      {lastEntry ? (
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          Last: {new Date(lastEntry.created_at).toLocaleString()} · {lastEntry.type.replace("_", " ")}
-                        </p>
-                      ) : (
-                        <p className="text-xs text-gray-400 mt-0.5">No activity yet</p>
-                      )}
-                      <p className={`mt-1 text-xs font-medium ${drawer?.active ? "text-blue-700" : "text-gray-400"}`}>
-                        {drawer?.active ? "Open drawer shift" : "No active drawer shift"}
-                      </p>
-                    </div>
-                    <div className="flex items-center justify-between sm:block sm:text-right">
-                      <div className="contents">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 sm:hidden">
-                          Expected
-                        </p>
-                        <p className={`${dashboardMetricValueClass} tabular-nums ${balance !== null ? "" : "text-gray-300"}`}>
-                          {balance !== null ? fmtUsd(balance) : "—"}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex sm:justify-end">
-                      <Button
-                        variant="secondary"
-                        disabled={!drawer?.active}
-                        onClick={() => { setCloseoutTerminalId(t.id); setCloseoutAmount(""); setCloseoutResult(null) }}
-                        className="w-full rounded-xl sm:w-auto"
-                      >
-                        Close Drawer
-                      </Button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-
-          </div>
-
-        </section>
-
-      )}
-
       {/* CLOSEOUT MODAL */}
 
       {closeoutTerminalId && (

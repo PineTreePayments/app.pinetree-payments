@@ -423,6 +423,8 @@ export default function TransactionsPage() {
 
   const pageSizeSelectClass =
     "h-9 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-gray-600 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
+  const paginationControlClass =
+    "inline-flex h-9 items-center justify-center rounded-lg border border-blue-100 bg-blue-50/40 px-3 text-sm font-semibold text-blue-700 transition hover:border-blue-200 hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:border-blue-50 disabled:bg-blue-50/30 disabled:text-blue-300"
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -594,16 +596,16 @@ export default function TransactionsPage() {
               type="button"
               disabled={page <= 1}
               onClick={() => setPage((value) => Math.max(1, value - 1))}
-              className="rounded-lg border border-gray-200 px-3 py-1.5 font-medium disabled:opacity-40"
+              className={paginationControlClass}
             >
               Previous
             </button>
-            <span>Page {page} of {totalPages}</span>
+            <span className={paginationControlClass} aria-live="polite">Page {page} of {totalPages}</span>
             <button
               type="button"
               disabled={page >= totalPages}
               onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-              className="rounded-lg border border-gray-200 px-3 py-1.5 font-medium disabled:opacity-40"
+              className={paginationControlClass}
             >
               Next
             </button>

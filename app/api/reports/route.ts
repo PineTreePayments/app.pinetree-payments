@@ -13,6 +13,10 @@ export async function GET(req: NextRequest) {
     const startDate = searchParams.get("startDate")
     const endDate = searchParams.get("endDate")
     const type = searchParams.get("type") || undefined
+    const requestedPage = Number(searchParams.get("page") || 1)
+    const requestedPageSize = Number(searchParams.get("pageSize") || 50)
+    const pageSize = [25, 50, 100].includes(requestedPageSize) ? requestedPageSize : 50
+    const page = Math.max(1, Number.isFinite(requestedPage) ? Math.floor(requestedPage) : 1)
 
     const report = await generateReportEngine({
       merchantId,
@@ -21,12 +25,21 @@ export async function GET(req: NextRequest) {
       type,
       status: searchParams.get("status") || undefined
     })
-    const visibleLedgerLimit = 250
+    const totalLedgerRows = report.transactionsTable.length
+    const totalPages = Math.max(1, Math.ceil(totalLedgerRows / pageSize))
+    const normalizedPage = Math.min(page, totalPages)
+    const start = (normalizedPage - 1) * pageSize
     return NextResponse.json({
       ...report,
-      transactionsTable: report.transactionsTable.slice(0, visibleLedgerLimit),
-      totalLedgerRows: report.transactionsTable.length,
-      transactionsTruncated: report.transactionsTable.length > visibleLedgerLimit
+      transactionsTable: report.transactionsTable.slice(start, start + pageSize),
+      totalLedgerRows,
+      transactionsTruncated: false,
+      pagination: {
+        page: normalizedPage,
+        pageSize,
+        total: totalLedgerRows,
+        totalPages
+      }
     })
   } catch (error: unknown) {
     const status = getRouteErrorStatus(error)

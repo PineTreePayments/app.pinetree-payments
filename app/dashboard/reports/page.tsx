@@ -12,7 +12,8 @@ import {
   DashboardSection,
   GroupedMetricSurface,
   InlineMetric,
-  dashboardPageTitleClass
+  dashboardPageTitleClass,
+  dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
 import {
   formatDashboardNetwork,
@@ -71,6 +72,7 @@ type ReportSummary = {
   transactionsTable: LedgerRow[]
   totalLedgerRows: number
   transactionsTruncated: boolean
+  pagination?: { page: number; pageSize: number; total: number; totalPages: number }
 }
 
 const PERIODS: Array<{ value: ReportPeriod; label: string }> = [
@@ -94,6 +96,14 @@ function reportQuery(period: ReportPeriod, startDate: string, endDate: string) {
   }
   return params
 }
+
+const reportPageSizeOptions = [25, 50, 100]
+
+const lightBlueControlClass =
+  "inline-flex h-9 items-center justify-center rounded-lg border border-blue-100 bg-blue-50/40 px-3 text-sm font-semibold text-blue-700 transition hover:border-blue-200 hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:border-blue-50 disabled:bg-blue-50/30 disabled:text-blue-300"
+
+const lightBlueSelectClass =
+  "h-9 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-blue-700 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
 
 function Breakdown({
   title,
@@ -136,6 +146,8 @@ export default function ReportsPage() {
   const [emailRecipient, setEmailRecipient] = useState("")
   const [userEmail, setUserEmail] = useState("")
   const [sendingEmail, setSendingEmail] = useState(false)
+  const [ledgerPage, setLedgerPage] = useState(1)
+  const [ledgerPageSize, setLedgerPageSize] = useState(50)
   const emailRef = useRef<HTMLInputElement>(null)
 
   const activeStart = period === "custom" ? appliedCustom.start : ""
@@ -158,6 +170,8 @@ export default function ReportsPage() {
         setEmailRecipient((current) => current || session.user.email || "")
       }
       const params = reportQuery(period, activeStart, activeEnd)
+      params.set("page", String(ledgerPage))
+      params.set("pageSize", String(ledgerPageSize))
       const response = await fetch(`/api/reports?${params}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
         credentials: "include",
@@ -165,13 +179,18 @@ export default function ReportsPage() {
       })
       const payload = await response.json() as ReportSummary & { error?: string }
       if (!response.ok) throw new Error(payload.error || "Failed to load report")
+      const responseTotalPages = payload.pagination?.totalPages || Math.max(1, Math.ceil((payload.totalLedgerRows || 0) / ledgerPageSize))
+      if (ledgerPage > responseTotalPages) {
+        setLedgerPage(responseTotalPages)
+        return
+      }
       setSummary(payload)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load report")
     } finally {
       setLoading(false)
     }
-  }, [activeEnd, activeStart, period])
+  }, [activeEnd, activeStart, ledgerPage, ledgerPageSize, period])
 
   useEffect(() => {
     void fetchSummary()
@@ -192,6 +211,7 @@ export default function ReportsPage() {
       return
     }
     setAppliedCustom({ start: customStart, end: customEnd })
+    setLedgerPage(1)
   }
 
   async function download(format: "csv" | "pdf") {
@@ -270,6 +290,8 @@ export default function ReportsPage() {
     summary.reconciliation.railMatchesGross &&
     summary.reconciliation.assetMatchesCrypto
   )
+  const ledgerTotalPages = summary?.pagination?.totalPages || Math.max(1, Math.ceil((summary?.totalLedgerRows || 0) / ledgerPageSize))
+  const ledgerCurrentPage = summary?.pagination?.page || ledgerPage
 
   return (
     <div className="space-y-5 md:space-y-7">
@@ -280,7 +302,6 @@ export default function ReportsPage() {
           eyebrow={`${PERIODS.find((option) => option.value === period)?.label || "Report"}${summary.isInProgress ? " · In progress" : ""}`}
           title="Confirmed gross sales"
           value={currency(summary.grossVolume)}
-          detail={`${summary.confirmedCount} confirmed of ${summary.transactionCount} tracked transactions.`}
           secondary={<div className="grid min-w-[300px] grid-cols-2 divide-x divide-blue-200/80"><InlineMetric label="Merchant net" value={currency(summary.netSettlements)} className="pr-4" /><InlineMetric label="PineTree fees" value={currency(summary.pineTreeFees)} className="pl-4" /></div>}
         />
       ) : null}
@@ -297,18 +318,23 @@ export default function ReportsPage() {
         </PrimaryActionButton>
       </div>
 
-      <div className="rounded-2xl border border-gray-200/80 bg-white p-3 shadow-sm">
+      <div className="space-y-3">
+        <h2 className={dashboardSectionLabelClass}>PineTree Insights</h2>
         <SegmentedButtons
           ariaLabel="Report period"
-          className="flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           value={period}
-          onChange={(value) => { setPeriod(value); setError(null) }}
+          onChange={(value) => {
+            setPeriod(value)
+            setLedgerPage(1)
+            setError(null)
+          }}
           options={PERIODS.map((option) => ({ value: option.value, label: option.label }))}
         />
         {period === "custom" ? (
-          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-            <label className="text-xs font-semibold text-gray-600">Start date<input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 px-3 text-sm font-normal text-gray-900" /></label>
-            <label className="text-xs font-semibold text-gray-600">End date<input type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 px-3 text-sm font-normal text-gray-900" /></label>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <label className="text-xs font-semibold text-gray-600">Start date<input type="date" value={customStart} onChange={(event) => { setCustomStart(event.target.value); setLedgerPage(1) }} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900" /></label>
+            <label className="text-xs font-semibold text-gray-600">End date<input type="date" value={customEnd} onChange={(event) => { setCustomEnd(event.target.value); setLedgerPage(1) }} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900" /></label>
             <PrimaryActionButton onClick={applyCustomRange} className="mt-auto">Apply range</PrimaryActionButton>
           </div>
         ) : null}
@@ -328,9 +354,7 @@ export default function ReportsPage() {
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
               Report totals need review. Provider, rail, or crypto asset totals differ by {currency(summary.reconciliation.variance)}.
             </div>
-          ) : (
-            <div className="rounded-2xl border border-blue-200/80 bg-blue-50/80 px-4 py-3 text-sm font-medium text-blue-800 shadow-[0_8px_24px_rgba(37,99,235,0.07)]">Provider and rail totals reconcile to confirmed gross sales, and crypto assets reconcile to crypto volume.</div>
-          )}
+          ) : null}
 
           <DashboardSection title="Summary" titleTone="blue">
             <div className="grid gap-3 lg:grid-cols-2">
@@ -381,7 +405,45 @@ export default function ReportsPage() {
                     <tr key={`${row.paymentId}-${row.reference}`}><td className="whitespace-nowrap px-4 py-3 text-gray-600">{new Intl.DateTimeFormat("en-US", { timeZone: summary.timeZone, dateStyle: "medium", timeStyle: "short" }).format(new Date(row.dateTime))}</td><td className="max-w-[180px] truncate px-4 py-3 font-mono text-xs text-gray-600">{row.reference}</td><td className="px-4 py-3">{formatDashboardProvider(row.provider)}</td><td className="px-4 py-3">{row.rail}</td><td className="px-4 py-3">{formatDashboardNetwork(row.network)} · {row.asset}</td><td className="px-4 py-3 text-right font-semibold">{currency(row.gross)}</td><td className="px-4 py-3 text-right">{currency(row.pinetreeFee)}</td><td className="px-4 py-3"><StatusBadge status={row.canonicalStatus} /></td></tr>
                   ))}</tbody>
                 </table>
-                {summary.transactionsTruncated ? <p className="border-t border-gray-100 px-4 py-3 text-xs text-gray-500">Showing the first {summary.transactionsTable.length} of {summary.totalLedgerRows} rows. CSV export includes the complete period.</p> : null}
+                <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-3 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
+                  <span>{summary.totalLedgerRows} transactions</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="sr-only" htmlFor="reports-page-size">Transactions per page</label>
+                    <div className="relative">
+                      <select
+                        id="reports-page-size"
+                        aria-label="Transactions per page"
+                        className={lightBlueSelectClass}
+                        value={ledgerPageSize}
+                        onChange={(event) => {
+                          setLedgerPageSize(Number(event.target.value))
+                          setLedgerPage(1)
+                        }}
+                      >
+                        {reportPageSizeOptions.map((option) => (
+                          <option key={option} value={option}>{option} per page</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={ledgerCurrentPage <= 1}
+                      onClick={() => setLedgerPage((value) => Math.max(1, value - 1))}
+                      className={lightBlueControlClass}
+                    >
+                      Previous
+                    </button>
+                    <span className={lightBlueControlClass} aria-live="polite">Page {ledgerCurrentPage} of {ledgerTotalPages}</span>
+                    <button
+                      type="button"
+                      disabled={ledgerCurrentPage >= ledgerTotalPages}
+                      onClick={() => setLedgerPage((value) => Math.min(ledgerTotalPages, value + 1))}
+                      className={lightBlueControlClass}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </DashboardSection>
