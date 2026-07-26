@@ -3,7 +3,6 @@ import path from "node:path"
 import { createClient } from "@supabase/supabase-js"
 
 const OFFICIAL_ADMIN_EMAILS = [
-  "joshuaduskin@outlook.com",
   "jordanduskin@gmail.com",
 ]
 const ADMIN_LIKE_ROLES = ["admin", "super_admin", "developer", "staff", "support"]

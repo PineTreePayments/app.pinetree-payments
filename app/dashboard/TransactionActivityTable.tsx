@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import StatusBadge from "@/components/ui/StatusBadge"
+import { showMoreTransactionsButtonClass } from "@/components/ui/PaginationControls"
 import {
   formatProviderReference,
   formatTransactionReference,
@@ -363,11 +364,11 @@ export default function TransactionActivityTable({
           )
         })}
         {hasMoreMobileTransactions && (
-          <div className="border-t border-gray-100 bg-gray-50/70 p-3">
+          <div className="flex justify-center border-t border-gray-100 bg-gray-50/70 p-3">
             <button
               type="button"
               onClick={() => setVisibleMobileCount((current) => Math.min(current + mobileInitialCount, transactions.length))}
-              className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-blue-200 bg-white px-4 text-sm font-semibold text-blue-700 shadow-sm transition hover:bg-blue-50"
+              className={showMoreTransactionsButtonClass}
             >
               Show More Transactions
             </button>

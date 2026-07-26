@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import { PrimaryActionButton } from "@/components/ui/PrimaryActionButton"
+import { PaginationControls, paginationSelectClass } from "@/components/ui/PaginationControls"
 import TransactionActivityTable, { type DashboardTransactionRow } from "../TransactionActivityTable"
 import {
   DashboardHeroCard,
@@ -98,15 +99,6 @@ function reportQuery(period: ReportPeriod, startDate: string, endDate: string) {
 }
 
 const reportPageSizeOptions = [25, 50, 100]
-
-const paginationButtonClass =
-  "inline-flex h-9 items-center justify-center rounded-lg border border-[#0052FF]/45 bg-blue-50/80 px-3 text-sm font-semibold text-[#0052FF] transition hover:border-[#0052FF] hover:bg-blue-100/80 focus:outline-none focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:border-blue-100 disabled:bg-blue-50/20 disabled:text-blue-200 disabled:shadow-none"
-
-const paginationIndicatorClass =
-  "inline-flex h-9 items-center justify-center rounded-lg border border-blue-100 bg-white px-3 text-sm font-medium text-gray-700"
-
-const lightBlueSelectClass =
-  "h-9 appearance-none rounded-lg border border-[#0052FF]/35 bg-blue-50/80 pl-3 pr-7 text-sm font-medium text-gray-700 outline-none transition hover:border-[#0052FF]/60 hover:bg-blue-100/70 focus:border-[#0052FF] focus:bg-white focus:ring-4 focus:ring-blue-50"
 
 function topTotalLabel(totals: Record<string, number>, formatter = (value: string) => value) {
   const [label, value] = Object.entries(totals).sort((a, b) => b[1] - a[1])[0] || []
@@ -362,14 +354,14 @@ export default function ReportsPage() {
         />
       ) : null}
 
-      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-        <PrimaryActionButton onClick={() => void download("csv")} disabled={!summary || loading || Boolean(exporting)} className="w-full sm:w-auto">
+      <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-wrap sm:gap-2">
+        <PrimaryActionButton onClick={() => void download("csv")} disabled={!summary || loading || Boolean(exporting)} className="min-w-0 !h-9 w-full !px-1.5 !text-[10px] min-[380px]:!text-[11px] sm:w-auto sm:!h-10 sm:!px-4 sm:!text-sm">
           {exporting === "csv" ? "Exporting…" : "Export CSV"}
         </PrimaryActionButton>
-        <PrimaryActionButton onClick={() => void download("pdf")} disabled={!summary || loading || Boolean(exporting)} className="w-full sm:w-auto">
+        <PrimaryActionButton onClick={() => void download("pdf")} disabled={!summary || loading || Boolean(exporting)} className="min-w-0 !h-9 w-full !px-1.5 !text-[10px] min-[380px]:!text-[11px] sm:w-auto sm:!h-10 sm:!px-4 sm:!text-sm">
           {exporting === "pdf" ? "Exporting…" : "Download PDF"}
         </PrimaryActionButton>
-        <PrimaryActionButton onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading} className="w-full sm:w-auto">
+        <PrimaryActionButton onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading} className="min-w-0 !h-9 w-full !px-1.5 !text-[10px] min-[380px]:!text-[11px] sm:w-auto sm:!h-10 sm:!px-4 sm:!text-sm">
           Email report
         </PrimaryActionButton>
       </div>
@@ -462,15 +454,21 @@ export default function ReportsPage() {
                     emptyMessage="No transactions were recorded in this period."
                   />
                 </div>
-                <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-3 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
-                  <span>{summary.totalLedgerRows} transactions</span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="sr-only" htmlFor="reports-page-size">Transactions per page</label>
-                    <div className="relative">
+                <PaginationControls
+                  totalLabel={`${summary.totalLedgerRows} transactions`}
+                  page={ledgerCurrentPage}
+                  totalPages={ledgerTotalPages}
+                  previousDisabled={ledgerCurrentPage <= 1}
+                  nextDisabled={ledgerCurrentPage >= ledgerTotalPages}
+                  onPrevious={() => setLedgerPage((value) => Math.max(1, value - 1))}
+                  onNext={() => setLedgerPage((value) => Math.min(ledgerTotalPages, value + 1))}
+                  pageSizeControl={(
+                    <div className="min-w-0">
+                      <label className="sr-only" htmlFor="reports-page-size">Transactions per page</label>
                       <select
                         id="reports-page-size"
                         aria-label="Transactions per page"
-                        className={lightBlueSelectClass}
+                        className={paginationSelectClass}
                         value={ledgerPageSize}
                         onChange={(event) => {
                           setLedgerPageSize(Number(event.target.value))
@@ -482,25 +480,8 @@ export default function ReportsPage() {
                         ))}
                       </select>
                     </div>
-                    <button
-                      type="button"
-                      disabled={ledgerCurrentPage <= 1}
-                      onClick={() => setLedgerPage((value) => Math.max(1, value - 1))}
-                      className={paginationButtonClass}
-                    >
-                      Previous
-                    </button>
-                    <span className={paginationIndicatorClass} aria-live="polite">Page {ledgerCurrentPage} of {ledgerTotalPages}</span>
-                    <button
-                      type="button"
-                      disabled={ledgerCurrentPage >= ledgerTotalPages}
-                      onClick={() => setLedgerPage((value) => Math.min(ledgerTotalPages, value + 1))}
-                      className={paginationButtonClass}
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
+                  )}
+                />
               </div>
             )}
           </DashboardSection>

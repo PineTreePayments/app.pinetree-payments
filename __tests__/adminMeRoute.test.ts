@@ -28,7 +28,7 @@ describe("/api/admin/me", () => {
     mocks.getAdminStatusFromRequest.mockResolvedValue({
       isAdmin: true,
       merchantId: "admin-user-id",
-      email: "joshuaduskin@outlook.com",
+      email: "jordanduskin@gmail.com",
       role: "admin",
     })
 
@@ -38,7 +38,7 @@ describe("/api/admin/me", () => {
     await expect(response.json()).resolves.toEqual({
       isAdmin: true,
       merchantId: "admin-user-id",
-      email: "joshuaduskin@outlook.com",
+      email: "jordanduskin@gmail.com",
       role: "admin",
     })
   })

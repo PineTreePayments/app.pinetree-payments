@@ -19,6 +19,7 @@ import {
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import { ExpandIconButton } from "@/components/ui/ExpandIconButton"
+import { PaginationControls, paginationSelectClass } from "@/components/ui/PaginationControls"
 import {
   buildNeutralInsight,
   countBy,
@@ -421,13 +422,6 @@ export default function TransactionsPage() {
   const filterSelectClass =
     "h-9 w-full min-w-0 appearance-none rounded-lg border border-blue-100 bg-blue-50/40 pl-3 pr-7 text-sm font-normal text-gray-600 outline-none transition hover:border-blue-200 hover:bg-blue-50/70 focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-50"
 
-  const pageSizeSelectClass =
-    "h-9 appearance-none rounded-lg border border-[#0052FF]/35 bg-blue-50/80 pl-3 pr-7 text-sm font-medium text-gray-700 outline-none transition hover:border-[#0052FF]/60 hover:bg-blue-100/70 focus:border-[#0052FF] focus:bg-white focus:ring-4 focus:ring-blue-50"
-  const paginationControlClass =
-    "inline-flex h-9 items-center justify-center rounded-lg border border-[#0052FF]/45 bg-blue-50/80 px-3 text-sm font-semibold text-[#0052FF] transition hover:border-[#0052FF] hover:bg-blue-100/80 focus:outline-none focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:border-blue-100 disabled:bg-blue-50/20 disabled:text-blue-200 disabled:shadow-none"
-  const paginationIndicatorClass =
-    "inline-flex h-9 items-center justify-center rounded-lg border border-blue-100 bg-white px-3 text-sm font-medium text-gray-700"
-
   return (
     <div className="space-y-5 md:space-y-7">
       <div>
@@ -576,15 +570,21 @@ export default function TransactionsPage() {
           </div>
         ) : null}
         {loadingTransactions ? <p className="px-4 py-8 text-center text-sm text-gray-500">Loading transactions…</p> : <TransactionActivityTable transactions={filteredTransactions} />}
-        <div className="flex flex-col gap-3 border-t border-gray-100 px-2 py-3 text-sm text-gray-600 sm:flex-row sm:items-center sm:justify-between">
-          <span>{totalTransactions} transactions</span>
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="sr-only" htmlFor="transactions-page-size">Page size</label>
-            <div className="relative">
+        <PaginationControls
+          totalLabel={`${totalTransactions} transactions`}
+          page={page}
+          totalPages={totalPages}
+          previousDisabled={page <= 1}
+          nextDisabled={page >= totalPages}
+          onPrevious={() => setPage((value) => Math.max(1, value - 1))}
+          onNext={() => setPage((value) => Math.min(totalPages, value + 1))}
+          pageSizeControl={(
+            <div className="relative min-w-0">
+              <label className="sr-only" htmlFor="transactions-page-size">Page size</label>
               <select
                 id="transactions-page-size"
                 aria-label="Page size"
-                className={pageSizeSelectClass}
+                className={paginationSelectClass}
                 value={pageSize}
                 onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1) }}
               >
@@ -594,25 +594,8 @@ export default function TransactionsPage() {
               </select>
               <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-blue-300" />
             </div>
-            <button
-              type="button"
-              disabled={page <= 1}
-              onClick={() => setPage((value) => Math.max(1, value - 1))}
-              className={paginationControlClass}
-            >
-              Previous
-            </button>
-            <span className={paginationIndicatorClass} aria-live="polite">Page {page} of {totalPages}</span>
-            <button
-              type="button"
-              disabled={page >= totalPages}
-              onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-              className={paginationControlClass}
-            >
-              Next
-            </button>
-          </div>
-        </div>
+          )}
+        />
       </div>
       </DashboardSection>
 

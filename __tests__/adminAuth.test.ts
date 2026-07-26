@@ -39,20 +39,20 @@ describe("admin authorization", () => {
     mocks.requireMerchantAuthFromRequest.mockResolvedValue({
       merchantId: "admin-user-id",
       authUserId: "admin-user-id",
-      email: "joshuaduskin@outlook.com",
+      email: "jordanduskin@gmail.com",
       source: "supabase",
     })
     mocks.single.mockResolvedValue({
-      data: { email: "joshuaduskin@outlook.com", role: "admin" },
+      data: { email: "jordanduskin@gmail.com", role: "admin" },
       error: null,
     })
   })
 
-  it("recognizes a Supabase user with the existing admin role", async () => {
+  it("recognizes Jordan when the canonical admin role is present", async () => {
     await expect(requireAdminFromRequest(req())).resolves.toBe("admin-user-id")
   })
 
-  it("recognizes the cofounder account when it has the canonical admin role", async () => {
+  it("normalizes Jordan's email and admin role consistently", async () => {
     mocks.requireMerchantAuthFromRequest.mockResolvedValue({
       merchantId: "cofounder-admin-id",
       authUserId: "cofounder-admin-id",
@@ -71,19 +71,24 @@ describe("admin authorization", () => {
     await expect(requireAdminFromRequest(req())).resolves.toBe("cofounder-admin-id")
   })
 
-  it("does not depend on email casing when the canonical admin role is present", async () => {
+  it("denies Joshua admin access while preserving normal merchant authentication", async () => {
     mocks.requireMerchantAuthFromRequest.mockResolvedValue({
-      merchantId: "admin-user-id",
-      authUserId: "admin-user-id",
+      merchantId: "joshua-merchant-id",
+      authUserId: "joshua-merchant-id",
       email: "JoshuaDuskin@Outlook.com",
       source: "supabase",
     })
     mocks.single.mockResolvedValue({
-      data: { email: "JOSHUAduSKIN@outlook.com", role: "Admin" },
+      data: { email: "JOSHUAduSKIN@outlook.com", role: "merchant" },
       error: null,
     })
 
-    await expect(requireAdminFromRequest(req())).resolves.toBe("admin-user-id")
+    const status = await getAdminStatusFromRequest(req())
+
+    expect(status.isAdmin).toBe(false)
+    expect(status.merchantId).toBe("joshua-merchant-id")
+    expect(status.role).toBe("merchant")
+    await expect(requireAdminFromRequest(req())).rejects.toMatchObject({ status: 403 })
   })
 
   it("denies a normal merchant even if a client supplies admin-looking headers", async () => {
@@ -99,7 +104,7 @@ describe("admin authorization", () => {
     })
 
     const status = await getAdminStatusFromRequest(req({
-      "x-user-email": "joshuaduskin@outlook.com",
+      "x-user-email": "jordanduskin@gmail.com",
       "x-user-role": "admin",
     }))
 

@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import { ArrowLeft, ChevronLeft, ChevronRight, Copy, RefreshCw, Search, X } from "lucide-react"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
+import { PaginationControls } from "@/components/ui/PaginationControls"
 import {
   CompactMetricTile,
   DashboardSection,
@@ -914,27 +915,17 @@ export default function AdminTransactionsPage() {
 
         {/* Pagination */}
         {!loading && totalCount > LIMIT && (
-          <div className="flex items-center justify-between pt-1">
-            <button
-              onClick={() => setOffset(Math.max(0, offset - LIMIT))}
-              disabled={currentPage === 1}
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-600 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ChevronLeft size={14} /> Previous
-            </button>
-
-            <span className="text-xs text-gray-500">
-              Page {fmt(currentPage)} of {fmt(totalPages)}
-            </span>
-
-            <button
-              onClick={() => setOffset(offset + LIMIT)}
-              disabled={currentPage >= totalPages}
-              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-600 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Next <ChevronRight size={14} />
-            </button>
-          </div>
+          <PaginationControls
+            totalLabel={`${fmt(totalCount)} transactions`}
+            page={fmt(currentPage)}
+            totalPages={fmt(totalPages)}
+            previousDisabled={currentPage === 1}
+            nextDisabled={currentPage >= totalPages}
+            onPrevious={() => setOffset(Math.max(0, offset - LIMIT))}
+            onNext={() => setOffset(offset + LIMIT)}
+            previousContent={<><ChevronLeft size={14} /> Previous</>}
+            nextContent={<>Next <ChevronRight size={14} /></>}
+          />
         )}
       </DashboardSection>
 

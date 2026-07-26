@@ -1,5 +1,4 @@
 export const OFFICIAL_ADMIN_EMAILS = [
-  "joshuaduskin@outlook.com",
   "jordanduskin@gmail.com",
 ] as const
 

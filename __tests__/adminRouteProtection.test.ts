@@ -44,10 +44,10 @@ describe("admin route protection", () => {
     }
   })
 
-  it("keeps the restoration script narrowly scoped to the official accounts", () => {
+  it("keeps the restoration script narrowly scoped to the current official account", () => {
     const script = read("scripts/restore-official-admin.mjs")
 
-    expect(script).toContain('"joshuaduskin@outlook.com"')
+    expect(script).not.toContain('"joshuaduskin@outlook.com"')
     expect(script).toContain('"jordanduskin@gmail.com"')
     expect(script).toContain('role: "admin"')
     expect(script).toContain('.not("id", "in", `(${officialAdminIds.join(",")})`)')
