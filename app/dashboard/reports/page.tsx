@@ -412,6 +412,23 @@ export default function ReportsPage() {
             </div>
           </DashboardSection>
 
+          <DashboardSection title="Breakdowns" titleTone="blue">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <Breakdown title="Providers" totals={summary.providerTotals} formatLabel={formatDashboardProvider} />
+              <Breakdown title="Rails" totals={summary.railTotals} />
+              <Breakdown title="Assets" totals={summary.assetTotals} />
+              <Breakdown title="Networks" totals={summary.networkTotals} formatLabel={formatDashboardNetwork} />
+            </div>
+          </DashboardSection>
+
+          <DashboardSection title="Status Breakdown" titleTone="blue">
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              {Object.entries(summary.statusCounts).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
+                <div key={status} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2.5"><p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">{status}</p><p className="mt-0.5 text-base font-semibold leading-tight text-gray-950 sm:text-lg">{count}</p></div>
+              ))}
+            </div>
+          </DashboardSection>
+
           <PineTreeInsightsCard title="PINETREE INSIGHTS" insights={insights} />
 
           <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-wrap sm:gap-2">
@@ -425,23 +442,6 @@ export default function ReportsPage() {
               Email report
             </PrimaryActionButton>
           </div>
-
-          <DashboardSection title="Breakdowns" titleTone="blue">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Breakdown title="Providers" totals={summary.providerTotals} formatLabel={formatDashboardProvider} />
-              <Breakdown title="Rails" totals={summary.railTotals} />
-              <Breakdown title="Assets" totals={summary.assetTotals} />
-              <Breakdown title="Networks" totals={summary.networkTotals} formatLabel={formatDashboardNetwork} />
-            </div>
-          </DashboardSection>
-
-          <DashboardSection title="Status breakdown" titleTone="blue">
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-              {Object.entries(summary.statusCounts).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
-                <div key={status} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2.5"><p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">{status}</p><p className="mt-0.5 text-base font-semibold leading-tight text-gray-950 sm:text-lg">{count}</p></div>
-              ))}
-            </div>
-          </DashboardSection>
 
           <DashboardSection title="Transaction ledger" titleTone="blue">
             {summary.totalLedgerRows === 0 ? (

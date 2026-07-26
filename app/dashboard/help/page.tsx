@@ -171,6 +171,8 @@ const HELP_NAV_ITEMS = [
   { id: "tickets" as const, label: "Tickets", href: "#recent-tickets" },
 ]
 
+const HELP_SECTION_ANCHOR_CLASS = "scroll-mt-24 md:scroll-mt-28"
+
 const TICKET_STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   open: { label: "Open", cls: "bg-blue-50 text-[#0052FF] border-blue-200" },
   in_review: { label: "In Review", cls: "bg-amber-50 text-amber-700 border-amber-200" },
@@ -633,12 +635,11 @@ export default function HelpCenterPage() {
         {/* AI tab */}
         {mobileSection === "ai" && (
           <div className="flex h-[calc(100dvh-9rem)] max-h-[34rem] min-h-[24rem] flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-3 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
-            <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
+            <div className="mb-2 flex shrink-0 items-center gap-2">
               <div className="flex items-center gap-2">
                 <Bot className="h-5 w-5 text-[#0052FF]" />
                 <h2 className="text-base font-semibold text-gray-950">Ask PineTree AI</h2>
               </div>
-              <ProviderStatusPill label="Account-aware" tone="blue" />
             </div>
 
             <div className="flex shrink-0 gap-2 overflow-x-auto pb-2">
@@ -1010,14 +1011,14 @@ export default function HelpCenterPage() {
       {/* ── DESKTOP ONLY ─────────────────────────────────────────────────── */}
       <div className="hidden md:block md:space-y-7">
 
+      <div id="pinetree-ai" className={HELP_SECTION_ANCHOR_CLASS}>
       <DashboardSection title="PineTree AI" titleTone="blue">
-        <div id="pinetree-ai" className="flex h-[32rem] max-h-[calc(100vh-12rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+        <div className="flex h-[32rem] max-h-[calc(100vh-12rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
           <div className="flex shrink-0 items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <Bot className="h-5 w-5 text-[#0052FF]" />
               <h2 className="text-lg font-semibold text-gray-950">Ask PineTree AI</h2>
             </div>
-            <ProviderStatusPill label="Account-aware" tone="blue" />
           </div>
 
           <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain rounded-xl border border-blue-100 bg-white/75 p-3">
@@ -1065,6 +1066,7 @@ export default function HelpCenterPage() {
           </div>
         </div>
       </DashboardSection>
+      </div>
 
       <DashboardSection title="Support Paths" titleTone="blue">
         <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-color:#e2e8f0_transparent] [scrollbar-width:thin]">
@@ -1106,9 +1108,9 @@ export default function HelpCenterPage() {
         </div>
       </DashboardSection>
 
-
-<DashboardSection title="Documentation" titleTone="blue">
-        <div id="help-docs" className="scroll-mt-6 space-y-3">
+      <div id="help-docs" className={HELP_SECTION_ANCHOR_CLASS}>
+      <DashboardSection title="Documentation" titleTone="blue">
+        <div className="space-y-3">
           {!hasSearch && (
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {categorySummaries.map(({ category, count, sample }) => {
@@ -1209,11 +1211,13 @@ export default function HelpCenterPage() {
           </div>
         </div>
       </DashboardSection>
+      </div>
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div id="support-ticket" className={HELP_SECTION_ANCHOR_CLASS}>
         <DashboardSection title="Support" titleTone="blue">
             {/* Open a Ticket form */}
-            <div id="support-ticket" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+            <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-950">Open a Ticket</h2>
@@ -1286,11 +1290,13 @@ export default function HelpCenterPage() {
             </div>
 
           </DashboardSection>
+        </div>
 
       </div>
 
+      <div id="recent-tickets" className={HELP_SECTION_ANCHOR_CLASS}>
       <DashboardSection title="Recent Tickets" titleTone="blue">
-        <div id="recent-tickets" className="scroll-mt-6 rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+        <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-gray-950">Recent Tickets</h2>
             <button
@@ -1379,6 +1385,7 @@ export default function HelpCenterPage() {
           )}
         </div>
       </DashboardSection>
+      </div>
 
       <DashboardSection title="Feedback" titleTone="blue">
         <div id="feedback" className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
