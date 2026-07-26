@@ -16,7 +16,6 @@ import {
   Search,
   Send,
   Sparkles,
-  Ticket,
   WalletCards,
   X
 } from "lucide-react"
@@ -32,8 +31,7 @@ import {
 import {
   DashboardSection,
   ProviderStatusPill,
-  dashboardPageTitleClass,
-  dashboardSectionLabelClass
+  dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
 import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/SegmentedButtons"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
@@ -165,6 +163,13 @@ const SUPPORT_STORAGE_DISABLED_MESSAGE =
 
 const TICKET_FILTERS = ["All", "Open", "In Review", "Resolved", "Archived"] as const
 type TicketFilter = typeof TICKET_FILTERS[number]
+
+const HELP_NAV_ITEMS = [
+  { id: "ai" as const, label: "Ask AI", href: "#pinetree-ai" },
+  { id: "docs" as const, label: "Docs", href: "#help-docs" },
+  { id: "support" as const, label: "Support", href: "#support-ticket" },
+  { id: "tickets" as const, label: "Tickets", href: "#recent-tickets" },
+]
 
 const TICKET_STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   open: { label: "Open", cls: "bg-blue-50 text-[#0052FF] border-blue-200" },
@@ -600,46 +605,26 @@ export default function HelpCenterPage() {
         <h1 className={dashboardPageTitleClass}>Help Center</h1>
       </div>
 
-      {/* Desktop hero card */}
-      <div className="hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.12),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef5ff_100%)] px-4 pb-5 pt-4 shadow-[0_10px_30px_rgba(0,82,255,0.09)] md:block sm:px-5 sm:pb-6 sm:pt-5">
-        <div className="flex min-h-20 flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="min-w-0">
-            <p className={dashboardSectionLabelClass}>
-              PineTree Support Center
-            </p>
-            <h2 className="mt-1 text-sm font-normal leading-relaxed text-gray-700">
-              Set up rails, understand payment states, and know when to escalate.
-            </h2>
-          </div>
-          <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:min-w-[250px] md:self-center">
-            <QuickAction label="Open a Ticket" icon={<Ticket size={16} />} href="#support-ticket" />
-            <QuickAction label="Ask PineTree AI" icon={<Bot size={16} />} href="#pinetree-ai" />
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile tab row — top, sticky */}
-      <div className="sticky top-0 z-10 -mx-4 bg-white/95 px-4 pb-2 pt-1 backdrop-blur-sm md:hidden">
-        <div className="grid grid-cols-4 gap-1.5">
-          {(
-            [
-              { id: "ai" as const, label: "Ask AI", icon: Bot },
-              { id: "docs" as const, label: "Docs", icon: BookOpen },
-              { id: "support" as const, label: "Support", icon: LifeBuoy },
-              { id: "tickets" as const, label: "Tickets", icon: FileText },
-            ]
-          ).map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setMobileSection(id)}
-              className={`flex min-w-0 items-center justify-center gap-1 ${segmentedButtonClass(mobileSection === id, "compact")}`}
-            >
-              <Icon className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{label}</span>
-            </button>
-          ))}
-        </div>
+      <div className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap">
+        {HELP_NAV_ITEMS.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setMobileSection(id)}
+            className={`flex min-w-0 items-center justify-center md:hidden ${segmentedButtonClass(mobileSection === id, "compact")}`}
+          >
+            <span className="truncate">{label}</span>
+          </button>
+        ))}
+        {HELP_NAV_ITEMS.map(({ id, label, href }) => (
+          <a
+            key={`desktop-${id}`}
+            href={href}
+            className={`hidden items-center justify-center md:inline-flex ${segmentedButtonClass(false)}`}
+          >
+            <span className="truncate">{label}</span>
+          </a>
+        ))}
       </div>
 
       {/* ── MOBILE ONLY: tab content ─────────────────────────────────────── */}
@@ -1025,6 +1010,62 @@ export default function HelpCenterPage() {
       {/* ── DESKTOP ONLY ─────────────────────────────────────────────────── */}
       <div className="hidden md:block md:space-y-7">
 
+      <DashboardSection title="PineTree AI" titleTone="blue">
+        <div id="pinetree-ai" className="flex h-[32rem] max-h-[calc(100vh-12rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
+          <div className="flex shrink-0 items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Bot className="h-5 w-5 text-[#0052FF]" />
+              <h2 className="text-lg font-semibold text-gray-950">Ask PineTree AI</h2>
+            </div>
+            <ProviderStatusPill label="Account-aware" tone="blue" />
+          </div>
+
+          <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain rounded-xl border border-blue-100 bg-white/75 p-3">
+            {assistantMessages.map((message) => (
+              <AssistantMessageBubble
+                key={message.id}
+                message={message}
+                onOpenArticle={(article) => {
+                  setSelectedCategory(article.category)
+                  setSelectedArticle(article)
+                  setQuery("")
+                }}
+              />
+            ))}
+            {assistantLoading && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-[#0052FF]">
+                Checking your PineTree account context...
+              </div>
+            )}
+          </div>
+
+          <div className="mt-3 flex shrink-0 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+            <Sparkles className="h-4 w-4 text-[#0052FF]" />
+            <input
+              value={assistantQuestion}
+              onChange={(event) => setAssistantQuestion(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault()
+                  void submitAssistantQuestion()
+                }
+              }}
+              placeholder="Ask PineTree AI about your setup or a payment status"
+              className="min-h-9 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
+            />
+            <button
+              type="button"
+              onClick={() => void submitAssistantQuestion()}
+              disabled={assistantLoading || !assistantQuestion.trim()}
+              aria-label="Ask PineTree AI"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#0052FF] text-white transition hover:bg-blue-700 disabled:opacity-50"
+            >
+              <Send size={15} />
+            </button>
+          </div>
+        </div>
+      </DashboardSection>
+
       <DashboardSection title="Support Paths" titleTone="blue">
         <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-color:#e2e8f0_transparent] [scrollbar-width:thin]">
           {supportHubCards.map((section) => {
@@ -1067,7 +1108,7 @@ export default function HelpCenterPage() {
 
 
 <DashboardSection title="Documentation" titleTone="blue">
-        <div className="space-y-3">
+        <div id="help-docs" className="scroll-mt-6 space-y-3">
           {!hasSearch && (
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {categorySummaries.map(({ category, count, sample }) => {
@@ -1246,65 +1287,10 @@ export default function HelpCenterPage() {
 
           </DashboardSection>
 
-        <DashboardSection title="PineTree AI" titleTone="blue">
-          <div id="pinetree-ai" className="flex h-[32rem] max-h-[calc(100vh-12rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] p-4 shadow-[0_14px_45px_rgba(37,99,235,0.10)]">
-            <div className="flex shrink-0 items-start justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Bot className="h-5 w-5 text-[#0052FF]" />
-                <h2 className="text-lg font-semibold text-gray-950">Ask PineTree AI</h2>
-              </div>
-              <ProviderStatusPill label="Account-aware" tone="blue" />
-            </div>
-
-            <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain rounded-xl border border-blue-100 bg-white/75 p-3">
-              {assistantMessages.map((message) => (
-                <AssistantMessageBubble
-                  key={message.id}
-                  message={message}
-                  onOpenArticle={(article) => {
-                    setSelectedCategory(article.category)
-                    setSelectedArticle(article)
-                    setQuery("")
-                  }}
-                />
-              ))}
-              {assistantLoading && (
-                <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-[#0052FF]">
-                  Checking your PineTree account context...
-                </div>
-              )}
-            </div>
-
-            <div className="mt-3 flex shrink-0 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
-              <Sparkles className="h-4 w-4 text-[#0052FF]" />
-              <input
-                value={assistantQuestion}
-                onChange={(event) => setAssistantQuestion(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault()
-                    void submitAssistantQuestion()
-                  }
-                }}
-                placeholder="Ask PineTree AI about your setup or a payment status"
-                className="min-h-9 flex-1 bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400"
-              />
-              <button
-                type="button"
-                onClick={() => void submitAssistantQuestion()}
-                disabled={assistantLoading || !assistantQuestion.trim()}
-                aria-label="Ask PineTree AI"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#0052FF] text-white transition hover:bg-blue-700 disabled:opacity-50"
-              >
-                <Send size={15} />
-              </button>
-            </div>
-          </div>
-        </DashboardSection>
       </div>
 
       <DashboardSection title="Recent Tickets" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
+        <div id="recent-tickets" className="scroll-mt-6 rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-gray-950">Recent Tickets</h2>
             <button
@@ -2001,18 +1987,6 @@ function ArticleModal({
 }
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
-
-function QuickAction({ label, icon, href }: { label: string; icon: ReactNode; href: string }) {
-  return (
-    <a
-      href={href}
-      className="inline-flex min-h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-blue-200 bg-white px-3 text-sm font-semibold text-[#0052FF] shadow-sm transition hover:border-[#0052FF] hover:bg-blue-50"
-    >
-      {icon}
-      {label}
-    </a>
-  )
-}
 
 function Field({
   label,

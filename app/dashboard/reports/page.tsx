@@ -375,8 +375,6 @@ export default function ReportsPage() {
         ) : null}
       </div>
 
-      <PineTreeInsightsCard title="PINETREE INSIGHTS" insights={insights} />
-
       {error ? (
         <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <div className="flex flex-wrap items-center justify-between gap-3"><span>{error}</span><button type="button" onClick={() => void fetchSummary()} className="font-semibold underline">Try again</button></div>
@@ -393,7 +391,7 @@ export default function ReportsPage() {
             </div>
           ) : null}
 
-          <DashboardSection title="Summary" titleTone="blue">
+          <DashboardSection>
             <div className="grid gap-3 lg:grid-cols-2">
               <GroupedMetricSurface dense titleTone="blue" title="Volume Summary">
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 lg:grid-cols-4">
@@ -413,6 +411,8 @@ export default function ReportsPage() {
               </GroupedMetricSurface>
             </div>
           </DashboardSection>
+
+          <PineTreeInsightsCard title="PINETREE INSIGHTS" insights={insights} />
 
           <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-wrap sm:gap-2">
             <PrimaryActionButton onClick={() => void download("csv")} disabled={!summary || loading || Boolean(exporting)} className="min-w-0 !h-9 w-full !px-1.5 !text-[10px] min-[380px]:!text-[11px] sm:w-auto sm:!h-10 sm:!px-4 sm:!text-sm">

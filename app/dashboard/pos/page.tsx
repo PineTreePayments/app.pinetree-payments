@@ -476,47 +476,34 @@ export default function POSPage() {
 
       {/* HEADER */}
 
-      <div>
-
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className={dashboardPageTitleClass}>
           Point of Sale
         </h1>
-
+        <button
+          type="button"
+          className={`${primaryActionButtonClass} w-full sm:w-auto`}
+          onClick={startCreatingTerminal}
+        >
+          Register terminal
+        </button>
       </div>
 
       <div className="rounded-2xl border border-blue-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_55%,#eef5ff_100%)] px-3.5 py-3 shadow-[0_10px_30px_rgba(37,99,235,0.1)] md:hidden">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className={dashboardSectionLabelClass}>ACTIVE TERMINALS</p>
-            <div className="mt-1 flex items-baseline gap-2">
-              <p className="text-3xl font-semibold leading-none text-gray-950">{terminals.length}</p>
-              <p className="truncate text-xs font-medium text-gray-600">Manage and launch POS sessions</p>
-            </div>
+        <div className="min-w-0">
+          <p className={dashboardSectionLabelClass}>ACTIVE TERMINALS</p>
+          <div className="mt-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">Terminal Count</p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-gray-950">{terminals.length}</p>
           </div>
-          <Button
-            variant="secondary"
-            className={`${primaryActionButtonClass} self-end`}
-            onClick={startCreatingTerminal}
-          >
-            Register terminal
-          </Button>
         </div>
       </div>
 
       <div className="hidden md:block">
         <DashboardHeroCard
           eyebrow="ACTIVE TERMINALS"
-          title="Manage terminals and launch POS sessions."
+          title="Terminal Count"
           value={terminals.length}
-          action={
-            <Button
-              variant="secondary"
-              className={`${primaryActionButtonClass} self-end`}
-              onClick={startCreatingTerminal}
-            >
-              Register terminal
-            </Button>
-          }
         />
       </div>
 
