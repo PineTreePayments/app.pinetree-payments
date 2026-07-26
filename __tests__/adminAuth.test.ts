@@ -52,6 +52,25 @@ describe("admin authorization", () => {
     await expect(requireAdminFromRequest(req())).resolves.toBe("admin-user-id")
   })
 
+  it("recognizes the cofounder account when it has the canonical admin role", async () => {
+    mocks.requireMerchantAuthFromRequest.mockResolvedValue({
+      merchantId: "cofounder-admin-id",
+      authUserId: "cofounder-admin-id",
+      email: " JordanDuskin@Gmail.com ",
+      source: "supabase",
+    })
+    mocks.single.mockResolvedValue({
+      data: { email: "jordanduskin@gmail.com", role: " admin " },
+      error: null,
+    })
+
+    const status = await getAdminStatusFromRequest(req())
+
+    expect(status.isAdmin).toBe(true)
+    expect(status.role).toBe("admin")
+    await expect(requireAdminFromRequest(req())).resolves.toBe("cofounder-admin-id")
+  })
+
   it("does not depend on email casing when the canonical admin role is present", async () => {
     mocks.requireMerchantAuthFromRequest.mockResolvedValue({
       merchantId: "admin-user-id",
@@ -60,7 +79,7 @@ describe("admin authorization", () => {
       source: "supabase",
     })
     mocks.single.mockResolvedValue({
-      data: { email: "JOSHUAduSKIN@outlook.com", role: "admin" },
+      data: { email: "JOSHUAduSKIN@outlook.com", role: "Admin" },
       error: null,
     })
 

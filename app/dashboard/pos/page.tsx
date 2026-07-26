@@ -386,7 +386,7 @@ export default function POSPage() {
           </div>
           <button
             onClick={startCreatingTerminal}
-            className={`${primaryActionButtonClass} h-9 px-3 text-xs`}
+            className={`${primaryActionButtonClass} h-9 self-end px-3 text-xs`}
           >
             + New Terminal
           </button>
@@ -644,12 +644,12 @@ export default function POSPage() {
 
                 </div>
 
-                <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center md:w-auto md:justify-end">
+                <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(0,1fr))] gap-1.5 min-[380px]:gap-2 sm:flex sm:flex-wrap sm:items-center md:w-auto md:justify-end">
 
                   <Button
                     variant="secondary"
                     onClick={() => toggleTerminalDetails(t.id)}
-                    className="w-full rounded-md px-3 text-xs sm:w-auto"
+                    className="h-10 w-full min-w-0 rounded-md px-2 text-[11px] sm:w-auto sm:px-3 sm:text-xs"
                   >
                     Details
                   </Button>
@@ -658,28 +658,17 @@ export default function POSPage() {
                     <Button
                       variant="secondary"
                       onClick={() => { setCloseoutTerminalId(t.id); setCloseoutAmount(""); setCloseoutResult(null) }}
-                      className="w-full rounded-md px-3 text-xs sm:w-auto"
+                      className="h-10 w-full min-w-0 rounded-md px-2 text-[11px] sm:w-auto sm:px-3 sm:text-xs"
                     >
                       Close Drawer
                     </Button>
                   ) : null}
 
-                  <Link href={`/terminal?tid=${t.id}`} className="block sm:inline-block">
-                    <Button variant="primary" className="w-full rounded-md px-5 sm:w-auto">
+                  <Link href={`/terminal?tid=${t.id}`} className="block min-w-0 sm:inline-block">
+                    <Button variant="primary" className="h-10 w-full min-w-0 rounded-md px-2 text-[11px] sm:w-auto sm:px-5 sm:text-sm">
                       Launch
                     </Button>
                   </Link>
-
-                  <Button
-                    variant="danger"
-                    onClick={()=>{
-                      setTerminalToDelete(t.id)
-                      setConfirmDelete(true)
-                    }}
-                    className="w-full rounded-md px-3 text-xs sm:w-auto"
-                  >
-                    Delete
-                  </Button>
 
                 </div>
 
@@ -815,23 +804,25 @@ export default function POSPage() {
               </div>
             </div>
 
-            <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-gray-100 bg-white px-5 py-4 sm:flex sm:justify-end sm:px-6">
-              <Link href={`/terminal?tid=${selectedTerminal.id}`} className="block sm:inline-block">
-                <Button variant="primary" className="w-full rounded-xl px-5 sm:w-auto">
-                  Launch
+            <div className="shrink-0 border-t border-gray-100 bg-white px-5 py-4 sm:px-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    setTerminalToDelete(selectedTerminal.id)
+                    setConfirmDelete(true)
+                    setExpandedTerminalId(null)
+                  }}
+                  className="w-full rounded-xl border-red-300 bg-red-50 px-3 text-xs sm:w-auto"
+                >
+                  Delete
                 </Button>
-              </Link>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  setTerminalToDelete(selectedTerminal.id)
-                  setConfirmDelete(true)
-                  setExpandedTerminalId(null)
-                }}
-                className="w-full rounded-xl px-3 text-xs sm:w-auto"
-              >
-                Delete
-              </Button>
+                <Link href={`/terminal?tid=${selectedTerminal.id}`} className="block sm:inline-block">
+                  <Button variant="primary" className="w-full rounded-xl px-5 sm:w-auto">
+                    Launch
+                  </Button>
+                </Link>
+              </div>
             </div>
           </section>
         </div>

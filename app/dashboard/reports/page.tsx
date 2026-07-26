@@ -13,8 +13,7 @@ import {
   GroupedMetricSurface,
   InlineMetric,
   PineTreeInsightsCard,
-  dashboardPageTitleClass,
-  dashboardSectionLabelClass
+  dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
 import {
   formatDashboardNetwork,
@@ -375,10 +374,7 @@ export default function ReportsPage() {
         </PrimaryActionButton>
       </div>
 
-      <div className="space-y-3">
-        <h2 className={dashboardSectionLabelClass}>PineTree Insights</h2>
-        <PineTreeInsightsCard title="PINETREE INSIGHTS" insights={insights} />
-      </div>
+      <PineTreeInsightsCard title="PINETREE INSIGHTS" insights={insights} />
 
       {error ? (
         <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

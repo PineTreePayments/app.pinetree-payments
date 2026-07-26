@@ -2,7 +2,10 @@ import fs from "node:fs"
 import path from "node:path"
 import { createClient } from "@supabase/supabase-js"
 
-const OFFICIAL_ADMIN_EMAIL = "joshuaduskin@outlook.com"
+const OFFICIAL_ADMIN_EMAILS = [
+  "joshuaduskin@outlook.com",
+  "jordanduskin@gmail.com",
+]
 const ADMIN_LIKE_ROLES = ["admin", "super_admin", "developer", "staff", "support"]
 
 function loadEnvFile(fileName) {
@@ -43,7 +46,10 @@ function requireEnv(name) {
   return value
 }
 
-async function findAuthUserByEmail(admin, email) {
+async function findAuthUsersByEmail(admin, emails) {
+  const remaining = new Set(emails.map(normalizeEmail))
+  const matches = new Map()
+
   for (let page = 1; page <= 20; page += 1) {
     let result
     const originalConsoleError = console.error
@@ -59,9 +65,15 @@ async function findAuthUserByEmail(admin, email) {
     const { data, error } = result
     if (error) throw new Error("Failed to list Supabase auth users")
 
-    const match = data.users.find((user) => normalizeEmail(user.email) === email)
-    if (match) return match
-    if (data.users.length < 1000) return null
+    for (const user of data.users) {
+      const normalized = normalizeEmail(user.email)
+      if (remaining.has(normalized)) {
+        matches.set(normalized, user)
+        remaining.delete(normalized)
+      }
+    }
+
+    if (remaining.size === 0 || data.users.length < 1000) return matches
   }
 
   throw new Error("Supabase auth user lookup exceeded the expected page limit")
@@ -77,48 +89,55 @@ async function main() {
     auth: { persistSession: false },
   })
 
-  const authUser = await findAuthUserByEmail(admin, OFFICIAL_ADMIN_EMAIL)
-  if (!authUser) {
-    console.log("Official auth user not found. Recreate it through the normal signup or invitation flow, then rerun this script.")
+  const officialAuthUsers = await findAuthUsersByEmail(admin, OFFICIAL_ADMIN_EMAILS)
+  const missingEmails = OFFICIAL_ADMIN_EMAILS.filter((email) => !officialAuthUsers.has(email))
+  if (missingEmails.length > 0) {
+    console.log(`Official auth user(s) not found: ${missingEmails.join(", ")}. Recreate them through the normal signup or invitation flow, then rerun this script.`)
     process.exitCode = 2
     return
   }
 
-  const { data: existingMerchant, error: existingError } = await admin
-    .from("merchants")
-    .select("business_name,status")
-    .eq("id", authUser.id)
-    .maybeSingle()
-
-  if (existingError) {
-    throw new Error("Failed to inspect the official merchant row")
-  }
-
   const now = new Date().toISOString()
-  const { error: upsertError } = await admin
-    .from("merchants")
-    .upsert(
-      {
-        id: authUser.id,
-        email: OFFICIAL_ADMIN_EMAIL,
-        business_name: existingMerchant?.business_name || "PineTree Administration",
-        status: existingMerchant?.status || "active",
-        role: "admin",
-        updated_at: now,
-        ...(!existingMerchant ? { created_at: now } : {}),
-      },
-      { onConflict: "id" }
-    )
+  const officialAdminIds = []
 
-  if (upsertError) {
-    throw new Error("Failed to restore the official admin merchant row")
+  for (const officialEmail of OFFICIAL_ADMIN_EMAILS) {
+    const authUser = officialAuthUsers.get(officialEmail)
+    officialAdminIds.push(authUser.id)
+
+    const { data: existingMerchant, error: existingError } = await admin
+      .from("merchants")
+      .select("business_name")
+      .eq("id", authUser.id)
+      .maybeSingle()
+
+    if (existingError) {
+      throw new Error(`Failed to inspect the official merchant row for ${officialEmail}`)
+    }
+
+    const { error: upsertError } = await admin
+      .from("merchants")
+      .upsert(
+        {
+          id: authUser.id,
+          email: officialEmail,
+          business_name: existingMerchant?.business_name || "PineTree Administration",
+          role: "admin",
+          updated_at: now,
+          ...(!existingMerchant ? { created_at: now } : {}),
+        },
+        { onConflict: "id" }
+      )
+
+    if (upsertError) {
+      throw new Error(`Failed to restore the official admin merchant row for ${officialEmail}`)
+    }
   }
 
   const { error: demoteError, count: demotedCount } = await admin
     .from("merchants")
     .update({ role: "merchant", updated_at: now }, { count: "exact" })
     .in("role", ADMIN_LIKE_ROLES)
-    .neq("id", authUser.id)
+    .not("id", "in", `(${officialAdminIds.join(",")})`)
 
   if (demoteError) {
     throw new Error("Failed to remove non-official admin-like merchant roles")
@@ -128,15 +147,16 @@ async function main() {
     .from("merchants")
     .select("id", { count: "exact", head: true })
     .in("role", ADMIN_LIKE_ROLES)
-    .neq("id", authUser.id)
+    .not("id", "in", `(${officialAdminIds.join(",")})`)
 
   if (verifyError) {
     throw new Error("Failed to verify admin exclusivity")
   }
 
   console.log(JSON.stringify({
-    officialAuthUserFound: true,
-    officialMerchantRowRestored: true,
+    officialAuthUsersFound: true,
+    officialAdminEmails: OFFICIAL_ADMIN_EMAILS,
+    officialMerchantRowsRestored: true,
     nonOfficialAdminLikeRowsDemoted: demotedCount ?? 0,
     remainingNonOfficialAdminLikeRows: remainingAdminLike ?? 0,
   }))

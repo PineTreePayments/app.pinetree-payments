@@ -22,10 +22,11 @@ describe("admin route protection", () => {
     expect(middleware).toContain('pathname === "/dashboard/admin"')
     expect(middleware).toContain('pathname.startsWith("/dashboard/admin/")')
     expect(middleware).toContain('.select("role")')
-    expect(middleware).toContain('data?.role === "admin"')
+    expect(middleware).toContain("isAdminRole(data?.role)")
     expect(middleware).toContain('dashboardUrl.pathname = "/dashboard"')
     expect(middleware).not.toContain("isOfficialAdminEmail")
     expect(middleware).not.toContain("joshuaduskin@outlook.com")
+    expect(middleware).not.toContain("jordanduskin@gmail.com")
   })
 
   it("requires server-side admin authorization on every admin API route", () => {
@@ -43,12 +44,13 @@ describe("admin route protection", () => {
     }
   })
 
-  it("keeps the restoration script narrowly scoped to the official account", () => {
+  it("keeps the restoration script narrowly scoped to the official accounts", () => {
     const script = read("scripts/restore-official-admin.mjs")
 
-    expect(script).toContain('const OFFICIAL_ADMIN_EMAIL = "joshuaduskin@outlook.com"')
+    expect(script).toContain('"joshuaduskin@outlook.com"')
+    expect(script).toContain('"jordanduskin@gmail.com"')
     expect(script).toContain('role: "admin"')
-    expect(script).toContain('.neq("id", authUser.id)')
+    expect(script).toContain('.not("id", "in", `(${officialAdminIds.join(",")})`)')
     expect(script).toContain('role: "merchant"')
     expect(script).toContain('admin.auth.admin.listUsers')
     expect(script).not.toContain("createUser")

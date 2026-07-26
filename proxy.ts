@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import { createClient } from "@supabase/supabase-js"
+import { isAdminRole } from "@/lib/adminAccess"
 
 function isProtectedPage(pathname: string): boolean {
   return (
@@ -158,7 +159,7 @@ export async function proxy(req: NextRequest) {
       .eq("id", user.id)
       .single()
 
-    const isAdmin = data?.role === "admin"
+    const isAdmin = isAdminRole(data?.role)
 
     if (!isAdmin) {
       const dashboardUrl = req.nextUrl.clone()

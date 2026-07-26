@@ -4,6 +4,7 @@ import {
   getRouteErrorStatus
 } from "./merchantAuth"
 import { supabase, supabaseAdmin } from "@/database/supabase"
+import { isAdminRole, normalizeAdminRole } from "@/lib/adminAccess"
 
 export { getRouteErrorStatus }
 
@@ -40,10 +41,10 @@ export async function getAdminStatusFromRequest(req: NextRequest): Promise<Admin
     .eq("id", auth.merchantId)
     .single()
 
-  const role = typeof data?.role === "string" ? data.role : null
+  const role = normalizeAdminRole(data?.role)
 
   return {
-    isAdmin: Boolean(data && role === "admin"),
+    isAdmin: Boolean(data && isAdminRole(role)),
     merchantId: auth.merchantId,
     email: auth.email,
     role,
