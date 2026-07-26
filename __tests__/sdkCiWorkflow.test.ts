@@ -17,7 +17,9 @@ describe("SDK CI workflow", () => {
     }
 
     // Node 18 removed: Next.js 16 and 256 transitive deps require node >=20.9.0.
-    expect(workflow).toContain('node: ["20", "22"]')
+    // Pin the Node 20 lane to a known-good patch so setup-node cannot resolve
+    // to a runtime below the root app's engine floor.
+    expect(workflow).toContain('node: ["20.20.2", "22"]')
     expect(workflow).not.toContain('"18"')
     expect(workflow).toContain("npm run typecheck --workspace packages/pinetree-node")
     expect(workflow).toContain("npm run build --workspace packages/pinetree-node")
@@ -31,8 +33,8 @@ describe("SDK CI workflow", () => {
     // Normalize CRLF → LF so assertions work on Windows and Linux alike.
     const workflow = read(".github/workflows/sdk-ci.yml").replace(/\r\n/g, "\n")
 
-    expect(workflow).toContain("- name: Root typecheck\n        if: matrix.node == '20'")
-    expect(workflow).toContain("- name: Root tests\n        if: matrix.node == '20'")
+    expect(workflow).toContain("- name: Root typecheck\n        if: startsWith(matrix.node, '20')")
+    expect(workflow).toContain("- name: Root tests\n        if: startsWith(matrix.node, '20')")
     expect(workflow).toContain("actions/checkout@v4")
     expect(workflow).toContain("actions/setup-node@v4")
     expect(workflow).toContain('"package-lock.json"')

@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["20", "22"]
+        node: ["20.20.2", "22"]
 
     steps:
       - uses: actions/checkout@v4
@@ -60,17 +60,17 @@ jobs:
         run: npm test --workspace packages/pinetree-node
 
       # Next.js 16 and 256 transitive packages require Node >=20.9.0.
-      # Run root app validation only on the LTS node (20) to keep CI fast.
+      # Run root app validation only on the pinned LTS node (20.x) to keep CI fast.
       - name: Root typecheck
-        if: matrix.node == '20'
+        if: startsWith(matrix.node, '20')
         run: npm run typecheck
 
       - name: Root tests
-        if: matrix.node == '20'
+        if: startsWith(matrix.node, '20')
         run: npm test
 
       - name: Root production build
-        if: matrix.node == '20'
+        if: startsWith(matrix.node, '20')
         run: npm run build
         env:
           # Build-only placeholders satisfy module-level Supabase client creation.
@@ -80,7 +80,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
 
       - name: SDK release-candidate validation
-        if: matrix.node == '20'
+        if: startsWith(matrix.node, '20')
         run: npm run release-candidate --workspace packages/pinetree-node
 
   # ── Integration tests (opt-in, requires secrets) ────────────────────────────
@@ -105,7 +105,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "20.20.2"
           cache: npm
           cache-dependency-path: "package-lock.json"
 

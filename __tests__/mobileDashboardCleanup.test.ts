@@ -51,11 +51,12 @@ describe("mobile dashboard hero cleanup", () => {
 
   it("keeps the POS terminal action compact", () => {
     const pos = read("app/dashboard/pos/page.tsx")
-    const action = pos.match(/<button[\s\S]*?onClick=\{startCreatingTerminal\}[\s\S]*?<\/button>/)?.[0] ?? ""
+    const action = pos.match(/<Button[\s\S]*?onClick=\{startCreatingTerminal\}[\s\S]*?<\/Button>/)?.[0] ?? ""
 
     expect(action).toContain("primaryActionButtonClass")
     expect(action).toContain("self-end")
     expect(action).not.toContain("w-full")
+    expect(action).not.toContain("fullWidth")
   })
 
   it("shows Inventory metrics without a duplicate hero value", () => {

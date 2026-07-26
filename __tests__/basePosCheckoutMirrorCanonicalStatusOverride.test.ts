@@ -43,14 +43,15 @@ describe("BasePosCheckoutMirror — canonical status overrides stale session ste
     const start = src.indexOf('if (terminalStatus === "CONFIRMED")')
     const end = src.indexOf("if (terminalStatus) {", start)
     const block = src.slice(start, end)
-    expect(block).toContain('<PaymentStatusVisual status="CONFIRMED"')
+    expect(block).toContain('<TransactionResult state="CONFIRMED"')
   })
 
   it("renders a non-CONFIRMED terminal status (FAILED/INCOMPLETE/EXPIRED/CANCELED) driven by canonical status alone", () => {
     const start = src.indexOf("if (terminalStatus) {")
     const end = src.indexOf("const step = session?.step", start)
     const block = src.slice(start, end)
-    expect(block).toContain("<PaymentStatusVisual status={terminalStatus}")
+    expect(block).toContain("<TransactionResult")
+    expect(block).toContain("state={terminalStatus}")
   })
 
   it("this override sits before the awaiting-wallet card render, so it applies even if the POS session mirror never loaded", () => {

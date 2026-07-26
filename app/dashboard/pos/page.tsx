@@ -493,12 +493,13 @@ export default function POSPage() {
               <p className="truncate text-xs font-medium text-gray-600">Manage and launch POS sessions</p>
             </div>
           </div>
-          <button
+          <Button
+            variant="secondary"
+            className={`${primaryActionButtonClass} self-end`}
             onClick={startCreatingTerminal}
-            className={`${primaryActionButtonClass} h-9 self-end px-3 text-xs`}
           >
-            + New Terminal
-          </button>
+            Register terminal
+          </Button>
         </div>
       </div>
 
@@ -508,12 +509,13 @@ export default function POSPage() {
           title="Manage terminals and launch POS sessions."
           value={terminals.length}
           action={
-            <button
-              onClick={startCreatingTerminal}
+            <Button
+              variant="secondary"
               className={`${primaryActionButtonClass} self-end`}
+              onClick={startCreatingTerminal}
             >
-              + New Terminal
-            </button>
+              Register terminal
+            </Button>
           }
         />
       </div>
