@@ -42,9 +42,10 @@ type Props = {
 type StateConfig = {
   title: string
   description: string
-  glowClassName: string
+  iconBgClassName: string
   iconClassName: string
-  animationClassName: string
+  isWaiting?: boolean
+  spin?: boolean
   Icon: typeof Check
 }
 
@@ -52,57 +53,52 @@ const STATE_CONFIG: Record<TransactionResultState, StateConfig> = {
   pending: {
     title: "Pending",
     description: "Awaiting customer action.",
-    glowClassName: "from-[#0052FF]/28 via-[#0052FF]/12 to-transparent",
-    iconClassName: "text-[#0052FF]",
-    animationClassName: "pinetree-result-pulse",
+    iconBgClassName: "bg-transparent",
+    iconClassName: "text-[#2f5bea]",
+    isWaiting: true,
     Icon: Clock3,
   },
   processing: {
     title: "Processing",
     description: "Payment detected and awaiting confirmation.",
-    glowClassName: "from-[#0052FF]/30 via-[#0052FF]/13 to-transparent",
-    iconClassName: "text-[#0052FF]",
-    animationClassName: "pinetree-result-pulse",
+    iconBgClassName: "bg-blue-100",
+    iconClassName: "text-blue-700",
+    spin: true,
     Icon: LoaderCircle,
   },
   confirmed: {
     title: "Confirmed",
     description: "Payment successfully completed.",
-    glowClassName: "from-emerald-500/30 via-emerald-400/13 to-transparent",
-    iconClassName: "text-emerald-600",
-    animationClassName: "pinetree-result-confirmed",
+    iconBgClassName: "bg-green-50",
+    iconClassName: "text-green-600",
     Icon: Check,
   },
   failed: {
     title: "Failed",
     description: "Payment attempt failed validation, was rejected, or could not complete.",
-    glowClassName: "from-red-500/30 via-red-400/13 to-transparent",
+    iconBgClassName: "bg-red-50",
     iconClassName: "text-red-600",
-    animationClassName: "pinetree-result-shake",
     Icon: X,
   },
   incomplete: {
     title: "Incomplete",
     description: "The payment was not completed before the request ended.",
-    glowClassName: "from-orange-500/30 via-orange-400/13 to-transparent",
-    iconClassName: "text-orange-600",
-    animationClassName: "pinetree-result-fade",
+    iconBgClassName: "bg-amber-50",
+    iconClassName: "text-amber-700",
     Icon: CirclePause,
   },
   expired: {
     title: "Expired",
     description: "The payment request timed out.",
-    glowClassName: "from-amber-500/30 via-amber-400/13 to-transparent",
-    iconClassName: "text-amber-600",
-    animationClassName: "pinetree-result-fade",
+    iconBgClassName: "bg-amber-50",
+    iconClassName: "text-amber-700",
     Icon: TimerOff,
   },
   cancelled: {
     title: "Cancelled",
     description: "The payment was cancelled before completion.",
-    glowClassName: "from-slate-400/30 via-slate-400/13 to-transparent",
-    iconClassName: "text-slate-500",
-    animationClassName: "pinetree-result-fade",
+    iconBgClassName: "bg-gray-50",
+    iconClassName: "text-gray-600",
     Icon: Ban,
   },
 }
@@ -134,43 +130,42 @@ export function TransactionResult({
   const normalized = normalizeTransactionResultState(state)
   const config = STATE_CONFIG[normalized]
   const Icon = config.Icon
+  const resolvedIconSize = compact ? 34 : 56
 
   return (
     <section
-      className={`flex w-full flex-col rounded-[1.35rem] border border-white/80 bg-white/82 px-5 py-6 text-center shadow-[0_24px_70px_rgba(15,23,42,0.14)] ring-1 ring-[#0052FF]/8 backdrop-blur-xl sm:px-7 ${compact ? "min-h-[23.75rem] sm:py-7" : "min-h-[25rem] sm:py-8"} ${className}`}
+      className={`w-full rounded-[1.35rem] border border-[#0052FF]/10 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.10),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef5ff_100%)] px-5 ${compact ? "py-5" : "py-7"} text-center shadow-[0_18px_60px_rgba(0,82,255,0.12)] sm:px-7 ${compact ? "sm:py-6" : "sm:py-8"} ${className}`}
       aria-live="polite"
     >
-      <div className="mx-auto flex min-h-full w-full max-w-[19rem] flex-1 flex-col items-center">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#0052FF]">
-          PineTree Checkout
-        </p>
+      <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
+        PineTree Checkout
+      </p>
 
-        <div className={`relative mt-7 flex h-[7.25rem] w-[7.25rem] items-center justify-center ${config.animationClassName}`}>
-          <span
-            aria-hidden="true"
-            className={`absolute left-1/2 top-1/2 h-[7.25rem] w-[7.25rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,var(--tw-gradient-stops))] ${config.glowClassName} blur-xl`}
-          />
-          {normalized === "processing" ? (
-            <span
-              aria-hidden="true"
-              className="absolute left-1/2 top-1/2 h-[5.35rem] w-[5.35rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-[#0052FF]/14 border-t-[#0052FF] animate-spin"
+      <div className={`mx-auto mt-4 flex flex-col items-center ${compact ? "gap-2" : "gap-3"}`}>
+        <div className={`rounded-full ${compact ? "p-2" : "p-3"} ${config.iconBgClassName} shadow-sm ring-1 ring-white/80`}>
+          <span className={`inline-flex ${config.isWaiting ? "pinetree-waiting-glow" : ""}`}>
+            <Icon
+              size={resolvedIconSize}
+              className={`${config.iconClassName} ${config.spin ? "animate-spin" : ""} ${config.isWaiting ? "pinetree-waiting-indicator" : ""}`}
+              strokeWidth={1.8}
             />
-          ) : null}
-          <Icon className={`relative h-16 w-16 ${config.iconClassName}`} strokeWidth={1.75} />
+          </span>
         </div>
 
-        <div className="mt-7 min-h-[7.625rem] space-y-3">
-          <h1 className="text-[1.72rem] font-bold leading-tight text-gray-950 sm:text-[1.9rem]">
+        <div className="space-y-0.5">
+          <h1 className={`${compact ? "text-lg" : "text-xl sm:text-2xl"} font-semibold ${config.isWaiting ? "text-[#2f5bea]" : "text-gray-950"}`}>
             {config.title}
           </h1>
-          <p className="mx-auto max-w-[18rem] text-[15px] leading-6 text-gray-600">
+          <p className={`${compact ? "text-xs" : "text-sm"} leading-6 text-gray-600`}>
             {description || config.description}
           </p>
         </div>
+      </div>
 
-        {children ? <div className="mt-5 w-full">{children}</div> : null}
+      {children ? <div className="mt-5 w-full">{children}</div> : null}
 
-        <div className="mt-auto min-h-[7.25rem] w-full space-y-2 pt-7">
+      {actions.length > 0 ? (
+        <div className="mt-6 w-full space-y-2">
           {actions.map((action) => {
             if (action.href) {
               return (
@@ -194,7 +189,7 @@ export function TransactionResult({
             )
           })}
         </div>
-      </div>
+      ) : null}
     </section>
   )
 }

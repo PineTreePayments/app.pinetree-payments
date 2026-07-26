@@ -128,87 +128,6 @@ body.pinetree-wallet-provider-authorizing [class*="dynamic" i] {
   }
 }
 
-@keyframes pinetreeResultPulse {
-  0%, 100% {
-    transform: scale(0.985);
-  }
-
-  50% {
-    transform: scale(1.025);
-  }
-}
-
-@keyframes pinetreeResultConfirmed {
-  0% {
-    opacity: 0;
-    transform: scale(0.9);
-  }
-
-  62% {
-    opacity: 1;
-    transform: scale(1.045);
-  }
-
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes pinetreeResultShake {
-  0%, 100% {
-    transform: translateX(0);
-  }
-
-  18% {
-    transform: translateX(-4px);
-  }
-
-  36% {
-    transform: translateX(4px);
-  }
-
-  54% {
-    transform: translateX(-2px);
-  }
-
-  72% {
-    transform: translateX(2px);
-  }
-}
-
-@keyframes pinetreeResultFade {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.pinetree-result-pulse {
-  animation: pinetreeResultPulse 1.65s ease-in-out infinite;
-  transform-origin: center;
-}
-
-.pinetree-result-confirmed {
-  animation: pinetreeResultConfirmed 0.55s cubic-bezier(0.2, 0.9, 0.25, 1.2) both;
-  transform-origin: center;
-}
-
-.pinetree-result-shake {
-  animation: pinetreeResultShake 0.42s ease-out both;
-  transform-origin: center;
-}
-
-.pinetree-result-fade {
-  animation: pinetreeResultFade 0.38s ease-out both;
-  transform-origin: center;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .pinetree-waiting-indicator {
     animation: none;
@@ -217,13 +136,6 @@ body.pinetree-wallet-provider-authorizing [class*="dynamic" i] {
   .pinetree-waiting-glow::before {
     animation: none;
     opacity: 0.4;
-  }
-
-  .pinetree-result-pulse,
-  .pinetree-result-confirmed,
-  .pinetree-result-shake,
-  .pinetree-result-fade {
-    animation: none;
   }
 }
 

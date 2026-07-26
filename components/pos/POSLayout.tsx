@@ -2211,6 +2211,29 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
               </div>
             )}
 
+            {breakdown && (
+              <div className="mt-3 space-y-1.5 rounded-2xl border border-gray-100 bg-gray-50/80 px-3.5 py-3 text-sm shadow-inner shadow-white">
+                <div className="flex justify-between text-gray-700">
+                  <span>Subtotal</span>
+                  <span>{fmtUsd(breakdown.subtotalAmount)}</span>
+                </div>
+                {breakdown.taxEnabled && (
+                  <div className="flex justify-between text-gray-700">
+                    <span>Tax ({breakdown.taxRate}%)</span>
+                    <span>{fmtUsd(breakdown.taxAmount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-gray-700">
+                  <span>Service fee</span>
+                  <span>{fmtUsd(breakdown.serviceFee)}</span>
+                </div>
+                <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-1.5">
+                  <span>Total</span>
+                  <span>{fmtUsd(breakdown.totalAmount)}</span>
+                </div>
+              </div>
+            )}
+
           </TransactionResult>
         )}
 
