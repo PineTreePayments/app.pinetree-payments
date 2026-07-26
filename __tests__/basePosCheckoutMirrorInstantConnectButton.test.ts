@@ -130,11 +130,11 @@ describe("BasePosCheckoutMirror — instant Connect button", () => {
     expect(cardBlock).toContain("Cancel")
 
     // Unrelated cancel/back paths still exist: error state keeps a danger
-    // button, while terminal statuses now flow through the canonical
-    // TransactionResult action model.
+    // button, while terminal statuses use the shared hosted-checkout
+    // PaymentStatusVisual treatment plus the existing Back action.
     expect(src).toContain("if (selectNetworkError) {")
-    expect(src).toContain("<TransactionResult")
-    expect(src).toContain("onClick: onCancel")
+    expect(src).toContain("<PaymentStatusVisual")
+    expect(src).toContain("onClick={onCancel}")
   })
 
   it("preserves and adds the requested timing milestones, each carrying intentId and paymentId", () => {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
-import { TransactionResult } from "@/components/payment/TransactionResult"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import WalletPickerModal, { type WalletPickerSection } from "@/components/payment/WalletPickerModal"
 import { acquireLightningStatusPoller, isTerminalLightningPollStatus } from "@/lib/lightning/lightningStatusPoller"
 import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
@@ -491,8 +491,11 @@ export default function LightningPayment({
 
   if (terminalStatus) {
     return (
-      <div className="py-3">
-        <TransactionResult state={terminalStatus} compact />
+      <div className="space-y-3">
+        <div className="text-center text-xs font-semibold uppercase tracking-widest text-gray-500">
+          Bitcoin Lightning Payment
+        </div>
+        <PaymentStatusVisual status={terminalStatus} variant="card" />
       </div>
     )
   }

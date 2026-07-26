@@ -13,7 +13,7 @@ import BasePosCheckoutMirror from "@/components/payment/BasePosCheckoutMirror"
 import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
 import LightningPayment from "@/components/payment/LightningPayment"
 import { StripeCardPayment } from "@/components/payment/StripeCardPayment"
-import { TransactionResult } from "@/components/payment/TransactionResult"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import {
   getHostedCheckoutTerminalEvent,
   postHostedCheckoutEvent,
@@ -1469,36 +1469,22 @@ export default function PayClient() {
 
   if (isIntentMode && terminalPaymentStatus) {
     const isConfirmed = terminalPaymentStatus === "CONFIRMED"
-    const isFailed = terminalPaymentStatus === "FAILED"
-    const isExpired = terminalPaymentStatus === "EXPIRED"
-    const isIncomplete = terminalPaymentStatus === "INCOMPLETE"
-    const isCancelled = terminalPaymentStatus === "CANCELED"
     const returnUrl = isConfirmed ? successUrl : cancelUrl
-    const actions = [
-      isConfirmed
-        ? { label: "Done", onClick: () => window.close() }
-        : isFailed
-          ? { label: "Try Again", onClick: () => { void loadIntentCallback() } }
-          : isExpired
-            ? { label: "Create New Payment", href: returnUrl || undefined, variant: "secondary" as const }
-            : isIncomplete
-              ? { label: "Resume Payment", onClick: () => { void loadIntentCallback() } }
-              : isCancelled
-                ? { label: "Close", onClick: () => window.close(), variant: "secondary" as const }
-                : null,
-      isConfirmed && returnUrl
-        ? { label: "Return to Merchant", href: returnUrl, variant: "secondary" as const }
-        : !isConfirmed && returnUrl
-          ? { label: "Return", href: returnUrl, variant: "secondary" as const }
-          : null,
-    ].filter(Boolean) as Array<{ label: string; onClick?: () => void; href?: string; variant?: "primary" | "secondary" | "danger" }>
+    const returnLabel = isConfirmed ? "Return to merchant" : "Return to store"
     return (
       <PageContainer>
-        <TransactionResult
-          state={terminalPaymentStatus}
-          actions={actions}
-          className="max-w-md"
-        />
+        <div className="w-full max-w-md space-y-3 text-center">
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
+          <PaymentStatusVisual status={terminalPaymentStatus} variant="card" />
+          {returnUrl && (
+            <a
+              href={returnUrl}
+              className="inline-block rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:border-[#0052FF]/30 hover:text-[#0052FF]"
+            >
+              {returnLabel}
+            </a>
+          )}
+        </div>
       </PageContainer>
     )
   }
@@ -1510,7 +1496,10 @@ export default function PayClient() {
   ) {
     return (
       <PageContainer>
-        <TransactionResult state="PROCESSING" className="max-w-md" />
+        <div className="w-full max-w-md space-y-3 text-center">
+          <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
+          <PaymentStatusVisual status="PROCESSING" variant="card" />
+        </div>
       </PageContainer>
     )
   }

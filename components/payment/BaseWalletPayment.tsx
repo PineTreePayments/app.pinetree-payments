@@ -4,7 +4,7 @@ import { useAccount, useConnect, useSwitchChain, useWalletClient } from "wagmi"
 import type { Connector } from "wagmi"
 import { base } from "wagmi/chains"
 import Button from "@/components/ui/Button"
-import { TransactionResult } from "@/components/payment/TransactionResult"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import { classifyWalletFamily, detectCapabilitiesFromProvider } from "@/lib/basePay/strategyOrchestrator"
 import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
 import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
@@ -1831,7 +1831,7 @@ export default function BaseWalletPayment({
       setIsPreparingPayment(false)
     }
   }, [directBaseUsdcStrategy, directPaymentId, directPaymentUrl, intentId, isIntentMode, onPaymentCreated, selectedAsset])
-  // ─── Base V7 USDC execution ──────────────────────────────────────���─────────
+  // ─── Base V7 USDC execution ───────────────────────────────────────────────
   // Calls the server strategy endpoint, then executes the confirmed strategy.
   // No force flag — the server determines the best path.
   const executeBaseV6UsdcPayment = useCallback(async (input: {
@@ -1963,7 +1963,7 @@ export default function BaseWalletPayment({
             activeWalletRequestRef.current = null
             console.info("[BASE V6] delegated-batch-unsupported-falling-through", { paymentId, error: sendMsg })
             // Fall through to EIP-3009 or allowance path below
-            throw new Error("wallet_sendCalls unsupported. Please try again �� a different approval method will be used.")
+            throw new Error("wallet_sendCalls unsupported. Please try again; a different approval method will be used.")
           }
           resolveWalletRequest()
           let finalTxHash = extractDirectFinalTxHashFromSendCallsResult(sendCallsResult)
@@ -2168,7 +2168,7 @@ export default function BaseWalletPayment({
           )
         }
       }
-      // ── Strategy: usdc_allowance_direct / usdc_allowance_two_step ───���─────────
+      // ── Strategy: usdc_allowance_direct / usdc_allowance_two_step ─────────
       logBaseV6("usdc_final_payment_build_start", {
         paymentId,
         selectedAsset,
@@ -3447,8 +3447,11 @@ export default function BaseWalletPayment({
   // ── Render helpers ────────────────────────────────────────────────────────
   if (terminalStatus) {
     return (
-      <div className="py-3">
-        <TransactionResult state={terminalStatus} compact />
+      <div className="space-y-3">
+        <div className="text-center text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
+          Base Network Payment
+        </div>
+        <PaymentStatusVisual status={terminalStatus} variant="card" />
       </div>
     )
   }

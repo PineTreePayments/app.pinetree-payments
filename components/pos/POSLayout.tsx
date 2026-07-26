@@ -7,7 +7,7 @@ import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 import Button from "@/components/ui/Button"
-import { TransactionResult } from "@/components/payment/TransactionResult"
+import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import PosCardPaymentExperience, {
   type PosCardCapabilities,
   type PosCardView,
@@ -97,7 +97,7 @@ function resolveUiStatus(dbStatus: string): Status | null {
   return null
 }
 
-// Parse digits â†’ number (no decimal = whole dollars, e.g. "12" â†’ 12.00)
+// Parse digits -> number (no decimal = whole dollars, e.g. "12" -> 12.00)
 function digitsToNumber(d: string): number {
   if (!d) return 0
   if (d.includes(".")) return parseFloat(d) || 0
@@ -108,17 +108,17 @@ function digitsToNumber(d: string): number {
 function digitsToDisplay(d: string): string {
   if (!d) return "0.00"
   if (d.includes(".")) return d              // show raw during decimal entry
-  return `${d}.00`                           // "12" â†’ "12.00"
+  return `${d}.00`                           // "12" -> "12.00"
 }
 
 function posAuthHeaders(token?: string): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-// â”€â”€ Base V7 POS helpers (defined outside component â€” no state dependency) â”€â”€â”€â”€
+// -- Base V7 POS helpers (defined outside component - no state dependency) ----
 
 // The POS terminal's WalletConnect provider.request() calls (eth_sendTransaction,
-// eth_signTypedData_v4) had no timeout at all â€” unlike the customer-owned
+// eth_signTypedData_v4) had no timeout at all - unlike the customer-owned
 // checkout flow (components/payment/BaseWalletPayment.tsx's
 // sendWalletConnectTransactionWithTimeout), so a lost/delayed relay response
 // after the customer approved in their wallet left the request awaiting
@@ -165,7 +165,7 @@ function parseEthereumUri(uri: string): { to: string; valueHex: string; data: st
 }
 
 // Poll allowance-check after USDC approval tx until sufficient or timeout.
-// Base block time is ~2 s; 10 Ã— 3 s = 30 s max wait before giving up.
+// Base block time is ~2 s; 10 x 3 s = 30 s max wait before giving up.
 async function waitForAllowanceSufficient(
   paymentId: string,
   walletAddress: string
@@ -185,7 +185,7 @@ async function waitForAllowanceSufficient(
       const data = (await res.json()) as { ok: boolean; sufficient?: boolean }
       if (data.ok && data.sufficient) return
     } catch {
-      // transient â€” retry
+      // transient - retry
     }
     if (attempt < MAX_ATTEMPTS - 1) {
       await new Promise<void>((resolve) => setTimeout(resolve, DELAY_MS))
@@ -194,7 +194,7 @@ async function waitForAllowanceSufficient(
   throw new Error("USDC allowance did not update after approval. Please try again.")
 }
 
-/** Best-effort WalletConnect peer/wallet name â€” same extraction BaseWalletPayment.tsx uses, kept independent per this file's established convention of not sharing helpers across the two flows (POS owns its own session type, PosWcProvider). */
+/** Best-effort WalletConnect peer/wallet name - same extraction BaseWalletPayment.tsx uses, kept independent per this file's established convention of not sharing helpers across the two flows (POS owns its own session type, PosWcProvider). */
 function getPosWalletConnectPeerName(provider: PosWcProvider["_provider"]): string | null {
   const source = provider as unknown as { session?: { peer?: { metadata?: { name?: unknown } } } }
   const name = source.session?.peer?.metadata?.name
@@ -206,7 +206,7 @@ function getPosWalletConnectPeerName(provider: PosWcProvider["_provider"]): stri
  * every continuation past an await boundary inside the EIP-3009/allowance
  * helpers below (Part 5's concurrency requirement). Verifies payment/intent
  * identity is unchanged, this attempt still owns the POS Base flow, and the
- * shared WalletConnect session hasn't been claimed by a newer generation â€”
+ * shared WalletConnect session hasn't been claimed by a newer generation -
  * any one of those failing means a stale continuation must not send another
  * wallet request or apply its result.
  */
@@ -427,7 +427,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   const resetTimerRef = useRef<NodeJS.Timeout | null>(null)
   const hasScheduledResetRef = useRef(false)
 
-  // â”€â”€ Sale correlation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Sale correlation --------------------------------------------------------
   // Bumped by resetSale() (and therefore by cancelSale()/the auto-reset timer,
   // which both call it) every time the terminal moves on from the current
   // sale. Every async status-update pathway below (poll tick, realtime
@@ -450,14 +450,14 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     intentIdRef.current = intentId
   }, [intentId])
 
-  // â”€â”€ POS Base WC controller â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- POS Base WC controller -------------------------------------------------
   const posBaseRunningRef = useRef(false)
   const posWcProviderRef = useRef<PosWcProvider | null>(null)
   const activePaymentIdRef = useRef("")
   // Bumped every time the previous Base attempt must be treated as
   // abandoned (a new intent replaces it, or the sale is reset/canceled).
   // A runPosBaseFlow invocation captures the token value at start time and
-  // compares against the live ref at each checkpoint â€” isCurrentBasePayment
+  // compares against the live ref at each checkpoint - isCurrentBasePayment
   // alone only detects supersession *within the same intent* (e.g. the
   // customer switched rails), never a POS terminal that has moved on to an
   // entirely different intent, whose own DB row is left untouched and would
@@ -476,7 +476,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   // to the same payment_intents row) can arrive after that reset and
   // rediscover selectedNetwork="base" as if the payment had never been
   // attempted. See lib/pos/posBaseDuplicateGuard.ts for the (unit-tested)
-  // decision logic â€” kept as a plain class here rather than a hook so it can
+  // decision logic - kept as a plain class here rather than a hook so it can
   // be tested without rendering this component.
   const posBaseDuplicateGuardRef = useRef<PosBaseDuplicateGuard | null>(null)
   if (!posBaseDuplicateGuardRef.current) {
@@ -484,7 +484,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   }
   const posBaseDuplicateGuard = posBaseDuplicateGuardRef.current
 
-  // Explicit "at most one Base USDC wallet request in flight" guard â€” see
+  // Explicit "at most one Base USDC wallet request in flight" guard - see
   // lib/pos/posBaseUsdcWalletRequestStage.ts. Reset alongside every other
   // Base attempt/session state in resetSale() below.
   const posBaseUsdcStageGuardRef = useRef<PosBaseUsdcWalletRequestStageGuard | null>(null)
@@ -534,7 +534,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   }
 
   // Warm the shared WalletConnect provider/Core as soon as the POS terminal
-  // is ready, well before any customer selects Base â€” this only opens the
+  // is ready, well before any customer selects Base - this only opens the
   // relay connection, it never creates a pairing/proposal/session (see
   // lib/pos/posBaseWalletConnect.ts). By the time the first sale of the day
   // reaches runPosBaseFlow, connect() can generate display_uri immediately
@@ -627,7 +627,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         if (!response.ok) throw new Error("Unable to cancel sale")
       } catch {
         return
-        // best-effort â€” always reset local state even if the API call fails
+        // best-effort - always reset local state even if the API call fails
       } finally {
         setCanceling(false)
       }
@@ -641,7 +641,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   // the generation their listener/request was set up under, plus whatever
   // intentId/paymentId the event is actually about. The actual staleness
   // decision lives in lib/pos/posSaleCorrelationGuard.ts (a pure function,
-  // unit-tested directly there) â€” see its module doc comment for why the
+  // unit-tested directly there) - see its module doc comment for why the
   // generation check is the primary guard (it's the only one that still
   // works during the window a fresh sale has an intent but no child payment
   // yet, which is exactly where the production incident this closes slipped
@@ -711,14 +711,14 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
      POLLING FALLBACK
      Polls every 3s while waiting or processing.
      Uses paymentId when available; falls back to intentId so POS updates
-     even if the Supabase realtime intentâ†’payment link event was missed.
+     even if the Supabase realtime intent->payment link event was missed.
   ========================= */
 
   useEffect(() => {
     const pid = activePaymentId
     const iid = intentId
     // Captured once, at the moment this poll loop is set up for the CURRENT
-    // sale â€” not re-read per tick. A request already in flight when
+    // sale - not re-read per tick. A request already in flight when
     // resetSale() runs (and clearInterval below only stops FUTURE ticks, not
     // a fetch that already fired) still resolves with this stale value, so
     // its result gets rejected by applyPaymentStatus regardless of when the
@@ -775,7 +775,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
           sourceIntentId: iid || undefined,
         })
       } catch {
-        // non-fatal â€” realtime is the primary update path
+        // non-fatal - realtime is the primary update path
       }
     }, 3000)
 
@@ -790,7 +790,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   useEffect(() => {
     if (!activePaymentId || intentId) return
 
-    // Captured once at subscribe time â€” see saleGenerationRef declaration.
+    // Captured once at subscribe time - see saleGenerationRef declaration.
     // removeChannel() below only stops FUTURE messages; a payload Supabase
     // already dispatched to this handler before unsubscribing still runs it.
     const myGeneration = saleGenerationRef.current
@@ -831,7 +831,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   useEffect(() => {
     if (!intentId) return
 
-    // Captured once at subscribe time â€” shared by both channels this effect
+    // Captured once at subscribe time - shared by both channels this effect
     // owns (the intent channel and whichever payment channel it later
     // resolves to), so a payload dispatched for either just as resetSale()
     // runs is still rejected downstream even though removeChannel() below
@@ -943,7 +943,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         body: JSON.stringify(updates),
       })
     } catch {
-      // best-effort â€” session updates are informational
+      // best-effort - session updates are informational
     }
   }
 
@@ -1077,7 +1077,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         return
       }
       const maskedAddress = walletAddress
-        ? `${walletAddress.slice(0, 6)}â€¦${walletAddress.slice(-4)}`
+        ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}`
         : ""
 
       console.log("[POS Base WC] wallet_connected", { intentId: iid, paymentId, asset, maskedAddress, attemptId: myAttempt })
@@ -1130,10 +1130,10 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         })
 
       } else {
-        // â”€â”€ USDC: resolve V7 strategy, try EIP-3009 relayer, fall back to allowance â”€â”€
+        // -- USDC: resolve V7 strategy, try EIP-3009 relayer, fall back to allowance --
         // Wallet capability evidence is derived from the actual WalletConnect
         // session (approved namespaces, peer metadata) instead of the
-        // previous hardcoded `supportsTypedData: true, skipEip3009: false` â€”
+        // previous hardcoded `supportsTypedData: true, skipEip3009: false` -
         // literals that claimed full capability regardless of which wallet
         // actually paired, which is why the strategy endpoint kept selecting
         // usdc_eip3009_relayer for a wallet that had already proven (in the
@@ -1146,7 +1146,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
           supportsTypedData: detectedCapabilities.supportsTypedData,
           supportsSendCalls: detectedCapabilities.supportsSendCalls,
           // Once this exact payment has proven eth_signTypedData_v4 is
-          // unsupported, a retry of the SAME payment must not re-attempt it â€”
+          // unsupported, a retry of the SAME payment must not re-attempt it -
           // this is scoped per-payment, not a wallet-wide blacklist (see
           // lib/pos/posBaseUsdcEip3009SessionMemory.ts).
           skipEip3009: detectedCapabilities.skipEip3009 || eip3009ProvenUnsupported,
@@ -1179,7 +1179,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         // allowance two-step. Every other outcome (including a genuinely
         // ambiguous one, like the production incident's "Failed to sign
         // message") stops here instead of silently sending more wallet
-        // prompts â€” see lib/pos/baseUsdcSigningErrorClassifier.ts.
+        // prompts - see lib/pos/baseUsdcSigningErrorClassifier.ts.
         let usdcTxHash: string | undefined
         const stageOwner: BaseUsdcStageOwnership = { paymentId, intentId: iid, attemptId: myAttempt }
         const wcGeneration = wcResult.provider.generation
@@ -1217,7 +1217,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
                 errorCode: "wallet_rejected",
                 error: serialized,
               })
-              // Stop immediately â€” no fallback, no further wallet request.
+              // Stop immediately - no fallback, no further wallet request.
               throw eip3009Err
             }
 
@@ -1235,7 +1235,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
             if (classification !== "method_unsupported") {
               // Not conclusively proven unsupported (unknown, timed out,
               // malformed typed data, chain/account mismatch, session
-              // disconnected, transport error) â€” do not guess. Surface a
+              // disconnected, transport error) - do not guess. Surface a
               // recoverable failure instead of silently launching the
               // allowance two-step's additional wallet prompts.
               throw new Error("USDC payment approval could not be completed. Please try again.")
@@ -1243,7 +1243,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
 
             // Conclusively proven unsupported: re-verify ownership and that
             // no wallet request is currently in flight before automatically
-            // starting the fallback (Part 4/5 requirement â€” a stale
+            // starting the fallback (Part 4/5 requirement - a stale
             // continuation must never trigger this).
             if (!(await verifyStillOwned())) {
               throw new Error("Base payment attempt superseded before allowance fallback")
@@ -1252,7 +1252,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
               throw new Error("A wallet request is already in progress for this payment")
             }
             rememberBaseUsdcEip3009MethodUnsupported(paymentId)
-            // usdcTxHash remains undefined â€” allowance path runs below
+            // usdcTxHash remains undefined - allowance path runs below
           }
         }
 
@@ -1345,7 +1345,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       // wallet had already connected: a slow relay round-trip can mean the
       // wallet is still completing (or already completed) the send even
       // though this request itself timed out / expired on our side with no
-      // txHash returned. Read canonical DB status before showing "failed" â€”
+      // txHash returned. Read canonical DB status before showing "failed" -
       // a false failure here is what previously led a merchant to cancel a
       // payment that had, in fact, already gone through.
       //
@@ -1384,7 +1384,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       }
 
       // A superseded attempt's failure belongs to whatever sale it was for,
-      // not to whatever the terminal is showing now â€” never let a stale
+      // not to whatever the terminal is showing now - never let a stale
       // attempt's error/failed state clobber the current sale's screen.
       if (isOwnedBaseAttempt(myAttempt)) {
         setPaymentError(message)
@@ -1397,7 +1397,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       }
     } finally {
       // This exact attemptId is done, one way or another (blocked before
-      // starting, succeeded, rejected, or errored) â€” never let it restart a
+      // starting, succeeded, rejected, or errored) - never let it restart a
       // WalletConnect session again. A genuinely new attempt always gets a
       // freshly incremented attemptId, so this can never suppress it.
       posBaseDuplicateGuard.markTerminal(iid, paymentId, myAttempt)
@@ -1409,7 +1409,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         stillOwned: isOwnedBaseAttempt(myAttempt),
       })
       // Always attempt to tear down the WalletConnect session this attempt
-      // created, whether or not it's still the current attempt â€” an
+      // created, whether or not it's still the current attempt - an
       // abandoned attempt must never leave an orphaned WC session
       // pairing/listening in the background. This is safe to call
       // unconditionally even when superseded: the shared provider's own
@@ -1419,7 +1419,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       if (localProvider) {
         localProvider.disconnect().catch(() => null)
       }
-      // Only clear the shared refs if this attempt still owns them â€” a
+      // Only clear the shared refs if this attempt still owns them - a
       // newer attempt (resetSale or a fresh intent) may have already reset
       // or reassigned them for its own flow, and clearing them here would
       // clobber that.
@@ -1439,7 +1439,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   useEffect(() => {
     if (!intentId) return
 
-    // A distinct intentId mount always means a fresh sale attempt â€” even if
+    // A distinct intentId mount always means a fresh sale attempt - even if
     // it didn't arrive via resetSale()/cancelSale(). Invalidate whatever
     // Base attempt may still be in flight from a previous intent (its own
     // ownership checks will now fail fast) and release the running guard so
@@ -1447,7 +1447,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     // by an attempt that hasn't reached its own cleanup yet.
     posBaseAttemptRef.current += 1
     posBaseRunningRef.current = false
-    // A genuinely new payment intent â€” the only point the terminal-attempt
+    // A genuinely new payment intent - the only point the terminal-attempt
     // suppression guard is cleared (see its declaration above).
     posBaseDuplicateGuard.reset()
     posBaseUsdcStageGuard.reset()
@@ -1485,7 +1485,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         const net = String(data.selectedNetwork || "").toLowerCase()
         if (net === "base" && pid && !cancelled && !posBaseRunningRef.current) {
           const myAttempt = posBaseAttemptRef.current
-          // Cheap, synchronous first line of defense â€” the same completed
+          // Cheap, synchronous first line of defense - the same completed
           // payment's own row keeps satisfying selectedNetwork==="base"
           // forever, and this poll/realtime handler has no other way to
           // tell "never started" apart from "already finished." The fuller
@@ -1508,7 +1508,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
           }
         }
       } catch {
-        // non-fatal â€” retry
+        // non-fatal - retry
       }
 
       if (!cancelled && !posBaseRunningRef.current) {
@@ -1523,7 +1523,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     // in the common case the customer's selectedNetwork write commits well
     // before the next scheduled tick. Reacting to the same postgres_changes
     // UPDATE event the "REALTIME: INTENT FLOW" subscription above already
-    // listens for (this is a second, independent channel â€” Supabase allows
+    // listens for (this is a second, independent channel - Supabase allows
     // multiple subscriptions on the same table/row) collapses that wait to
     // realtime latency instead of up to a full POLL_MS. poll() re-checks the
     // full intent record itself, so this is safe to fire on every UPDATE
@@ -1926,7 +1926,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
 
       <div className={`${paymentMode === "card" ? "bg-[#F4F8FF]" : "bg-white"} max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] overflow-y-auto overscroll-contain rounded-2xl p-4 shadow-lg sm:p-6`}>
 
-        {/* â”€â”€ READY â”€â”€ */}
+        {/* -- READY -- */}
         {status === "ready" && (
           <div className="space-y-4">
             <AmountDisplay amount={displayAmount} />
@@ -1939,7 +1939,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
           </div>
         )}
 
-        {/* â”€â”€ CONFIRM â”€â”€ */}
+        {/* -- CONFIRM -- */}
         {status === "confirm" && (
           <div className="space-y-5">
 
@@ -1953,7 +1953,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
             {breakdownLoading && (
               <div className="flex items-center justify-center gap-2 py-2">
                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-[#0052FF] border-t-transparent" />
-                <p className="text-sm text-gray-500">Loading breakdownâ€¦</p>
+                <p className="text-sm text-gray-500">Loading breakdown…</p>
               </div>
             )}
 
@@ -2013,7 +2013,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
                     disabled={!availableMethods.card || cardLoading}
                     onClick={() => void startCard()}
                   >
-                    {cardLoading ? "Preparing card paymentâ€¦" : "Card"}
+                    {cardLoading ? "Preparing card payment…" : "Card"}
                   </Button>
                 </div>
                 <Button variant="danger" fullWidth onClick={resetSale}>
@@ -2025,7 +2025,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
           </div>
         )}
 
-        {/* â”€â”€ CASH TENDER â”€â”€ */}
+        {/* -- CASH TENDER -- */}
         {status === "cash-tender" && (
           <div className="space-y-5">
 
@@ -2065,7 +2065,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
           </div>
         )}
 
-        {/* â”€â”€ CASH CHANGE â”€â”€ */}
+        {/* -- CASH CHANGE -- */}
         {status === "cash-change" && (
           <div className="space-y-5">
 
@@ -2143,7 +2143,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
           </div>
         )}
 
-        {/* â”€â”€ WAITING / PROCESSING â”€â”€ */}
+        {/* -- WAITING / PROCESSING -- */}
         {paymentMode === "card" && (
           <PosCardPaymentExperience
             amount={displayTotal}
@@ -2182,12 +2182,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         )}
 
         {paymentMode !== "card" && (status === "waiting" || status === "processing") && (
-          <TransactionResult
-            state={status === "waiting" ? "PENDING" : "PROCESSING"}
-            compact
-            description={status === "waiting" ? "Awaiting customer action." : "Payment is processing."}
-            actions={[{ label: canceling ? "Canceling..." : "Cancel Payment", onClick: () => void cancelSale(), variant: "danger", disabled: canceling }]}
-          >
+          <div className="space-y-3">
 
             {qrCodeUrl ? (
               <div className="flex flex-col items-center rounded-2xl border border-blue-100/70 bg-gradient-to-br from-white to-blue-50/40 px-4 py-4 shadow-[0_12px_32px_rgba(0,82,255,0.08)]">
@@ -2201,18 +2196,26 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
                   alt="QR code"
                   className="rounded-xl shadow-sm"
                 />
+                <PaymentStatusVisual
+                  status={status === "waiting" ? "PENDING" : "PROCESSING"}
+                  size="compact"
+                  iconSize={18}
+                  showMessage={false}
+                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]"
+                  className="mt-3 gap-1.5"
+                />
               </div>
             ) : (
               <div className="rounded-2xl border border-blue-100/70 bg-blue-50/50 px-4 py-4 text-center">
                 <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
                 <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-                  Preparing paymentâ€¦
+                  Preparing payment…
                 </p>
               </div>
             )}
 
             {breakdown && (
-              <div className="mt-3 space-y-1.5 rounded-2xl border border-gray-100 bg-gray-50/80 px-3.5 py-3 text-sm shadow-inner shadow-white">
+              <div className="space-y-1.5 rounded-2xl border border-gray-100 bg-gray-50/80 px-3.5 py-3 text-sm shadow-inner shadow-white">
                 <div className="flex justify-between text-gray-700">
                   <span>Subtotal</span>
                   <span>{fmtUsd(breakdown.subtotalAmount)}</span>
@@ -2234,72 +2237,64 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
               </div>
             )}
 
-          </TransactionResult>
+            <Button variant="danger" fullWidth disabled={canceling} onClick={() => void cancelSale()}>
+              {canceling ? "Canceling…" : "Cancel Payment"}
+            </Button>
+
+          </div>
         )}
 
-        {/* â”€â”€ CONFIRMED â”€â”€ */}
+        {/* -- CONFIRMED -- */}
         {paymentMode !== "card" && status === "confirmed" && (
           <div className="py-3">
-            <TransactionResult
-              state="CONFIRMED"
-              compact
-              description="Payment successfully completed."
-              actions={[{ label: "New Sale", onClick: resetSale }]}
-            />
+            <PaymentStatusVisual status="CONFIRMED" variant="card" />
           </div>
         )}
 
-        {/* â”€â”€ INCOMPLETE â”€â”€ */}
+        {/* -- INCOMPLETE -- */}
         {paymentMode !== "card" && status === "incomplete" && (
-          <div className="py-3">
-            <TransactionResult
-              state="INCOMPLETE"
-              compact
-              actions={[
-                { label: "Resume Payment", onClick: () => { setStatus("confirm") } },
-                { label: "New Sale", onClick: resetSale, variant: "secondary" },
-              ]}
-            />
+          <div className="flex flex-col items-center gap-3 py-3">
+            <PaymentStatusVisual status="INCOMPLETE" variant="card" />
+            <Button variant="secondary" fullWidth onClick={resetSale}>
+              Back
+            </Button>
           </div>
         )}
 
-        {/* â”€â”€ FAILED â”€â”€ */}
+        {/* -- FAILED -- */}
         {paymentMode !== "card" && status === "failed" && (
-          <div className="py-3">
-            <TransactionResult
-              state="FAILED"
-              compact
-              description={paymentError || "Payment could not be completed. Please try again."}
-              actions={[
-                { label: "Try Again", onClick: () => { setPaymentError(""); setStatus("confirm") } },
-                { label: "New Sale", onClick: resetSale, variant: "secondary" },
-              ]}
+          <div className="flex flex-col items-center gap-3 py-3">
+            <PaymentStatusVisual
+              status="FAILED"
+              variant="card"
+              messageOverride={paymentError || undefined}
             />
             {paymentError && (
               <span className="sr-only">{paymentError}</span>
             )}
+            <Button fullWidth onClick={resetSale}>
+              Try Again
+            </Button>
           </div>
         )}
 
-        {/* â”€â”€ EXPIRED â”€â”€ */}
+        {/* -- EXPIRED -- */}
         {paymentMode !== "card" && status === "expired" && (
-          <div className="py-3">
-            <TransactionResult
-              state="EXPIRED"
-              compact
-              actions={[{ label: "Create New Payment", onClick: resetSale }]}
-            />
+          <div className="flex flex-col items-center gap-3 py-3">
+            <PaymentStatusVisual status="EXPIRED" variant="card" />
+            <Button variant="secondary" fullWidth onClick={resetSale}>
+              Back
+            </Button>
           </div>
         )}
 
-        {/* â”€â”€ CANCELLED â”€â”€ */}
+        {/* -- CANCELLED -- */}
         {paymentMode !== "card" && status === "cancelled" && (
-          <div className="py-3">
-            <TransactionResult
-              state="CANCELED"
-              compact
-              actions={[{ label: "New Sale", onClick: resetSale }]}
-            />
+          <div className="flex flex-col items-center gap-3 py-3">
+            <PaymentStatusVisual status="CANCELED" variant="card" />
+            <Button variant="secondary" fullWidth onClick={resetSale}>
+              Back
+            </Button>
           </div>
         )}
 
