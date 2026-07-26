@@ -1,8 +1,9 @@
 "use client"
 
 import Link from "next/link"
+import type { ReactNode } from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Eye, EyeOff, X } from "lucide-react"
+import { Copy, Eye, EyeOff, X } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import Button from "@/components/ui/Button"
@@ -22,6 +23,7 @@ type Terminal = {
   pin: string
   autolock: string
   merchant_id?: string
+  status?: string | null
   drawer_starting_amount?: number
   created_at?: string
   tax_mode: "none" | "merchant_default" | "custom"
@@ -60,8 +62,102 @@ function fmtUsd(n: number) {
 function formatAutoLock(value: string) {
   if (value === "never") return "Never"
   const minutes = Number(value)
-  if (!Number.isFinite(minutes) || minutes <= 0) return "-"
+  if (!Number.isFinite(minutes) || minutes <= 0) return "Not set"
   return `${minutes} min`
+}
+
+function formatTerminalDateTime(value: string | null | undefined) {
+  if (!value) return "Not recorded"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "Not recorded"
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  })
+}
+
+function formatTerminalStatus(value: string | null | undefined) {
+  const normalized = String(value || "active").trim().toLowerCase()
+  if (!normalized) return "Active"
+  return normalized
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+}
+
+function terminalStatusBadgeClass(value: string | null | undefined) {
+  const normalized = String(value || "active").trim().toLowerCase()
+  if (["active", "online", "ready"].includes(normalized)) {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  }
+  if (["offline", "inactive", "disabled"].includes(normalized)) {
+    return "border-gray-200 bg-gray-50 text-gray-600"
+  }
+  return "border-blue-200 bg-blue-50 text-blue-700"
+}
+
+function formatTaxSettings(terminal: Terminal) {
+  if (terminal.tax_mode === "merchant_default") return "Merchant default"
+  if (terminal.tax_mode === "custom") return "Custom for this terminal"
+  return "No tax"
+}
+
+function formatTaxRate(terminal: Terminal, defaultTaxRate: number | null) {
+  if (terminal.tax_mode === "none") return "Not applied"
+  if (terminal.tax_mode === "custom") {
+    return typeof terminal.tax_rate === "number" ? `${terminal.tax_rate}%` : "Custom rate not set"
+  }
+  return typeof defaultTaxRate === "number" ? `${defaultTaxRate}%` : "Default rate not set"
+}
+
+function DetailRow({
+  label,
+  value,
+  mono = false,
+  onCopy,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+  onCopy?: () => void
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-t border-gray-100 py-2 first:border-t-0">
+      <span className="shrink-0 text-sm text-gray-500">{label}</span>
+      <span className={`flex min-w-0 items-start gap-1.5 text-right text-sm font-medium text-gray-900 ${mono ? "font-mono text-xs leading-5" : ""}`}>
+        <span className="min-w-0 break-all">{value}</span>
+        {onCopy ? (
+          <button
+            type="button"
+            onClick={onCopy}
+            aria-label={`Copy ${label}`}
+            className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-blue-500 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          >
+            <Copy size={12} aria-hidden="true" />
+          </button>
+        ) : null}
+      </span>
+    </div>
+  )
+}
+
+function ActivityMetric({
+  label,
+  value,
+}: {
+  label: string
+  value: ReactNode
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">{label}</p>
+      <div className="mt-1 text-sm font-semibold leading-5 text-gray-950">{value}</div>
+    </div>
+  )
 }
 
 export default function POSPage() {
@@ -293,7 +389,7 @@ export default function POSPage() {
     try {
       await callPosTerminalsApi("DELETE", { id })
       setTerminals(prev => prev.filter(t=>t.id !== id))
-      toast.success("Terminal deleted")
+      toast.success("Terminal removed")
     } catch (error) {
       console.error(error)
       toast.error(error instanceof Error ? error.message : "Failed to delete terminal")
@@ -318,6 +414,19 @@ export default function POSPage() {
     return sum + (Number.isFinite(amount) ? amount : 0)
   }, 0)
   const hasTerminalActivityStats = selectedTodaySalesEntries.length > 0
+  const selectedTerminalStatus = formatTerminalStatus(selectedTerminal?.status)
+  const selectedDrawerShiftLabel = selectedDrawer?.active ? "Drawer shift: Open" : "Drawer shift: Closed"
+  const showSelectedDrawerBalance = Boolean(selectedDrawer?.active)
+  const hasSelectedActivity = hasTerminalActivityStats || showSelectedDrawerBalance
+
+  function copyValue(label: string, value: string | null | undefined) {
+    const text = String(value || "").trim()
+    if (!text) return
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => toast.success(`${label} copied`))
+      .catch(() => toast.error("Copy failed"))
+  }
 
   return (
 
@@ -332,11 +441,11 @@ export default function POSPage() {
           <Card className="w-full max-w-md">
 
             <h2 className="text-lg font-semibold mb-2 text-gray-900">
-              Delete Terminal
+              Remove Terminal
             </h2>
 
             <p className="text-sm text-gray-500 mb-6">
-              Are you sure you want to delete this terminal?
+              Are you sure you want to remove this terminal?
             </p>
 
             <div className="flex justify-end gap-3">
@@ -354,7 +463,7 @@ export default function POSPage() {
                   setConfirmDelete(false)
                 }}
               >
-                Delete Terminal
+                Remove Terminal
               </Button>
 
             </div>
@@ -700,9 +809,14 @@ export default function POSPage() {
             <div className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-100 px-5 py-4 sm:px-6">
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">Terminal Details</p>
-                <h2 id="terminal-details-title" className="mt-1 truncate text-xl font-semibold text-gray-950">
-                  {selectedTerminal.name}
-                </h2>
+                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+                  <h2 id="terminal-details-title" className="min-w-0 truncate text-xl font-semibold text-gray-950">
+                    {selectedTerminal.name}
+                  </h2>
+                  <span className={`inline-flex h-6 shrink-0 items-center rounded-full border px-2 text-[11px] font-semibold ${terminalStatusBadgeClass(selectedTerminal.status)}`}>
+                    {selectedTerminalStatus}
+                  </span>
+                </div>
               </div>
               <button
                 type="button"
@@ -714,98 +828,84 @@ export default function POSPage() {
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Status</p>
-                  <p className="mt-1 text-sm font-semibold text-blue-700">Active</p>
-                </div>
-                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Terminal ID</p>
-                  <p className="mt-1 truncate font-mono text-xs text-gray-700" title={selectedTerminal.id}>
-                    {selectedTerminal.id}
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
+              <section className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                <p className={dashboardSectionLabelClass}>Today&apos;s Activity</p>
+                {hasSelectedActivity ? (
+                  <div className={`mt-3 grid gap-2 ${showSelectedDrawerBalance ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+                    <ActivityMetric
+                      label="Transactions"
+                      value={hasTerminalActivityStats ? selectedTodaySalesEntries.length : "No transactions yet"}
+                    />
+                    <ActivityMetric
+                      label="Sales"
+                      value={hasTerminalActivityStats ? fmtUsd(selectedTodaySalesTotal) : "No sales yet"}
+                    />
+                    {showSelectedDrawerBalance ? (
+                      <ActivityMetric
+                        label="Expected Cash Balance"
+                        value={fmtUsd(selectedDrawer?.balance ?? 0)}
+                      />
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5 text-sm leading-5 text-blue-900">
+                    No activity yet. Sales and transaction totals will appear after this terminal processes its first payment.
                   </p>
-                </div>
-                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Created</p>
-                  <p className="mt-1 text-sm font-medium text-gray-900">
-                    {selectedTerminal.created_at ? new Date(selectedTerminal.created_at).toLocaleString() : "-"}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Last Active</p>
-                  <p className="mt-1 text-sm font-medium text-gray-900">
-                    {selectedDrawer?.lastEntry ? new Date(selectedDrawer.lastEntry.created_at).toLocaleString() : "-"}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Drawer Status</p>
-                  <p className={`mt-1 text-sm font-semibold ${selectedDrawer?.active ? "text-blue-700" : "text-gray-500"}`}>
-                    {selectedDrawer?.active ? "Open drawer shift" : "No active drawer shift"}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Current / Expected Drawer Balance</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-950">
-                    {selectedDrawer ? fmtUsd(selectedDrawer.balance) : "-"}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Today Transactions</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-950">
-                    {hasTerminalActivityStats ? selectedTodaySalesEntries.length : "-"}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-gray-100 bg-gray-50/70 p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Today Sales</p>
-                  <p className="mt-1 text-sm font-semibold text-gray-950">
-                    {hasTerminalActivityStats ? fmtUsd(selectedTodaySalesTotal) : "-"}
-                  </p>
-                </div>
-              </div>
+                )}
+              </section>
 
-              {!hasTerminalActivityStats && (
-                <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm text-blue-900">
-                  Terminal activity will appear here after this terminal processes payments.
-                </div>
-              )}
-
-              <div className="mt-4 rounded-2xl border border-gray-100 bg-white p-3 text-sm text-gray-600">
-                <div className="flex justify-between gap-4 py-1">
-                  <span className="text-gray-500">Auto-lock</span>
-                  <span className="font-medium text-gray-900">{formatAutoLock(selectedTerminal.autolock)}</span>
-                </div>
-                <div className="flex justify-between gap-4 py-1">
-                  <span className="text-gray-500">Merchant</span>
-                  <span className="truncate font-medium text-gray-900">{selectedTerminal.merchant_id || "-"}</span>
-                </div>
-                <div className="flex justify-between gap-4 border-t border-gray-100 py-1 pt-2">
-                  <span className="text-gray-500">Tax mode</span>
-                  <span className="font-medium text-gray-900">
-                    {selectedTerminal.tax_mode === "merchant_default"
-                      ? "Merchant default"
-                      : selectedTerminal.tax_mode === "custom"
-                        ? "Custom"
-                        : "No tax"}
-                  </span>
-                </div>
-                {selectedTerminal.tax_mode !== "none" && (
-                  <div className="flex justify-between gap-4 py-1">
+              <section className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                <p className={dashboardSectionLabelClass}>Terminal Settings</p>
+                <div className="mt-3 divide-y divide-gray-100 text-sm">
+                  <div className="flex justify-between gap-4 py-2 first:pt-0">
+                    <span className="text-gray-500">Auto-lock after</span>
+                    <span className="font-medium text-gray-900">{formatAutoLock(selectedTerminal.autolock)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4 py-2">
+                    <span className="text-gray-500">Tax settings</span>
+                    <span className="text-right font-medium text-gray-900">{formatTaxSettings(selectedTerminal)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4 py-2">
                     <span className="text-gray-500">Tax rate</span>
-                    <span className="font-medium text-gray-900">
-                      {selectedTerminal.tax_mode === "custom"
-                        ? `${selectedTerminal.tax_rate}%`
-                        : defaultTax.rate
-                          ? `${defaultTax.rate}%`
-                          : "Default rate"}
+                    <span className="font-medium text-gray-900">{formatTaxRate(selectedTerminal, defaultTax.rate)}</span>
+                  </div>
+                  <div className="flex justify-between gap-4 py-2 last:pb-0">
+                    <span className="text-gray-500">Drawer shift</span>
+                    <span className={`font-semibold ${selectedDrawer?.active ? "text-blue-700" : "text-gray-600"}`}>
+                      {selectedDrawerShiftLabel.replace("Drawer shift: ", "")}
                     </span>
                   </div>
-                )}
-              </div>
+                </div>
+              </section>
+
+              <details className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                <summary className="cursor-pointer list-none text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF] marker:hidden">
+                  Terminal Information
+                </summary>
+                <div className="mt-3">
+                  <DetailRow
+                    label="Terminal ID"
+                    value={selectedTerminal.id}
+                    mono
+                    onCopy={() => copyValue("Terminal ID", selectedTerminal.id)}
+                  />
+                  {selectedTerminal.merchant_id ? (
+                    <DetailRow
+                      label="Merchant ID"
+                      value={selectedTerminal.merchant_id}
+                      mono
+                      onCopy={() => copyValue("Merchant ID", selectedTerminal.merchant_id)}
+                    />
+                  ) : null}
+                  <DetailRow label="Created" value={formatTerminalDateTime(selectedTerminal.created_at)} />
+                  <DetailRow label="Last active" value={formatTerminalDateTime(selectedDrawer?.lastEntry?.created_at)} />
+                </div>
+              </details>
             </div>
 
-            <div className="shrink-0 border-t border-gray-100 bg-white px-5 py-4 sm:px-6">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="shrink-0 border-t border-gray-100 bg-white px-5 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-6 sm:pb-4">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <Button
                   variant="danger"
                   onClick={() => {
@@ -815,11 +915,11 @@ export default function POSPage() {
                   }}
                   className="w-full rounded-xl border-red-300 bg-red-50 px-3 text-xs sm:w-auto"
                 >
-                  Delete
+                  Remove Terminal
                 </Button>
                 <Link href={`/terminal?tid=${selectedTerminal.id}`} className="block sm:inline-block">
                   <Button variant="primary" className="w-full rounded-xl px-5 sm:w-auto">
-                    Launch
+                    Launch Terminal
                   </Button>
                 </Link>
               </div>

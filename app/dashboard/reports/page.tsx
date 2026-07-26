@@ -354,16 +354,25 @@ export default function ReportsPage() {
         />
       ) : null}
 
-      <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-wrap sm:gap-2">
-        <PrimaryActionButton onClick={() => void download("csv")} disabled={!summary || loading || Boolean(exporting)} className="min-w-0 !h-9 w-full !px-1.5 !text-[10px] min-[380px]:!text-[11px] sm:w-auto sm:!h-10 sm:!px-4 sm:!text-sm">
-          {exporting === "csv" ? "Exporting…" : "Export CSV"}
-        </PrimaryActionButton>
-        <PrimaryActionButton onClick={() => void download("pdf")} disabled={!summary || loading || Boolean(exporting)} className="min-w-0 !h-9 w-full !px-1.5 !text-[10px] min-[380px]:!text-[11px] sm:w-auto sm:!h-10 sm:!px-4 sm:!text-sm">
-          {exporting === "pdf" ? "Exporting…" : "Download PDF"}
-        </PrimaryActionButton>
-        <PrimaryActionButton onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading} className="min-w-0 !h-9 w-full !px-1.5 !text-[10px] min-[380px]:!text-[11px] sm:w-auto sm:!h-10 sm:!px-4 sm:!text-sm">
-          Email report
-        </PrimaryActionButton>
+      <div className="space-y-3">
+        <SegmentedButtons
+          ariaLabel="Report period"
+          className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap"
+          value={period}
+          onChange={(value) => {
+            setPeriod(value)
+            setLedgerPage(1)
+            setError(null)
+          }}
+          options={PERIODS.map((option) => ({ value: option.value, label: option.label }))}
+        />
+        {period === "custom" ? (
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <label className="text-xs font-semibold text-gray-600">Start date<input type="date" value={customStart} onChange={(event) => { setCustomStart(event.target.value); setLedgerPage(1) }} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900" /></label>
+            <label className="text-xs font-semibold text-gray-600">End date<input type="date" value={customEnd} onChange={(event) => { setCustomEnd(event.target.value); setLedgerPage(1) }} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900" /></label>
+            <PrimaryActionButton onClick={applyCustomRange} className="mt-auto">Apply range</PrimaryActionButton>
+          </div>
+        ) : null}
       </div>
 
       <PineTreeInsightsCard title="PINETREE INSIGHTS" insights={insights} />
@@ -405,25 +414,16 @@ export default function ReportsPage() {
             </div>
           </DashboardSection>
 
-          <div className="space-y-3">
-            <SegmentedButtons
-              ariaLabel="Report period"
-              className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-              value={period}
-              onChange={(value) => {
-                setPeriod(value)
-                setLedgerPage(1)
-                setError(null)
-              }}
-              options={PERIODS.map((option) => ({ value: option.value, label: option.label }))}
-            />
-            {period === "custom" ? (
-              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                <label className="text-xs font-semibold text-gray-600">Start date<input type="date" value={customStart} onChange={(event) => { setCustomStart(event.target.value); setLedgerPage(1) }} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900" /></label>
-                <label className="text-xs font-semibold text-gray-600">End date<input type="date" value={customEnd} onChange={(event) => { setCustomEnd(event.target.value); setLedgerPage(1) }} className="mt-1 block h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-normal text-gray-900" /></label>
-                <PrimaryActionButton onClick={applyCustomRange} className="mt-auto">Apply range</PrimaryActionButton>
-              </div>
-            ) : null}
+          <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-wrap sm:gap-2">
+            <PrimaryActionButton onClick={() => void download("csv")} disabled={!summary || loading || Boolean(exporting)} className="min-w-0 !h-9 w-full !px-1.5 !text-[10px] min-[380px]:!text-[11px] sm:w-auto sm:!h-10 sm:!px-4 sm:!text-sm">
+              {exporting === "csv" ? "Exporting..." : "Export CSV"}
+            </PrimaryActionButton>
+            <PrimaryActionButton onClick={() => void download("pdf")} disabled={!summary || loading || Boolean(exporting)} className="min-w-0 !h-9 w-full !px-1.5 !text-[10px] min-[380px]:!text-[11px] sm:w-auto sm:!h-10 sm:!px-4 sm:!text-sm">
+              {exporting === "pdf" ? "Exporting..." : "Download PDF"}
+            </PrimaryActionButton>
+            <PrimaryActionButton onClick={() => { setEmailRecipient(userEmail); setEmailOpen(true) }} disabled={!summary || loading} className="min-w-0 !h-9 w-full !px-1.5 !text-[10px] min-[380px]:!text-[11px] sm:w-auto sm:!h-10 sm:!px-4 sm:!text-sm">
+              Email report
+            </PrimaryActionButton>
           </div>
 
           <DashboardSection title="Breakdowns" titleTone="blue">
