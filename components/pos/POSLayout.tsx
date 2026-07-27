@@ -37,6 +37,11 @@ import {
   rememberBaseUsdcEip3009MethodUnsupported,
   hasProvenBaseUsdcEip3009MethodUnsupported,
 } from "@/lib/pos/posBaseUsdcEip3009SessionMemory"
+import {
+  isPosTerminalUiStatus,
+  schedulePosResultReset,
+  cancelPosResultReset,
+} from "@/lib/pos/posResultResetTimer"
 
 type Props = {
   locked: boolean
@@ -693,6 +698,36 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       }
     }
   }, [])
+
+  /* =========================
+     POST-RESULT AUTO-RESET
+     Once a terminal result is actually on screen — status reaching a
+     terminal value for cash/crypto, or cardView reaching approved/declined
+     for the card rail — show it for POS_RESULT_RESET_DELAY_MS, then return
+     to a clean keypad automatically via the same central resetSale() every
+     manual dismissal button already calls. Keyed on cardView (not just
+     status) so a card "Try Again" tap, which moves cardView back to
+     "collect" without changing status away from "failed", still cancels the
+     pending timer via this effect's own cleanup instead of yanking the
+     merchant back to the keypad mid-retry.
+  ========================= */
+
+  useEffect(() => {
+    const isCardTerminalResult =
+      paymentMode === "card" && (cardView === "approved" || cardView === "declined")
+    const isNonCardTerminalResult = paymentMode !== "card" && isPosTerminalUiStatus(status)
+    if (!isCardTerminalResult && !isNonCardTerminalResult) return
+
+    const myGeneration = saleGenerationRef.current
+    hasScheduledResetRef.current = true
+    schedulePosResultReset(resetTimerRef, myGeneration, () => saleGenerationRef.current, resetSale)
+
+    return () => {
+      hasScheduledResetRef.current = false
+      cancelPosResultReset(resetTimerRef)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, paymentMode, cardView])
 
   useEffect(() => {
     const url = new URL(window.location.href)
