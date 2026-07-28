@@ -7,6 +7,7 @@ function readNormalized(file: string) {
 }
 
 const page = readNormalized("app/dashboard/wallet-setup/page.tsx")
+const withdrawalCards = readNormalized("components/withdrawals/WithdrawalCards.tsx")
 const dynamicSubmitRoute = readNormalized("app/api/wallets/pinetree-wallet/withdrawals/[id]/submit/route.ts")
 const bitcoinWithdrawalsRoute = readNormalized("app/api/wallets/withdrawals/route.ts")
 
@@ -124,12 +125,12 @@ describe("Withdrawal approval/result flow unification repair", () => {
       expect(src).toContain("Authorizing withdrawal")
       expect(src).toContain("Confirm this withdrawal in PineTree Wallet.")
       expect(src).toContain('"Withdrawal confirmed"')
-      expect(src).toContain("Your withdrawal has been confirmed.")
+      expect(src).toContain("Sent successfully")
       expect(src).toContain('"Withdrawal submitted"')
       expect(src).toContain("Your withdrawal was submitted. You can safely leave this screen.")
       expect(src).toContain("Withdrawal failed")
-      expect(src).toContain("View transaction")
-      expect(src).toContain(">\n            Done\n          </button>")
+      expect(withdrawalCards).toContain("View transaction in explorer")
+      expect(src).toContain("<WithdrawalPrimaryButton onClick={onDone}>Done</WithdrawalPrimaryButton>")
       expect(src).toContain("Try again")
     })
 
@@ -153,12 +154,13 @@ describe("Withdrawal approval/result flow unification repair", () => {
   describe("mobile presentation fixes", () => {
     it("destination addresses wrap with overflow-wrap instead of character-count break-all", () => {
       expect(page).not.toContain("break-all")
-      expect(page.match(/\[overflow-wrap:anywhere\]/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
+      expect(`${page}\n${withdrawalCards}`.match(/\[overflow-wrap:anywhere\]/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
+      expect(withdrawalCards).toContain("min-w-0 flex-1 truncate")
     })
 
     it("review and result screens reserve bottom safe-area space and clear the sticky header on scroll-into-view", () => {
-      expect(page.match(/env\(safe-area-inset-bottom\)/g)?.length ?? 0).toBeGreaterThanOrEqual(3)
-      expect(page.match(/scroll-mt-24/g)?.length ?? 0).toBeGreaterThanOrEqual(4)
+      expect(withdrawalCards).toContain("pb-[calc(1rem+env(safe-area-inset-bottom))]")
+      expect(withdrawalCards).toContain("mx-auto w-full max-w-xl space-y-3 pt-1")
     })
 
     it("uses an explicit provider-authorization handoff so PineTree does not block Dynamic", () => {

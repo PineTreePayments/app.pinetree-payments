@@ -1803,14 +1803,10 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('aria-label="Destination address"')
     expect(page).toContain('aria-label="Withdrawal amount"')
     expect(page).toContain("Review withdrawal")
-    const reviewButton = page.slice(
-      page.indexOf("onClick={onReview}"),
-      page.indexOf('{reviewing ? "Reviewing..."')
-    )
-    expect(reviewButton).toContain("inline-flex h-11 min-w-[12rem]")
-    expect(reviewButton).toContain("px-6")
-    expect(reviewButton).not.toContain("w-full")
-    expect(reviewButton).not.toContain("Reconnect PineTree Wallet")
+    expect(page).toContain("<WithdrawalPrimaryButton")
+    expect(page).toContain("onClick={onReview}")
+    expect(withdrawalCards).toContain("inline-flex h-11 w-full")
+    expect(withdrawalCards).toContain("rounded-xl px-5 text-sm font-semibold")
     expect(page).toContain("/api/wallets/pinetree-wallet/withdrawals")
     expect(page).not.toContain("Withdrawal coming soon")
     expect(page).not.toContain("Withdrawal disabled")
@@ -1931,8 +1927,8 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("the review screen explains why the primary action button is disabled instead of leaving it silently greyed out", () => {
-    expect(page).toContain("Ready to authorize withdrawal.")
     expect(page).toContain("This withdrawal can&apos;t be approved right now")
+    expect(page).toContain("disabled={!review.canSubmit}")
   })
 
   it("maps raw schema/cache withdrawal errors to merchant-safe copy via the shared presentation module", () => {

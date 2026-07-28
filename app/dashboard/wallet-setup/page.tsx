@@ -50,9 +50,13 @@ import StatusBadge from "@/components/ui/StatusBadge"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
 import {
+  WithdrawalActionStack,
+  WithdrawalPrimaryButton,
   WithdrawalProgressCard,
   WithdrawalReviewCard,
   WithdrawalResultCard as SharedWithdrawalResultCard,
+  WithdrawalSecondaryButton,
+  WithdrawalShell,
 } from "@/components/withdrawals/WithdrawalCards"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 import {
@@ -2639,7 +2643,7 @@ function WithdrawalResultCard({
   const merchantStatus = submitResult?.merchantStatus ?? null
 
   if (kind === "authorizing") {
-    return <WithdrawalProgressCard state="SUBMITTING" network={review?.review.rail ? railDisplayName(review.review.rail) : undefined} />
+    return <WithdrawalProgressCard state="SUBMITTING" network={review?.review.rail ? railDisplayName(review.review.rail) : undefined} amount={review?.review.amountDecimal} asset={review?.review.asset} />
   }
 
   if (kind === "submitted" && submitResult) {
@@ -2674,26 +2678,21 @@ function WithdrawalResultCard({
       ...(confirmedAtLabel ? [{ label: "Confirmed", value: confirmedAtLabel }] : []),
     ] : []
     return (
-      <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] [overflow-wrap:anywhere]">
+      <div className="scroll-mt-24 space-y-3 [overflow-wrap:anywhere]">
         <SharedWithdrawalResultCard
           state={resultState}
           title={title}
           message={supportingCopy}
-          amount={review ? `${review.review.amountDecimal} ${review.review.asset}` : undefined}
+          amount={review?.review.amountDecimal}
+          asset={review?.review.asset}
           network={review?.review.rail ? railDisplayName(review.review.rail) : undefined}
           destination={review?.review.destinationAddress}
           explorerUrl={explorerUrl}
           details={resultDetails}
         />
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <button
-            type="button"
-            onClick={onDone}
-            className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-          >
-            Done
-          </button>
-        </div>
+        <WithdrawalActionStack>
+          <WithdrawalPrimaryButton onClick={onDone}>Done</WithdrawalPrimaryButton>
+        </WithdrawalActionStack>
       </div>
     )
   }
@@ -2705,58 +2704,32 @@ function WithdrawalResultCard({
     approvalError === solanaWithdrawalReconnectMessage
   const withdrawalOutcomePending = approvalError === withdrawalStatusUnknownMessage
   return (
-    <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+    <div className="scroll-mt-24 space-y-3">
       <SharedWithdrawalResultCard
         state={withdrawalOutcomePending ? "CHECKING_STATUS" : "FAILED"}
         title={withdrawalOutcomePending ? "Withdrawal outcome pending" : "Withdrawal failed"}
         message={approvalError || error || submitResult?.request.error_message || "The withdrawal could not be completed. Review the details and try again."}
-        amount={review ? `${review.review.amountDecimal} ${review.review.asset}` : undefined}
+        amount={review?.review.amountDecimal}
+        asset={review?.review.asset}
         network={review?.review.rail ? railDisplayName(review.review.rail) : undefined}
         destination={review?.review.destinationAddress}
       />
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <WithdrawalActionStack>
         {isSignerSessionError && onOpenWallet ? (
-          <button
-            type="button"
-            onClick={onOpenWallet}
-            className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-          >
+          <WithdrawalPrimaryButton onClick={onOpenWallet}>
             Open PineTree Wallet
-          </button>
+          </WithdrawalPrimaryButton>
         ) : review && !withdrawalOutcomePending ? (
-          <button
-            type="button"
-            onClick={() => onSubmit()}
-            disabled={submitting}
-            className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
-          >
+          <WithdrawalPrimaryButton onClick={() => onSubmit()} disabled={submitting}>
             Try again
-          </button>
+          </WithdrawalPrimaryButton>
         ) : null}
-        <button
-          type="button"
-          onClick={onDone}
-          className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
-        >
-          Done
-        </button>
-        <button
-          type="button"
-          onClick={onEdit}
-          className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
-        >
-          Edit withdrawal
-        </button>
+        <WithdrawalSecondaryButton onClick={onDone}>Done</WithdrawalSecondaryButton>
+        <WithdrawalSecondaryButton onClick={onEdit}>Edit withdrawal</WithdrawalSecondaryButton>
         {approvalError !== withdrawalStatusUnknownMessage ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-red-200 hover:text-red-600"
-          >
-            Cancel
-          </button>
+          <WithdrawalSecondaryButton onClick={onCancel} className="hover:border-red-200 hover:text-red-600">Cancel</WithdrawalSecondaryButton>
         ) : null}
-      </div>
+      </WithdrawalActionStack>
     </div>
   )
 }
@@ -2939,14 +2912,14 @@ function WithdrawalFormShell({
   if (providerAuthorizationActive) {
     // Authorize withdrawal in your wallet. PineTree remains the visible
     // presentation while the configured embedded signer authorizes underneath.
-    return <WithdrawalProgressCard state="AUTHORIZING" network={railDisplayName(rail)} />
+    return <WithdrawalProgressCard state="AUTHORIZING" network={railDisplayName(rail)} amount={review?.review.amountDecimal ?? amountDecimal} asset={review?.review.asset ?? asset} />
   }
 
   if (screen === "review" && review) {
     return (
-      <div className="scroll-mt-24 pb-[max(0.5rem,env(safe-area-inset-bottom))] [overflow-wrap:anywhere]">
       <WithdrawalReviewCard
-        amount={`${review.review.amountDecimal} ${review.review.asset}`}
+        amount={review.review.amountDecimal}
+        asset={review.review.asset}
         network={railDisplayName(review.review.rail)}
         destination={review.review.destinationAddress}
         destinationLabel={selectedDestinationLabel}
@@ -2958,7 +2931,7 @@ function WithdrawalFormShell({
         ]}
         disabled={!review.canSubmit}
         submitting={submitting}
-        onCancel={onCancel}
+        onEdit={onEdit}
         onConfirm={() => onSubmit()}
       >
         {debugEnabled ? (
@@ -2979,19 +2952,12 @@ function WithdrawalFormShell({
             </div>
           </div>
         ) : null}
-        {!submitting && review.canSubmit ? (
-          <p className="text-xs font-medium text-blue-700">
-            Ready to authorize withdrawal.
-          </p>
-        ) : null}
         {!submitting && !review.canSubmit ? (
           <p className="text-xs font-medium text-red-700">
             This withdrawal can&apos;t be approved right now. Go back and review it again.
           </p>
         ) : null}
-        <button type="button" onClick={onEdit} className="text-sm font-semibold text-blue-700 hover:text-blue-900">Edit withdrawal</button>
       </WithdrawalReviewCard>
-      </div>
     )
   }
 
@@ -3014,6 +2980,7 @@ function WithdrawalFormShell({
   }
 
   return (
+    <WithdrawalShell>
     <div className="space-y-4">
       {assetOptions.length > 0 ? (
         <AssetSelectDropdown
@@ -3199,26 +3166,15 @@ function WithdrawalFormShell({
         </div>
       ) : null}
 
-      <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
-        <button
-          type="button"
+      <WithdrawalActionStack>
+        <WithdrawalPrimaryButton
           onClick={onReview}
           disabled={reviewDisabled}
-          className="inline-flex h-11 min-w-[12rem] items-center justify-center rounded-lg bg-[#0052FF] px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none"
         >
           {reviewing ? "Reviewing..." : "Review withdrawal"}
-        </button>
-        {destinationAddress.trim() || amountTrimmed || selectedDestinationId ? (
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={reviewing}
-            className="inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-6 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-red-200 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Cancel
-          </button>
-        ) : null}
-      </div>
+        </WithdrawalPrimaryButton>
+        <WithdrawalSecondaryButton onClick={onCancel} disabled={reviewing} className="hover:border-red-200 hover:text-red-600">Cancel</WithdrawalSecondaryButton>
+      </WithdrawalActionStack>
 
       {process.env.NODE_ENV !== "production" ? (
         <details className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-500">
@@ -3227,6 +3183,7 @@ function WithdrawalFormShell({
         </details>
       ) : null}
     </div>
+    </WithdrawalShell>
   )
 }
 
@@ -11289,6 +11246,7 @@ function PineTreeWalletRuntime() {
           ) : null}
 
           {activeView === "withdraw" ? (
+            <div data-withdrawal-module-active="true" className="mx-auto w-full max-w-xl">
             <WalletFloatingWorkspace title="Withdraw" onClose={() => setActiveView(null)}>
               <WithdrawalFormShell
                 rail={withdrawalRail}
@@ -11376,6 +11334,7 @@ function PineTreeWalletRuntime() {
                 onFinishSetup={handleFinishWalletSetup}
               />
             </WalletFloatingWorkspace>
+            </div>
           ) : null}
 
           {activeView === "activity" ? (
@@ -11412,7 +11371,7 @@ export default function PineTreeWalletPage() {
   const infrastructure = usePineTreeWalletInfrastructureStatus()
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 [&:has([data-withdrawal-module-active])>h1]:hidden">
       <h1 className={dashboardPageTitleClass}>PineTree Wallet</h1>
       {!infrastructure.configured ? (
         <WalletSetupUnavailable kind="missing-env" />

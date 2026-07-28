@@ -311,7 +311,7 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(src).not.toContain(">Send<")
     expect(src).not.toContain("Choose a PineTree Wallet asset, then review before approval.")
     // The default (non-review) screen opens straight into the asset selector.
-    const formScreen = src.slice(src.lastIndexOf('return (\n    <div className="space-y-4">'))
+    const formScreen = src.slice(src.lastIndexOf('return (\n    <WithdrawalShell>'))
     expect(formScreen.indexOf("AssetSelectDropdown")).toBeGreaterThan(-1)
     expect(formScreen.indexOf(">Send<")).toBe(-1)
   })
@@ -363,7 +363,8 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(withdrawalCards).toContain("<dt")
     expect(reviewScreen).toContain('label: "Asset"')
     expect(reviewScreen).toContain('label: "Network"')
-    expect(reviewScreen).toContain('amount={`${review.review.amountDecimal} ${review.review.asset}`}')
+    expect(reviewScreen).toContain("amount={review.review.amountDecimal}")
+    expect(reviewScreen).toContain("asset={review.review.asset}")
     expect(reviewScreen).toContain("destination={review.review.destinationAddress}")
     expect(reviewScreen).toContain("Estimated network fee")
     expect(reviewScreen).toContain("Network fee may apply")
@@ -377,28 +378,29 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     )
     expect(withdrawalCards).toContain('"Confirm withdrawal"')
     expect(reviewScreen).toContain("onConfirm={() => onSubmit()}")
-    expect(reviewScreen).toContain("onClick={onEdit}")
-    expect(withdrawalCards).toContain("flex-col gap-2 sm:flex-row")
+    expect(reviewScreen).toContain("onEdit={onEdit}")
+    expect(withdrawalCards).toContain("<WithdrawalSecondaryButton onClick={onEdit}")
     expect(reviewScreen).not.toContain("window.confirm")
   })
 
-  it("withdrawal form uses a compact centered Review withdrawal action", () => {
+  it("withdrawal form uses the shared full-width action stack", () => {
     const src = withdrawalFormSrc()
     const actionBlock = src.slice(
-      src.lastIndexOf('<div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">'),
+      src.lastIndexOf("<WithdrawalActionStack>"),
       src.indexOf('{process.env.NODE_ENV !== "production" ? (')
     )
 
     expect(actionBlock).toContain("onClick={onReview}")
     expect(actionBlock).toContain('disabled={reviewDisabled}')
     expect(actionBlock).toContain('Review withdrawal')
-    expect(actionBlock).toContain("min-w-[12rem]")
-    expect(actionBlock).not.toContain("w-full")
+    expect(actionBlock).toContain("<WithdrawalPrimaryButton")
+    expect(actionBlock).toContain("<WithdrawalSecondaryButton")
+    expect(withdrawalCards).toContain("h-11 w-full")
   })
 
   it("withdraw validation and pending review states are not yellow warning blocks", () => {
     const src = withdrawalFormSrc().replace(/\r\n/g, "\n")
-    const formScreen = src.slice(src.lastIndexOf('return (\n    <div className="space-y-4">'))
+    const formScreen = src.slice(src.lastIndexOf('return (\n    <WithdrawalShell>'))
     expect(formScreen).not.toContain("border-amber")
     expect(formScreen).not.toContain("bg-amber")
     expect(formScreen).not.toContain("text-amber")
@@ -533,7 +535,7 @@ describe("Wallet setup card - connected rails and compact desktop layout", () =>
       walletPage.indexOf("function formatUsd(")
     )
     const actionBlock = formShell.slice(
-      formShell.lastIndexOf('<div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-center">'),
+      formShell.lastIndexOf("<WithdrawalActionStack>"),
       formShell.indexOf('{process.env.NODE_ENV !== "production" ? (')
     )
 

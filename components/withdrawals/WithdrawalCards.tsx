@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type ReactNode } from "react"
+import { useState, type ButtonHTMLAttributes, type ReactNode } from "react"
 import { Check, CircleAlert, Clock3, Copy, ExternalLink } from "lucide-react"
 
 export type WithdrawalLifecycleState =
@@ -38,6 +38,43 @@ const resultTone: Record<"success" | "pending" | "failed" | "checking", string> 
   pending: "border-blue-200/80 bg-blue-50/65 text-blue-950",
   failed: "border-red-200/80 bg-red-50/65 text-red-950",
   checking: "border-gray-200 bg-gray-50 text-gray-950",
+}
+
+const withdrawalActionBaseClass = "inline-flex h-11 w-full items-center justify-center rounded-xl px-5 text-sm font-semibold shadow-sm transition focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+
+export function WithdrawalShell({ children }: { children: ReactNode }) {
+  return <div className="mx-auto w-full max-w-xl space-y-3 pt-1">{children}</div>
+}
+
+export function WithdrawalActionStack({ children }: { children: ReactNode }) {
+  return (
+    <div className="mx-auto flex w-full max-w-sm flex-col gap-2 px-0 pt-1 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-2">
+      {children}
+    </div>
+  )
+}
+
+export function WithdrawalPrimaryButton({ className = "", type = "button", ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button type={type} className={`${withdrawalActionBaseClass} bg-[#0052FF] text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-500 ${className}`} {...props} />
+}
+
+export function WithdrawalSecondaryButton({ className = "", type = "button", ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button type={type} className={`${withdrawalActionBaseClass} border border-gray-200 bg-white text-gray-700 hover:border-blue-200 hover:text-blue-700 ${className}`} {...props} />
+}
+
+function WithdrawalAmountHero({ amount, asset }: { amount: string; asset: string }) {
+  const amountSize = amount.length > 22
+    ? "text-base sm:text-xl"
+    : amount.length > 16
+      ? "text-xl sm:text-2xl"
+      : "text-[clamp(1.75rem,8vw,2.25rem)]"
+
+  return (
+    <p className="mt-2 flex max-w-full flex-wrap items-baseline justify-center gap-x-2 gap-y-0.5 tracking-[-0.035em] text-gray-950">
+      <span className={`max-w-full whitespace-nowrap font-semibold tabular-nums ${amountSize}`}>{amount}</span>
+      <span className="whitespace-nowrap text-base font-semibold tracking-[-0.01em] text-gray-600 sm:text-lg">{asset}</span>
+    </p>
+  )
 }
 
 export function WithdrawalStatusPill({ state }: { state: WithdrawalLifecycleState }) {
@@ -109,33 +146,35 @@ function DestinationPanel({
 
 export function WithdrawalReviewCard({
   amount,
+  asset,
   network,
   destination,
   destinationLabel,
   details,
   disabled,
   submitting,
-  onCancel,
+  onEdit,
   onConfirm,
   children,
 }: {
   amount: string
+  asset: string
   network: string
   destination: string
   destinationLabel?: string
   details: WithdrawalDetail[]
   disabled?: boolean
   submitting?: boolean
-  onCancel: () => void
+  onEdit: () => void
   onConfirm: () => void
   children?: ReactNode
 }) {
   return (
-    <div className="scroll-mt-24 space-y-3 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+    <WithdrawalShell>
       <section className="rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top,rgba(37,99,235,0.10),transparent_48%),linear-gradient(145deg,rgba(255,255,255,0.98),rgba(244,249,255,0.96))] px-4 py-4 shadow-[0_14px_36px_rgba(37,99,235,0.09)] sm:px-5 sm:py-5">
         <header className="text-center">
           <h3 className="text-sm font-semibold text-gray-900">Review withdrawal</h3>
-          <p className="mt-2 break-words text-3xl font-semibold tracking-[-0.035em] text-gray-950 sm:text-4xl">{amount}</p>
+          <WithdrawalAmountHero amount={amount} asset={asset} />
           <p className="mt-1 text-xs text-gray-500">Ready to send on {network}</p>
         </header>
         <div className="mt-4">
@@ -146,33 +185,32 @@ export function WithdrawalReviewCard({
         </div>
       </section>
       {children}
-      <div className="flex flex-col gap-2 sm:flex-row-reverse sm:justify-end">
-        <button type="button" onClick={onConfirm} disabled={disabled || submitting} className="inline-flex h-11 items-center justify-center rounded-xl bg-[#0052FF] px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none">
+      <WithdrawalActionStack>
+        <WithdrawalPrimaryButton onClick={onConfirm} disabled={disabled || submitting}>
           {submitting ? "Confirming…" : "Confirm withdrawal"}
-        </button>
-        <button type="button" onClick={onCancel} disabled={submitting} className="inline-flex h-11 items-center justify-center rounded-xl border border-gray-200 bg-white px-5 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-red-200 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50">
-          Cancel
-        </button>
-      </div>
-    </div>
+        </WithdrawalPrimaryButton>
+        <WithdrawalSecondaryButton onClick={onEdit} disabled={submitting}>Edit withdrawal</WithdrawalSecondaryButton>
+      </WithdrawalActionStack>
+    </WithdrawalShell>
   )
 }
 
-export function WithdrawalProgressCard({ state, network }: { state: "AUTHORIZING" | "SUBMITTING" | "SUBMITTED" | "CONFIRMING" | "CHECKING_STATUS"; network?: string }) {
+export function WithdrawalProgressCard({ state, network, amount, asset }: { state: "AUTHORIZING" | "SUBMITTING" | "SUBMITTED" | "CONFIRMING" | "CHECKING_STATUS"; network?: string; amount?: string; asset?: string }) {
   const title = state === "AUTHORIZING" ? "Authorizing withdrawal" : state === "SUBMITTING" ? "Submitting withdrawal" : state === "SUBMITTED" ? "Withdrawal submitted" : state === "CONFIRMING" ? `Confirming${network ? ` on ${network}` : ""}` : "Checking withdrawal status"
   const checking = state === "CHECKING_STATUS"
   return (
-    <section className={`relative z-0 scroll-mt-24 rounded-2xl border px-4 py-4 sm:px-5 ${checking ? resultTone.checking : resultTone.pending}`} aria-live="polite">
-      <div className="flex items-start gap-3">
-        <span className={`mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${checking ? "bg-gray-200/70 text-gray-600" : "bg-blue-100 text-blue-700"}`}>
+    <WithdrawalShell>
+    <section className={`relative z-0 rounded-2xl border px-4 py-5 text-center shadow-[0_12px_32px_rgba(15,23,42,0.05)] sm:px-6 ${checking ? resultTone.checking : resultTone.pending}`} aria-live="polite">
+      <div>
+        <span className={`mx-auto inline-flex h-10 w-10 items-center justify-center rounded-full ${checking ? "bg-gray-200/70 text-gray-600" : "bg-blue-100 text-blue-700"}`}>
           <Clock3 className="h-[18px] w-[18px]" aria-hidden="true" />
         </span>
-        <div className="min-w-0">
-          <h3 className="text-base font-semibold tracking-[-0.01em]">{title}</h3>
-          <p className="mt-0.5 text-xs leading-5 opacity-70">PineTree will keep this withdrawal synchronized with its canonical provider status.</p>
-        </div>
+        <h3 className="mt-2.5 text-base font-semibold tracking-[-0.01em]">{title}</h3>
+        {amount && asset ? <WithdrawalAmountHero amount={amount} asset={asset} /> : null}
+        <p className="mx-auto mt-1 max-w-md text-xs leading-5 opacity-70">{network ? `Preparing secure authorization on ${network}.` : "PineTree is securely preparing this withdrawal."}</p>
       </div>
     </section>
+    </WithdrawalShell>
   )
 }
 
@@ -181,6 +219,7 @@ export function WithdrawalResultCard({
   title,
   message,
   amount,
+  asset,
   network,
   destination,
   explorerUrl,
@@ -191,6 +230,7 @@ export function WithdrawalResultCard({
   title: string
   message: string
   amount?: string
+  asset?: string
   network?: string
   destination?: string
   explorerUrl?: string | null
@@ -202,18 +242,20 @@ export function WithdrawalResultCard({
   const iconTone = state === "COMPLETED" ? "bg-emerald-100 text-emerald-700" : state === "FAILED" ? "bg-red-100 text-red-700" : state === "CHECKING_STATUS" || state === "CANCELED" ? "bg-gray-200/70 text-gray-600" : "bg-blue-100 text-blue-700"
 
   return (
+    <WithdrawalShell>
     <section className={`rounded-2xl border px-4 py-4 shadow-[0_12px_32px_rgba(15,23,42,0.06)] sm:px-6 sm:py-5 ${tone}`} aria-live="polite">
       <header className="text-center">
         <span className={`mx-auto inline-flex h-10 w-10 items-center justify-center rounded-full ${iconTone}`}>
           <Icon className="h-5 w-5" aria-hidden="true" />
         </span>
         <h3 className="mt-2.5 text-lg font-semibold tracking-[-0.02em]">{title}</h3>
-        {amount ? <p className="mt-1 break-words text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">{amount}</p> : null}
+        {amount && asset ? <WithdrawalAmountHero amount={amount} asset={asset} /> : null}
         <p className="mx-auto mt-1.5 max-w-md text-xs leading-5 opacity-70">{message}{network && state !== "COMPLETED" ? ` on ${network}` : ""}</p>
       </header>
       {details?.length ? <div className="mt-4"><WithdrawalDetailsCard details={details} /></div> : null}
       {destination ? <div className="mt-3"><DestinationPanel destination={destination} explorerUrl={explorerUrl} /></div> : null}
       {children}
     </section>
+    </WithdrawalShell>
   )
 }

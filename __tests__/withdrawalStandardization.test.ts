@@ -96,8 +96,9 @@ describe("standardized withdrawal presentation and submission safety", () => {
   })
 
   it("uses an amount-first hero and compact metadata rows at every width", () => {
-    expect(cards).toContain("text-3xl font-semibold")
-    expect(cards).toContain("sm:text-4xl")
+    expect(cards).toContain("function WithdrawalAmountHero")
+    expect(cards).toContain("text-[clamp(1.75rem,8vw,2.25rem)]")
+    expect(cards).toContain("whitespace-nowrap font-semibold tabular-nums")
     expect(cards).toContain("divide-y divide-gray-200/70")
     expect(cards).toContain("min-w-0 break-words")
     expect(cards).toContain("px-4 py-4")

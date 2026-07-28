@@ -56,7 +56,7 @@ describe("Withdrawal result card copy (this session's exact required wording)", 
     const src = resultCardSrc()
     expect(src).toContain("Withdrawal failed")
     expect(src).not.toContain("Withdrawal couldn't be completed")
-    expect(src).toContain("Your withdrawal has been confirmed.")
+    expect(src).toContain("Sent successfully")
   })
 
   it("shows Submitted/Confirmed timestamps when available on the request record", () => {
