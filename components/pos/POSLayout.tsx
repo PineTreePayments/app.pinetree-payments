@@ -1353,6 +1353,38 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         payload: { surface: "pos", httpStatus: detectRes?.status ?? "network_error" }
       })
 
+      // The detector verified the receipt. A proven revert must surface its
+      // truthful cause on the terminal AND the customer's mirrored phone
+      // screen - never a bare "Payment failed" while showing "confirming"
+      // (production payment a29773b7: reverted with insufficient USDC, POS
+      // kept projecting the generic confirming/failed sequence).
+      const detectBody = detectRes
+        ? ((await detectRes.json().catch(() => null)) as {
+            status?: string
+            failureCode?: string
+            failureReason?: string
+          } | null)
+        : null
+      if (String(detectBody?.status || "").toUpperCase() === "FAILED") {
+        const failureMessage =
+          detectBody?.failureCode === "insufficient_usdc_balance"
+            ? friendlyWalletExecutionMessage("insufficient_payment_asset", { rail: "base", asset: "USDC" })!
+            : sanitizeCustomerPaymentErrorMessage(
+                detectBody?.failureReason || "",
+                "Payment could not be completed. Start a new sale to retry."
+              )
+        console.warn(`${detectPrefix} detect_reported_failed`, {
+          paymentId,
+          failureCode: detectBody?.failureCode || null,
+        })
+        if (isOwnedBaseAttempt(myAttempt)) {
+          setPaymentError(failureMessage)
+          setStatus("failed")
+        }
+        await updatePosBaseSession(iid, { step: "failed", errorMessage: failureMessage }).catch(() => null)
+        return
+      }
+
       await updatePosBaseSession(iid, { step: "confirming" })
     } catch (err) {
       const message = err instanceof Error ? err.message : "Payment failed"

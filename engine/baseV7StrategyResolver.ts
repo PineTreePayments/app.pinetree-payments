@@ -16,7 +16,8 @@ import { getMarketPricesUSD } from "./marketPrices"
 const BASE_CHAIN_ID = 8453
 
 const USDC_ABI = [
-  "function allowance(address owner, address spender) view returns (uint256)"
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function balanceOf(address account) view returns (uint256)"
 ] as const
 
 const V7_RELAYER_ABI = [
@@ -53,6 +54,25 @@ export type BaseV7StrategyResolution = {
 export type BaseV7StrategyError = {
   ok: false
   error: string
+  /** Structured preflight code, e.g. "insufficient_usdc_balance". */
+  errorCode?: string
+  requiredUsdcAmount?: string
+  currentUsdcBalance?: string
+}
+
+/**
+ * Pure preflight decision: whether the payer's current USDC balance can cover
+ * the full required amount (merchant + Platform Fee). A null balance means
+ * the read failed - never block on missing evidence, only on proof of
+ * insufficiency (the payment call itself remains the final authority).
+ */
+export function classifyBaseUsdcBalancePreflight(input: {
+  balance: bigint | null
+  required: bigint
+}): { sufficient: boolean } {
+  if (input.required <= BigInt(0)) return { sufficient: true }
+  if (input.balance === null) return { sufficient: true }
+  return { sufficient: input.balance >= input.required }
 }
 
 function requireEvmAddress(label: string, value: string): string {
@@ -170,7 +190,7 @@ export async function resolveBaseV7Strategy(input: {
         ? BigInt(rawMerchantAmount) + BigInt(rawFeeAmount)
         : BigInt(0)
 
-    const [relayerCheck, allowanceResult] = await Promise.all([
+    const [relayerCheck, allowanceResult, balanceResult] = await Promise.all([
       isBaseV7Eip3009Enabled() && !skipEip3009
         ? checkRelayerAvailability()
         : Promise.resolve({ available: false, reason: "eip3009-disabled-or-skipped" }),
@@ -189,8 +209,45 @@ export async function resolveBaseV7Strategy(input: {
               return { sufficient: false, allowance: "0", required: totalRequired.toString() }
             }
           })()
-        : Promise.resolve({ sufficient: false, allowance: "0", required: "0" })
+        : Promise.resolve({ sufficient: false, allowance: "0", required: "0" }),
+      totalRequired > BigInt(0)
+        ? (async (): Promise<bigint | null> => {
+            try {
+              const provider = new JsonRpcProvider(getRpcUrl("base"), BASE_CHAIN_ID)
+              const usdcContract = new Contract(getBaseV7UsdcToken(), USDC_ABI, provider)
+              return (await usdcContract.balanceOf(payerAddress)) as bigint
+            } catch {
+              return null
+            }
+          })()
+        : Promise.resolve<bigint | null>(null)
     ])
+
+    // Balance preflight: production payment a29773b7 approved a 0.26 USDC
+    // allowance from a wallet holding ZERO USDC, then had the final payment
+    // call revert on-chain with "transfer amount exceeds balance" - after
+    // TWO wallet prompts. Proof of insufficiency must stop the flow before
+    // any wallet prompt; a failed balance READ never blocks (the payment
+    // call remains the final authority).
+    const balancePreflight = classifyBaseUsdcBalancePreflight({
+      balance: balanceResult,
+      required: totalRequired
+    })
+    if (!balancePreflight.sufficient) {
+      console.warn("[BaseV7] usdc_balance_preflight_insufficient", {
+        paymentId,
+        requiredUsdcAmount: totalRequired.toString(),
+        currentUsdcBalance: balanceResult === null ? null : balanceResult.toString(),
+        walletFamily
+      })
+      return {
+        ok: false,
+        error: "Insufficient USDC balance for this payment.",
+        errorCode: "insufficient_usdc_balance",
+        requiredUsdcAmount: totalRequired.toString(),
+        currentUsdcBalance: balanceResult === null ? undefined : balanceResult.toString()
+      }
+    }
 
     const relayerAvailable = relayerCheck.available
     const relayerReason = relayerCheck.reason

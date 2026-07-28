@@ -503,6 +503,14 @@ export type WatcherEvent = {
   from?: string
   feeCaptureValidated?: boolean
   /**
+   * Normalized failure diagnostics attached by the watcher when a mined
+   * transaction provably reverted (e.g. insufficient_usdc_balance from an
+   * "ERC20: transfer amount exceeds balance" replay). Evidence only — the
+   * FAILED decision itself always comes from the receipt.
+   */
+  failureCode?: string
+  failureReason?: string
+  /**
    * Self-healing reconciliation only. When true and the payment is currently
    * INCOMPLETE, allows this verified on-chain match to repair it back to
    * PROCESSING/CONFIRMED instead of being silently skipped as terminal.
@@ -728,7 +736,13 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
       value,
       from,
       feeCaptureValidated,
-      ...(targetStatus === "FAILED" ? { failureEvidence: true } : {})
+      ...(targetStatus === "FAILED"
+        ? {
+            failureEvidence: true,
+            ...(event.failureCode ? { failureCode: event.failureCode } : {}),
+            ...(event.failureReason ? { failureReason: event.failureReason } : {}),
+          }
+        : {})
     }
   }
 

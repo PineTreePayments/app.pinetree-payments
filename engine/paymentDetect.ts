@@ -233,5 +233,22 @@ export async function runPaymentDetectForPayment(
     })
   }
 
-  return { httpStatus: 200, body: { detected, status, kind } }
+  // A proven revert carries its extracted cause (persisted by the watcher
+  // into payment metadata, e.g. insufficient_usdc_balance) so the caller can
+  // show a truthful failure instead of a bare "Payment failed".
+  const failure =
+    status === "FAILED"
+      ? ((updatedPayment?.metadata as { failure?: { code?: string; message?: string } } | null)?.failure ?? null)
+      : null
+
+  return {
+    httpStatus: 200,
+    body: {
+      detected,
+      status,
+      kind,
+      ...(failure?.code ? { failureCode: failure.code } : {}),
+      ...(failure?.message ? { failureReason: failure.message } : {}),
+    }
+  }
 }

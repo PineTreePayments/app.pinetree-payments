@@ -30,6 +30,8 @@ import {
   BASE_V7_PAYMENT_SPLIT_TOPIC,
   evaluateBaseV7ReceiptEvidence
 } from "./baseV7Evidence"
+import { extractBaseRevertReason } from "./baseRevertReason"
+import { updatePaymentMetadata } from "@/database/payments"
 
 // Solana Memo Program ID — same constant used in solanaSplitTransaction.ts
 const SOLANA_MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
@@ -126,6 +128,7 @@ type EvmReceiptLog = {
 type EvmTransactionReceipt = {
   logs: EvmReceiptLog[]
   status?: string | number
+  blockNumber?: string | number
 }
 
 type SolanaRpcSignatureRow = {
@@ -565,11 +568,46 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
         }
 
         if (decision.kind === "failed_transaction") {
+          // The receipt proves the revert; replay the call to recover WHY it
+          // reverted (e.g. "ERC20: transfer amount exceeds balance" =
+          // insufficient USDC) and persist it so the failure surfaces as a
+          // truthful cause instead of a bare "Payment failed". Pure
+          // diagnostics on an already-proven failure - extraction problems
+          // never block the FAILED transition.
+          const revert = await extractBaseRevertReason({
+            rpcUrl,
+            transaction,
+            blockNumber: receipt.blockNumber ?? null,
+          })
+          console.warn("[PineTreeBaseTrace] watcher:base-v7 payment reverted", {
+            step: "watcher-base-v7-revert-classified",
+            paymentId: input.paymentId,
+            txHash: input.txHash,
+            failureCode: revert.code,
+            failureReason: revert.raw || null,
+          })
+          await updatePaymentMetadata(input.paymentId, {
+            failure: {
+              code: revert.code,
+              message: revert.message,
+              raw_reason: revert.raw,
+              tx_hash: input.txHash,
+              source: "receipt_replay",
+              occurred_at: new Date().toISOString(),
+            },
+          }).catch((metadataError) => {
+            console.warn("[PineTreeBaseTrace] watcher:base-v7 failure metadata persist failed", {
+              paymentId: input.paymentId,
+              error: metadataError instanceof Error ? metadataError.message : String(metadataError),
+            })
+          })
           await processPaymentEvent({
             type: "payment.failed",
             paymentId: input.paymentId,
             txHash: input.txHash,
-            feeCaptureValidated: false
+            feeCaptureValidated: false,
+            failureCode: revert.code,
+            failureReason: revert.message
           })
           return true
         }
