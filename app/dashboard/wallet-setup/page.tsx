@@ -2648,14 +2648,16 @@ function WithdrawalResultCard({
     // Name the network while finality is pending so the merchant can see the
     // withdrawal is progressing on-chain rather than stalled.
     const title = confirmed
-      ? "Withdrawal confirmed"
+      ? "Withdrawal Complete"
       : lifecycle === "CONFIRMING"
         ? review?.review.rail
           ? `Confirming on ${railDisplayName(review.review.rail)}`
           : "Withdrawal confirming"
         : "Withdrawal submitted"
     const supportingCopy = confirmed
-      ? "Your withdrawal has been confirmed."
+      ? review?.review.rail
+        ? `Sent successfully on ${railDisplayName(review.review.rail)}`
+        : "Sent successfully"
       : lifecycle === "CONFIRMING"
         ? "Your withdrawal was submitted and is being confirmed. You can safely leave this screen."
         : "Your withdrawal was submitted. You can safely leave this screen."
@@ -2667,15 +2669,22 @@ function WithdrawalResultCard({
     const resultDetails = review ? [
       { label: "Asset", value: review.review.asset },
       { label: "Network", value: railDisplayName(review.review.rail) },
-      { label: "Amount", value: `${review.review.amountDecimal} ${review.review.asset}` },
       { label: "Status", value: confirmed ? "Confirmed" : lifecycle === "CONFIRMING" ? "Confirming" : "Submitted" },
-      { label: "Destination address", value: review.review.destinationAddress, wide: true, mono: true },
       ...(submittedAtLabel ? [{ label: "Submitted", value: submittedAtLabel }] : []),
       ...(confirmedAtLabel ? [{ label: "Confirmed", value: confirmedAtLabel }] : []),
     ] : []
     return (
       <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] [overflow-wrap:anywhere]">
-        <SharedWithdrawalResultCard state={resultState} title={title} message={supportingCopy} details={resultDetails} />
+        <SharedWithdrawalResultCard
+          state={resultState}
+          title={title}
+          message={supportingCopy}
+          amount={review ? `${review.review.amountDecimal} ${review.review.asset}` : undefined}
+          network={review?.review.rail ? railDisplayName(review.review.rail) : undefined}
+          destination={review?.review.destinationAddress}
+          explorerUrl={explorerUrl}
+          details={resultDetails}
+        />
         <div className="flex flex-col gap-2 sm:flex-row">
           <button
             type="button"
@@ -2684,16 +2693,6 @@ function WithdrawalResultCard({
           >
             Done
           </button>
-          {explorerUrl ? (
-            <a
-              href={explorerUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
-            >
-              View transaction
-            </a>
-          ) : null}
         </div>
       </div>
     )
@@ -2711,6 +2710,9 @@ function WithdrawalResultCard({
         state={withdrawalOutcomePending ? "CHECKING_STATUS" : "FAILED"}
         title={withdrawalOutcomePending ? "Withdrawal outcome pending" : "Withdrawal failed"}
         message={approvalError || error || submitResult?.request.error_message || "The withdrawal could not be completed. Review the details and try again."}
+        amount={review ? `${review.review.amountDecimal} ${review.review.asset}` : undefined}
+        network={review?.review.rail ? railDisplayName(review.review.rail) : undefined}
+        destination={review?.review.destinationAddress}
       />
       <div className="flex flex-col gap-2 sm:flex-row">
         {isSignerSessionError && onOpenWallet ? (
@@ -2944,14 +2946,15 @@ function WithdrawalFormShell({
     return (
       <div className="scroll-mt-24 pb-[max(0.5rem,env(safe-area-inset-bottom))] [overflow-wrap:anywhere]">
       <WithdrawalReviewCard
+        amount={`${review.review.amountDecimal} ${review.review.asset}`}
+        network={railDisplayName(review.review.rail)}
+        destination={review.review.destinationAddress}
+        destinationLabel={selectedDestinationLabel}
         details={[
-          { label: "Amount", value: `${review.review.amountDecimal} ${review.review.asset}` },
           { label: "Asset", value: review.review.asset },
           { label: "Network", value: railDisplayName(review.review.rail) },
           { label: "Estimated network fee", value: "Network fee may apply" },
           { label: "PineTree wallet/source", value: diagnostics.savedSourceAddress ? `…${diagnostics.savedSourceAddress.slice(-8)}` : "Provider account", wide: true, mono: true },
-          { label: "Destination label", value: selectedDestinationLabel, wide: true },
-          { label: "Destination address", value: review.review.destinationAddress, wide: true, mono: true },
         ]}
         disabled={!review.canSubmit}
         submitting={submitting}

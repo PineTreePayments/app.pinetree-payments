@@ -88,4 +88,33 @@ describe("standardized withdrawal presentation and submission safety", () => {
     expect(page).toContain("withdrawalOutcomePending ? \"CHECKING_STATUS\" : \"FAILED\"")
     expect(page).toContain("review && !withdrawalOutcomePending")
   })
+
+  it("keeps status badges compact and impossible to wrap", () => {
+    expect(cards).toContain("h-7 w-auto shrink-0")
+    expect(cards).toContain("whitespace-nowrap")
+    expect(cards).not.toContain("<WithdrawalStatusPill state={state}")
+  })
+
+  it("uses an amount-first hero and compact metadata rows at every width", () => {
+    expect(cards).toContain("text-3xl font-semibold")
+    expect(cards).toContain("sm:text-4xl")
+    expect(cards).toContain("divide-y divide-gray-200/70")
+    expect(cards).toContain("min-w-0 break-words")
+    expect(cards).toContain("px-4 py-4")
+    expect(cards).toContain("sm:px-6 sm:py-5")
+  })
+
+  it("gives long destinations a bounded copy and explorer treatment", () => {
+    expect(cards).toContain("min-w-0 flex-1 truncate")
+    expect(cards).toContain('aria-label={copied ? "Destination copied" : "Copy destination"}')
+    expect(cards).toContain('aria-label="View transaction in explorer"')
+    expect(cards).toContain("h-8 w-8 shrink-0")
+  })
+
+  it("uses cohesive success, pending, failed, and checking surfaces", () => {
+    expect(cards).toContain("border-emerald-200/80 bg-emerald-50/65")
+    expect(cards).toContain("border-blue-200/80 bg-blue-50/65")
+    expect(cards).toContain("border-red-200/80 bg-red-50/65")
+    expect(cards).toContain("border-gray-200 bg-gray-50")
+  })
 })

@@ -1725,7 +1725,7 @@ describe("PineTree embedded wallet setup", () => {
   it("hides the editable form and review screen after withdrawal submission", () => {
     expect(page).toContain('if (screen === "approving" || screen === "failed" || (screen === "submitted" && submitResult))')
     expect(page).toContain("Withdrawal submitted")
-    expect(page).toContain("View transaction")
+    expect(withdrawalCards).toContain("View transaction in explorer")
     expect(page).toContain("Done")
     expect(page).not.toContain("{review && !submitResult ? (")
   })
@@ -2481,7 +2481,7 @@ describe("PineTree embedded wallet setup", () => {
   it("valid Solana review with Dynamic approvalMethod shows the shared Confirm withdrawal button", () => {
     expect(page).toContain('if (screen === "review" && review)')
     expect(withdrawalCards).toContain("\"Confirm withdrawal\"")
-    expect(withdrawalCards).toContain("Review the withdrawal details before authorizing.")
+    expect(withdrawalCards).toContain("Ready to send on")
   })
 
   it("clicking Approve calls the prepare route before signing", () => {
@@ -2527,7 +2527,7 @@ describe("PineTree embedded wallet setup", () => {
     // shared WithdrawalResultCard, which links out to an explorer instead of printing
     // the raw reference/hash as plain text.
     expect(page).toContain("buildWithdrawalExplorerUrl(review?.review.rail, txHash)")
-    expect(page).toContain("View transaction")
+    expect(withdrawalCards).toContain("View transaction in explorer")
     expect(page).toContain("Withdrawal submitted")
     expect(page).toContain("setWithdrawalSubmitResult({")
     expect(page).toContain("...submittedResult")
