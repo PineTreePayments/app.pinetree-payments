@@ -32,6 +32,8 @@ export const WITHDRAWAL_ERROR_MESSAGES: Record<WalletApiErrorCode, string> = {
   // happened". Never phrase this as an existing/completed withdrawal.
   IDEMPOTENCY_KEY_CONFLICT: "These withdrawal details don't match the earlier attempt they were submitted under. Review the withdrawal again and submit it as a new request.",
   INSUFFICIENT_BALANCE: "The available balance is insufficient for this withdrawal.",
+  INSUFFICIENT_NETWORK_FEE_BALANCE: "The network fee balance is too low for this withdrawal.",
+  BALANCE_VERIFICATION_UNAVAILABLE: "We could not confirm the wallet's spendable balance. Please try again shortly.",
   INTERNAL_ERROR: "Something went wrong on our end. Please try again.",
   INVALID_DESTINATION: "Enter a valid destination address for the selected asset and network.",
   INVALID_AMOUNT: "Enter a valid withdrawal amount.",
@@ -59,7 +61,7 @@ export const WITHDRAWAL_ERROR_MESSAGES: Record<WalletApiErrorCode, string> = {
  * never reach the merchant - collapse them to the generic fallback instead.
  */
 const INTERNAL_LEAK_PATTERN =
-  /schema cache|column|wallet_withdrawal_requests|merchant_wallet_operations|amount_decimal|failed to create wallet withdrawal request|private key|secret|api key/i
+  /schema cache|column|wallet_withdrawal_requests|merchant_wallet_operations|amount_decimal|failed to create wallet withdrawal request|private key|secret|api key|simulation failed|transaction simulation|program log|\blogs:|sendtransactionerror|getlogs\(\)|rpc error|stack trace|intrinsic gas/i
 
 /**
  * Best-effort classifier for legacy plain-Error withdrawal messages that
@@ -70,7 +72,11 @@ const INTERNAL_LEAK_PATTERN =
 export function classifyLegacyWithdrawalErrorMessage(rawMessage: string): WalletApiErrorCode {
   const raw = String(rawMessage || "")
   if (!raw.trim()) return "UNKNOWN_ERROR"
-  if (/insufficient|exceeds available balance|exceeds balance/i.test(raw)) return "INSUFFICIENT_BALANCE"
+  if (/unable to verify available balance|could not confirm.*spendable balance|current available balance could not be verified/i.test(raw))
+    return "BALANCE_VERIFICATION_UNAVAILABLE"
+  if (/insufficient.*(gas|network fee|rent|lamports)|not enough.*(ETH|SOL).*(fee|gas|rent)|intrinsic gas too low/i.test(raw))
+    return "INSUFFICIENT_NETWORK_FEE_BALANCE"
+  if (/insufficient|exceeds available balance|exceeds balance|transfer amount exceeds balance|fee exceeds balance|insufficient lamports|insufficient token balance/i.test(raw)) return "INSUFFICIENT_BALANCE"
   if (/minimum/i.test(raw)) return "MINIMUM_AMOUNT"
   if (/maximum|too large/i.test(raw)) return "MAXIMUM_AMOUNT"
   if (/network fee|fee too high/i.test(raw)) return "NETWORK_FEE_TOO_HIGH"
@@ -125,7 +131,6 @@ export function presentWithdrawalError(input: {
     "INVALID_AMOUNT",
     "WALLET_VALIDATION_ERROR",
     "WALLET_CAPABILITY_UNAVAILABLE",
-    "INSUFFICIENT_BALANCE",
     "SIGNER_NOT_AVAILABLE",
     "WALLET_NOT_CONNECTED",
   ]

@@ -29,6 +29,7 @@ import type {
 import type { WalletAdapterOperationResult, WalletAdapterWriteInput } from "./walletProviderAdapter"
 import {
   createWalletOperation,
+  getWalletOperationByIdempotencyKey,
   getWalletOperationForMerchant,
   listWalletOperations,
   upsertWalletOperationFromProviderActivity,
@@ -40,6 +41,12 @@ import {
 import { listWalletBalanceSnapshots, upsertWalletBalanceSnapshot } from "@/database/merchantWalletBalanceSnapshots"
 import { classifyBitcoinWithdrawalDestination } from "@/providers/wallets/bitcoinWithdrawalDestination"
 import { speedAmountFitsAvailable } from "@/engine/withdrawals/speedWithdrawalQuote"
+import {
+  evaluateWithdrawalPreflight,
+  WithdrawalPreflightError,
+  unavailableWithdrawalPreflight,
+  type WithdrawalPreflightResult,
+} from "@/engine/withdrawals/withdrawalPreflightResult"
 import { isAbandonedCreatedWalletOperation } from "@/engine/withdrawals/canonicalWithdrawalStatus"
 
 export const STALE_BALANCE_THRESHOLD_MS = 15 * 60 * 1000
@@ -1336,6 +1343,13 @@ export async function createWalletWithdrawal(
     correlationId: input.correlationId,
     diagnostics: input.diagnostics,
   }
+  // A new Speed withdrawal must pass live provider validation before the
+  // idempotent operation row is created. Existing rows skip this boundary so
+  // replay still restores/reconciles the original operation rather than
+  // being reinterpreted against today's balance.
+  const resolution = await resolveMerchantWalletProvider(merchantId)
+  const existing = await getWalletOperationByIdempotencyKey(merchantId, input.idempotencyKey)
+  if (!existing) await preflightProviderWalletWithdrawal(merchantId, adapterInput, resolution)
   return createWalletWrite(
     merchantId,
     "WITHDRAWAL",
@@ -1347,6 +1361,87 @@ export async function createWalletWithdrawal(
       resolution.adapter.validateWithdrawal?.(adapterInput)
     }
   )
+}
+
+export async function preflightProviderWalletWithdrawal(
+  merchantId: string,
+  input: WalletAdapterWriteInput,
+  resolved?: Awaited<ReturnType<typeof resolveMerchantWalletProvider>>
+): Promise<WithdrawalPreflightResult> {
+  const resolution = resolved ?? await resolveMerchantWalletProvider(merchantId)
+  input.diagnostics?.setProviderAccountId?.(resolution.context.providerAccountId)
+  input.diagnostics?.setSubstage?.("provider_account_validation")
+  resolution.adapter.validateWithdrawal?.(input)
+  const capabilities = await resolution.adapter.getCapabilities(resolution.context)
+  if (!capabilities.withdrawals || !capabilities.balances || !resolution.adapter.getBalances) {
+    throw new WalletApiRouteError(
+      "WALLET_CAPABILITY_UNAVAILABLE",
+      "A current available balance is required before withdrawal."
+    )
+  }
+
+  let balances: Awaited<ReturnType<NonNullable<typeof resolution.adapter.getBalances>>>
+  try {
+    input.diagnostics?.setSubstage?.("balance_retrieval")
+    balances = await resolution.adapter.getBalances(resolution.context)
+  } catch (error) {
+    console.warn("[pinetree-withdrawals] provider_balance_preflight_unavailable", {
+      correlationId: input.correlationId || null,
+      withdrawalId: null,
+      merchantId,
+      rail: "bitcoin",
+      asset: "BTC",
+      providerErrorClass: error instanceof Error ? error.name : "Error",
+      technicalError: error instanceof Error ? error.message : String(error || "unknown_error"),
+    })
+    throw new WithdrawalPreflightError(
+      unavailableWithdrawalPreflight({ rail: "bitcoin", asset: "BTC", requestedAmount: input.amountBaseUnits.toString() })
+    )
+  }
+
+  const requestedAsset = input.asset === "SATS" ? "BTC" : input.asset
+  const available = balances.find(
+    (balance) => canonicalWalletBalanceIdentity(balance.asset, balance.network).asset === requestedAsset
+  )?.availableBaseUnits
+  if (available == null) {
+    throw new WithdrawalPreflightError(
+      unavailableWithdrawalPreflight({ rail: "bitcoin", asset: "BTC", requestedAmount: input.amountBaseUnits.toString() })
+    )
+  }
+  const classified = classifyBitcoinWithdrawalDestination(input.destination)
+  const method = classified.valid && classified.method === "onchain" ? "onchain" : "lightning"
+  const quote = speedAmountFitsAvailable({
+    amountSats: input.amountBaseUnits,
+    providerAvailableSats: available,
+    method,
+  })
+  const preflight = evaluateWithdrawalPreflight({
+    capacity: {
+      rail: "bitcoin",
+      asset: "BTC",
+      network: "Bitcoin / Lightning",
+      availableBaseUnits: quote.totalAvailableSats,
+      pendingBaseUnits: quote.pendingSats,
+      spendableBaseUnits: quote.maximumSendableSats,
+      feeBaseUnits: quote.estimatedFeeSats,
+      reserveBaseUnits: BigInt(0),
+      feeAsset: "BTC",
+      verifiedAt: new Date().toISOString(),
+    },
+    requestedBaseUnits: input.amountBaseUnits,
+    minimumBaseUnits: method === "onchain" ? BigInt(1000) : BigInt(1),
+  })
+  if (!preflight.allowed) throw new WithdrawalPreflightError(preflight)
+  input.diagnostics?.setSubstage?.("balance_validation")
+  console.info("[pinetree-withdrawals] provider_withdrawal_preflight_passed", {
+    merchantId,
+    rail: "bitcoin",
+    asset: "BTC",
+    requestedSats: input.amountBaseUnits.toString(),
+    spendableSats: quote.maximumSendableSats.toString(),
+    estimatedFeeSats: quote.estimatedFeeSats.toString(),
+  })
+  return preflight
 }
 
 export async function createWalletPayout(

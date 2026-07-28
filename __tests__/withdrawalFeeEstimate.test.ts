@@ -23,6 +23,16 @@ vi.mock("@/database/merchantWalletOperations", () => ({
   sumPendingWithdrawalOperationBaseUnits: mocks.sumPendingWithdrawalOperationBaseUnits,
 }))
 
+vi.mock("@/engine/wallet/walletOperations", () => ({
+  getWalletBalances: vi.fn(async () => {
+    const row = await mocks.getWalletBalance("merchant_1", "BTC")
+    const decimal = String(row?.balance || "0")
+    const [whole, fraction = ""] = decimal.split(".")
+    const sats = BigInt(whole) * BigInt(100_000_000) + BigInt(fraction.padEnd(8, "0").slice(0, 8) || "0")
+    return { syncStatus: "live", balances: [{ asset: "BTC", availableBaseUnits: sats.toString() }] }
+  }),
+}))
+
 // Solana fee estimation talks to a real Connection - stub the whole module so
 // tests never make network calls. Only the methods withdrawalFeeEstimate.ts
 // actually calls are implemented.
@@ -30,6 +40,14 @@ vi.mock("@solana/web3.js", () => ({
   Connection: vi.fn().mockImplementation(() => ({
     getLatestBlockhash: vi.fn().mockResolvedValue({ blockhash: "fake-blockhash" }),
     getAccountInfo: vi.fn().mockResolvedValue({}), // ATA already exists - no rent needed
+    getBalance: vi.fn().mockImplementation(async () => {
+      const row = await mocks.getWalletBalance("merchant_1", "SOLANA_SOL")
+      return Number(String(row?.balance || "0")) * 1_000_000_000
+    }),
+    getTokenAccountBalance: vi.fn().mockImplementation(async () => {
+      const row = await mocks.getWalletBalance("merchant_1", "SOLANA_USDC")
+      return { value: { amount: String(Math.round(Number(String(row?.balance || "0")) * 1_000_000)) } }
+    }),
     getFeeForMessage: vi.fn().mockResolvedValue({ value: 5000 }),
     getMinimumBalanceForRentExemption: vi.fn().mockResolvedValue(2039280),
   })),
@@ -58,13 +76,27 @@ const BASE_ETH_GAS_ESTIMATE = "0x5208" // 21000
 function mockBaseFetch() {
   global.fetch = vi.fn().mockImplementation(async (_url, options) => {
     const body = JSON.parse((options as { body: string }).body)
+    let result = "0x0"
     if (body.method === "eth_gasPrice") {
-      return { json: async () => ({ result: BASE_ETH_GAS_PRICE_WEI }) }
+      result = BASE_ETH_GAS_PRICE_WEI
     }
     if (body.method === "eth_estimateGas") {
-      return { json: async () => ({ result: BASE_ETH_GAS_ESTIMATE }) }
+      result = BASE_ETH_GAS_ESTIMATE
     }
-    return { json: async () => ({ result: "0x0" }) }
+    if (body.method === "eth_getBalance") {
+      const row = await mocks.getWalletBalance("merchant_1", "BASE_ETH")
+      result = `0x${(BigInt(Math.round(Number(String(row?.balance || "0")) * 1e9)) * BigInt(1e9)).toString(16)}`
+    }
+    if (body.method === "eth_call") {
+      const row = await mocks.getWalletBalance("merchant_1", "BASE_USDC")
+      result = `0x${BigInt(Math.round(Number(String(row?.balance || "0")) * 1e6)).toString(16)}`
+    }
+    if (body.method === "getBalance") {
+      const row = await mocks.getWalletBalance("merchant_1", "SOLANA_SOL")
+      const lamports = BigInt(Math.round(Number(String(row?.balance || "0")) * 1_000_000_000))
+      return { ok: true, status: 200, text: async () => `{"result":{"value":${lamports.toString()}}}` }
+    }
+    return { ok: true, status: 200, json: async () => ({ result }), text: async () => JSON.stringify({ result }) }
   }) as unknown as typeof fetch
 }
 
@@ -73,7 +105,7 @@ describe("estimateMaxWithdrawalAmount", () => {
     vi.clearAllMocks()
     mockBaseFetch()
     mocks.getPineTreeWalletProfile.mockResolvedValue({
-      base_address: "0x1111111111111111111111111111111111111a",
+      base_address: "0x1111111111111111111111111111111111111111",
       solana_address: "So1anaAddress11111111111111111111111111111",
     })
     mocks.sumPendingWalletWithdrawalAmount.mockResolvedValue(0)

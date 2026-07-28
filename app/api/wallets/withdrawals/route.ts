@@ -8,6 +8,8 @@ import { getDeploymentBuildId } from "@/lib/deploymentInfo"
 import { WalletApiRouteError, walletError, walletErrorHttpStatus, walletOk } from "@/engine/wallet/walletErrors"
 import { classifyBitcoinWithdrawalDestination } from "@/providers/wallets/bitcoinWithdrawalDestination"
 import { syncPineTreeWalletBalances } from "@/engine/pineTreeWalletSync"
+import { WithdrawalPreflightError } from "@/engine/withdrawals/withdrawalPreflightResult"
+import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
 
 function safeErrorName(error: unknown) {
   const name = error && typeof error === "object" && "name" in error ? String((error as { name?: unknown }).name || "") : ""
@@ -32,9 +34,13 @@ function routeFailure(error: unknown) {
     const retryable = error instanceof WalletApiRouteError
       ? error.retryable
       : Boolean((error as { retryable?: unknown }).retryable)
+    const presented = presentWithdrawalError({
+      code,
+      rawMessage: error instanceof Error ? error.message : undefined,
+    })
     return {
       code,
-      message: error instanceof Error ? error.message : "Wallet withdrawal failed.",
+      message: presented.message,
       retryable: code === "STATUS_UNKNOWN" ? false : retryable,
       httpStatus: walletErrorHttpStatus(code),
     }
@@ -204,6 +210,7 @@ export async function POST(req: NextRequest) {
     })
   } catch (error) {
     const failure = routeFailure(error)
+    const preflight = error instanceof WithdrawalPreflightError ? error.preflight : undefined
     void refreshBalancesAfterWithdrawal(merchantId, {
       rail: "bitcoin",
       asset: "BTC",
@@ -225,7 +232,10 @@ export async function POST(req: NextRequest) {
       routeStage: "route_failed",
     })
     return NextResponse.json(
-      withCorrelation(walletError(failure.code, failure.message, failure.retryable), correlationId),
+      {
+        ...withCorrelation(walletError(failure.code, failure.message, failure.retryable), correlationId),
+        ...(preflight ? { preflight } : {}),
+      },
       {
         status: failure.httpStatus,
         headers: { "Cache-Control": "private, no-store, max-age=0" },

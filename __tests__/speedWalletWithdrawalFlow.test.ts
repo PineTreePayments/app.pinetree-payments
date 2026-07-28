@@ -56,6 +56,7 @@ describe("account-scoped withdrawal safeguards", () => {
     const updateWalletOperation = vi.fn().mockImplementation(async (_merchant, _id, patch) => operation(patch.status || "CREATED"))
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
+      getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       updateWalletOperation,
       getWalletOperationForMerchant: vi.fn(), listWalletOperations: vi.fn(),
       upsertWalletOperationFromProviderActivity: vi.fn(),
@@ -64,18 +65,18 @@ describe("account-scoped withdrawal safeguards", () => {
     return { adapter, createWithdrawal, createWalletOperation, updateWalletOperation }
   }
 
-  it("persists a failed operation and never dispatches when fresh balance is insufficient", async () => {
+  it("does not persist or dispatch when fresh balance is insufficient", async () => {
     const arranged = await arrange(BigInt(999))
     const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
     await expect(createWalletWithdrawal("merchant-1", {
       asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
     })).rejects.toMatchObject({ code: "INSUFFICIENT_BALANCE" })
     expect(arranged.createWithdrawal).not.toHaveBeenCalled()
-    expect(arranged.updateWalletOperation).toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ status: "FAILED", failureCode: "INSUFFICIENT_BALANCE" }))
-    expect(arranged.updateWalletOperation).toHaveBeenCalledWith("merchant-1", "op-1", expect.objectContaining({ failedAt: expect.any(String) }))
+    expect(arranged.createWalletOperation).not.toHaveBeenCalled()
+    expect(arranged.updateWalletOperation).not.toHaveBeenCalled()
   })
 
-  it("marks an adapter validation failure FAILED with failedAt and never dispatches", async () => {
+  it("does not persist an adapter validation failure before dispatch", async () => {
     const createWithdrawal = vi.fn()
     const validateWithdrawal = vi.fn(() => {
       throw new WalletApiRouteError("WALLET_PROVIDER_UNAVAILABLE", "Connected account is not ready.", false)
@@ -88,19 +89,11 @@ describe("account-scoped withdrawal safeguards", () => {
     })).rejects.toMatchObject({ code: "WALLET_PROVIDER_UNAVAILABLE" })
 
     expect(createWithdrawal).not.toHaveBeenCalled()
-    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
-      "merchant-1",
-      "op-1",
-      expect.objectContaining({
-        status: "FAILED",
-        failureCode: "WALLET_PROVIDER_UNAVAILABLE",
-        failedAt: expect.any(String),
-        rawProviderStatus: expect.objectContaining({ failureStage: "provider_account_validation" }),
-      })
-    )
+    expect(arranged.createWalletOperation).not.toHaveBeenCalled()
+    expect(arranged.updateWalletOperation).not.toHaveBeenCalled()
   })
 
-  it("marks balance verification failure FAILED with failedAt before dispatch", async () => {
+  it("returns a safe balance-verification error without persistence", async () => {
     const createWithdrawal = vi.fn()
     const arranged = await arrange(BigInt(2000), createWithdrawal, {
       getBalances: vi.fn().mockRejectedValue(new Error("balance read failed")),
@@ -109,19 +102,11 @@ describe("account-scoped withdrawal safeguards", () => {
 
     await expect(createWalletWithdrawal("merchant-1", {
       asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
-    })).rejects.toThrow("balance read failed")
+    })).rejects.toMatchObject({ code: "BALANCE_VERIFICATION_UNAVAILABLE" })
 
     expect(createWithdrawal).not.toHaveBeenCalled()
-    expect(arranged.updateWalletOperation).toHaveBeenCalledWith(
-      "merchant-1",
-      "op-1",
-      expect.objectContaining({
-        status: "FAILED",
-        failureCode: "WALLET_PROVIDER_UNAVAILABLE",
-        failedAt: expect.any(String),
-        rawProviderStatus: expect.objectContaining({ failureStage: "balance_retrieval" }),
-      })
-    )
+    expect(arranged.createWalletOperation).not.toHaveBeenCalled()
+    expect(arranged.updateWalletOperation).not.toHaveBeenCalled()
   })
 
   it("marks a Speed client error before acceptance FAILED with failedAt", async () => {

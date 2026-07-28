@@ -41,18 +41,25 @@ import {
   withdrawalLifecycleLabel,
   type WithdrawalMerchantStatusLabel,
 } from "@/engine/withdrawals/withdrawalLifecycle"
+import {
+  preflightDynamicWithdrawal,
+  WithdrawalPreflightError,
+  type WithdrawalPreflightResult,
+} from "@/engine/withdrawals/withdrawalPreflight"
 
 export type CreateWalletWithdrawalReviewInput = {
   rail: string
   asset: string
   destinationAddress: string
   amountDecimal: string
+  correlationId?: string | null
 }
 
 export type CreateWalletWithdrawalReviewResult = {
   request: WalletWithdrawalRequestRecord
   review: WithdrawalReview
   canSubmit: boolean
+  preflight?: WithdrawalPreflightResult
 }
 
 type WithdrawalFallbackDiagnostics = {
@@ -360,6 +367,21 @@ export async function createWalletWithdrawalReview(
     throw Object.assign(new Error("PineTree Wallet source address is not available."), { status: 409 })
   }
 
+  // Review is the first authoritative boundary. Reject predictable
+  // underfunding before a request row exists, so an invalid draft never
+  // becomes a canonical FAILED withdrawal or enters reconciliation.
+  const preflight = validated.rail === "base" || validated.rail === "solana"
+    ? await preflightDynamicWithdrawal({
+        merchantId,
+        rail: validated.rail,
+        asset: validated.asset as "ETH" | "USDC" | "SOL",
+        destinationAddress: validated.destinationAddress,
+        amountDecimal: validated.amountDecimal,
+        correlationId: input.correlationId,
+      })
+    : undefined
+  if (preflight && !preflight.allowed) throw new WithdrawalPreflightError(preflight)
+
   const signerInput = {
     merchantId,
     walletProfileId: profile.id,
@@ -430,6 +452,7 @@ export async function createWalletWithdrawalReview(
         reviewPayload: {
           ...review,
           diagnostics,
+          preflight,
         },
         errorMessage: null,
       })
@@ -443,6 +466,7 @@ export async function createWalletWithdrawalReview(
     reviewPayload: {
       ...review,
       diagnostics,
+      preflight,
     },
     errorMessage: null,
   })
@@ -461,6 +485,7 @@ export async function createWalletWithdrawalReview(
     request,
     review,
     canSubmit: canSign,
+    preflight,
   }
 }
 
@@ -565,7 +590,8 @@ export async function submitWalletWithdrawalRequest(
 
 export async function prepareDynamicWalletWithdrawal(
   merchantId: string,
-  withdrawalId: string
+  withdrawalId: string,
+  context?: { correlationId?: string | null }
 ): Promise<PreparedDynamicWithdrawal> {
   const request = await getWalletWithdrawalRequest(merchantId, withdrawalId)
   if (!request) {
@@ -598,6 +624,22 @@ export async function prepareDynamicWalletWithdrawal(
     throw Object.assign(new Error("Bitcoin wallet approval is not available yet."), { status: 409 })
   }
   const sourceAddress = getSourceAddressForRail(profile, validated.rail)
+
+  // Re-verify immediately before authorization material is returned. This
+  // closes the race between review and signing and runs before payload reuse
+  // as well as before new transaction construction.
+  if (validated.rail === "base" || validated.rail === "solana") {
+    const preflight = await preflightDynamicWithdrawal({
+      merchantId,
+      rail: validated.rail,
+      asset: validated.asset as "ETH" | "USDC" | "SOL",
+      destinationAddress: validated.destinationAddress,
+      amountDecimal: validated.amountDecimal,
+      correlationId: context?.correlationId,
+      withdrawalId: request.id,
+    })
+    if (!preflight.allowed) throw new WithdrawalPreflightError(preflight)
+  }
 
   if (hasReusablePreparedPayload) {
     assertPreparedPayloadUsesSavedSource(request.unsigned_transaction_payload!, sourceAddress)

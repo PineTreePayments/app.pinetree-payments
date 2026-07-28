@@ -3,6 +3,7 @@ import { prepareDynamicWalletWithdrawal } from "@/engine/withdrawals/walletWithd
 import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import { getDeploymentBuildId } from "@/lib/deploymentInfo"
+import { WithdrawalPreflightError } from "@/engine/withdrawals/withdrawalPreflightResult"
 
 export async function POST(
   req: NextRequest,
@@ -14,18 +15,20 @@ export async function POST(
   try {
     const merchantId = await requireMerchantIdFromRequest(req)
     console.info("[pinetree-withdrawals] PREPARE_RECEIVED", { correlationId, merchantId, requestId: id, buildId, routeStage: "prepare_received" })
-    const result = await prepareDynamicWalletWithdrawal(merchantId, id)
+    const result = await prepareDynamicWalletWithdrawal(merchantId, id, { correlationId })
     console.info("[pinetree-withdrawals] PREPARE_RETURNED", {
       correlationId, merchantId, requestId: id, buildId, routeStage: "prepare_returned", rail: result.rail, asset: result.asset,
     })
     return NextResponse.json(result)
   } catch (error) {
+    const preflight = error instanceof WithdrawalPreflightError ? error.preflight : undefined
     const presented = presentWithdrawalError({
+      code: error instanceof WithdrawalPreflightError ? error.code : undefined,
       rawMessage: error instanceof Error ? error.message : "Failed to prepare wallet approval",
     })
     console.warn("[pinetree-withdrawals] PREPARE_FAILED", { correlationId, requestId: id, buildId, routeStage: "prepare_failed", code: presented.code })
     return NextResponse.json(
-      { error: presented.message, error_code: presented.code },
+      { error: presented.message, error_code: presented.code, ...(preflight ? { preflight } : {}) },
       { status: getRouteErrorStatus(error) }
     )
   }

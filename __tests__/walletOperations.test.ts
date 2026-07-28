@@ -90,6 +90,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
       updateWalletOperation: vi.fn(),
+      getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
       listWalletOperations: vi.fn(),
     }))
@@ -146,36 +147,30 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     ).rejects.toMatchObject({ code: "WALLET_PROVIDER_NOT_CONFIGURED" })
   })
 
-  it("creates an operation row and marks it FAILED with WALLET_CAPABILITY_UNAVAILABLE when the resolved adapter does not support the capability", async () => {
+  it("rejects without an operation row when live withdrawal balance capability is unavailable", async () => {
     const adapter = fakeAdapter()
     const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "fake-provider", adapter, context: fakeContext })
-    const created = operationRow()
-    const failed = operationRow({ status: "FAILED", failure_code: "WALLET_CAPABILITY_UNAVAILABLE" })
-    const createWalletOperation = vi.fn().mockResolvedValue({ operation: created, created: true })
-    const updateWalletOperation = vi.fn().mockResolvedValue(failed)
+    const createWalletOperation = vi.fn()
+    const updateWalletOperation = vi.fn()
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
       updateWalletOperation,
+      getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
       listWalletOperations: vi.fn(),
     }))
 
     const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
-    const result = await createWalletWithdrawal("merchant-1", {
+    await expect(createWalletWithdrawal("merchant-1", {
       asset: "SATS",
       amountDecimal: "1000",
       destination: "lnbc1qqqqqqqqqqqqqqqqqqqq",
       idempotencyKey: "key-1",
-    })
+    })).rejects.toMatchObject({ code: "WALLET_CAPABILITY_UNAVAILABLE" })
 
-    expect(result.capabilityAvailable).toBe(false)
-    expect(result.operation.status).toBe("FAILED")
-    expect(updateWalletOperation).toHaveBeenCalledWith(
-      "merchant-1",
-      "op-1",
-      expect.objectContaining({ status: "FAILED", failureCode: "WALLET_CAPABILITY_UNAVAILABLE" })
-    )
+    expect(createWalletOperation).not.toHaveBeenCalled()
+    expect(updateWalletOperation).not.toHaveBeenCalled()
   })
 
   it("calls the resolved adapter's createWithdrawal and reconciles the operation when the capability is available - proves generic dispatch, not a hardcoded provider call", async () => {
@@ -186,13 +181,14 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     })
     const adapter = fakeAdapter({
       getCapabilities: vi.fn().mockResolvedValue({
-        balances: false,
+        balances: true,
         withdrawals: true,
         payouts: false,
         swaps: false,
         automaticPayouts: false,
         automaticConversion: false,
       }),
+      getBalances: vi.fn().mockResolvedValue([{ asset: "BTC", network: "bitcoin_lightning", availableBaseUnits: BigInt(5000), pendingBaseUnits: BigInt(0), totalBaseUnits: BigInt(5000) }]),
       createWithdrawal,
     })
     const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "fake-provider", adapter, context: fakeContext })
@@ -204,6 +200,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
       updateWalletOperation,
+      getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
       listWalletOperations: vi.fn(),
     }))
@@ -243,13 +240,14 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
       provider: "speed",
       providerDisplayName: "Speed",
       getCapabilities: vi.fn().mockResolvedValue({
-        balances: false,
+        balances: true,
         withdrawals: true,
         payouts: false,
         swaps: false,
         automaticPayouts: false,
         automaticConversion: false,
       }),
+      getBalances: vi.fn().mockResolvedValue([{ asset: "BTC", network: "bitcoin_lightning", availableBaseUnits: BigInt(5000), pendingBaseUnits: BigInt(0), totalBaseUnits: BigInt(5000) }]),
       createWithdrawal,
     })
     const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "speed", adapter, context: fakeContext })
@@ -259,6 +257,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
       updateWalletOperation: vi.fn().mockResolvedValue(operationRow({ status: "PROCESSING", network: "bitcoin_onchain" })),
+      getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
       listWalletOperations: vi.fn(),
     }))
@@ -284,13 +283,14 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     }
     const adapter = fakeAdapter({
       getCapabilities: vi.fn().mockResolvedValue({
-        balances: false,
+        balances: true,
         withdrawals: true,
         payouts: false,
         swaps: false,
         automaticPayouts: false,
         automaticConversion: false,
       }),
+      getBalances: vi.fn().mockResolvedValue([{ asset: "BTC", network: "bitcoin_lightning", availableBaseUnits: BigInt(5000), pendingBaseUnits: BigInt(0), totalBaseUnits: BigInt(5000) }]),
       createWithdrawal: vi.fn().mockResolvedValue(confirmedResult),
     })
     const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "fake-provider", adapter, context: fakeContext })
@@ -300,6 +300,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation: vi.fn().mockResolvedValue({ operation: created, created: true }),
       updateWalletOperation,
+      getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
       listWalletOperations: vi.fn(),
     }))
@@ -355,14 +356,13 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
       adapter,
       context: { merchantId: "merchant-1", providerAccountId: "acct_speed_1" },
     })
-    const created = operationRow({ amount_base_units: "2969" })
-    const failed = operationRow({ status: "FAILED", failure_code: "INSUFFICIENT_BALANCE" })
-    const createWalletOperation = vi.fn().mockResolvedValue({ operation: created, created: true })
-    const updateWalletOperation = vi.fn().mockResolvedValue(failed)
+    const createWalletOperation = vi.fn()
+    const updateWalletOperation = vi.fn()
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
       updateWalletOperation,
+      getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
       listWalletOperations: vi.fn(),
     }))
@@ -377,15 +377,8 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
       })
     ).rejects.toMatchObject({ code: "INSUFFICIENT_BALANCE", retryable: false })
 
-    expect(updateWalletOperation).toHaveBeenCalledWith(
-      "merchant-1",
-      "op-1",
-      expect.objectContaining({
-        status: "FAILED",
-        failureCode: "INSUFFICIENT_BALANCE",
-        failureReason: expect.stringContaining("estimated provider/network fee"),
-      })
-    )
+    expect(createWalletOperation).not.toHaveBeenCalled()
+    expect(updateWalletOperation).not.toHaveBeenCalled()
     expect(createWithdrawal).not.toHaveBeenCalled()
   })
 
@@ -420,6 +413,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
       updateWalletOperation,
+      getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(existing),
       getWalletOperationForMerchant: vi.fn(),
       listWalletOperations: vi.fn(),
     }))
@@ -481,6 +475,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
       updateWalletOperation,
+      getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(existing),
       getWalletOperationForMerchant: vi.fn(),
       listWalletOperations: vi.fn(),
     }))

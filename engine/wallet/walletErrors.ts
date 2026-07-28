@@ -23,6 +23,8 @@ export type WalletApiErrorCode =
   | "IDEMPOTENCY_KEY_REQUIRED"
   | "IDEMPOTENCY_KEY_CONFLICT"
   | "INSUFFICIENT_BALANCE"
+  | "INSUFFICIENT_NETWORK_FEE_BALANCE"
+  | "BALANCE_VERIFICATION_UNAVAILABLE"
   | "INTERNAL_ERROR"
   // Withdrawal-specific additions (engine/withdrawals/*) - kept in this same
   // taxonomy rather than a parallel one, so every wallet-surface route still
@@ -88,6 +90,8 @@ const CODE_HTTP_STATUS: Record<WalletApiErrorCode, number> = {
   IDEMPOTENCY_KEY_REQUIRED: 400,
   IDEMPOTENCY_KEY_CONFLICT: 409,
   INSUFFICIENT_BALANCE: 409,
+  INSUFFICIENT_NETWORK_FEE_BALANCE: 409,
+  BALANCE_VERIFICATION_UNAVAILABLE: 503,
   INTERNAL_ERROR: 500,
   INVALID_DESTINATION: 400,
   INVALID_AMOUNT: 400,

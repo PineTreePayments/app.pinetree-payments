@@ -188,6 +188,7 @@ export async function submitCanonicalWithdrawal(
     asset: input.asset,
     destinationAddress: address,
     amountDecimal: input.amountDecimal,
+    correlationId: input.correlationId,
   })
 
   const request = await updateWalletWithdrawalRequestCanonicalFields(input.merchantId, result.request.id, {

@@ -114,6 +114,19 @@ type WithdrawalLifecycleState =
   | "FAILED"
   | "CANCELLED"
 
+type WithdrawalPreflightFailure = {
+  allowed: false
+  code: "INSUFFICIENT_BALANCE" | "INSUFFICIENT_NETWORK_FEE_BALANCE" | "BALANCE_VERIFICATION_UNAVAILABLE" | "MINIMUM_AMOUNT"
+  title: string
+  userMessage: string
+  asset: WithdrawalAsset
+  requestedAmount: string
+  availableBalance: string
+  spendableBalance: string
+  requiredFeeReserve: string
+  feeAsset: "ETH" | "SOL" | "BTC"
+}
+
 type WithdrawalReviewResponse = {
   request: {
     id: string
@@ -162,6 +175,7 @@ type WalletWithdrawalResponse = {
     }
   }
   error?: { message?: string; code?: string }
+  preflight?: WithdrawalPreflightFailure
 }
 
 type WithdrawalPrepareResponse = {
@@ -2746,6 +2760,7 @@ function WithdrawalFormShell({
   screen,
   review,
   error,
+  preflightFailure,
   approvalError,
   reviewing,
   submitting,
@@ -2782,6 +2797,7 @@ function WithdrawalFormShell({
   screen: WithdrawalScreen
   review: WithdrawalReviewResponse | null
   error: string
+  preflightFailure: WithdrawalPreflightFailure | null
   approvalError: string
   reviewing: boolean
   submitting: boolean
@@ -2812,7 +2828,12 @@ function WithdrawalFormShell({
   const [saveDestinationLabel, setSaveDestinationLabel] = useState("")
   const [savingDestination, setSavingDestination] = useState(false)
   const [saveDestinationError, setSaveDestinationError] = useState("")
+  const amountInputRef = useRef<HTMLInputElement | null>(null)
   const savedDestinationsMethod = rail === "bitcoin" ? bitcoinTransferType : undefined
+
+  useEffect(() => {
+    if (preflightFailure) amountInputRef.current?.focus()
+  }, [preflightFailure])
 
   const fetchSavedDestinations = useCallback(async () => {
     if (!accessToken) return
@@ -3112,12 +3133,13 @@ function WithdrawalFormShell({
         <div className="flex gap-2">
           <div className="relative min-w-0 flex-1">
             <input
+              ref={amountInputRef}
               value={amountDecimal}
               onChange={(event) => onAmountChange(event.target.value)}
               inputMode="decimal"
               aria-label="Withdrawal amount"
               placeholder="0.00"
-              className="h-11 w-full rounded-xl border border-gray-200 bg-white pl-3 pr-14 text-sm font-semibold text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+              className={`h-11 w-full rounded-xl border bg-white pl-3 pr-14 text-sm font-semibold text-gray-900 outline-none transition placeholder:text-gray-400 focus:ring-4 ${preflightFailure ? "border-red-300 focus:border-red-400 focus:ring-red-100" : "border-gray-200 focus:border-blue-300 focus:ring-blue-100"}`}
             />
             <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-400">
               {asset}
@@ -3160,7 +3182,29 @@ function WithdrawalFormShell({
         )}
       </div>
 
-      {blockingMessage ? (
+      {preflightFailure ? (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-900">
+          <p className="font-semibold">{preflightFailure.title}</p>
+          <p className="mt-1 leading-5 text-red-800">{preflightFailure.userMessage}</p>
+          {preflightFailure.availableBalance ? (
+            <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+              <dt className="text-red-700">Available</dt>
+              <dd className="text-right font-semibold tabular-nums">{preflightFailure.availableBalance} {preflightFailure.asset}</dd>
+              <dt className="text-red-700">Spendable</dt>
+              <dd className="text-right font-semibold tabular-nums">{preflightFailure.spendableBalance} {preflightFailure.asset}</dd>
+              <dt className="text-red-700">Requested</dt>
+              <dd className="text-right font-semibold tabular-nums">{preflightFailure.requestedAmount} {preflightFailure.asset}</dd>
+              {preflightFailure.requiredFeeReserve ? (
+                <>
+                  <dt className="text-red-700">Fee and reserve</dt>
+                  <dd className="text-right font-semibold tabular-nums">{preflightFailure.requiredFeeReserve} {preflightFailure.feeAsset}</dd>
+                </>
+              ) : null}
+            </dl>
+          ) : null}
+          <p className="mt-2 text-xs font-medium text-red-800">Reduce the amount and try again.</p>
+        </div>
+      ) : blockingMessage ? (
         <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs font-semibold leading-5 text-blue-800">
           {blockingMessage}
         </div>
@@ -4333,6 +4377,7 @@ function PineTreeWalletRuntime() {
   const [withdrawalReview, setWithdrawalReview] = useState<WithdrawalReviewResponse | null>(null)
   const [withdrawalSubmitResult, setWithdrawalSubmitResult] = useState<WithdrawalSubmitResponse | null>(null)
   const [withdrawalError, setWithdrawalError] = useState("")
+  const [withdrawalPreflightFailure, setWithdrawalPreflightFailure] = useState<WithdrawalPreflightFailure | null>(null)
   const [withdrawalApprovalError, setWithdrawalApprovalError] = useState("")
   const [instantSendIdempotencyKey, setInstantSendIdempotencyKey] = useState<string | null>(null)
   // One correlation ID per withdrawal attempt, generated when review starts and
@@ -8352,6 +8397,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalReview(null)
     setWithdrawalSubmitResult(null)
     setWithdrawalError("")
+    setWithdrawalPreflightFailure(null)
     setWithdrawalApprovalError("")
   }, [withdrawableAssetOptions, withdrawalAsset, withdrawalRail])
 
@@ -9129,6 +9175,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalReview(null)
     setWithdrawalScreen("form")
     setWithdrawalApprovalError("")
+    setWithdrawalPreflightFailure(null)
     setWithdrawalError("")
     console.info("[pinetree-wallets] repair_dynamic_session_reset_start", {
       previousProfileId: repairProfileIdRef.current,
@@ -9540,6 +9587,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalSubmitResult(null)
     setWithdrawalApprovalError("")
     setWithdrawalError("")
+    setWithdrawalPreflightFailure(null)
   }
 
   // A withdrawal request row already exists server-side and its outcome
@@ -9566,6 +9614,7 @@ function PineTreeWalletRuntime() {
     setWithdrawalReview(null)
     setWithdrawalSubmitResult(null)
     setWithdrawalError("")
+    setWithdrawalPreflightFailure(null)
     setWithdrawalApprovalError("")
     setWithdrawalProviderAuthorizationActive(false)
     setInstantSendIdempotencyKey(null)
@@ -9965,7 +10014,7 @@ function PineTreeWalletRuntime() {
             destination_id: withdrawalSelectedDestinationId || undefined,
           }),
         })
-        const json = (await res.json()) as WithdrawalReviewResponse | { error?: string; error_code?: string }
+        const json = (await res.json()) as WithdrawalReviewResponse | { error?: string; error_code?: string; preflight?: WithdrawalPreflightFailure }
         if (!res.ok) {
           emitWalletSetupDebugEvent("wallet_withdrawal_review_blocked", {
             correlationId,
@@ -9973,6 +10022,7 @@ function PineTreeWalletRuntime() {
             reason: "server_rejected",
             httpStatus: res.status,
           })
+          if ("preflight" in json && json.preflight) setWithdrawalPreflightFailure(json.preflight)
           setWithdrawalError(
             sanitizeWithdrawalErrorForMerchant(
               "error" in json ? json.error : undefined,
@@ -10342,8 +10392,18 @@ function PineTreeWalletRuntime() {
           // fresh identity instead of dead-ending on the same conflict.
           if (presented.code === "IDEMPOTENCY_KEY_CONFLICT") setInstantSendIdempotencyKey(null)
           emitWalletSetupDebugEvent("provider_submission_failed", { correlationId, rail: "bitcoin", asset: "BTC", provider: "speed", errorCode: presented.code || "UNKNOWN" })
+          if (result.preflight) {
+            setWithdrawalReview(null)
+            setWithdrawalPreflightFailure(result.preflight)
+            setWithdrawalError(result.preflight.userMessage)
+            setWithdrawalApprovalError("")
+            setWithdrawalScreen("form")
+            setInstantSendIdempotencyKey(null)
+            activeWithdrawalAttemptRef.current = null
+            return
+          }
           setWithdrawalApprovalError(presented.code === "STATUS_UNKNOWN" ? withdrawalStatusUnknownMessage : presented.message)
-          setWithdrawalScreen(presented.code === "INSUFFICIENT_BALANCE" ? "review" : "failed")
+          setWithdrawalScreen("failed")
           void syncPineTreeWallet()
           return
         }
@@ -10509,13 +10569,24 @@ function PineTreeWalletRuntime() {
             "X-PineTree-Withdrawal-Correlation": correlationId,
           },
         })
-        const prepared = (await prepareRes.json()) as WithdrawalPrepareResponse | { error?: string; error_code?: string }
+        const prepared = (await prepareRes.json()) as WithdrawalPrepareResponse | { error?: string; error_code?: string; preflight?: WithdrawalPreflightFailure }
         emitWalletSetupDebugEvent("wallet_withdrawal_prepare_returned", {
           correlationId,
           httpStatus: prepareRes.status,
           ok: prepareRes.ok,
         })
         if (!prepareRes.ok) {
+          const preflight = "preflight" in prepared ? prepared.preflight : undefined
+          if (preflight && ["INSUFFICIENT_BALANCE", "INSUFFICIENT_NETWORK_FEE_BALANCE", "BALANCE_VERIFICATION_UNAVAILABLE"].includes(preflight.code)) {
+            setWithdrawalReview(null)
+            setWithdrawalPreflightFailure(preflight)
+            setWithdrawalError(preflight.userMessage)
+            setWithdrawalApprovalError("")
+            setWithdrawalScreen("form")
+            activeWithdrawalAttemptRef.current = null
+            clearActiveWithdrawalMarker(merchantId)
+            return
+          }
           // Clear the stale review so the button reverts to "Review withdrawal". The
           // underlying request status may have changed (e.g. already "pending"), and
           // prepare will keep rejecting it. The merchant must re-review to start fresh.
@@ -11272,6 +11343,7 @@ function PineTreeWalletRuntime() {
                 screen={withdrawalScreen}
                 review={withdrawalReview}
                 error={withdrawalError}
+                preflightFailure={withdrawalPreflightFailure}
                 approvalError={withdrawalApprovalError}
                 reviewing={reviewingWithdrawal}
                 submitting={submittingWithdrawal}
@@ -11316,6 +11388,7 @@ function PineTreeWalletRuntime() {
                 }}
                 onAmountChange={(value) => {
                   setWithdrawalAmount(value)
+                  setWithdrawalPreflightFailure(null)
                   setWithdrawalScreen("form")
                   setWithdrawalReview(null)
                   setWithdrawalSubmitResult(null)

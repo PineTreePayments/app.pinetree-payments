@@ -9,6 +9,7 @@ import { submitCanonicalWithdrawal } from "@/engine/withdrawals/canonicalWithdra
 import { normalizeWithdrawalRail, normalizeWithdrawalAsset } from "@/engine/withdrawals/walletWithdrawals"
 import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import { getDeploymentBuildId } from "@/lib/deploymentInfo"
+import { WithdrawalPreflightError } from "@/engine/withdrawals/withdrawalPreflightResult"
 
 export async function POST(req: NextRequest) {
   const correlationId = req.headers?.get("x-pinetree-withdrawal-correlation") || null
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
         source: "saved_address",
         idempotencyKey,
         destinationId,
+        correlationId,
       })
       if (canonical.kind === "review_required") {
         console.info("[pinetree-withdrawals] REVIEW_RETURNED", {
@@ -88,6 +90,7 @@ export async function POST(req: NextRequest) {
       asset,
       destinationAddress: String(body.destination_address || body.destinationAddress || ""),
       amountDecimal,
+      correlationId,
     })
 
     // Stamps this row as a plain manual (freely-typed address) withdrawal for
@@ -105,12 +108,14 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json({ ...result, request })
   } catch (error) {
+    const preflight = error instanceof WithdrawalPreflightError ? error.preflight : undefined
     const presented = presentWithdrawalError({
+      code: error instanceof WithdrawalPreflightError ? error.code : undefined,
       rawMessage: error instanceof Error ? error.message : "Failed to prepare withdrawal review",
     })
     console.warn("[pinetree-withdrawals] REVIEW_FAILED", { correlationId, buildId, routeStage: "review_failed", code: presented.code })
     return NextResponse.json(
-      { error: presented.message, error_code: presented.code },
+      { error: presented.message, error_code: presented.code, ...(preflight ? { preflight } : {}) },
       { status: getRouteErrorStatus(error) }
     )
   }

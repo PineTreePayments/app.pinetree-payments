@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     findOpenUnsignedWalletWithdrawalReview: vi.fn(),
     getWalletWithdrawalRequest: vi.fn(),
     updateWalletWithdrawalRequest: vi.fn(),
+    preflightDynamicWithdrawal: vi.fn(),
     fetch: vi.fn(),
   }))
 
@@ -27,6 +28,11 @@ vi.mock("@/database/merchantAuditEvents", () => ({
   insertMerchantAuditEvent: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock("@/engine/withdrawals/withdrawalPreflight", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/engine/withdrawals/withdrawalPreflight")>()),
+  preflightDynamicWithdrawal: mocks.preflightDynamicWithdrawal,
+}))
+
 import {
   completeDynamicWalletWithdrawal,
   createWalletWithdrawalReview,
@@ -39,6 +45,7 @@ import {
 import { createDefaultWithdrawalSigner } from "@/providers/wallets/withdrawalSigner"
 import * as bitcoinNetworkProvider from "@/providers/wallets/bitcoinNetworkProvider"
 import type { WithdrawalSigner } from "@/providers/wallets/withdrawalSigner"
+import { WithdrawalPreflightError } from "@/engine/withdrawals/withdrawalPreflightResult"
 
 function makeSigner(canSign: boolean): WithdrawalSigner & {
   submitWithdrawal: ReturnType<typeof vi.fn>
@@ -143,6 +150,7 @@ function mockBtcProviderFetch(utxoValue = 100_000) {
 describe("PineTree Wallet withdrawals", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.preflightDynamicWithdrawal.mockResolvedValue({ allowed: true })
     mocks.getPineTreeWalletProfile.mockResolvedValue({
       id: "wallet_profile_1",
       merchant_id: "merchant_1",
@@ -1036,6 +1044,35 @@ describe("PineTree Wallet withdrawals", () => {
         signedPayload: { dynamic_wallet_address: "0x9999999999999999999999999999999999999999" },
       })
     )
+  })
+
+  it("rejects failed authoritative preflight before creating a review row", async () => {
+    mocks.preflightDynamicWithdrawal.mockResolvedValueOnce({
+      allowed: false,
+      code: "INSUFFICIENT_BALANCE",
+      title: "Insufficient balance",
+      userMessage: "You do not have enough ETH to withdraw this amount and cover the network fee.",
+      reason: "asset_balance",
+      rail: "base",
+      asset: "ETH",
+      network: "Base",
+      requestedAmount: "1",
+      availableBalance: "1",
+      spendableBalance: "0.999",
+      requiredFeeReserve: "0.001",
+      feeAsset: "ETH",
+      verifiedAt: "2026-07-28T00:00:00.000Z",
+    })
+
+    await expect(createWalletWithdrawalReview("merchant_1", {
+      rail: "base",
+      asset: "ETH",
+      destinationAddress: "0x1234567890abcdef1234567890abcdef12345678",
+      amountDecimal: "1",
+    }, makeSigner(true))).rejects.toBeInstanceOf(WithdrawalPreflightError)
+
+    expect(mocks.createWalletWithdrawalRequest).not.toHaveBeenCalled()
+    expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
   })
 
   it("returns an existing Dynamic processing withdrawal idempotently when the same tx hash is submitted again", async () => {

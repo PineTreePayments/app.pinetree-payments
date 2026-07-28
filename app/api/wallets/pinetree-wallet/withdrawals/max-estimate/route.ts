@@ -2,6 +2,8 @@ import { type NextRequest, NextResponse } from "next/server"
 import { estimateMaxWithdrawalAmount } from "@/engine/withdrawals/withdrawalFeeEstimate"
 import { normalizeWithdrawalRail, normalizeWithdrawalAsset } from "@/engine/withdrawals/walletWithdrawals"
 import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
+import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
+import type { WalletApiErrorCode } from "@/engine/wallet/walletErrors"
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,7 +19,13 @@ export async function POST(req: NextRequest) {
     const estimate = await estimateMaxWithdrawalAmount(merchantId, rail, asset)
     return NextResponse.json({ estimate })
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to estimate maximum withdrawal amount"
-    return NextResponse.json({ error: message }, { status: getRouteErrorStatus(error) })
+    const code = error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code || "") as WalletApiErrorCode
+      : undefined
+    const presented = presentWithdrawalError({
+      code,
+      rawMessage: error instanceof Error ? error.message : "Failed to estimate maximum withdrawal amount",
+    })
+    return NextResponse.json({ error: presented.message, error_code: presented.code }, { status: getRouteErrorStatus(error) })
   }
 }
