@@ -10,6 +10,7 @@ function read(file: string) {
 const walletPage = read("app/dashboard/wallet-setup/page.tsx")
 const providersPage = read("app/dashboard/providers/page.tsx")
 const dynamicProvider = read("components/providers/PineTreeDynamicProvider.tsx")
+const withdrawalCards = read("components/withdrawals/WithdrawalCards.tsx")
 
 function walletOverviewSrc() {
   return walletPage.slice(
@@ -355,29 +356,29 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
       src.indexOf('if (screen === "review" && review)'),
       src.indexOf('if (screen === "approving" || screen === "failed" || (screen === "submitted" && submitResult))')
     )
-    expect(reviewScreen).toContain("rounded-[1.35rem]")
-    expect(reviewScreen).toContain("border-blue-200/70")
-    expect(reviewScreen).toContain("Review withdrawal")
-    expect(reviewScreen).toContain("<dt")
-    expect(reviewScreen).toContain(">Asset<")
-    expect(reviewScreen).toContain(">Network<")
-    expect(reviewScreen).toContain(">Amount<")
-    expect(reviewScreen).toContain(">Destination<")
+    expect(reviewScreen).toContain("<WithdrawalReviewCard")
+    expect(withdrawalCards).toContain("rounded-[1.35rem]")
+    expect(withdrawalCards).toContain("border-blue-200/70")
+    expect(withdrawalCards).toContain("Review withdrawal")
+    expect(withdrawalCards).toContain("<dt")
+    expect(reviewScreen).toContain('label: "Asset"')
+    expect(reviewScreen).toContain('label: "Network"')
+    expect(reviewScreen).toContain('label: "Amount"')
+    expect(reviewScreen).toContain('label: "Destination address"')
     expect(reviewScreen).toContain("Estimated network fee")
     expect(reviewScreen).toContain("Network fee may apply")
   })
 
-  it("review screen has Authorize withdrawal and a Back secondary action, not a generic browser-confirm layout", () => {
+  it("review screen has one shared Confirm withdrawal action and an edit action", () => {
     const src = withdrawalFormSrc().replace(/\r\n/g, "\n")
     const reviewScreen = src.slice(
       src.indexOf('if (screen === "review" && review)'),
       src.indexOf('if (screen === "approving" || screen === "failed" || (screen === "submitted" && submitResult))')
     )
-    expect(reviewScreen).toContain("{reviewActionLabel}")
-    expect(reviewScreen).toContain(">\n            Back\n          </button>")
-    expect(reviewScreen).toContain("onClick={() => onSubmit()}")
+    expect(withdrawalCards).toContain('"Confirm withdrawal"')
+    expect(reviewScreen).toContain("onConfirm={() => onSubmit()}")
     expect(reviewScreen).toContain("onClick={onEdit}")
-    expect(reviewScreen).toContain("flex-col gap-2 sm:flex-row")
+    expect(withdrawalCards).toContain("flex-col gap-2 sm:flex-row")
     expect(reviewScreen).not.toContain("window.confirm")
   })
 

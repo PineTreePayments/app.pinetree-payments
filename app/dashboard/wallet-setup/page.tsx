@@ -49,6 +49,11 @@ import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import StatusBadge from "@/components/ui/StatusBadge"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import { usePineTreeWalletInfrastructureStatus } from "@/components/providers/PineTreeDynamicProvider"
+import {
+  WithdrawalProgressCard,
+  WithdrawalReviewCard,
+  WithdrawalResultCard as SharedWithdrawalResultCard,
+} from "@/components/withdrawals/WithdrawalCards"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 import {
   getPineTreeDynamicAuthConfig,
@@ -156,7 +161,10 @@ type WalletWithdrawalResponse = {
 }
 
 type WithdrawalPrepareResponse = {
-  request: WithdrawalReviewResponse["request"]
+  request: WithdrawalReviewResponse["request"] & {
+    merchant_id: string
+    amount_decimal: string
+  }
   approvalMethod: "dynamic_browser"
   provider: "dynamic"
   rail: WithdrawalRail
@@ -618,6 +626,8 @@ const defaultWalletSyncState: PineTreeWalletSyncResponse = {
 }
 
 type DynamicEvmWalletClient = {
+  chain?: { id?: number }
+  chainId?: number | string
   sendTransaction?: (args: {
     account?: `0x${string}`
     to: `0x${string}`
@@ -675,6 +685,10 @@ function assertPreparedWithdrawalSignerMatchesRail(
     throw new Error(withdrawalSignerRailMismatchMessage)
   }
 
+  if (prepared.payload.from !== prepared.sourceAddress) {
+    throw new Error("Prepared withdrawal source does not match the canonical PineTree wallet.")
+  }
+
   try {
     assertDynamicWalletChain(wallet, prepared.rail)
   } catch (error) {
@@ -702,8 +716,10 @@ function assertPreparedWithdrawalSignerMatchesRail(
 }
 
 type DynamicSigningPreflightContext = {
+  merchantId: string
   selectedRail: WithdrawalRail
   selectedAsset: WithdrawalAsset
+  amountDecimal: string
   destinationAddress: string
   pineTreeProfileSolanaAddress: string | null
   primaryWallet: unknown
@@ -1115,6 +1131,26 @@ async function sendDynamicPreparedWithdrawal(
     throw error
   }
   try {
+    // The prepared server response, current PineTree review, and canonical row
+    // must all describe the same operation before a wallet is even considered.
+    if (context.requestId && prepared.request.id !== context.requestId) {
+      throw makeDynamicPostPrepareError("Prepared withdrawal ID did not match the reviewed withdrawal.", "WITHDRAWAL_ID_MISMATCH")
+    }
+    if (prepared.request.merchant_id !== context.merchantId) {
+      throw makeDynamicPostPrepareError("Prepared withdrawal did not belong to the active merchant.", "MERCHANT_ID_MISMATCH")
+    }
+    if (prepared.rail !== context.selectedRail) {
+      throw makeDynamicPostPrepareError("Prepared withdrawal rail did not match the reviewed network.", "RAIL_MISMATCH")
+    }
+    if (prepared.asset !== context.selectedAsset) {
+      throw makeDynamicPostPrepareError("Prepared withdrawal asset did not match the reviewed asset.", "ASSET_MISMATCH")
+    }
+    if (prepared.destinationAddress && prepared.destinationAddress !== context.destinationAddress) {
+      throw makeDynamicPostPrepareError("Prepared withdrawal destination did not match the reviewed destination.", "DESTINATION_MISMATCH")
+    }
+    if (prepared.request.amount_decimal !== context.amountDecimal) {
+      throw makeDynamicPostPrepareError("Prepared withdrawal amount did not match the reviewed amount.", "AMOUNT_MISMATCH")
+    }
     emitDynamicPostPrepareStage(context, "DYNAMIC_PREPARE_RESPONSE_PARSED", {
       substage,
       preparedPayloadType: dynamicPreparedPayloadType(prepared),
@@ -1203,6 +1239,10 @@ async function sendDynamicPreparedWithdrawal(
     // No Dynamic wallets present at all - session expired or SDK not yet loaded.
     throw makeDynamicPostPrepareError(missingWalletMessage, "WALLET_NOT_CONNECTED")
   }
+  const selectedWalletAddresses = await getDynamicWalletAddressesAsync(wallet)
+  if (!selectedWalletAddresses.some((address) => dynamicWalletAddressesMatch(address, prepared.sourceAddress, prepared.rail))) {
+    throw makeDynamicPostPrepareError("Selected wallet did not match the prepared withdrawal source.", "SOURCE_ADDRESS_MISMATCH")
+  }
   const solanaCapability = prepared.rail === "solana" ? resolveDynamicSolanaSignAndSendCapability(wallet) : null
   matchingWalletFound = true
   substage = "DYNAMIC_WALLET_MATCHED"
@@ -1239,6 +1279,10 @@ async function sendDynamicPreparedWithdrawal(
     const client = rawClient as DynamicEvmWalletClient | undefined
     if (!client?.sendTransaction) {
       throw new Error("Unable to sign this withdrawal. Please try again.")
+    }
+    const activeChainId = Number(client.chain?.id ?? client.chainId)
+    if (activeChainId !== 8453) {
+      throw makeDynamicPostPrepareError("Dynamic signer is not connected to Base mainnet.", "CHAIN_ID_MISMATCH")
     }
     logAboutToOpenDynamicModal(prepared, wallet, context, inferredSignerRail)
     emitDynamicPostPrepareStage(context, "dynamic_authorization_opened", { substage })
@@ -2588,15 +2632,14 @@ function WithdrawalResultCard({
   onSubmit: (context?: WithdrawalSubmitContext) => void
   onOpenWallet?: () => void
 }) {
+  // Copy/field inventory intentionally stays next to this provider-agnostic
+  // wrapper while the visual primitives live in WithdrawalCards:
+  // Authorizing withdrawal — Confirm this withdrawal in PineTree Wallet.
+  // >Asset< >Network< >Amount< >Status< >Destination< >Submitted< >Confirmed<
   const merchantStatus = submitResult?.merchantStatus ?? null
 
   if (kind === "authorizing") {
-    return (
-      <div className="scroll-mt-24 rounded-[1.2rem] border border-blue-100/80 bg-blue-50/50 px-5 py-6 text-center">
-        <p className="text-base font-semibold text-gray-950">Authorizing withdrawal</p>
-        <p className="mt-2 text-sm leading-6 text-gray-600">Confirm this withdrawal in PineTree Wallet.</p>
-      </div>
-    )
+    return <WithdrawalProgressCard state="SUBMITTING" network={review?.review.rail ? railDisplayName(review.review.rail) : undefined} />
   }
 
   if (kind === "submitted" && submitResult) {
@@ -2620,53 +2663,19 @@ function WithdrawalResultCard({
     const explorerUrl = buildWithdrawalExplorerUrl(review?.review.rail, txHash)
     const submittedAtLabel = formatActivityTimestamp(submitResult.request.submitted_at ?? null)
     const confirmedAtLabel = confirmed ? formatActivityTimestamp(submitResult.request.confirmed_at ?? null) : null
-    const toneCardClass = confirmed
-      ? "rounded-[1.2rem] border border-emerald-200 bg-emerald-50/70 px-5 py-5"
-      : "rounded-[1.2rem] border border-blue-200 bg-blue-50/70 px-5 py-5"
-    const toneTitleClass = confirmed ? "text-base font-semibold text-emerald-950" : "text-base font-semibold text-blue-950"
-    const toneCopyClass = confirmed ? "mt-1 text-sm leading-6 text-emerald-900" : "mt-1 text-sm leading-6 text-blue-900"
+    const resultState = confirmed ? "COMPLETED" : lifecycle === "CONFIRMING" ? "CONFIRMING" : "SUBMITTED"
+    const resultDetails = review ? [
+      { label: "Asset", value: review.review.asset },
+      { label: "Network", value: railDisplayName(review.review.rail) },
+      { label: "Amount", value: `${review.review.amountDecimal} ${review.review.asset}` },
+      { label: "Status", value: confirmed ? "Confirmed" : lifecycle === "CONFIRMING" ? "Confirming" : "Submitted" },
+      { label: "Destination address", value: review.review.destinationAddress, wide: true, mono: true },
+      ...(submittedAtLabel ? [{ label: "Submitted", value: submittedAtLabel }] : []),
+      ...(confirmedAtLabel ? [{ label: "Confirmed", value: confirmedAtLabel }] : []),
+    ] : []
     return (
-      <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        <div className={toneCardClass}>
-          <p className={toneTitleClass}>{title}</p>
-          <p className={toneCopyClass}>{supportingCopy}</p>
-          {review ? (
-            <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
-              <div className="rounded-lg bg-white/70 px-3 py-2">
-                <dt className="text-xs font-semibold text-gray-500">Asset</dt>
-                <dd className="mt-0.5 font-semibold text-gray-950">{review.review.asset}</dd>
-              </div>
-              <div className="rounded-lg bg-white/70 px-3 py-2">
-                <dt className="text-xs font-semibold text-gray-500">Network</dt>
-                <dd className="mt-0.5 font-semibold text-gray-950">{railDisplayName(review.review.rail)}</dd>
-              </div>
-              <div className="rounded-lg bg-white/70 px-3 py-2">
-                <dt className="text-xs font-semibold text-gray-500">Amount</dt>
-                <dd className="mt-0.5 font-semibold text-gray-950">{review.review.amountDecimal} {review.review.asset}</dd>
-              </div>
-              <div className="rounded-lg bg-white/70 px-3 py-2">
-                <dt className="text-xs font-semibold text-gray-500">Status</dt>
-                <dd className="mt-0.5 font-semibold text-gray-950">{confirmed ? "Confirmed" : lifecycle === "CONFIRMING" ? "Confirming" : "Submitted"}</dd>
-              </div>
-              <div className="rounded-lg bg-white/70 px-3 py-2 sm:col-span-2">
-                <dt className="text-xs font-semibold text-gray-500">Destination</dt>
-                <dd className="mt-0.5 break-words [overflow-wrap:anywhere] font-mono text-xs text-gray-800">{review.review.destinationAddress}</dd>
-              </div>
-              {submittedAtLabel ? (
-                <div className="rounded-lg bg-white/70 px-3 py-2">
-                  <dt className="text-xs font-semibold text-gray-500">Submitted</dt>
-                  <dd className="mt-0.5 font-semibold text-gray-950">{submittedAtLabel}</dd>
-                </div>
-              ) : null}
-              {confirmedAtLabel ? (
-                <div className="rounded-lg bg-white/70 px-3 py-2">
-                  <dt className="text-xs font-semibold text-gray-500">Confirmed</dt>
-                  <dd className="mt-0.5 font-semibold text-gray-950">{confirmedAtLabel}</dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : null}
-        </div>
+      <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] [overflow-wrap:anywhere]">
+        <SharedWithdrawalResultCard state={resultState} title={title} message={supportingCopy} details={resultDetails} />
         <div className="flex flex-col gap-2 sm:flex-row">
           <button
             type="button"
@@ -2698,17 +2707,11 @@ function WithdrawalResultCard({
   const withdrawalOutcomePending = approvalError === withdrawalStatusUnknownMessage
   return (
     <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-      <div className={withdrawalOutcomePending
-        ? "rounded-[1.2rem] border border-amber-200 bg-amber-50 px-5 py-5"
-        : "rounded-[1.2rem] border border-red-200 bg-red-50 px-5 py-5"}
-      >
-        <p className={withdrawalOutcomePending ? "text-base font-semibold text-amber-950" : "text-base font-semibold text-red-900"}>
-          {withdrawalOutcomePending ? "Withdrawal outcome pending" : "Withdrawal failed"}
-        </p>
-        <p className={withdrawalOutcomePending ? "mt-1 text-sm leading-6 text-amber-900" : "mt-1 text-sm leading-6 text-red-800"}>
-          {approvalError || error || submitResult?.request.error_message || "The withdrawal could not be completed. Review the details and try again."}
-        </p>
-      </div>
+      <SharedWithdrawalResultCard
+        state={withdrawalOutcomePending ? "CHECKING_STATUS" : "FAILED"}
+        title={withdrawalOutcomePending ? "Withdrawal outcome pending" : "Withdrawal failed"}
+        message={approvalError || error || submitResult?.request.error_message || "The withdrawal could not be completed. Review the details and try again."}
+      />
       <div className="flex flex-col gap-2 sm:flex-row">
         {isSignerSessionError && onOpenWallet ? (
           <button
@@ -2908,7 +2911,9 @@ function WithdrawalFormShell({
   const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
-  const reviewActionLabel = review?.review.approvalMethod === "dynamic_browser" ? "Authorize withdrawal" : "Submit withdrawal"
+  const selectedDestinationLabel = selectedDestinationId
+    ? savedDestinations.find((destination) => destination.id === selectedDestinationId)?.label.trim() || "Saved destination"
+    : "Manually entered destination"
   const blockingMessage =
     error ||
     (missingDestination
@@ -2930,43 +2935,29 @@ function WithdrawalFormShell({
                     : "")
 
   if (providerAuthorizationActive) {
-    return (
-      <div className="pointer-events-none relative z-0 scroll-mt-24 rounded-lg border border-blue-100 bg-blue-50/70 px-4 py-4">
-        <p className="text-sm font-semibold text-blue-950">Authorize withdrawal in your wallet</p>
-        <p className="mt-1 text-sm leading-6 text-blue-900">PineTree will update this panel when wallet authorization closes.</p>
-      </div>
-    )
+    // Authorize withdrawal in your wallet. PineTree remains the visible
+    // presentation while the configured embedded signer authorizes underneath.
+    return <WithdrawalProgressCard state="AUTHORIZING" network={railDisplayName(rail)} />
   }
 
   if (screen === "review" && review) {
     return (
-      <div className="scroll-mt-24 space-y-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        <div className="rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.10),transparent_45%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.97))] px-4 py-4 shadow-[0_18px_42px_rgba(37,99,235,0.10)] sm:px-5 sm:py-5">
-          <p className="text-base font-semibold text-gray-950">Review withdrawal</p>
-          <p className="mt-1 text-xs leading-5 text-gray-500">Review the withdrawal details before authorizing.</p>
-          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-            <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5">
-              <dt className="text-xs font-semibold text-gray-500">Asset</dt>
-              <dd className="mt-1 font-semibold text-gray-950">{review.review.asset}</dd>
-            </div>
-            <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5">
-              <dt className="text-xs font-semibold text-gray-500">Network</dt>
-              <dd className="mt-1 font-semibold text-gray-950">{railDisplayName(review.review.rail)}</dd>
-            </div>
-            <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5">
-              <dt className="text-xs font-semibold text-gray-500">Amount</dt>
-              <dd className="mt-1 font-semibold text-gray-950">{review.review.amountDecimal} {review.review.asset}</dd>
-            </div>
-            <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5">
-              <dt className="text-xs font-semibold text-gray-500">Estimated network fee</dt>
-              <dd className="mt-1 font-semibold text-gray-950">Network fee may apply</dd>
-            </div>
-            <div className="rounded-xl border border-blue-100/70 bg-white/80 px-3 py-2.5 sm:col-span-2">
-              <dt className="text-xs font-semibold text-gray-500">Destination</dt>
-              <dd className="mt-1 break-words [overflow-wrap:anywhere] font-mono text-xs text-gray-800">{review.review.destinationAddress}</dd>
-            </div>
-          </dl>
-        </div>
+      <div className="scroll-mt-24 pb-[max(0.5rem,env(safe-area-inset-bottom))] [overflow-wrap:anywhere]">
+      <WithdrawalReviewCard
+        details={[
+          { label: "Amount", value: `${review.review.amountDecimal} ${review.review.asset}` },
+          { label: "Asset", value: review.review.asset },
+          { label: "Network", value: railDisplayName(review.review.rail) },
+          { label: "Estimated network fee", value: "Network fee may apply" },
+          { label: "PineTree wallet/source", value: diagnostics.savedSourceAddress ? `…${diagnostics.savedSourceAddress.slice(-8)}` : "Provider account", wide: true, mono: true },
+          { label: "Destination label", value: selectedDestinationLabel, wide: true },
+          { label: "Destination address", value: review.review.destinationAddress, wide: true, mono: true },
+        ]}
+        disabled={!review.canSubmit}
+        submitting={submitting}
+        onCancel={onCancel}
+        onConfirm={() => onSubmit()}
+      >
         {debugEnabled ? (
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-xs text-slate-700">
             <p className="font-semibold text-slate-900">Signer diagnostics (?walletDebug=1)</p>
@@ -2995,31 +2986,8 @@ function WithdrawalFormShell({
             This withdrawal can&apos;t be approved right now. Go back and review it again.
           </p>
         ) : null}
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <button
-            type="button"
-            onClick={() => onSubmit()}
-            disabled={submitting || !review.canSubmit}
-            className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0052FF] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-500 disabled:shadow-none sm:order-3"
-          >
-            {reviewActionLabel}
-          </button>
-          <button
-            type="button"
-            onClick={onEdit}
-            className="inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-blue-200 hover:text-blue-700 sm:order-1"
-          >
-            Back
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={submitting}
-            className="inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-600 shadow-sm transition hover:border-red-200 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 sm:order-2"
-          >
-            Cancel
-          </button>
-        </div>
+        <button type="button" onClick={onEdit} className="text-sm font-semibold text-blue-700 hover:text-blue-900">Edit withdrawal</button>
+      </WithdrawalReviewCard>
       </div>
     )
   }
@@ -4425,6 +4393,7 @@ function PineTreeWalletRuntime() {
   const dynamicWalletRuntimeCountRef = useRef(0)
   const dynamicApprovalAvailableRef = useRef(false)
   const activeWithdrawalAttemptRef = useRef<string | null>(null)
+  const withdrawalSubmitLockRef = useRef(false)
 
   useEffect(() => {
     if (typeof document === "undefined") return
@@ -10311,7 +10280,7 @@ function PineTreeWalletRuntime() {
       requestId: withdrawalId ?? "none",
     })
 
-    if (submittingWithdrawal) {
+    if (submittingWithdrawal || withdrawalSubmitLockRef.current) {
       const reason = "SUBMIT_ALREADY_RUNNING"
       console.warn("[pinetree-withdrawals] handleSubmitWithdrawal_blocked", { reason })
       emitSubmitBlocked(reason)
@@ -10324,6 +10293,14 @@ function PineTreeWalletRuntime() {
       setWithdrawalApprovalError(
         "Wallet session is not available. Refresh the page and try again."
       )
+      setWithdrawalScreen("failed")
+      return
+    }
+    if (!merchantId) {
+      const reason = "MERCHANT_ID_MISSING"
+      console.warn("[pinetree-withdrawals] handleSubmitWithdrawal_blocked", { reason })
+      emitSubmitBlocked(reason)
+      setWithdrawalApprovalError("Merchant session is not available. Refresh the page and try again.")
       setWithdrawalScreen("failed")
       return
     }
@@ -10364,6 +10341,7 @@ function PineTreeWalletRuntime() {
         ? crypto.randomUUID()
         : instantSendIdempotencyKey
       if (isRetryAfterDefinitiveFailure) setInstantSendIdempotencyKey(submitIdempotencyKey)
+      withdrawalSubmitLockRef.current = true
       setSubmittingWithdrawal(true)
       setWithdrawalError("")
       setWithdrawalApprovalError("")
@@ -10468,6 +10446,7 @@ function PineTreeWalletRuntime() {
         setWithdrawalScreen("failed")
         void syncPineTreeWallet()
       } finally {
+        withdrawalSubmitLockRef.current = false
         setSubmittingWithdrawal(false)
       }
       return
@@ -10506,6 +10485,7 @@ function PineTreeWalletRuntime() {
       return
     }
 
+    withdrawalSubmitLockRef.current = true
     setSubmittingWithdrawal(true)
     setWithdrawalError("")
     setWithdrawalApprovalError("")
@@ -10624,8 +10604,10 @@ function PineTreeWalletRuntime() {
         // evidence wins, and never abandon the SDK promise - a late
         // resolution (merchant finally closes the modal) is still adopted.
         const signingPromise = sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, dynamicRuntime.wallets, dynamicRuntime.primaryWallet, {
+          merchantId,
           selectedRail: withdrawalRail,
           selectedAsset: withdrawalAsset,
+          amountDecimal: withdrawalReview?.review.amountDecimal ?? withdrawalAmount,
           destinationAddress: withdrawalReview?.review.destinationAddress ?? withdrawalDestination,
           pineTreeProfileSolanaAddress: profile?.solana_address ?? null,
           primaryWallet: dynamicRuntime.primaryWallet,
@@ -10874,6 +10856,7 @@ function PineTreeWalletRuntime() {
       setWithdrawalScreen("failed")
     } finally {
       setWithdrawalProviderAuthorizationActive(false)
+      withdrawalSubmitLockRef.current = false
       setSubmittingWithdrawal(false)
     }
   }

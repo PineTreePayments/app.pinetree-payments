@@ -222,6 +222,10 @@ export default function PineTreeDynamicProvider({ children }: { children: ReactN
             BitcoinWalletConnectors,
           ],
           detectNewWalletsForLinking: false,
+          // Keep merchant authorization in PineTree's review flow. Dynamic's
+          // dashboard "Show Confirmation UI" setting must also remain off;
+          // SDK 4.92.4 treats a project-level `true` as authoritative.
+          transactionConfirmation: { required: false },
           walletsFilter: filterPineTreeMerchantWalletOptions,
         }}
       >

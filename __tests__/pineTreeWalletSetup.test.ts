@@ -23,6 +23,7 @@ describe("PineTree embedded wallet setup", () => {
   const withdrawalEngine = read("engine/withdrawals/walletWithdrawals.ts")
   const withdrawalSigner = read("providers/wallets/withdrawalSigner.ts")
   const dynamicSignerLookup = read("lib/wallets/dynamicSignerLookup.ts")
+  const withdrawalCards = read("components/withdrawals/WithdrawalCards.tsx")
   const dynamicAuthConfig = read("lib/pinetreeDynamicAuth.ts")
   const merchantAuth = read("lib/api/merchantAuth.ts")
   const merchantsDb = read("database/merchants.ts")
@@ -1714,7 +1715,7 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("routes non-Dynamic wallet sends to a signer-unavailable failure instead of manual review", () => {
-    expect(page).toContain("Submit withdrawal")
+    expect(withdrawalCards).toContain("Confirm withdrawal")
     expect(page).toContain("if (review.review.approvalMethod === \"dynamic_browser\")")
     expect(page).toContain("This withdrawal cannot be signed in this browser session.")
     expect(page).not.toContain("action: \"submit\"")
@@ -2477,10 +2478,10 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain('setWithdrawalScreen("failed")')
   })
 
-  it("valid Solana review with Dynamic approvalMethod shows Authorize withdrawal button", () => {
+  it("valid Solana review with Dynamic approvalMethod shows the shared Confirm withdrawal button", () => {
     expect(page).toContain('if (screen === "review" && review)')
-    expect(page).toContain("\"Authorize withdrawal\"")
-    expect(page).toContain("Review the withdrawal details before authorizing.")
+    expect(withdrawalCards).toContain("\"Confirm withdrawal\"")
+    expect(withdrawalCards).toContain("Review the withdrawal details before authorizing.")
   })
 
   it("clicking Approve calls the prepare route before signing", () => {
@@ -2583,7 +2584,7 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("missing Dynamic signer fails instead of creating a manual review request", () => {
-    expect(page).toContain("\"Submit withdrawal\"")
+    expect(withdrawalCards).toContain("\"Confirm withdrawal\"")
     expect(page).toContain('setWithdrawalApprovalError("This withdrawal cannot be signed in this browser session.")')
     expect(page).not.toContain("action: \"submit\"")
     expect(page).not.toContain("withdrawal_id: withdrawalId")
