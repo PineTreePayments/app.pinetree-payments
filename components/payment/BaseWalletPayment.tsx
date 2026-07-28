@@ -8,6 +8,11 @@ import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import { classifyWalletFamily, detectCapabilitiesFromProvider } from "@/lib/basePay/strategyOrchestrator"
 import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
 import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
+import {
+  classifyWalletExecutionError,
+  friendlyWalletExecutionMessage,
+  sanitizeCustomerPaymentErrorMessage,
+} from "@/lib/payments/walletExecutionErrorClassifier"
 type BaseAsset = "ETH" | "USDC"
 type Props = {
   intentId?: string
@@ -2612,13 +2617,19 @@ export default function BaseWalletPayment({
       } else if (timedOut) {
         timeoutWalletRequest()
       }
+      // Prefer a validated specific cause (insufficient balance / gas / wrong
+      // network / expired request) over the raw wallet or RPC string - the
+      // screen must never show a bare timeout or an RPC dump when the wallet
+      // already reported why execution cannot succeed.
+      const executionKind = classifyWalletExecutionError(err, { rail: "base", asset: selectedAsset })
       const friendly = rejected
         ? (walletKind === "connect"
             ? "Wallet connection declined. Tap Try Again to retry."
             : "Payment declined. Tap Try Again to retry.")
         : isHandoff
           ? "Waiting for wallet response, or tap Try Again to restart."
-          : message
+          : friendlyWalletExecutionMessage(executionKind, { rail: "base", asset: selectedAsset })
+            ?? sanitizeCustomerPaymentErrorMessage(message, "Payment could not be completed. Tap Try Again to retry.")
       const failReason = getFailReason({
         selectedAsset,
         rejected,

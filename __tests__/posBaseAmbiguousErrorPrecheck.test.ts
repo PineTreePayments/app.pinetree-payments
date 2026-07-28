@@ -33,7 +33,7 @@ function read(relativePath: string) {
 
 function extractAmbiguousPrecheckBlock(src: string): string {
   const start = src.indexOf("if (!isRejection && walletConnectedForAttempt && !finalTxHashSubmitted)")
-  const end = src.indexOf("setPaymentError(message)", start)
+  const end = src.indexOf("setPaymentError(displayMessage)", start)
   if (start === -1 || end === -1) {
     throw new Error("Could not locate the ambiguous-error precheck block in POSLayout.tsx")
   }
@@ -65,7 +65,7 @@ describe("POSLayout ambiguous WalletConnect error recovery", () => {
     // through past the block to the existing setPaymentError/"failed" step
     // path, which is unchanged by this fix.
     const afterPrecheck = src.slice(src.indexOf(precheckBlock) + precheckBlock.length, src.indexOf(precheckBlock) + precheckBlock.length + 400)
-    expect(afterPrecheck).toContain("setPaymentError(message)")
+    expect(afterPrecheck).toContain("setPaymentError(displayMessage)")
     expect(afterPrecheck).toContain('step: "failed"')
   })
 

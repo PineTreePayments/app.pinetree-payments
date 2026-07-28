@@ -41,7 +41,7 @@
       <tr><td>API prefix</td><td><code>/api/v1</code></td></tr>
       <tr><td>Authentication</td><td>Secret API keys for server requests.</td></tr>
       <tr><td>Webhook schema</td><td><code>payments-v1</code></td></tr>
-      <tr><td>Supported rails</td><td>Solana, Base, Bitcoin Lightning. Shift4 card processing for approved merchants.</td></tr>
+      <tr><td>Supported rails</td><td>Solana, Base, Bitcoin Lightning. Shift4 card processing for approved merchants. Stripe and FluidPay card processing in early access.</td></tr>
       <tr><td>Confirmed state</td><td>Confirmed (<code>status: "paid"</code> in API response).</td></tr>
     </tbody>
   </table>
@@ -127,6 +127,16 @@ Content-Type: application/json</code></pre>
     <code>POST /api/v1/checkout/sessions</code> to prevent duplicate sessions on retries.
     See <a href="#idempotency">Idempotency</a>.
   </p>
+
+  <p>
+    PineTree issues <code>pt_live_*</code> keys only — there is no <code>pt_test_*</code> variant.
+    All keys operate against live payment infrastructure. See <a href="#testing">Testing</a>.
+  </p>
+
+  <p>
+    Public browser keys (<code>pk_live_*</code>) are created and revoked from Developer → API Keys
+    → Public Keys in your PineTree dashboard, the same way secret keys are managed.
+  </p>
 </section>
 
 <!-- ============================================================
@@ -142,10 +152,11 @@ Content-Type: application/json</code></pre>
   <table>
     <thead><tr><th>Permission</th><th>Allows</th></tr></thead>
     <tbody>
-      <tr><td><code>checkout.sessions:create</code></td><td>Create Checkout Sessions.</td></tr>
+      <tr><td><code>checkout.sessions:create</code></td><td>Create Checkout Sessions. Also accepted in place of <code>checkout.sessions:read</code>/<code>write</code> for back-compat.</td></tr>
       <tr><td><code>checkout.sessions:read</code></td><td>List and retrieve Checkout Sessions.</td></tr>
       <tr><td><code>checkout.sessions:write</code></td><td>Cancel or expire Checkout Sessions.</td></tr>
       <tr><td><code>payments:read</code></td><td>Retrieve Payments.</td></tr>
+      <tr><td><code>checkout.links:create</code></td><td>Reserved for payment-link creation. Granted by default today but not yet enforced by any live endpoint.</td></tr>
       <tr><td><code>webhooks:read</code></td><td>List Webhook Deliveries.</td></tr>
       <tr><td><code>webhooks:write</code></td><td>Retry Webhook Deliveries.</td></tr>
     </tbody>
@@ -169,19 +180,19 @@ Content-Type: application/json</code></pre>
   </div>
   <div class="route">
     <span class="method">GET</span><code>/api/v1/checkout/sessions</code>
-    <p>Lists Checkout Sessions. Supports status, reference, limit, date, and cursor filters. Requires <code>checkout.sessions:read</code>.</p>
+    <p>Lists Checkout Sessions. Requires <code>checkout.sessions:read</code> (or <code>checkout.sessions:create</code>).</p>
   </div>
   <div class="route">
     <span class="method">GET</span><code>/api/v1/checkout/sessions/{id}</code>
-    <p>Retrieves a Checkout Session by ID. Requires <code>checkout.sessions:read</code>.</p>
+    <p>Retrieves a Checkout Session by ID. Requires <code>checkout.sessions:read</code> (or <code>checkout.sessions:create</code>).</p>
   </div>
   <div class="route">
     <span class="method">POST</span><code>/api/v1/checkout/sessions/{id}/cancel</code>
-    <p>Cancels an open Checkout Session. Requires <code>checkout.sessions:write</code>.</p>
+    <p>Cancels an open Checkout Session. Requires <code>checkout.sessions:write</code> (or <code>checkout.sessions:create</code>).</p>
   </div>
   <div class="route">
     <span class="method">POST</span><code>/api/v1/checkout/sessions/{id}/expire</code>
-    <p>Expires an open Checkout Session. Requires <code>checkout.sessions:write</code>.</p>
+    <p>Expires an open Checkout Session. Requires <code>checkout.sessions:write</code> (or <code>checkout.sessions:create</code>).</p>
   </div>
   <div class="route">
     <span class="method">POST</span><code>/api/v1/browser/checkout/sessions</code>
@@ -197,10 +208,11 @@ Content-Type: application/json</code></pre>
   "successUrl": "https://yoursite.com/paid",
   "cancelUrl": "https://yoursite.com/cancel"
 }</code></pre>
+  <p><code>amount</code> is in major currency units — for USD, <code>49.99</code> means $49.99, not 4999 cents.</p>
 
   <h3>Create Session Response</h3>
   <pre><code>{
-  "id": "cs_01abc",
+  "id": "3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40",
   "object": "checkout.session",
   "status": "open",
   "amount": 49.99,
@@ -208,7 +220,7 @@ Content-Type: application/json</code></pre>
   "reference": "order_1042",
   "customer": { "email": "jane@example.com" },
   "metadata": {},
-  "checkoutUrl": "https://app.pinetree-payments.com/checkout/tok_01abc...",
+  "checkoutUrl": "https://app.pinetree-payments.com/checkout/8f2a1b9c3d4e5f60",
   "paymentId": null,
   "supportedRails": ["solana", "base", "bitcoin_lightning"],
   "successUrl": "https://yoursite.com/paid",
@@ -221,6 +233,41 @@ Content-Type: application/json</code></pre>
     Redirect customers directly to <code>checkoutUrl</code>. Do not construct or parse this URL —
     treat it as an opaque redirect destination.
   </p>
+  <p>
+    Object IDs (<code>id</code> on Checkout Sessions and Payments) are plain UUIDs with no prefix.
+    Do not write validation or routing logic that assumes a <code>cs_</code> or <code>pay_</code>
+    prefix. Webhook event IDs use an <code>evt_</code> prefix — see
+    <a href="#webhook-payload">Webhook Payload</a>.
+  </p>
+
+  <h3>Restricting Rails on a Session</h3>
+  <p>Pass the optional <code>rails</code> array to limit which payment methods are offered on the hosted checkout page:</p>
+  <pre><code>{
+  "amount": 49.99,
+  "currency": "USD",
+  "rails": ["solana", "base"]
+}</code></pre>
+
+  <h3>List Sessions — Query Parameters</h3>
+  <table>
+    <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>limit</code></td><td>integer</td><td>1–100. Defaults to 10.</td></tr>
+      <tr><td><code>status</code></td><td>string</td><td>One of <code>open</code>, <code>processing</code>, <code>paid</code>, <code>failed</code>, <code>expired</code>, <code>canceled</code>.</td></tr>
+      <tr><td><code>cursor</code></td><td>string</td><td>Pagination cursor from a previous response's <code>nextCursor</code>. Also accepted as <code>starting_after</code>.</td></tr>
+      <tr><td><code>reference</code></td><td>string</td><td>Filter by merchant reference.</td></tr>
+      <tr><td><code>created_after</code></td><td>ISO 8601</td><td>Include sessions created after this date.</td></tr>
+      <tr><td><code>created_before</code></td><td>ISO 8601</td><td>Include sessions created before this date.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>List Response</h3>
+  <pre><code>{
+  "object": "list",
+  "data": [ /* checkout.session objects */ ],
+  "hasMore": true,
+  "nextCursor": "eyJjcmVhdGVkQXQiOi..."
+}</code></pre>
 
   <h3>Session Statuses</h3>
   <table>
@@ -232,6 +279,27 @@ Content-Type: application/json</code></pre>
       <tr><td><code>failed</code></td><td>Payment failed</td></tr>
       <tr><td><code>expired</code></td><td>Session expired without payment</td></tr>
       <tr><td><code>canceled</code></td><td>Explicitly canceled by merchant</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Checkout Session Errors</h3>
+  <table>
+    <thead><tr><th>Error code</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>invalid_amount</code></td><td><code>amount</code> missing, zero, or not a positive number.</td></tr>
+      <tr><td><code>invalid_json</code></td><td>Request body is not valid JSON.</td></tr>
+      <tr><td><code>invalid_rails</code></td><td>Unrecognized rail value in the <code>rails</code> array.</td></tr>
+      <tr><td><code>invalid_customer</code></td><td>Malformed <code>customer</code> object.</td></tr>
+      <tr><td><code>invalid_metadata</code></td><td>Malformed <code>metadata</code> object.</td></tr>
+      <tr><td><code>invalid_url</code></td><td>Malformed <code>successUrl</code> or <code>cancelUrl</code>.</td></tr>
+      <tr><td><code>idempotency_key_conflict</code></td><td>Same <code>Idempotency-Key</code>, different request body.</td></tr>
+      <tr><td><code>idempotency_request_in_progress</code></td><td>A request with this key is still in flight.</td></tr>
+      <tr><td><code>invalid_filter</code></td><td><code>limit</code> out of range on a list request.</td></tr>
+      <tr><td><code>unsupported_status</code></td><td>Unrecognized <code>status</code> filter value.</td></tr>
+      <tr><td><code>invalid_cursor</code></td><td>Malformed pagination <code>cursor</code>.</td></tr>
+      <tr><td><code>missing_session_id</code></td><td>No session ID in the request path.</td></tr>
+      <tr><td><code>checkout_session_not_cancelable</code></td><td>Session is not in a cancelable state.</td></tr>
+      <tr><td><code>checkout_session_not_expirable</code></td><td>Session is not in an expirable state.</td></tr>
     </tbody>
   </table>
 </section>
@@ -249,6 +317,17 @@ Content-Type: application/json</code></pre>
   </div>
 
   <p>Public keys (<code>pk_live_*</code>) are safe to embed in browser JavaScript. They can only create checkout sessions — they cannot access payment data, list webhook deliveries, or perform back-office operations.</p>
+
+  <table>
+    <thead><tr><th>Error code</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>missing_public_key</code></td><td>No <code>X-PineTree-Public-Key</code> header.</td></tr>
+      <tr><td><code>invalid_public_key</code></td><td>Public key not found, revoked, or wrong format.</td></tr>
+      <tr><td><code>invalid_amount</code></td><td><code>amount</code> missing, zero, or not a positive number.</td></tr>
+      <tr><td><code>invalid_json</code></td><td>Request body is not valid JSON.</td></tr>
+      <tr><td><code>invalid_rails</code></td><td>Unrecognized rail value in the <code>rails</code> array.</td></tr>
+    </tbody>
+  </table>
 </section>
 
 <!-- ============================================================
@@ -260,7 +339,7 @@ Content-Type: application/json</code></pre>
 
   <div class="route">
     <span class="method">GET</span><code>/api/v1/payments/{id}</code>
-    <p>Retrieves a Payment object. Requires <code>payments:read</code>.</p>
+    <p>Retrieves a Payment object. Requires <code>payments:read</code>. There is no list-payments endpoint today — retrieve payments by ID only.</p>
   </div>
 
   <h3>Payment Status Values</h3>
@@ -269,8 +348,9 @@ Content-Type: application/json</code></pre>
     The Confirmed state in webhook events maps to <code>status: "paid"</code> in the API response.
   </p>
   <p>
-    Always use the <code>payment.confirmed</code> webhook event to trigger fulfillment.
-    Do not poll payment status as your primary fulfillment signal.
+    Only fulfill orders after <code>payment.confirmed</code> (API <code>status: "paid"</code>).
+    Never fulfill on the customer redirect alone, or while a payment is Processing, Failed,
+    Expired, or Incomplete. Do not poll payment status as your primary fulfillment signal.
   </p>
 
   <table>
@@ -287,15 +367,24 @@ Content-Type: application/json</code></pre>
 
   <h3>Payment Object</h3>
   <pre><code>{
-  "id": "pay_01abc",
+  "id": "3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40",
   "object": "payment",
   "status": "paid",
   "amount": 49.99,
   "currency": "USD",
+  "network": "solana",
   "rail": "solana",
-  "asset": "USDC",
-  "reference": "order_1042"
+  "reference": "order_1042",
+  "metadata": {},
+  "createdAt": "2026-06-22T17:59:30.000Z",
+  "updatedAt": "2026-06-22T18:00:05.000Z"
 }</code></pre>
+  <p>
+    The Payment object does not currently include a separate <code>asset</code> field
+    (e.g. distinguishing SOL vs. USDC on the same rail), a <code>checkoutSessionId</code>
+    back-reference, or a <code>confirmedAt</code> timestamp. <code>confirmedAt</code> is
+    available on the webhook payload only — see <a href="#webhook-payload">Webhook Payload</a>.
+  </p>
 </section>
 
 <!-- ============================================================
@@ -322,7 +411,7 @@ Content-Type: application/json</code></pre>
      RAILS &amp; ASSETS
      ============================================================ -->
 <section data-doc-label="Rails &amp; Assets">
-  <h2>Rails &amp; Assets</h2>
+  <h2>Providers, Rails &amp; Assets</h2>
   <p>Rails are payment paths. Assets are what the customer pays on that path.</p>
 
   <table>
@@ -341,11 +430,44 @@ Content-Type: application/json</code></pre>
     to apply. Additional card processors are available in early access.
   </p>
 
-  <h3>Invalid rail examples</h3>
+  <h3>Provider vs. Rail vs. Asset</h3>
   <p>
-    Do not combine the rail and asset into a single compound value. Use the <code>rail</code>
-    field for the network path and the <code>asset</code> field for what the customer pays.
-    PineTree returns both fields separately on every payment and webhook event.
+    A <strong>provider</strong> is the external payment platform or processor that moves the money
+    (Shift4, Stripe, FluidPay, Speed). A <strong>rail</strong> is the payment path or network a
+    Checkout Session travels on (<code>solana</code>, <code>base</code>, <code>bitcoin_lightning</code>,
+    <code>shift4</code>, <code>stripe</code>, <code>fluidpay</code>). An <strong>asset</strong> is the
+    currency or token the customer actually pays with (SOL, USDC, ETH, BTC, USD).
+  </p>
+  <p>
+    <code>solana</code> and <code>base</code> are native PineTree rails: there is no separate
+    third-party processor behind them, so the rail identifier <em>is</em> the provider, and both
+    are production ready today. <code>bitcoin_lightning</code>, <code>shift4</code>,
+    <code>stripe</code>, and <code>fluidpay</code> each have a distinct backing provider — see the
+    table below for current availability.
+  </p>
+
+  <h3>Providers</h3>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Provider</th><th>Rail</th><th>Assets / Currency</th><th>Availability</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Solana Pay</td><td><code>solana</code></td><td>SOL, USDC</td><td>Production ready</td><td>Native Solana rail. Not a third-party processor.</td></tr>
+      <tr><td>Base Pay</td><td><code>base</code></td><td>ETH, USDC</td><td>Production ready</td><td>Native Base rail. Not a third-party processor. Coinbase Wallet is one supported wallet on this rail — it is not the provider.</td></tr>
+      <tr><td>Speed</td><td><code>bitcoin_lightning</code></td><td>BTC</td><td>Live (setup-dependent)</td><td>Speed powers Lightning settlement. Requires either a merchant-connected Speed account or PineTree's platform-level Lightning settlement to be enabled for your environment. Lightning via Nostr Wallet Connect (NWC) is also supported.</td></tr>
+      <tr><td>Shift4</td><td><code>shift4</code></td><td>Card / USD</td><td>Enabled merchants</td><td>Card processing, production capable, available to approved merchants through PineTree's onboarding flow.</td></tr>
+      <tr><td>Stripe</td><td><code>stripe</code></td><td>Card / USD</td><td>Early access</td><td>Available in early access through PineTree's Stripe Connect integration (Connect, Payments, and Terminal). Availability depends on merchant onboarding and which capabilities are enabled on the connected account. Contact support to begin onboarding.</td></tr>
+      <tr><td>FluidPay</td><td><code>fluidpay</code></td><td>Card / USD</td><td>Early access</td><td>Available in early access. Merchant onboarding and provider approval are required before processing is enabled. Contact support for current status.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Rail vs. asset</h3>
+  <p>
+    <code>rail</code> (called <code>network</code> in webhook payloads) identifies the payment
+    path, such as <code>solana</code> or <code>base</code>. There is currently no separate
+    <code>asset</code> field to distinguish which token was paid on a multi-asset rail (for
+    example, SOL vs. USDC on Solana, or ETH vs. USDC on Base) — do not build logic that expects
+    one. Use the rails table above as the source of truth for which assets a rail can settle.
   </p>
 </section>
 
@@ -362,14 +484,19 @@ Content-Type: application/json</code></pre>
   <table>
     <thead><tr><th>State</th><th>Meaning</th><th>Terminal</th><th>Color</th></tr></thead>
     <tbody>
-      <tr><td><strong class="pt-blue">Waiting</strong></td><td>Payment request open, no funds detected</td><td>No</td><td>Blue</td></tr>
+      <tr><td><strong class="pt-gray">Waiting</strong></td><td>Payment request open, no funds detected</td><td>No</td><td>Gray</td></tr>
       <tr><td><strong class="pt-blue">Processing</strong></td><td>Payment detected, awaiting final confirmation</td><td>No</td><td>Blue</td></tr>
       <tr><td><strong class="pt-green">Confirmed</strong></td><td>Payment confirmed</td><td>Yes</td><td>Green</td></tr>
       <tr><td><strong class="pt-red">Failed</strong></td><td>Provider, network, or payment attempt failed</td><td>Yes</td><td>Red</td></tr>
-      <tr><td><strong class="pt-red">Expired</strong></td><td>Payment window timed out</td><td>Yes</td><td>Red</td></tr>
-      <tr><td><strong class="pt-red">Incomplete</strong></td><td>Customer abandoned or backed out or no funds were sent</td><td>Yes</td><td>Red</td></tr>
+      <tr><td><strong class="pt-amber">Expired</strong></td><td>Payment window timed out</td><td>Yes</td><td>Amber</td></tr>
+      <tr><td><strong class="pt-amber">Incomplete</strong></td><td>Customer abandoned or backed out or no funds were sent</td><td>Yes</td><td>Amber</td></tr>
     </tbody>
   </table>
+  <p>
+    Only fulfill orders after <code>payment.confirmed</code> (API <code>status: "paid"</code>).
+    Never fulfill on the customer redirect alone, or while a payment is Processing, Failed,
+    Expired, or Incomplete.
+  </p>
 </section>
 
 <!-- ============================================================
@@ -388,6 +515,7 @@ Content-Type: application/json</code></pre>
       <tr><td><code>PineTree-Timestamp</code></td><td>ISO 8601 timestamp for replay protection. Must be within 5 minutes.</td></tr>
       <tr><td><code>PineTree-Event-Id</code></td><td>Unique event ID for deduplication.</td></tr>
       <tr><td><code>PineTree-Event-Schema</code></td><td><code>payments-v1</code></td></tr>
+      <tr><td><code>PineTree-Webhook-Version</code></td><td>Legacy compatibility header carrying the same schema value. The canonical header is <code>PineTree-Event-Schema</code>.</td></tr>
     </tbody>
   </table>
 
@@ -408,7 +536,7 @@ const event = pinetree.webhooks.constructEvent(
 <!-- ============================================================
      WEBHOOK PAYLOAD
      ============================================================ -->
-<section data-doc-label="Webhook Payload">
+<section data-doc-label="Webhook Payload" id="webhook-payload">
   <h2>Webhook Payload</h2>
   <p>Every PineTree webhook is delivered as a JSON object with a standard <code>payments-v1</code> envelope.</p>
 
@@ -421,7 +549,7 @@ const event = pinetree.webhooks.constructEvent(
   "livemode":  true,
   "data": {
     "object": {
-      "id":         "pay_01abc",
+      "id":         "3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40",
       "object":     "payment",
       "status":     "paid",
       "network":    "solana",
@@ -439,6 +567,35 @@ const event = pinetree.webhooks.constructEvent(
     The REST API Payment object uses <code>rail</code> for the same value.
     Use <code>event.data.object.network</code> in webhook handlers.
   </p>
+
+  <h3>Checkout Session Event Payload</h3>
+  <pre><code>{
+  "eventId":   "evt_02def...",
+  "object":    "event",
+  "type":      "checkout.session.completed",
+  "schema":    "payments-v1",
+  "createdAt": "2026-06-22T18:00:05.000Z",
+  "livemode":  true,
+  "data": {
+    "object": {
+      "id":             "3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40",
+      "object":         "checkout.session",
+      "status":         "paid",
+      "amount":         49.99,
+      "currency":       "USD",
+      "reference":      "order_1042",
+      "customer":       { "email": "jane@example.com" },
+      "metadata":       {},
+      "checkoutUrl":    "https://app.pinetree-payments.com/checkout/8f2a1b9c3d4e5f60",
+      "paymentId":      "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
+      "supportedRails": ["solana", "base", "bitcoin_lightning"],
+      "successUrl":     "https://yoursite.com/paid",
+      "cancelUrl":      "https://yoursite.com/cancel",
+      "createdAt":      "2026-06-22T17:59:00.000Z",
+      "expiresAt":      "2026-06-23T17:59:00.000Z"
+    }
+  }
+}</code></pre>
 </section>
 
 <!-- ============================================================
@@ -494,6 +651,41 @@ const event = pinetree.webhooks.constructEvent(
     <p>Retries a failed Webhook Delivery. Requires <code>webhooks:write</code>.</p>
   </div>
 
+  <h3>List Query Parameters</h3>
+  <table>
+    <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>limit</code></td><td>1–100. Defaults to 20.</td></tr>
+      <tr><td><code>status</code></td><td>One of <code>pending</code>, <code>delivered</code>, <code>failed</code>, <code>dead_letter</code>.</td></tr>
+      <tr><td><code>eventType</code></td><td>Filter by event type, e.g. <code>payment.confirmed</code>.</td></tr>
+      <tr><td><code>cursor</code></td><td>Pagination cursor from a previous response's <code>nextCursor</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>List Response</h3>
+  <pre><code>{
+  "object": "list",
+  "data": [ /* webhook.delivery objects */ ],
+  "hasMore": false,
+  "nextCursor": null
+}</code></pre>
+
+  <h3>Webhook Delivery Object</h3>
+  <pre><code>{
+  "id": "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f",
+  "object": "webhook.delivery",
+  "eventType": "payment.confirmed",
+  "status": "delivered",
+  "attemptCount": 1,
+  "nextAttemptAt": null,
+  "lastAttemptAt": "2026-06-22T18:00:06.000Z",
+  "lastStatusCode": 200,
+  "lastError": null,
+  "deliveredAt": "2026-06-22T18:00:06.000Z",
+  "deadLetteredAt": null,
+  "createdAt": "2026-06-22T18:00:00.000Z"
+}</code></pre>
+
   <h3>Delivery Status Values</h3>
   <table>
     <thead><tr><th>Status</th><th>Description</th></tr></thead>
@@ -502,6 +694,21 @@ const event = pinetree.webhooks.constructEvent(
       <tr><td><code>delivered</code></td><td>Endpoint returned a 2xx response.</td></tr>
       <tr><td><code>failed</code></td><td>Last delivery attempt failed.</td></tr>
       <tr><td><code>dead_letter</code></td><td>Requires operator attention after 10 failed attempts.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Automatic Retry Schedule</h3>
+  <table>
+    <thead><tr><th>Attempt</th><th>Delay Before Retry</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>60 seconds</td></tr>
+      <tr><td>2</td><td>120 seconds</td></tr>
+      <tr><td>3</td><td>240 seconds</td></tr>
+      <tr><td>4</td><td>480 seconds</td></tr>
+      <tr><td>5</td><td>960 seconds</td></tr>
+      <tr><td>6</td><td>1,800 seconds</td></tr>
+      <tr><td>7–10</td><td>3,600 seconds</td></tr>
+      <tr><td>After 10</td><td><code>dead_letter</code> — no further automatic retries</td></tr>
     </tbody>
   </table>
 </section>
@@ -518,7 +725,7 @@ const event = pinetree.webhooks.constructEvent(
     "type": "authentication_error",
     "code": "missing_api_key",
     "message": "A PineTree API key is required.",
-    "requestId": "req_01abc"
+    "requestId": "3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40"
   }
 }</code></pre>
 
@@ -531,6 +738,34 @@ const event = pinetree.webhooks.constructEvent(
       <tr><td><code>idempotency_error</code></td><td>409</td><td>Idempotency conflict.</td></tr>
       <tr><td><code>not_found_error</code></td><td>404</td><td>Object does not exist or is not accessible.</td></tr>
       <tr><td><code>api_error</code></td><td>500</td><td>PineTree service error.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Common Error Codes</h3>
+  <table>
+    <thead><tr><th>Code</th><th>Type</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>missing_api_key</code></td><td>authentication_error</td><td>No Authorization header provided.</td></tr>
+      <tr><td><code>invalid_api_key</code></td><td>authentication_error</td><td>Key not found, revoked, or wrong format.</td></tr>
+      <tr><td><code>missing_public_key</code></td><td>authentication_error</td><td>No <code>X-PineTree-Public-Key</code> header on a browser request.</td></tr>
+      <tr><td><code>invalid_public_key</code></td><td>authentication_error</td><td>Public key not found, revoked, or wrong format.</td></tr>
+      <tr><td><code>missing_permission</code></td><td>authorization_error</td><td>Key does not have the required permission.</td></tr>
+      <tr><td><code>invalid_amount</code></td><td>invalid_request_error</td><td><code>amount</code> missing, zero, or not a positive number.</td></tr>
+      <tr><td><code>invalid_json</code></td><td>invalid_request_error</td><td>Request body is not valid JSON.</td></tr>
+      <tr><td><code>invalid_rails</code></td><td>invalid_request_error</td><td>Unrecognized rail value in <code>rails</code>.</td></tr>
+      <tr><td><code>invalid_filter</code></td><td>invalid_request_error</td><td><code>limit</code> out of range on a list request.</td></tr>
+      <tr><td><code>unsupported_status</code></td><td>invalid_request_error</td><td>Unrecognized <code>status</code> filter value.</td></tr>
+      <tr><td><code>invalid_cursor</code></td><td>invalid_request_error</td><td>Malformed pagination cursor.</td></tr>
+      <tr><td><code>missing_session_id</code></td><td>invalid_request_error</td><td>No session ID in the request path.</td></tr>
+      <tr><td><code>checkout_session_not_cancelable</code></td><td>invalid_request_error</td><td>Session is not in a cancelable state.</td></tr>
+      <tr><td><code>checkout_session_not_expirable</code></td><td>invalid_request_error</td><td>Session is not in an expirable state.</td></tr>
+      <tr><td><code>checkout_session_not_found</code></td><td>not_found_error</td><td>No session found for the provided ID.</td></tr>
+      <tr><td><code>payment_not_found</code></td><td>not_found_error</td><td>No payment found for the provided ID.</td></tr>
+      <tr><td><code>webhook_delivery_not_found</code></td><td>not_found_error</td><td>No webhook delivery found for the provided ID.</td></tr>
+      <tr><td><code>idempotency_key_conflict</code></td><td>idempotency_error</td><td>Same key used with a different request body.</td></tr>
+      <tr><td><code>idempotency_request_in_progress</code></td><td>idempotency_error</td><td>A request with this key is still in flight.</td></tr>
+      <tr><td><code>idempotency_storage_failure</code></td><td>api_error</td><td>PineTree failed to persist idempotency state. Safe to retry.</td></tr>
+      <tr><td><code>internal_error</code></td><td>api_error</td><td>Unexpected server error. Safe to retry with backoff.</td></tr>
     </tbody>
   </table>
 </section>
@@ -572,6 +807,32 @@ const event = pinetree.webhooks.constructEvent(
 
   <h3>Node SDK</h3>
   <pre><code>npm install @pinetreepayments/node</code></pre>
+  <p>Requires Node.js 18+.</p>
+
+  <pre><code>import { PineTree } from "@pinetreepayments/node"
+
+const pinetree = new PineTree(process.env.PINETREE_API_KEY)
+
+// Checkout Sessions
+await pinetree.checkout.sessions.create(params, { idempotencyKey: "order_1042" })
+await pinetree.checkout.sessions.retrieve(sessionId)
+await pinetree.checkout.sessions.list({ status: "paid", limit: 20 })
+await pinetree.checkout.sessions.cancel(sessionId)
+await pinetree.checkout.sessions.expire(sessionId)
+
+// Payments — retrieve only, there is no payments.list()
+const payment = await pinetree.payments.retrieve(paymentId)
+
+// Webhook Deliveries
+await pinetree.webhookDeliveries.list({ status: "failed" })
+await pinetree.webhookDeliveries.retry(deliveryId)
+
+// Webhook verification
+const event = pinetree.webhooks.constructEvent(
+  req.body,
+  req.headers,
+  process.env.PINETREE_WEBHOOK_SECRET
+)</code></pre>
 
   <h3>JavaScript SDK</h3>
   <pre><code>npm install @pinetreepayments/js</code></pre>
@@ -588,11 +849,14 @@ const event = pinetree.webhooks.constructEvent(
 <!-- ============================================================
      TESTING
      ============================================================ -->
-<section data-doc-label="Testing">
+<section data-doc-label="Testing" id="testing">
   <h2>Testing</h2>
   <p>
-    PineTree uses live keys. There is no sandbox or test-mode environment. Test with small amounts
-    and an HTTPS tunnel for local webhook development.
+    PineTree currently issues only <code>pt_live_*</code> keys — there is no separate PineTree
+    sandbox or test-mode environment. Individual payment providers behind a rail may still offer
+    their own sandbox or test mode for your own testing with that provider directly; that is
+    independent of PineTree's API, which always operates on live keys. Test PineTree integrations
+    with small live amounts and an HTTPS tunnel for local webhook development.
   </p>
 
   <pre><code>ngrok http 3000
@@ -612,8 +876,9 @@ https://abc123.ngrok-free.app/webhooks/pinetree</code></pre>
     <tbody>
       <tr><td>API keys</td><td>Secret key created with minimal permissions and stored server-side. No <code>pt_live_*</code> keys in frontend code.</td></tr>
       <tr><td>Webhooks</td><td>HTTPS endpoint configured. Raw-body verification enabled. <code>PineTree-Signature</code> verified on every event. Duplicate events handled via <code>eventId</code>.</td></tr>
-      <tr><td>Payment flows</td><td>Confirmed payments fulfill orders. Failed, Expired, and Incomplete payments do not fulfill. <code>payment.confirmed</code> is the fulfillment trigger.</td></tr>
+      <tr><td>Payment flows</td><td>Only fulfill orders after <code>payment.confirmed</code> (<code>status: "paid"</code>). Never fulfill on the customer redirect alone, or while Processing, Failed, Expired, or Incomplete.</td></tr>
       <tr><td>Rails</td><td>Enabled payment rails are configured and tested with small live amounts. At least one crypto rail active.</td></tr>
+      <tr><td>Providers</td><td>Shift4 merchant application approved for production card processing. Stripe: Connect account active with the capabilities your integration needs (Connect, Payments, Terminal) enabled — early access. FluidPay: onboarding and provider approval complete — early access.</td></tr>
     </tbody>
   </table>
 

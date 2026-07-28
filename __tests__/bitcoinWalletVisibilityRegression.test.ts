@@ -44,7 +44,10 @@ describe("Bitcoin wallet visibility regressions", () => {
 
   it("routes the main BTC withdrawal flow through generic Instant Send with exact sats", () => {
     expect(wallet).toContain('fetchWithTimeout("/api/wallets/withdrawals"')
-    expect(wallet).toContain('"Idempotency-Key": instantSendIdempotencyKey')
+    // The header carries submitIdempotencyKey: the cached review key normally,
+    // rotated to a fresh identity when retrying after a definitive failure.
+    expect(wallet).toContain('"Idempotency-Key": submitIdempotencyKey')
+    expect(wallet).toContain("isRetryAfterDefinitiveFailure")
     expect(wallet).toContain('asset: "SATS"')
     expect(wallet).toContain("btcDecimalToSats")
     expect(wallet).not.toContain("Math.round(Number(withdrawalReview.review.amountDecimal) * 100_000_000)")

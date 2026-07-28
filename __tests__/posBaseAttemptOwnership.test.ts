@@ -85,7 +85,7 @@ describe("POSLayout Base attempt ownership", () => {
     const end = src.indexOf("} finally {", start)
     const block = src.slice(start, end)
     expect(block).toContain("if (isOwnedBaseAttempt(myAttempt)) {")
-    expect(block).toContain("setPaymentError(message)")
+    expect(block).toContain("setPaymentError(displayMessage)")
     expect(block).toContain('setStatus("failed")')
     expect(block).toContain("stale_attempt_error_suppressed")
     // Ownership is checked before each UI-visible mutation, not once.

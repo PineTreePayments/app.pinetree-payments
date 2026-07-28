@@ -14,6 +14,11 @@ import {
   type SolanaBrowserProvider,
 } from "@/lib/wallets/solana"
 import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
+import {
+  classifyWalletExecutionError,
+  friendlyWalletExecutionMessage,
+  sanitizeCustomerPaymentErrorMessage,
+} from "@/lib/payments/walletExecutionErrorClassifier"
 
 type SolanaAsset = "SOL" | "USDC"
 type StepStatus = "done" | "active" | "upcoming"
@@ -564,9 +569,18 @@ export default function SolanaWalletPayment({
       const message = err instanceof Error ? err.message : "Failed to send Solana transaction"
       const isRejected = message.toLowerCase().includes("reject") || message.toLowerCase().includes("denied")
       void logSolana(isRejected ? "user_rejected" : "retryable_error", { walletId: wallet.id, rail: "solana", error: message })
-      setError(message)
+      // Show a validated specific cause (insufficient SOL/USDC, fee balance,
+      // expired blockhash, wrong network) when the wallet/RPC reported one;
+      // never show a raw RPC/program dump to the customer. The raw message is
+      // preserved in the logSolana call above.
+      const executionKind = classifyWalletExecutionError(err, { rail: "solana", asset: selectedAsset })
+      const friendly = isRejected
+        ? "Payment declined in your wallet. Tap Try Again to retry."
+        : friendlyWalletExecutionMessage(executionKind, { rail: "solana", asset: selectedAsset })
+          ?? sanitizeCustomerPaymentErrorMessage(message)
+      setError(friendly)
       setExecStage("retryable_error")
-      onError?.(message)
+      onError?.(friendly)
     } finally {
       setPendingWalletId("")
       // Unlike the mobile deep-link path, this whole call is one
@@ -575,7 +589,7 @@ export default function SolanaWalletPayment({
       // be retried immediately.
       walletLaunchInFlightRef.current = false
     }
-  }, [getPaymentData, onError, onExecutionStarted, onPaymentCreated, clearWalletFallbackTimer])
+  }, [getPaymentData, onError, onExecutionStarted, onPaymentCreated, clearWalletFallbackTimer, selectedAsset])
 
   const openMobileWalletBrowser = useCallback(async (wallet: WalletCatalogItem) => {
     // Single-use guard: refuse a second concurrent launch (e.g. a rapid

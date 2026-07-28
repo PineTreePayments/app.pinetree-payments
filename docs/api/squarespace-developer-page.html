@@ -1,8 +1,11 @@
 <!-- ============================================================
      PineTree Payments — Developer Documentation
      Squarespace Code Block  ·  /developer page
-     Source of truth: app.pinetree-payments repo audit 2026-06-21
+     Source of truth: app.pinetree-payments repo audit 2026-07-26
+     Wording is kept in sync with docs/api/squarespace-api-docs.html —
+     see __tests__/developerWording.test.ts for enforced constraints.
      ============================================================ -->
+
 <style>
 /* ── Reset & Base ── */
 #ptd-root*{box-sizing:border-box;margin:0;padding:0}
@@ -81,6 +84,7 @@
 .ptd-pill-green{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
 .ptd-pill-blue{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
 .ptd-pill-red{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
+.ptd-pill-amber{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
 .ptd-pill-gray{background:#f8fafc;color:#475569;border:1px solid #e2e8f0}
 
 /* ── At-a-glance grid ── */
@@ -122,7 +126,7 @@
   <optgroup label="Objects">
     <option value="payments">Payments</option>
     <option value="session-statuses">Session Statuses</option>
-    <option value="rails-assets">Rails &amp; Assets</option>
+    <option value="rails-assets">Providers, Rails &amp; Assets</option>
     <option value="payment-states">Payment States</option>
   </optgroup>
   <optgroup label="Webhooks">
@@ -162,7 +166,7 @@
   <span class="ptd-nav-label" style="margin-top:16px">Objects</span>
   <button class="ptd-nav-btn" data-sec="payments">Payments</button>
   <button class="ptd-nav-btn" data-sec="session-statuses">Session Statuses</button>
-  <button class="ptd-nav-btn" data-sec="rails-assets">Rails &amp; Assets</button>
+  <button class="ptd-nav-btn" data-sec="rails-assets">Providers, Rails &amp; Assets</button>
   <button class="ptd-nav-btn" data-sec="payment-states">Payment States</button>
 
   <span class="ptd-nav-label" style="margin-top:16px">Webhooks</span>
@@ -193,11 +197,12 @@
 <section class="ptd-sec ptd-visible" id="ptd-sec-overview">
   <span class="ptd-eyebrow">PineTree API</span>
   <h1 class="ptd-h1">Developer Documentation</h1>
-  <p class="ptd-lead">Accept crypto payments and launch hosted checkout flows through one clean API. Create sessions, track payment status, verify signed webhook events, and reconcile transactions across supported payment rails.</p>
+  <p class="ptd-lead">PineTree API lets developers create checkout sessions, retrieve payment status, receive signed webhook events, and reconcile payments across enabled payment rails.</p>
+  <p class="ptd-p">PineTree API uses versioned REST endpoints. The current API path prefix is <code>/api/v1</code>.</p>
 
   <div class="ptd-callout ptd-callout-blue">
     <b>Early Access</b>
-    PineTree Payments is currently in early access. API access, SDK packages, hosted checkout, and card-processing availability may require approved merchant access. Contact <strong>info@pinetree-payments.com</strong> to get started.
+    PineTree Payments is currently in early access. API access, SDK packages, and hosted checkout are available to approved merchants. Contact <strong>info@pinetree-payments.com</strong> to get started.
   </div>
 
   <h2 class="ptd-h2">At a Glance</h2>
@@ -207,32 +212,35 @@
     <div class="ptd-glance-item"><div class="ptd-glance-label">Server auth</div><div class="ptd-glance-val">Bearer pt_live_*</div></div>
     <div class="ptd-glance-item"><div class="ptd-glance-label">Browser auth</div><div class="ptd-glance-val">X-PineTree-Public-Key</div></div>
     <div class="ptd-glance-item"><div class="ptd-glance-label">Webhook schema</div><div class="ptd-glance-val">payments-v1</div></div>
-    <div class="ptd-glance-item"><div class="ptd-glance-label">Fulfillment event</div><div class="ptd-glance-val">payment.confirmed</div></div>
+    <div class="ptd-glance-item"><div class="ptd-glance-label">Confirmed state</div><div class="ptd-glance-val">status: "paid"</div></div>
   </div>
 
   <h2 class="ptd-h2">Supported Rails</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Rail</th><th>Assets</th><th>Availability</th></tr></thead>
     <tbody>
-      <tr><td><code>solana</code></td><td>SOL, USDC</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
-      <tr><td><code>base</code></td><td>ETH, USDC</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
-      <tr><td><code>bitcoin_lightning</code></td><td>BTC</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
+      <tr><td><code>solana</code></td><td>SOL, USDC</td><td><span class="ptd-pill ptd-pill-green">Production ready</span></td></tr>
+      <tr><td><code>base</code></td><td>ETH, USDC</td><td><span class="ptd-pill ptd-pill-green">Production ready</span></td></tr>
+      <tr><td><code>bitcoin_lightning</code></td><td>BTC</td><td><span class="ptd-pill ptd-pill-green">Live (setup-dependent)</span></td></tr>
       <tr><td><code>shift4</code></td><td>Card / USD</td><td><span class="ptd-pill ptd-pill-blue">Enabled merchants</span></td></tr>
+      <tr><td><code>stripe</code></td><td>Card / USD</td><td><span class="ptd-pill ptd-pill-gray">Early access</span></td></tr>
+      <tr><td><code>fluidpay</code></td><td>Card / USD</td><td><span class="ptd-pill ptd-pill-gray">Early access</span></td></tr>
     </tbody>
   </table></div>
+  <p class="ptd-p">See <a href="#" onclick="ptdNav('rails-assets');return false" style="color:#2563eb">Providers, Rails &amp; Assets</a> for what backs each rail and current availability.</p>
 
   <h2 class="ptd-h2">Core Flow</h2>
   <p class="ptd-p">The standard integration follows these steps:</p>
   <ol style="font-size:13.5px;color:#334155;padding-left:20px;line-height:2">
     <li>Create a Checkout Session from your server using a secret API key.</li>
     <li>Redirect the customer to the <code>checkoutUrl</code> returned in the response.</li>
-    <li>The customer completes payment on an enabled rail (crypto wallet or card).</li>
+    <li>The customer completes payment on an enabled rail.</li>
     <li>PineTree sends a signed <code>payment.confirmed</code> webhook to your endpoint.</li>
     <li>Verify the webhook signature, deduplicate on <code>eventId</code>, then fulfill the order.</li>
   </ol>
   <div class="ptd-callout ptd-callout-amber" style="margin-top:16px">
     <b>Fulfillment rule</b>
-    Fulfill orders only after <code>payment.confirmed</code>. Do not fulfill based on the customer redirect alone. Failed, Expired, and Incomplete payments must never trigger fulfillment.
+    Only fulfill orders after <code>payment.confirmed</code> (API <code>status: "paid"</code>). Never fulfill on the customer redirect alone, or while a payment is Processing, Failed, Expired, or Incomplete.
   </div>
 </section>
 
@@ -242,7 +250,7 @@
 <section class="ptd-sec" id="ptd-sec-quickstart">
   <span class="ptd-eyebrow">Getting Started</span>
   <h1 class="ptd-h1">Quickstart</h1>
-  <p class="ptd-lead">Go from zero to a working PineTree integration in under 30 minutes. Follow each step in order.</p>
+  <p class="ptd-lead">Create a checkout session server-side, redirect the customer, then fulfill only after a confirmed webhook.</p>
 
   <h2 class="ptd-h2">Step 1 — Install the Node SDK</h2>
   <div class="ptd-code-wrap"><pre><code>npm install @pinetreepayments/node</code></pre><button class="ptd-copy-btn">Copy</button></div>
@@ -250,89 +258,37 @@
 
   <h2 class="ptd-h2">Step 2 — Create a Checkout Session</h2>
   <p class="ptd-p">Call this from your server. Never from a browser.</p>
-  <div class="ptd-code-wrap"><pre><code>// Express example
-import { PineTree } from "@pinetreepayments/node"
+  <div class="ptd-code-wrap"><pre><code>import { PineTree } from "@pinetreepayments/node"
 
-const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
+const pinetree = new PineTree(process.env.PINETREE_API_KEY)
 
-app.post("/create-checkout", async (req, res) => {
-  const session = await pinetree.checkout.sessions.create(
-    {
-      amount: 49.99,          // $49.99 USD
-      currency: "USD",
-      reference: "order_1042",
-      customer: { email: req.body.email },
-      successUrl: "https://yoursite.com/paid",
-      cancelUrl:  "https://yoursite.com/cancel",
-    },
-    { idempotencyKey: "order_1042" }  // prevents duplicates on retry
-  )
+const session = await pinetree.checkout.sessions.create({
+  amount: 49.99,
+  currency: "USD",
+  reference: "order_1042",
+  successUrl: "https://yoursite.com/paid",
+  cancelUrl: "https://yoursite.com/cancel"
+})
 
-  // Redirect the customer to the PineTree hosted checkout page
-  res.redirect(session.checkoutUrl)
-})</code></pre><button class="ptd-copy-btn">Copy</button></div>
-
-  <div class="ptd-code-wrap"><pre><code>// Next.js App Router example
-import { PineTree } from "@pinetreepayments/node"
-import { redirect } from "next/navigation"
-
-const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
-
-export async function POST(req: Request) {
-  const { orderId, amount, email } = await req.json()
-
-  const session = await pinetree.checkout.sessions.create({
-    amount,
-    currency: "USD",
-    reference: orderId,
-    customer: { email },
-    successUrl: `${process.env.NEXT_PUBLIC_APP_URL}/paid`,
-    cancelUrl:  `${process.env.NEXT_PUBLIC_APP_URL}/cancel`,
-  })
-
-  return Response.json({ checkoutUrl: session.checkoutUrl })
-}</code></pre><button class="ptd-copy-btn">Copy</button></div>
+res.redirect(session.checkoutUrl)</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
   <h2 class="ptd-h2">Step 3 — Configure Your Webhook Endpoint</h2>
   <p class="ptd-p">In your PineTree dashboard, go to Developer → Webhooks. Add your HTTPS endpoint URL and copy the signing secret. The endpoint must be publicly reachable and return a <code>2xx</code> response after durable processing.</p>
 
   <h2 class="ptd-h2">Step 4 — Verify and Fulfill</h2>
-  <div class="ptd-code-wrap"><pre><code>// Express webhook handler
-import express from "express"
+  <div class="ptd-code-wrap"><pre><code>app.post("/webhooks/pinetree", express.raw({ type: "application/json" }), (req, res) => {
+  const event = pinetree.webhooks.constructEvent(
+    req.body,
+    req.headers,
+    process.env.PINETREE_WEBHOOK_SECRET
+  )
 
-// IMPORTANT: Use express.raw() so the body is not parsed before verification
-app.post(
-  "/webhooks/pinetree",
-  express.raw({ type: "application/json" }),
-  (req, res) => {
-    let event
-    try {
-      event = pinetree.webhooks.constructEvent(
-        req.body,                              // raw Buffer — do NOT parse first
-        req.headers,
-        process.env.PINETREE_WEBHOOK_SECRET!
-      )
-    } catch (err) {
-      // Signature verification failed — reject
-      return res.status(400).send("Webhook signature invalid")
-    }
-
-    // Deduplicate at-least-once delivery
-    const eventId = event.eventId
-    if (await isAlreadyProcessed(eventId)) {
-      return res.json({ received: true, duplicate: true })
-    }
-
-    if (event.type === "payment.confirmed") {
-      const payment = event.data.object
-      await fulfillOrder(payment.reference)  // your fulfillment logic
-      await markProcessed(eventId)
-    }
-
-    // Always return 2xx — even for event types you don't handle
-    res.json({ received: true })
+  if (event.type === "payment.confirmed") {
+    fulfillOrder(event.data.object.reference)
   }
-)</code></pre><button class="ptd-copy-btn">Copy</button></div>
+
+  res.json({ received: true })
+})</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
   <div class="ptd-callout ptd-callout-green">
     <b>You're ready</b>
@@ -346,20 +302,20 @@ app.post(
 <section class="ptd-sec" id="ptd-sec-authentication">
   <span class="ptd-eyebrow">Security</span>
   <h1 class="ptd-h1">Authentication</h1>
-  <p class="ptd-lead">PineTree uses two credential types. Secret keys for server requests. Public keys for browser checkout flows. Never mix them.</p>
+  <p class="ptd-lead">Use secret keys on your server. Use browser keys only for public checkout creation. Never expose secret API keys in frontend code.</p>
 
   <h2 class="ptd-h2">Key Types</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
-    <thead><tr><th>Type</th><th>Prefix</th><th>Where to Use</th></tr></thead>
+    <thead><tr><th>Credential</th><th>Prefix</th><th>Where to Use</th></tr></thead>
     <tbody>
-      <tr><td>Secret API key</td><td><code>pt_live_*</code></td><td>Server-side only. REST API and backend SDK calls.</td></tr>
-      <tr><td>Public browser key</td><td><code>pk_live_*</code></td><td>Browser and frontend. Can only create checkout sessions.</td></tr>
+      <tr><td>Secret API key</td><td><code>pt_live_*</code></td><td>Server REST API calls and backend SDK usage.</td></tr>
+      <tr><td>Public browser key</td><td><code>pk_live_*</code></td><td>Browser checkout creation only.</td></tr>
     </tbody>
   </table></div>
 
   <div class="ptd-callout ptd-callout-amber">
     <b>Security requirement</b>
-    Never use <code>pt_live_*</code> keys in frontend JavaScript, browser code, mobile apps, or public repositories. Anyone who obtains a secret key can read your payment data and manage your webhooks. Treat secret keys like passwords. Revoke any key that may have been exposed.
+    Never use <code>pt_live_*</code> keys in frontend JavaScript, browser code, mobile apps, or public repositories. Treat secret keys like passwords. Revoke any key that may have been exposed.
   </div>
 
   <h2 class="ptd-h2">Required Headers (Server)</h2>
@@ -374,18 +330,20 @@ Content-Type: application/json</code></pre><button class="ptd-copy-btn">Copy</bu
   <p class="ptd-p">When creating checkout sessions from browser code, use a public key instead of a secret key:</p>
   <div class="ptd-code-wrap"><pre><code>X-PineTree-Public-Key: pk_live_your_public_key_here
 Content-Type: application/json</code></pre><button class="ptd-copy-btn">Copy</button></div>
+  <p class="ptd-p">Public keys (<code>pk_live_*</code>) are created and revoked from Developer → API Keys → Public Keys in your PineTree dashboard, the same way secret keys are managed.</p>
 
   <h2 class="ptd-h2">Invalid Credentials</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Scenario</th><th>HTTP status</th><th>Error code</th></tr></thead>
     <tbody>
       <tr><td>No Authorization header</td><td>401</td><td><code>missing_api_key</code></td></tr>
-      <tr><td>Key does not start with <code>pt_live_</code></td><td>401</td><td><code>invalid_api_key</code></td></tr>
-      <tr><td>Key revoked or not found</td><td>401</td><td><code>invalid_api_key</code></td></tr>
+      <tr><td>Key not found, revoked, or wrong format</td><td>401</td><td><code>invalid_api_key</code></td></tr>
+      <tr><td>No <code>X-PineTree-Public-Key</code> header on a browser request</td><td>401</td><td><code>missing_public_key</code></td></tr>
+      <tr><td>Public key not found, revoked, or wrong format</td><td>401</td><td><code>invalid_public_key</code></td></tr>
       <tr><td>Key lacks required permission</td><td>403</td><td><code>missing_permission</code></td></tr>
     </tbody>
   </table></div>
-  <p class="ptd-p" style="color:#64748b;font-size:12.5px">Note: PineTree issues <code>pt_live_*</code> keys only. There is no <code>pt_test_*</code> variant. All keys operate against live payment infrastructure.</p>
+  <p class="ptd-p" style="color:#64748b;font-size:12.5px">PineTree issues <code>pt_live_*</code> keys only. There is no <code>pt_test_*</code> variant. All keys operate against live payment infrastructure.</p>
 </section>
 
 <!-- ══════════════════════════════════════════════
@@ -394,10 +352,10 @@ Content-Type: application/json</code></pre><button class="ptd-copy-btn">Copy</bu
 <section class="ptd-sec" id="ptd-sec-api-keys">
   <span class="ptd-eyebrow">Credentials</span>
   <h1 class="ptd-h1">API Keys</h1>
-  <p class="ptd-lead">Create scoped API keys from Developer → API Keys. Use the minimum permissions required for each integration. The full secret key value is only shown once at creation time.</p>
+  <p class="ptd-lead">Create permission-limited keys from the Developer area. Use the smallest permission set required for each integration. Secret keys are only shown once at creation time.</p>
 
   <h2 class="ptd-h2">Secret Keys</h2>
-  <p class="ptd-p">Secret keys (<code>pt_live_*</code>) are 72-character tokens that authenticate server-to-server REST requests. Store them in environment variables, not in source code or configuration files that may be committed to version control.</p>
+  <p class="ptd-p">Secret keys (<code>pt_live_*</code>) authenticate server-to-server REST requests. Store them in environment variables, not in source code or configuration files that may be committed to version control.</p>
 
   <div class="ptd-code-wrap"><pre><code># .env
 PINETREE_API_KEY=pt_live_a1b2c3d4e5f6...
@@ -410,11 +368,11 @@ PINETREE_WEBHOOK_SECRET=your_webhook_signing_secret</code></pre><button class="p
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Permission</th><th>Grants</th></tr></thead>
     <tbody>
-      <tr><td><code>checkout.sessions:create</code></td><td>Create Checkout Sessions via <code>POST /api/v1/checkout/sessions</code>.</td></tr>
+      <tr><td><code>checkout.sessions:create</code></td><td>Create Checkout Sessions via <code>POST /api/v1/checkout/sessions</code>. Also accepted in place of <code>checkout.sessions:read</code>/<code>write</code> for back-compat.</td></tr>
       <tr><td><code>checkout.sessions:read</code></td><td>List and retrieve Checkout Sessions.</td></tr>
       <tr><td><code>checkout.sessions:write</code></td><td>Cancel or expire Checkout Sessions.</td></tr>
       <tr><td><code>payments:read</code></td><td>Retrieve Payment objects.</td></tr>
-      <tr><td><code>checkout.links:create</code></td><td>Payment-link creation where enabled.</td></tr>
+      <tr><td><code>checkout.links:create</code></td><td>Reserved for payment-link creation. Granted by default today but not yet enforced by any live endpoint.</td></tr>
       <tr><td><code>webhooks:read</code></td><td>List Webhook Deliveries.</td></tr>
       <tr><td><code>webhooks:write</code></td><td>Retry Webhook Deliveries.</td></tr>
     </tbody>
@@ -436,36 +394,34 @@ PINETREE_WEBHOOK_SECRET=your_webhook_signing_secret</code></pre><button class="p
 <section class="ptd-sec" id="ptd-sec-checkout-sessions">
   <span class="ptd-eyebrow">Hosted Checkout</span>
   <h1 class="ptd-h1">Checkout Sessions</h1>
-  <p class="ptd-lead">Checkout Sessions create hosted payment pages. Create them from your server using a secret key, redirect the customer to <code>checkoutUrl</code>, and fulfill orders only after a confirmed webhook event.</p>
+  <p class="ptd-lead">Checkout Sessions create hosted payment pages. Create sessions from your server and fulfill orders only after confirmed webhook events.</p>
 
   <div class="ptd-callout ptd-callout-slate">
     <b>checkoutUrl is opaque</b>
-    Always redirect customers directly to the <code>checkoutUrl</code> value returned in the response. Do not construct this URL manually — the format may change between API versions.
+    Redirect customers directly to <code>checkoutUrl</code>. Do not construct or parse this URL — treat it as an opaque redirect destination.
   </div>
 
   <!-- POST create -->
   <h2 class="ptd-h2">Create a Session</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions</span></div><p>Creates a hosted Checkout Session and returns a <code>checkoutUrl</code> to redirect the customer to. Requires permission <span class="ptd-scope">checkout.sessions:create</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions</span></div><p>Creates a hosted Checkout Session. Requires permission <span class="ptd-scope">checkout.sessions:create</span></p></div>
 
   <h3 class="ptd-h3">Request body</h3>
   <div class="ptd-code-wrap"><pre><code>{
-  "amount": 49.99,                     // required — positive number in major currency units
+  "amount": 49.99,                     // required — major currency units. 49.99 means $49.99
   "currency": "USD",                   // optional — defaults to "USD"
   "reference": "order_1042",           // optional — your order/cart ID
   "customer": {
     "email": "jane@example.com"        // optional
   },
-  "successUrl": "https://yoursite.com/paid",    // optional redirect after success
-  "cancelUrl":  "https://yoursite.com/cancel",  // optional redirect on cancel
-  "metadata": {
-    "cartId": "cart_123"               // optional — any JSON object
-  },
+  "successUrl": "https://yoursite.com/paid",
+  "cancelUrl":  "https://yoursite.com/cancel",
+  "metadata": { "cartId": "cart_123" },
   "rails": ["solana", "base"]          // optional — limit available payment methods
 }</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
   <h3 class="ptd-h3">Response</h3>
   <div class="ptd-code-wrap"><pre><code>{
-  "id": "cs_01abc",
+  "id": "3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40",
   "object": "checkout.session",
   "status": "open",
   "amount": 49.99,
@@ -473,7 +429,7 @@ PINETREE_WEBHOOK_SECRET=your_webhook_signing_secret</code></pre><button class="p
   "reference": "order_1042",
   "customer": { "email": "jane@example.com" },
   "metadata": { "cartId": "cart_123" },
-  "checkoutUrl": "https://app.pinetree-payments.com/checkout/tok_01abc...",
+  "checkoutUrl": "https://app.pinetree-payments.com/checkout/8f2a1b9c3d4e5f60",
   "paymentId": null,
   "supportedRails": ["solana", "base", "bitcoin_lightning"],
   "successUrl": "https://yoursite.com/paid",
@@ -482,14 +438,22 @@ PINETREE_WEBHOOK_SECRET=your_webhook_signing_secret</code></pre><button class="p
   "expiresAt": "2026-06-23T12:00:00.000Z"
 }</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
+  <div class="ptd-callout ptd-callout-slate">
+    <b>Object IDs are plain UUIDs</b>
+    <code>id</code> on Checkout Sessions and Payments is a plain UUID with no prefix — do not write validation or routing logic that assumes a <code>cs_</code> or <code>pay_</code> prefix. Webhook event IDs use an <code>evt_</code> prefix — see <a href="#" onclick="ptdNav('webhook-payload');return false" style="color:#1e40af">Webhook Payload</a>.
+  </div>
+
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Error code</th><th>Meaning</th></tr></thead>
     <tbody>
       <tr><td><code>missing_api_key</code></td><td>No Authorization header.</td></tr>
       <tr><td><code>missing_permission</code></td><td>Key lacks <code>checkout.sessions:create</code>.</td></tr>
-      <tr><td><code>invalid_amount</code></td><td><code>amount</code> missing, zero, or not a number.</td></tr>
+      <tr><td><code>invalid_amount</code></td><td><code>amount</code> missing, zero, or not a positive number.</td></tr>
       <tr><td><code>invalid_json</code></td><td>Request body is not valid JSON.</td></tr>
       <tr><td><code>invalid_rails</code></td><td>Unrecognized rail value in <code>rails</code> array.</td></tr>
+      <tr><td><code>invalid_customer</code></td><td>Malformed <code>customer</code> object.</td></tr>
+      <tr><td><code>invalid_metadata</code></td><td>Malformed <code>metadata</code> object.</td></tr>
+      <tr><td><code>invalid_url</code></td><td>Malformed <code>successUrl</code> or <code>cancelUrl</code>.</td></tr>
       <tr><td><code>idempotency_key_conflict</code></td><td>Same <code>Idempotency-Key</code>, different body.</td></tr>
       <tr><td><code>idempotency_request_in_progress</code></td><td>Request with this key already in flight.</td></tr>
     </tbody>
@@ -497,17 +461,17 @@ PINETREE_WEBHOOK_SECRET=your_webhook_signing_secret</code></pre><button class="p
 
   <!-- GET list -->
   <h2 class="ptd-h2">List Sessions</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/checkout/sessions</span></div><p>Returns a paginated list of Checkout Sessions. Requires permission <span class="ptd-scope">checkout.sessions:read</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/checkout/sessions</span></div><p>Returns a paginated list of Checkout Sessions. Requires permission <span class="ptd-scope">checkout.sessions:read</span> (or <span class="ptd-scope">checkout.sessions:create</span>)</p></div>
 
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Query parameter</th><th>Type</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>status</code></td><td>string</td><td>Filter by session status.</td></tr>
+      <tr><td><code>limit</code></td><td>integer</td><td>1–100. Defaults to 10.</td></tr>
+      <tr><td><code>status</code></td><td>string</td><td>One of <code>open</code>, <code>processing</code>, <code>paid</code>, <code>failed</code>, <code>expired</code>, <code>canceled</code>.</td></tr>
+      <tr><td><code>cursor</code></td><td>string</td><td>Pagination cursor from a previous response's <code>nextCursor</code>. Also accepted as <code>starting_after</code>.</td></tr>
       <tr><td><code>reference</code></td><td>string</td><td>Filter by merchant reference.</td></tr>
-      <tr><td><code>limit</code></td><td>integer</td><td>Max results per page. Defaults to 20.</td></tr>
-      <tr><td><code>cursor</code></td><td>string</td><td>Pagination cursor from previous response.</td></tr>
-      <tr><td><code>createdAfter</code></td><td>ISO 8601</td><td>Include sessions created after this date.</td></tr>
-      <tr><td><code>createdBefore</code></td><td>ISO 8601</td><td>Include sessions created before this date.</td></tr>
+      <tr><td><code>created_after</code></td><td>ISO 8601</td><td>Include sessions created after this date.</td></tr>
+      <tr><td><code>created_before</code></td><td>ISO 8601</td><td>Include sessions created before this date.</td></tr>
     </tbody>
   </table></div>
 
@@ -519,17 +483,39 @@ PINETREE_WEBHOOK_SECRET=your_webhook_signing_secret</code></pre><button class="p
   "nextCursor": "eyJjcmVhdGVkQXQiOi..."
 }</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
+  <div class="ptd-tbl-wrap"><table class="ptd-tbl">
+    <thead><tr><th>Error code</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>invalid_filter</code></td><td><code>limit</code> out of range.</td></tr>
+      <tr><td><code>unsupported_status</code></td><td>Unrecognized <code>status</code> filter value.</td></tr>
+      <tr><td><code>invalid_cursor</code></td><td>Malformed pagination cursor.</td></tr>
+    </tbody>
+  </table></div>
+
   <!-- GET retrieve -->
   <h2 class="ptd-h2">Retrieve a Session</h2>
   <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}</span></div><p>Retrieves a single Checkout Session. Requires permission <span class="ptd-scope">checkout.sessions:read</span> or <span class="ptd-scope">checkout.sessions:create</span></p></div>
 
   <!-- POST cancel -->
   <h2 class="ptd-h2">Cancel a Session</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}/cancel</span></div><p>Cancels an open Checkout Session. Emits <code>checkout.session.canceled</code>. Requires permission <span class="ptd-scope">checkout.sessions:write</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}/cancel</span></div><p>Cancels an open Checkout Session. Requires permission <span class="ptd-scope">checkout.sessions:write</span> (or <span class="ptd-scope">checkout.sessions:create</span>). Returns <code>checkout_session_not_cancelable</code> if the session is not in a cancelable state.</p></div>
 
   <!-- POST expire -->
   <h2 class="ptd-h2">Expire a Session</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}/expire</span></div><p>Immediately expires an open Checkout Session. Emits <code>checkout.session.expired</code>. Requires permission <span class="ptd-scope">checkout.sessions:write</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/checkout/sessions/{id}/expire</span></div><p>Immediately expires an open Checkout Session. Requires permission <span class="ptd-scope">checkout.sessions:write</span> (or <span class="ptd-scope">checkout.sessions:create</span>). Returns <code>checkout_session_not_expirable</code> if the session is not in an expirable state.</p></div>
+
+  <h2 class="ptd-h2">Session Statuses</h2>
+  <div class="ptd-tbl-wrap"><table class="ptd-tbl">
+    <thead><tr><th>Status</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>open</code></td><td>Waiting for customer payment</td></tr>
+      <tr><td><code>processing</code></td><td>Payment broadcast; awaiting confirmation</td></tr>
+      <tr><td><code>paid</code></td><td>Confirmed — fulfill the order</td></tr>
+      <tr><td><code>failed</code></td><td>Payment failed</td></tr>
+      <tr><td><code>expired</code></td><td>Session expired without payment</td></tr>
+      <tr><td><code>canceled</code></td><td>Explicitly canceled by merchant</td></tr>
+    </tbody>
+  </table></div>
 
   <p class="ptd-p" style="margin-top:16px">Sessions that are not explicitly canceled or expired will expire automatically after 24 hours.</p>
 </section>
@@ -549,6 +535,17 @@ PINETREE_WEBHOOK_SECRET=your_webhook_signing_secret</code></pre><button class="p
 
   <h2 class="ptd-h2">Browser Checkout Endpoint</h2>
   <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/browser/checkout/sessions</span></div><p>Creates a Checkout Session using a public browser key. Authentication: <code>X-PineTree-Public-Key</code> header.</p></div>
+
+  <div class="ptd-tbl-wrap"><table class="ptd-tbl">
+    <thead><tr><th>Error code</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>missing_public_key</code></td><td>No <code>X-PineTree-Public-Key</code> header.</td></tr>
+      <tr><td><code>invalid_public_key</code></td><td>Public key not found, revoked, or wrong format.</td></tr>
+      <tr><td><code>invalid_amount</code></td><td><code>amount</code> missing, zero, or not a positive number.</td></tr>
+      <tr><td><code>invalid_json</code></td><td>Request body is not valid JSON.</td></tr>
+      <tr><td><code>invalid_rails</code></td><td>Unrecognized rail value in <code>rails</code> array.</td></tr>
+    </tbody>
+  </table></div>
 
   <h2 class="ptd-h2">Raw Fetch Example</h2>
   <div class="ptd-code-wrap"><pre><code>const response = await fetch(
@@ -577,7 +574,6 @@ window.location.href = session.checkoutUrl</code></pre><button class="ptd-copy-b
 
 const ptjs = new PineTreeJS("pk_live_your_public_key_here")
 
-// Open hosted checkout in the same tab
 const session = await ptjs.checkout.createSession({
   amount: 49.99,
   currency: "USD",
@@ -591,7 +587,6 @@ ptjs.checkout.open(session)</code></pre><button class="ptd-copy-btn">Copy</butto
   <div class="ptd-code-wrap"><pre><code>npm install @pinetreepayments/react</code></pre><button class="ptd-copy-btn">Copy</button></div>
   <div class="ptd-code-wrap"><pre><code>import { PineTreeProvider, PineTreeCheckoutButton } from "@pinetreepayments/react"
 
-// Wrap your app with the provider
 function App() {
   return (
     &lt;PineTreeProvider publicKey="pk_live_your_public_key_here"&gt;
@@ -600,7 +595,6 @@ function App() {
   )
 }
 
-// Use the checkout button component
 function CheckoutPage() {
   return (
     &lt;PineTreeCheckoutButton
@@ -626,34 +620,53 @@ function CheckoutPage() {
 <section class="ptd-sec" id="ptd-sec-payments">
   <span class="ptd-eyebrow">Payment Objects</span>
   <h1 class="ptd-h1">Payments</h1>
-  <p class="ptd-lead">Payment objects represent on-chain or provider payment activity. Use them for reconciliation and back-office lookups. Use <code>payment.confirmed</code> webhooks — not polling — for order fulfillment.</p>
+  <p class="ptd-lead">Use Payments for reconciliation, status lookup, and back-office workflows. Use <code>payment.confirmed</code> webhooks — not polling — for order fulfillment.</p>
 
   <h2 class="ptd-h2">Retrieve a Payment</h2>
-  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/payments/{id}</span></div><p>Retrieves a Payment object by ID. Requires permission <span class="ptd-scope">payments:read</span></p></div>
+  <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-get">GET</span><span class="ptd-route-path">/api/v1/payments/{id}</span></div><p>Retrieves a Payment object by ID. Requires permission <span class="ptd-scope">payments:read</span>. There is no list-payments endpoint today — retrieve payments by ID only.</p></div>
 
   <h2 class="ptd-h2">Payment Object Fields</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>id</code></td><td>string</td><td>PineTree payment ID.</td></tr>
+      <tr><td><code>id</code></td><td>string</td><td>PineTree payment ID. A plain UUID — no prefix.</td></tr>
       <tr><td><code>object</code></td><td>string</td><td>Always <code>"payment"</code>.</td></tr>
       <tr><td><code>status</code></td><td>string</td><td>Current payment status. See status mapping below.</td></tr>
       <tr><td><code>amount</code></td><td>number</td><td>Amount in major currency units (USD).</td></tr>
       <tr><td><code>currency</code></td><td>string</td><td>Fiat currency, e.g. <code>"USD"</code>.</td></tr>
       <tr><td><code>rail</code></td><td>string</td><td>Payment rail, e.g. <code>"solana"</code>, <code>"base"</code>, <code>"bitcoin_lightning"</code>.</td></tr>
-      <tr><td><code>asset</code></td><td>string</td><td>Asset paid, e.g. <code>"USDC"</code>, <code>"SOL"</code>, <code>"BTC"</code>.</td></tr>
+      <tr><td><code>network</code></td><td>string</td><td>Same value as <code>rail</code>, returned alongside it for compatibility with webhook payloads.</td></tr>
       <tr><td><code>reference</code></td><td>string</td><td>Your merchant reference / order ID.</td></tr>
-      <tr><td><code>checkoutSessionId</code></td><td>string</td><td>Backing checkout session ID when present.</td></tr>
-      <tr><td><code>confirmedAt</code></td><td>string</td><td>ISO 8601 timestamp when confirmed.</td></tr>
       <tr><td><code>createdAt</code></td><td>string</td><td>ISO 8601 creation timestamp.</td></tr>
+      <tr><td><code>updatedAt</code></td><td>string</td><td>ISO 8601 last-update timestamp.</td></tr>
       <tr><td><code>metadata</code></td><td>object</td><td>Public metadata from session creation.</td></tr>
     </tbody>
   </table></div>
 
+  <div class="ptd-callout ptd-callout-slate">
+    <b>No <code>asset</code>, <code>checkoutSessionId</code>, or <code>confirmedAt</code> on the REST object</b>
+    The Payment object does not currently return a separate <code>asset</code> field (e.g. distinguishing SOL vs. USDC on the same rail), a <code>checkoutSessionId</code> back-reference, or a <code>confirmedAt</code> timestamp. <code>confirmedAt</code> is available on the webhook payload only.
+  </div>
+
   <div class="ptd-callout ptd-callout-amber">
     <b>Status naming — important</b>
-    The Payment object returns <code>"status": "paid"</code> when the payment is confirmed. The visible customer-facing state is called <strong>Confirmed</strong>. Do not check for <code>status === "confirmed"</code> — it will never match. Use <code>status === "paid"</code> for API polling, or use the <code>payment.confirmed</code> webhook event for fulfillment.
+    The Payment object returns <code>"status": "paid"</code> when the payment is confirmed. The visible customer-facing state is called <strong>Confirmed</strong>. Do not check for <code>status === "confirmed"</code> — <code>confirmed</code> is never a real API status value, only <code>paid</code> is. Only fulfill orders after <code>payment.confirmed</code> (<code>status: "paid"</code>); never fulfill on the customer redirect alone, or while Processing, Failed, Expired, or Incomplete.
   </div>
+
+  <h2 class="ptd-h2">Payment Object</h2>
+  <div class="ptd-code-wrap"><pre><code>{
+  "id": "3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40",
+  "object": "payment",
+  "status": "paid",
+  "amount": 49.99,
+  "currency": "USD",
+  "rail": "solana",
+  "network": "solana",
+  "reference": "order_1042",
+  "metadata": {},
+  "createdAt": "2026-06-22T17:59:30.000Z",
+  "updatedAt": "2026-06-22T18:00:05.000Z"
+}</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
   <h2 class="ptd-h2">Status Mapping</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
@@ -693,61 +706,62 @@ function CheckoutPage() {
     <b>Webhook vs polling</b>
     The preferred way to detect <code>paid</code> is the <code>checkout.session.completed</code> or <code>payment.confirmed</code> webhook event — not polling the session status. Rely on webhooks for fulfillment; use session retrieval for UI state only.
   </div>
-
-  <h2 class="ptd-h2">Session vs Payment Status</h2>
-  <div class="ptd-tbl-wrap"><table class="ptd-tbl">
-    <thead><tr><th>Session status</th><th>Payment status</th><th>Notes</th></tr></thead>
-    <tbody>
-      <tr><td><code>open</code></td><td><code>open</code> / <code>pending</code></td><td>No funds detected yet.</td></tr>
-      <tr><td><code>processing</code></td><td><code>processing</code></td><td>Transaction broadcast.</td></tr>
-      <tr><td><code>paid</code></td><td><code>paid</code></td><td>Both are in confirmed state. Fulfill now.</td></tr>
-      <tr><td><code>failed</code></td><td><code>failed</code></td><td>Do not fulfill.</td></tr>
-      <tr><td><code>expired</code></td><td><code>expired</code></td><td>Do not fulfill.</td></tr>
-      <tr><td><code>canceled</code></td><td>n/a</td><td>Session was canceled before payment.</td></tr>
-    </tbody>
-  </table></div>
 </section>
 
 <!-- ══════════════════════════════════════════════
-     RAILS & ASSETS
+     PROVIDERS, RAILS & ASSETS
 ══════════════════════════════════════════════ -->
 <section class="ptd-sec" id="ptd-sec-rails-assets">
   <span class="ptd-eyebrow">Payment Methods</span>
-  <h1 class="ptd-h1">Rails &amp; Assets</h1>
-  <p class="ptd-lead">A <strong>rail</strong> is the network or provider path a payment travels on. An <strong>asset</strong> is what the customer actually pays. PineTree stores and returns both fields separately on every payment and webhook event.</p>
+  <h1 class="ptd-h1">Providers, Rails &amp; Assets</h1>
+  <p class="ptd-lead">Rails are payment paths. Assets are what the customer pays on that path.</p>
 
   <h2 class="ptd-h2">Supported Rails</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
-    <thead><tr><th>Rail</th><th>Assets</th><th>Description</th><th>Status</th></tr></thead>
+    <thead><tr><th>Rail</th><th>Assets / Currency</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>solana</code></td><td>SOL, USDC</td><td>Solana Pay — wallet QR code or deep link.</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
-      <tr><td><code>base</code></td><td>ETH, USDC</td><td>Base network — wallet QR code or WalletConnect.</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
-      <tr><td><code>bitcoin_lightning</code></td><td>BTC</td><td>Bitcoin Lightning Network invoice payments.</td><td><span class="ptd-pill ptd-pill-green">Live</span></td></tr>
-      <tr><td><code>shift4</code></td><td>Card / USD</td><td>Card payments via Shift4 gateway.</td><td><span class="ptd-pill ptd-pill-blue">Enabled merchants</span></td></tr>
+      <tr><td><code>solana</code></td><td>SOL, USDC</td><td>Solana Pay payments.</td></tr>
+      <tr><td><code>base</code></td><td>ETH, USDC</td><td>Base network payments.</td></tr>
+      <tr><td><code>bitcoin_lightning</code></td><td>BTC</td><td>Lightning invoice payments.</td></tr>
+      <tr><td><code>shift4</code></td><td>Card / USD</td><td>Card payments for approved merchants. Contact support to enable.</td></tr>
     </tbody>
   </table></div>
 
-  <div class="ptd-callout ptd-callout-slate">
-    <b>Shift4 card processing</b>
-    Shift4 card processing is available for approved merchants. Contact PineTree support to enable card checkout for your account. Additional card processors (including Stripe and Fluid Pay) are available in early access through a separate onboarding process.
-  </div>
+  <p class="ptd-p">Card processing via Shift4 is available to approved merchants through the PineTree merchant onboarding flow. Contact <a href="mailto:info@pinetree-payments.com">info@pinetree-payments.com</a> to apply. Additional card processors are available in early access.</p>
+
+  <h2 class="ptd-h2">Provider vs. Rail vs. Asset</h2>
+  <p class="ptd-p">A <strong>provider</strong> is the company powering payments — the external payment platform or processor that moves the money (Shift4, Stripe, FluidPay, Speed). A <strong>rail</strong> is the payment network — the path a Checkout Session travels on (<code>solana</code>, <code>base</code>, <code>bitcoin_lightning</code>, <code>shift4</code>, <code>stripe</code>, <code>fluidpay</code>). An <strong>asset</strong> is the currency/token the customer actually pays with (SOL, USDC, ETH, BTC, USD).</p>
+  <p class="ptd-p"><code>solana</code> and <code>base</code> are native PineTree rails: there is no separate third-party processor behind them, so the rail identifier <em>is</em> the provider, and both are production ready today. <code>bitcoin_lightning</code>, <code>shift4</code>, <code>stripe</code>, and <code>fluidpay</code> each have a distinct backing provider — see the table below for current availability.</p>
+
+  <h2 class="ptd-h2">Providers</h2>
+  <div class="ptd-tbl-wrap"><table class="ptd-tbl">
+    <thead><tr><th>Provider</th><th>Rail</th><th>Assets / Currency</th><th>Availability</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Solana Pay</td><td><code>solana</code></td><td>SOL, USDC</td><td><span class="ptd-pill ptd-pill-green">Production ready</span></td><td>Native Solana rail. Not a third-party processor.</td></tr>
+      <tr><td>Base Pay</td><td><code>base</code></td><td>ETH, USDC</td><td><span class="ptd-pill ptd-pill-green">Production ready</span></td><td>Native Base rail. Not a third-party processor. Coinbase Wallet is one supported wallet on this rail — it is not the provider.</td></tr>
+      <tr><td>Speed</td><td><code>bitcoin_lightning</code></td><td>BTC</td><td><span class="ptd-pill ptd-pill-green">Live (setup-dependent)</span></td><td>Speed powers Lightning settlement. Requires either a merchant-connected Speed account or PineTree's platform-level Lightning settlement to be enabled for your environment. Lightning via Nostr Wallet Connect (NWC) is also supported.</td></tr>
+      <tr><td>Shift4</td><td><code>shift4</code></td><td>Card / USD</td><td><span class="ptd-pill ptd-pill-blue">Enabled merchants</span></td><td>Card processing, production capable, available to approved merchants through PineTree's onboarding flow.</td></tr>
+      <tr><td>Stripe</td><td><code>stripe</code></td><td>Card / USD</td><td><span class="ptd-pill ptd-pill-gray">Early access</span></td><td>Available in early access through PineTree's Stripe Connect integration (Connect, Payments, and Terminal). Availability depends on merchant onboarding and which capabilities are enabled on the connected account. Contact support to begin onboarding.</td></tr>
+      <tr><td>FluidPay</td><td><code>fluidpay</code></td><td>Card / USD</td><td><span class="ptd-pill ptd-pill-gray">Early access</span></td><td>Available in early access. Merchant onboarding and provider approval are required before processing is enabled. Contact support for current status.</td></tr>
+    </tbody>
+  </table></div>
 
   <h2 class="ptd-h2">Rail and Asset by Payment Type</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
-    <thead><tr><th>Payment</th><th>rail</th><th>asset</th><th>Display label</th></tr></thead>
+    <thead><tr><th>Payment</th><th>rail</th><th>Display label</th></tr></thead>
     <tbody>
-      <tr><td>Solana SOL</td><td><code>solana</code></td><td><code>SOL</code></td><td>Solana Pay · SOL</td></tr>
-      <tr><td>Solana USDC</td><td><code>solana</code></td><td><code>USDC</code></td><td>Solana Pay · USDC</td></tr>
-      <tr><td>Base ETH</td><td><code>base</code></td><td><code>ETH</code></td><td>Base Pay · ETH</td></tr>
-      <tr><td>Base USDC</td><td><code>base</code></td><td><code>USDC</code></td><td>Base Pay · USDC</td></tr>
-      <tr><td>Bitcoin Lightning</td><td><code>bitcoin_lightning</code></td><td><code>BTC</code></td><td>Lightning · BTC</td></tr>
-      <tr><td>Card (Shift4)</td><td><code>shift4</code></td><td><code>USD</code></td><td>Card · USD</td></tr>
+      <tr><td>Solana SOL</td><td><code>solana</code></td><td>Solana Pay · SOL</td></tr>
+      <tr><td>Solana USDC</td><td><code>solana</code></td><td>Solana Pay · USDC</td></tr>
+      <tr><td>Base ETH</td><td><code>base</code></td><td>Base Pay · ETH</td></tr>
+      <tr><td>Base USDC</td><td><code>base</code></td><td>Base Pay · USDC</td></tr>
+      <tr><td>Bitcoin Lightning</td><td><code>bitcoin_lightning</code></td><td>Lightning · BTC</td></tr>
+      <tr><td>Card (Shift4)</td><td><code>shift4</code></td><td>Card · USD</td></tr>
     </tbody>
   </table></div>
 
   <div class="ptd-callout ptd-callout-amber">
-    <b>Do not combine rail and asset</b>
-    Never combine rail and asset into a compound value. Use the separate <code>rail</code> and <code>asset</code> fields that PineTree returns on every payment object and webhook event.
+    <b>There is no <code>asset</code> field</b>
+    <code>rail</code> (called <code>network</code> in webhook payloads) identifies the payment path, such as <code>solana</code> or <code>base</code>. There is currently no separate <code>asset</code> field to distinguish which token was paid on a multi-asset rail — for example, SOL vs. USDC on Solana, or ETH vs. USDC on Base. Do not build logic that expects one; use the rails table above as the source of truth for which assets a rail can settle.
   </div>
 
   <h2 class="ptd-h2">Restricting Rails on a Session</h2>
@@ -770,17 +784,17 @@ function CheckoutPage() {
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Visible state</th><th>API <code>status</code></th><th>Webhook event</th><th>Terminal</th><th>Fulfill?</th></tr></thead>
     <tbody>
-      <tr><td><span class="ptd-pill ptd-pill-blue">Waiting</span></td><td><code>open</code></td><td><code>payment.pending</code></td><td class="ptd-no">No</td><td class="ptd-no">No</td></tr>
+      <tr><td><span class="ptd-pill ptd-pill-gray">Waiting</span></td><td><code>open</code></td><td><code>payment.pending</code></td><td class="ptd-no">No</td><td class="ptd-no">No</td></tr>
       <tr><td><span class="ptd-pill ptd-pill-blue">Processing</span></td><td><code>processing</code></td><td><code>payment.processing</code></td><td class="ptd-no">No</td><td class="ptd-no">No</td></tr>
       <tr><td><span class="ptd-pill ptd-pill-green">Confirmed</span></td><td><code>paid</code></td><td><code>payment.confirmed</code></td><td class="ptd-yes">Yes</td><td class="ptd-yes">Yes ✓</td></tr>
       <tr><td><span class="ptd-pill ptd-pill-red">Failed</span></td><td><code>failed</code></td><td><code>payment.failed</code></td><td class="ptd-yes">Yes</td><td class="ptd-no">No</td></tr>
-      <tr><td><span class="ptd-pill ptd-pill-red">Expired</span></td><td><code>expired</code></td><td><code>payment.expired</code></td><td class="ptd-yes">Yes</td><td class="ptd-no">No</td></tr>
-      <tr><td><span class="ptd-pill ptd-pill-red">Incomplete</span></td><td><code>incomplete</code></td><td><code>payment.incomplete</code></td><td class="ptd-yes">Yes</td><td class="ptd-no">No</td></tr>
+      <tr><td><span class="ptd-pill ptd-pill-amber">Expired</span></td><td><code>expired</code></td><td><code>payment.expired</code></td><td class="ptd-yes">Yes</td><td class="ptd-no">No</td></tr>
+      <tr><td><span class="ptd-pill ptd-pill-amber">Incomplete</span></td><td><code>incomplete</code></td><td><code>payment.incomplete</code></td><td class="ptd-yes">Yes</td><td class="ptd-no">No</td></tr>
     </tbody>
   </table></div>
 
   <div class="ptd-callout ptd-callout-amber">
-    The visible state <strong>Confirmed</strong> maps to <code>status: "paid"</code> in the API Payment object. Do not check <code>status === "confirmed"</code> — it will not match. For fulfillment, use the <code>payment.confirmed</code> webhook event. For API polling, check <code>status === "paid"</code>.
+    Only fulfill orders after <code>payment.confirmed</code> (API <code>status: "paid"</code>). Never fulfill on the customer redirect alone, or while a payment is Processing, Failed, Expired, or Incomplete. The visible state <strong>Confirmed</strong> maps to <code>status: "paid"</code> in the API Payment object — do not check <code>status === "confirmed"</code>, it will not match.
   </div>
 
   <h2 class="ptd-h2">State Lifecycle</h2>
@@ -796,7 +810,7 @@ function CheckoutPage() {
 <section class="ptd-sec" id="ptd-sec-webhooks">
   <span class="ptd-eyebrow">Events</span>
   <h1 class="ptd-h1">Webhooks</h1>
-  <p class="ptd-lead">PineTree sends signed HTTPS POST requests to your webhook endpoint when payment activity changes. Verify the signature, deduplicate on the event ID, and return a 2xx response after durable processing.</p>
+  <p class="ptd-lead">Webhook deliveries are signed with PineTree headers. Verify the raw body before processing.</p>
 
   <h2 class="ptd-h2">Setup</h2>
   <ol style="font-size:13.5px;color:#334155;padding-left:20px;line-height:2.1">
@@ -804,7 +818,6 @@ function CheckoutPage() {
     <li>Enter your HTTPS endpoint URL. HTTP endpoints are not accepted.</li>
     <li>Copy the signing secret shown on the page. It is only shown once.</li>
     <li>Store the secret as <code>PINETREE_WEBHOOK_SECRET</code> in your environment.</li>
-    <li>Choose which events to subscribe to, or subscribe to all events.</li>
   </ol>
 
   <h2 class="ptd-h2">Webhook Headers</h2>
@@ -815,7 +828,7 @@ function CheckoutPage() {
       <tr><td><code>PineTree-Timestamp</code></td><td>ISO 8601 timestamp used in the signature. PineTree rejects events older than 5 minutes.</td></tr>
       <tr><td><code>PineTree-Event-Id</code></td><td>Unique event ID. Store and use for deduplication.</td></tr>
       <tr><td><code>PineTree-Event-Schema</code></td><td>Always <code>payments-v1</code>.</td></tr>
-      <tr><td><code>PineTree-Webhook-Version</code></td><td>Legacy compatibility header. Also <code>payments-v1</code>. Canonical header is <code>PineTree-Event-Schema</code>.</td></tr>
+      <tr><td><code>PineTree-Webhook-Version</code></td><td>Legacy compatibility header carrying the same schema value. Canonical header is <code>PineTree-Event-Schema</code>.</td></tr>
     </tbody>
   </table></div>
 
@@ -837,27 +850,19 @@ app.post(
     let event
     try {
       event = pinetree.webhooks.constructEvent(
-        req.body,                              // raw Buffer
+        req.body,
         req.headers,
-        process.env.PINETREE_WEBHOOK_SECRET!
+        process.env.PINETREE_WEBHOOK_SECRET
       )
     } catch (err) {
       return res.status(400).send("Signature verification failed")
     }
 
-    // Store event ID before processing to enable deduplication
     const alreadySeen = await checkAndStoreEventId(event.eventId)
     if (alreadySeen) return res.json({ received: true })
 
-    switch (event.type) {
-      case "payment.confirmed":
-        await fulfillOrder(event.data.object.reference)
-        break
-      case "payment.failed":
-      case "payment.expired":
-      case "payment.incomplete":
-        await cancelOrNotifyOrder(event.data.object.reference)
-        break
+    if (event.type === "payment.confirmed") {
+      await fulfillOrder(event.data.object.reference)
     }
 
     res.json({ received: true })
@@ -868,9 +873,8 @@ app.post(
   <ul style="font-size:13.5px;color:#334155;padding-left:20px;line-height:2.1">
     <li>PineTree delivers events <strong>at least once</strong>. Your endpoint must handle duplicate events idempotently.</li>
     <li>Return a <code>2xx</code> response only after writing event data to durable storage.</li>
-    <li>If your endpoint returns a non-2xx, PineTree will retry with exponential backoff.</li>
+    <li>If your endpoint returns a non-2xx, PineTree will retry with backoff — see <a href="#" onclick="ptdNav('webhook-deliveries');return false" style="color:#2563eb">Webhook Deliveries</a>.</li>
     <li>Do not fulfill orders based on the customer redirect URL alone. Always wait for <code>payment.confirmed</code>.</li>
-    <li>Your endpoint must respond within <strong>10 seconds</strong>. Use a background queue for slow processing.</li>
   </ul>
 </section>
 
@@ -880,18 +884,18 @@ app.post(
 <section class="ptd-sec" id="ptd-sec-webhook-payload">
   <span class="ptd-eyebrow">Event Structure</span>
   <h1 class="ptd-h1">Webhook Payload</h1>
-  <p class="ptd-lead">Every PineTree webhook is delivered as a JSON object with a standard envelope. The event type, schema, and event ID are at the top level. The payment or session object is inside <code>data.object</code>.</p>
+  <p class="ptd-lead">Every PineTree webhook is delivered as a JSON object with a standard <code>payments-v1</code> envelope. The event type, schema, and event ID are at the top level. The payment or session object is inside <code>data.object</code>.</p>
 
   <h2 class="ptd-h2">Event Envelope</h2>
   <div class="ptd-code-wrap"><pre><code>{
   "eventId":   "evt_01abc...",          // unique — store for deduplication
   "object":    "event",
-  "type":      "payment.confirmed",     // event type
-  "schema":    "payments-v1",           // always payments-v1
+  "type":      "payment.confirmed",
+  "schema":    "payments-v1",
   "createdAt": "2026-06-22T18:00:00.000Z",
   "livemode":  true,
   "data": {
-    "object": { /* payment or checkout.session or payment_link */ }
+    "object": { /* payment or checkout.session object */ }
   }
 }</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
@@ -905,29 +909,27 @@ app.post(
   "livemode":  true,
   "data": {
     "object": {
-      "id":             "pay_01abc",
-      "object":         "payment",
-      "merchantId":     "mer_01abc",
-      "amount":         49.99,
-      "currency":       "USD",
-      "status":         "paid",
-      "network":        "solana",        // rail identifier in webhook events
-      "reference":      "order_1042",
-      "checkoutLinkId": "cs_01abc",
-      "confirmedAt":    "2026-06-22T18:00:05.000Z",
-      "metadata":       { "cartId": "cart_123" }
+      "id":          "3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40",
+      "object":      "payment",
+      "status":      "paid",
+      "network":     "solana",
+      "amount":      49.99,
+      "currency":    "USD",
+      "reference":   "order_1042",
+      "confirmedAt": "2026-06-22T18:00:05.000Z",
+      "metadata":    { "cartId": "cart_123" }
     }
   }
 }</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
   <div class="ptd-callout ptd-callout-slate">
     <b>network vs rail</b>
-    Webhook payment events use the field name <code>network</code> to identify the payment rail (e.g., <code>"solana"</code>, <code>"base"</code>). The REST API Payment object uses <code>rail</code> for the same value. Both carry the same rail identifiers. Use <code>event.data.object.network</code> in webhook handlers.
+    Webhook payment events use the field name <code>network</code> to identify the payment rail (e.g., <code>"solana"</code>, <code>"base"</code>). The REST API Payment object uses <code>rail</code> for the same value (and also returns <code>network</code> alongside it). Use <code>event.data.object.network</code> in webhook handlers.
   </div>
 
   <h2 class="ptd-h2">Checkout Session Event Payload</h2>
   <div class="ptd-code-wrap"><pre><code>{
-  "eventId":   "evt_01abc...",
+  "eventId":   "evt_02def...",
   "object":    "event",
   "type":      "checkout.session.completed",
   "schema":    "payments-v1",
@@ -935,7 +937,7 @@ app.post(
   "livemode":  true,
   "data": {
     "object": {
-      "id":             "cs_01abc",
+      "id":             "3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40",
       "object":         "checkout.session",
       "status":         "paid",
       "amount":         49.99,
@@ -943,8 +945,8 @@ app.post(
       "reference":      "order_1042",
       "customer":       { "email": "jane@example.com" },
       "metadata":       { "cartId": "cart_123" },
-      "checkoutUrl":    "https://app.pinetree-payments.com/checkout/tok_01abc...",
-      "paymentId":      "pay_01abc",
+      "checkoutUrl":    "https://app.pinetree-payments.com/checkout/8f2a1b9c3d4e5f60",
+      "paymentId":      "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e",
       "supportedRails": ["solana", "base", "bitcoin_lightning"],
       "successUrl":     "https://yoursite.com/paid",
       "cancelUrl":      "https://yoursite.com/cancel",
@@ -958,15 +960,13 @@ app.post(
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>id</code></td><td>string</td><td>Payment ID.</td></tr>
+      <tr><td><code>id</code></td><td>string</td><td>Payment ID. A plain UUID — no prefix.</td></tr>
       <tr><td><code>object</code></td><td>string</td><td>Always <code>"payment"</code>.</td></tr>
-      <tr><td><code>merchantId</code></td><td>string</td><td>Merchant account.</td></tr>
-      <tr><td><code>amount</code></td><td>number</td><td>Amount in major currency units.</td></tr>
-      <tr><td><code>currency</code></td><td>string</td><td>Fiat currency.</td></tr>
       <tr><td><code>status</code></td><td>string</td><td>Payment status at time of event.</td></tr>
       <tr><td><code>network</code></td><td>string</td><td>Rail identifier (e.g., <code>solana</code>, <code>base</code>).</td></tr>
+      <tr><td><code>amount</code></td><td>number</td><td>Amount in major currency units.</td></tr>
+      <tr><td><code>currency</code></td><td>string</td><td>Fiat currency.</td></tr>
       <tr><td><code>reference</code></td><td>string</td><td>Your merchant reference / order ID.</td></tr>
-      <tr><td><code>checkoutLinkId</code></td><td>string</td><td>Checkout session ID if originated from a session.</td></tr>
       <tr><td><code>confirmedAt</code></td><td>string</td><td>ISO 8601 confirmation time. Present on <code>payment.confirmed</code>.</td></tr>
       <tr><td><code>metadata</code></td><td>object</td><td>Public metadata from session creation.</td></tr>
     </tbody>
@@ -979,18 +979,18 @@ app.post(
 <section class="ptd-sec" id="ptd-sec-webhook-events">
   <span class="ptd-eyebrow">Event Catalog</span>
   <h1 class="ptd-h1">Webhook Events</h1>
-  <p class="ptd-lead">All merchant webhook events use the <code>payments-v1</code> schema. Subscribe to the events your integration needs in the Developer dashboard. Use <code>eventId</code> to deduplicate — PineTree delivers at least once.</p>
+  <p class="ptd-lead">Implemented merchant webhook events in the <code>payments-v1</code> schema. Use <code>eventId</code> to deduplicate — PineTree delivers at least once.</p>
 
   <h2 class="ptd-h2">Payment Events</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Event</th><th>When it fires</th><th>Fulfill?</th></tr></thead>
     <tbody>
       <tr><td><code>payment.created</code></td><td>Payment object first created.</td><td class="ptd-no">No</td></tr>
-      <tr><td><code>payment.pending</code></td><td>Waiting for customer wallet action or network.</td><td class="ptd-no">No</td></tr>
-      <tr><td><code>payment.processing</code></td><td>Payment detected on-chain; awaiting confirmation.</td><td class="ptd-no">No</td></tr>
+      <tr><td><code>payment.pending</code></td><td>Waiting for customer or network action.</td><td class="ptd-no">No</td></tr>
+      <tr><td><code>payment.processing</code></td><td>Payment detected, awaiting confirmation.</td><td class="ptd-no">No</td></tr>
       <tr><td><code>payment.confirmed</code></td><td>Payment fully confirmed. <strong>Primary fulfillment trigger.</strong></td><td class="ptd-yes">Yes ✓</td></tr>
-      <tr><td><code>payment.failed</code></td><td>Provider or network rejected the payment.</td><td class="ptd-no">No</td></tr>
-      <tr><td><code>payment.expired</code></td><td>Payment window timed out.</td><td class="ptd-no">No</td></tr>
+      <tr><td><code>payment.failed</code></td><td>Payment failed.</td><td class="ptd-no">No</td></tr>
+      <tr><td><code>payment.expired</code></td><td>Payment timed out.</td><td class="ptd-no">No</td></tr>
       <tr><td><code>payment.canceled</code></td><td>Payment was canceled.</td><td class="ptd-no">No</td></tr>
       <tr><td><code>payment.incomplete</code></td><td>Customer abandoned or no funds were sent.</td><td class="ptd-no">No</td></tr>
       <tr><td><code>payment.refunded</code></td><td>Payment was refunded.</td><td class="ptd-no">No</td></tr>
@@ -1003,7 +1003,7 @@ app.post(
     <tbody>
       <tr><td><code>checkout.session.created</code></td><td>Session created via <code>POST /api/v1/checkout/sessions</code>.</td></tr>
       <tr><td><code>checkout.session.processing</code></td><td>Session has a payment in processing state.</td></tr>
-      <tr><td><code>checkout.session.completed</code></td><td>Session payment confirmed. Object carries full checkout session.</td></tr>
+      <tr><td><code>checkout.session.completed</code></td><td>Session payment confirmed. Object carries the full checkout session.</td></tr>
       <tr><td><code>checkout.session.failed</code></td><td>Session payment failed.</td></tr>
       <tr><td><code>checkout.session.expired</code></td><td>Session expired after 24 hours without confirmed payment.</td></tr>
       <tr><td><code>checkout.session.canceled</code></td><td>Session canceled by merchant.</td></tr>
@@ -1025,7 +1025,7 @@ app.post(
     <thead><tr><th>Legacy event</th><th>Normalizes to</th></tr></thead>
     <tbody>
       <tr><td><code>checkout.session.paid</code></td><td><code>checkout.session.completed</code></td></tr>
-      <tr><td>British-spelling payment cancellation event</td><td><code>payment.canceled</code></td></tr>
+      <tr><td><code>payment.cancelled</code></td><td><code>payment.canceled</code></td></tr>
     </tbody>
   </table></div>
   <p class="ptd-p" style="color:#64748b;font-size:12.5px">Legacy event aliases from prior API versions are accepted and normalized to their canonical equivalents. Use the canonical event names listed above for all new integrations.</p>
@@ -1044,19 +1044,43 @@ app.post(
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Query parameter</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><code>status</code></td><td>Filter by delivery status: <code>pending</code>, <code>delivered</code>, <code>failed</code>, <code>dead_letter</code>.</td></tr>
+      <tr><td><code>limit</code></td><td>1–100. Defaults to 20.</td></tr>
+      <tr><td><code>status</code></td><td>One of <code>pending</code>, <code>delivered</code>, <code>failed</code>, <code>dead_letter</code>.</td></tr>
       <tr><td><code>eventType</code></td><td>Filter by event type, e.g. <code>payment.confirmed</code>.</td></tr>
-      <tr><td><code>limit</code></td><td>Max results per page. Defaults to 20.</td></tr>
-      <tr><td><code>cursor</code></td><td>Pagination cursor.</td></tr>
+      <tr><td><code>cursor</code></td><td>Pagination cursor from a previous response's <code>nextCursor</code>.</td></tr>
     </tbody>
   </table></div>
+
+  <div class="ptd-code-wrap"><pre><code>// List response envelope
+{
+  "object": "list",
+  "data": [ /* webhook.delivery objects */ ],
+  "hasMore": false,
+  "nextCursor": null
+}</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
   <div class="ptd-route"><div class="ptd-route-head"><span class="ptd-badge ptd-post">POST</span><span class="ptd-route-path">/api/v1/webhook-deliveries/{id}/retry</span></div><p>Manually retries a failed or dead-letter delivery. Requires permission <span class="ptd-scope">webhooks:write</span></p></div>
 
   <div class="ptd-code-wrap"><pre><code>// Node SDK — manual retry
-const delivery = await pinetree.webhookDeliveries.retry("wdel_01abc...")
-console.log(delivery.status)        // "delivered" if retry succeeded
-console.log(delivery.attemptCount)  // total attempts including this retry</code></pre><button class="ptd-copy-btn">Copy</button></div>
+const delivery = await pinetree.webhookDeliveries.retry("6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f")
+console.log(delivery.status)         // "delivered" if retry succeeded
+console.log(delivery.attemptCount)   // total attempts including this retry</code></pre><button class="ptd-copy-btn">Copy</button></div>
+
+  <h2 class="ptd-h2">Webhook Delivery Object</h2>
+  <div class="ptd-code-wrap"><pre><code>{
+  "id": "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f",
+  "object": "webhook.delivery",
+  "eventType": "payment.confirmed",
+  "status": "delivered",
+  "attemptCount": 1,
+  "nextAttemptAt": null,
+  "lastAttemptAt": "2026-06-22T18:00:06.000Z",
+  "lastStatusCode": 200,
+  "lastError": null,
+  "deliveredAt": "2026-06-22T18:00:06.000Z",
+  "deadLetteredAt": null,
+  "createdAt": "2026-06-22T18:00:00.000Z"
+}</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
   <h2 class="ptd-h2">Delivery Statuses</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
@@ -1070,7 +1094,7 @@ console.log(delivery.attemptCount)  // total attempts including this retry</code
   </table></div>
 
   <h2 class="ptd-h2">Automatic Retry Schedule</h2>
-  <p class="ptd-p">PineTree retries failed deliveries with exponential backoff. After 10 failed attempts the delivery moves to <code>dead_letter</code>.</p>
+  <p class="ptd-p">PineTree retries failed deliveries with backoff. After 10 failed attempts the delivery moves to <code>dead_letter</code>.</p>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Attempt</th><th>Delay before retry</th></tr></thead>
     <tbody>
@@ -1102,7 +1126,7 @@ console.log(delivery.attemptCount)  // total attempts including this retry</code
     "type":      "authentication_error",
     "code":      "missing_api_key",
     "message":   "A PineTree API key is required.",
-    "requestId": "req_01abc..."
+    "requestId": "3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40"
   }
 }</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
@@ -1121,44 +1145,37 @@ console.log(delivery.attemptCount)  // total attempts including this retry</code
 
   <h2 class="ptd-h2">Common Error Codes</h2>
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
-    <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+    <thead><tr><th>Code</th><th>Type</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td><code>missing_api_key</code></td><td>No Authorization header provided.</td></tr>
-      <tr><td><code>invalid_api_key</code></td><td>Key not found, revoked, or wrong format.</td></tr>
-      <tr><td><code>missing_permission</code></td><td>Key does not have the required permission for this endpoint.</td></tr>
-      <tr><td><code>invalid_amount</code></td><td><code>amount</code> is missing, zero, or not a positive number.</td></tr>
-      <tr><td><code>invalid_json</code></td><td>Request body is not valid JSON.</td></tr>
-      <tr><td><code>invalid_rails</code></td><td>Unrecognized rail value in the <code>rails</code> array.</td></tr>
-      <tr><td><code>invalid_public_key</code></td><td>The <code>X-PineTree-Public-Key</code> header value is invalid or revoked.</td></tr>
-      <tr><td><code>checkout_session_not_found</code></td><td>No session found for the provided ID.</td></tr>
-      <tr><td><code>payment_not_found</code></td><td>No payment found for the provided ID.</td></tr>
-      <tr><td><code>webhook_delivery_not_found</code></td><td>No webhook delivery found for the provided ID.</td></tr>
-      <tr><td><code>idempotency_key_conflict</code></td><td>Same key was used with a different request body.</td></tr>
-      <tr><td><code>idempotency_request_in_progress</code></td><td>A request with this key is still in flight.</td></tr>
-      <tr><td><code>internal_error</code></td><td>Unexpected server error. Retry with backoff.</td></tr>
+      <tr><td><code>missing_api_key</code></td><td>authentication_error</td><td>No Authorization header provided.</td></tr>
+      <tr><td><code>invalid_api_key</code></td><td>authentication_error</td><td>Key not found, revoked, or wrong format.</td></tr>
+      <tr><td><code>missing_public_key</code></td><td>authentication_error</td><td>No <code>X-PineTree-Public-Key</code> header on a browser request.</td></tr>
+      <tr><td><code>invalid_public_key</code></td><td>authentication_error</td><td>The public key value is invalid or revoked.</td></tr>
+      <tr><td><code>missing_permission</code></td><td>authorization_error</td><td>Key does not have the required permission for this endpoint.</td></tr>
+      <tr><td><code>invalid_amount</code></td><td>invalid_request_error</td><td><code>amount</code> is missing, zero, or not a positive number.</td></tr>
+      <tr><td><code>invalid_json</code></td><td>invalid_request_error</td><td>Request body is not valid JSON.</td></tr>
+      <tr><td><code>invalid_rails</code></td><td>invalid_request_error</td><td>Unrecognized rail value in the <code>rails</code> array.</td></tr>
+      <tr><td><code>invalid_customer</code></td><td>invalid_request_error</td><td>Malformed <code>customer</code> object.</td></tr>
+      <tr><td><code>invalid_metadata</code></td><td>invalid_request_error</td><td>Malformed <code>metadata</code> object.</td></tr>
+      <tr><td><code>invalid_url</code></td><td>invalid_request_error</td><td>Malformed <code>successUrl</code> or <code>cancelUrl</code>.</td></tr>
+      <tr><td><code>invalid_filter</code></td><td>invalid_request_error</td><td><code>limit</code> out of range on a list request.</td></tr>
+      <tr><td><code>unsupported_status</code></td><td>invalid_request_error</td><td>Unrecognized <code>status</code> filter value.</td></tr>
+      <tr><td><code>invalid_cursor</code></td><td>invalid_request_error</td><td>Malformed pagination cursor.</td></tr>
+      <tr><td><code>missing_session_id</code></td><td>invalid_request_error</td><td>No session ID in the request path.</td></tr>
+      <tr><td><code>checkout_session_not_cancelable</code></td><td>invalid_request_error</td><td>Session is not in a cancelable state.</td></tr>
+      <tr><td><code>checkout_session_not_expirable</code></td><td>invalid_request_error</td><td>Session is not in an expirable state.</td></tr>
+      <tr><td><code>checkout_session_not_found</code></td><td>not_found_error</td><td>No session found for the provided ID.</td></tr>
+      <tr><td><code>payment_not_found</code></td><td>not_found_error</td><td>No payment found for the provided ID.</td></tr>
+      <tr><td><code>webhook_delivery_not_found</code></td><td>not_found_error</td><td>No webhook delivery found for the provided ID.</td></tr>
+      <tr><td><code>idempotency_key_conflict</code></td><td>idempotency_error</td><td>Same key was used with a different request body.</td></tr>
+      <tr><td><code>idempotency_request_in_progress</code></td><td>idempotency_error</td><td>A request with this key is still in flight.</td></tr>
+      <tr><td><code>idempotency_storage_failure</code></td><td>api_error</td><td>PineTree failed to persist idempotency state. Safe to retry.</td></tr>
+      <tr><td><code>internal_error</code></td><td>api_error</td><td>Unexpected server error. Safe to retry with backoff.</td></tr>
     </tbody>
   </table></div>
 
-  <h2 class="ptd-h2">Node SDK Error Classes</h2>
-  <div class="ptd-code-wrap"><pre><code>import {
-  AuthenticationError,
-  PermissionError,
-  InvalidRequestError,
-  IdempotencyConflictError,
-  NotFoundError,
-  APIConnectionError,
-} from "@pinetreepayments/node"
-
-try {
-  const session = await pinetree.checkout.sessions.create({ amount: 49.99 })
-} catch (err) {
-  if (err instanceof AuthenticationError)    { /* invalid or missing key */ }
-  if (err instanceof PermissionError)        { /* permission not granted */ }
-  if (err instanceof InvalidRequestError)    { /* bad request body */ }
-  if (err instanceof IdempotencyConflictError) { /* don't retry */ }
-  if (err instanceof NotFoundError)          { /* resource missing */ }
-  if (err instanceof APIConnectionError)     { /* safe to retry */ }
-}</code></pre><button class="ptd-copy-btn">Copy</button></div>
+  <h2 class="ptd-h2">Node SDK</h2>
+  <p class="ptd-p">The Node SDK throws <code>V1ApiError</code> on any non-2xx response, carrying the same <code>type</code>, <code>code</code>, and <code>requestId</code> shown above. Check <code>error.type</code>/<code>error.code</code> to branch your handling.</p>
 </section>
 
 <!-- ══════════════════════════════════════════════
@@ -1176,7 +1193,6 @@ try {
       <tr><td>Same key + same request body</td><td>Returns the original session. No duplicate is created.</td></tr>
       <tr><td>Same key + different request body</td><td>409 — <code>idempotency_key_conflict</code>. Do not retry.</td></tr>
       <tr><td>Request still in flight</td><td>409 — <code>idempotency_request_in_progress</code>. Wait and retry.</td></tr>
-      <tr><td>Replayed response</td><td>Returns original session with <code>Idempotent-Replayed: true</code> header.</td></tr>
     </tbody>
   </table></div>
 
@@ -1201,7 +1217,7 @@ Idempotency-Key: order_1042          ← use your stable order ID
     successUrl: "https://yoursite.com/paid",
     cancelUrl:  "https://yoursite.com/cancel",
   },
-  { idempotencyKey: "order_1042" }   // same key + same body = same session
+  { idempotencyKey: "order_1042" }
 )</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
   <h2 class="ptd-h2">Best Practices</h2>
@@ -1228,49 +1244,46 @@ Idempotency-Key: order_1042          ← use your stable order ID
   <!-- Node SDK -->
   <h2 class="ptd-h2">Node SDK — @pinetreepayments/node</h2>
   <div class="ptd-code-wrap"><pre><code>npm install @pinetreepayments/node</code></pre><button class="ptd-copy-btn">Copy</button></div>
-  <p class="ptd-p">Use on your server with a <code>pt_live_*</code> secret key. Supports ESM and CommonJS. Requires Node.js 18+.</p>
+  <p class="ptd-p">Use on your server with a <code>pt_live_*</code> secret key. Requires Node.js 18+.</p>
 
   <div class="ptd-code-wrap"><pre><code>import { PineTree } from "@pinetreepayments/node"
 
-const pinetree = new PineTree(process.env.PINETREE_API_KEY!)
+const pinetree = new PineTree(process.env.PINETREE_API_KEY)
 
-// Create a checkout session
-const session = await pinetree.checkout.sessions.create({
-  amount: 49.99,
-  currency: "USD",
-  reference: "order_1042",
-  successUrl: "https://yoursite.com/paid",
-  cancelUrl:  "https://yoursite.com/cancel",
-})
-// → session.checkoutUrl
+// Checkout Sessions
+const session = await pinetree.checkout.sessions.create(
+  { amount: 49.99, currency: "USD", reference: "order_1042" },
+  { idempotencyKey: "order_1042" }
+)
+await pinetree.checkout.sessions.retrieve(session.id)
+await pinetree.checkout.sessions.list({ status: "paid", limit: 20 })
+await pinetree.checkout.sessions.cancel(session.id)
+await pinetree.checkout.sessions.expire(session.id)
 
-// Retrieve a payment
-const payment = await pinetree.payments.retrieve("pay_01abc...")
+// Payments — retrieve only; there is no payments.list()
+const payment = await pinetree.payments.retrieve("3f9a1c2e-4b6d-4a11-9c2f-8e1a6d2b7f40")
 // → payment.status === "paid" means confirmed
 
-// List webhook deliveries
+// Webhook Deliveries
 const deliveries = await pinetree.webhookDeliveries.list({ status: "failed" })
-
-// Retry a failed delivery
-await pinetree.webhookDeliveries.retry("wdel_01abc...")
+await pinetree.webhookDeliveries.retry("6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f")
 
 // Verify a webhook signature
 const event = pinetree.webhooks.constructEvent(
   req.body,           // raw Buffer — must be raw, not parsed
   req.headers,
-  process.env.PINETREE_WEBHOOK_SECRET!
+  process.env.PINETREE_WEBHOOK_SECRET
 )</code></pre><button class="ptd-copy-btn">Copy</button></div>
 
   <!-- JS SDK -->
   <h2 class="ptd-h2">JavaScript SDK — @pinetreepayments/js</h2>
   <div class="ptd-code-wrap"><pre><code>npm install @pinetreepayments/js</code></pre><button class="ptd-copy-btn">Copy</button></div>
-  <p class="ptd-p">Use in browser environments with a <code>pk_live_*</code> public key. Cannot use secret keys. Supports popup and embed checkout modes.</p>
+  <p class="ptd-p">Use in browser environments with a <code>pk_live_*</code> public key. Cannot use secret keys.</p>
 
   <div class="ptd-code-wrap"><pre><code>import { PineTreeJS } from "@pinetreepayments/js"
 
 const ptjs = new PineTreeJS("pk_live_your_public_key_here")
 
-// Create and open a checkout session in the current tab
 const session = await ptjs.checkout.createSession({
   amount: 49.99,
   currency: "USD",
@@ -1284,11 +1297,10 @@ ptjs.checkout.open(session)   // redirects to hosted checkout</code></pre><butto
   <!-- React SDK -->
   <h2 class="ptd-h2">React SDK — @pinetreepayments/react</h2>
   <div class="ptd-code-wrap"><pre><code>npm install @pinetreepayments/react</code></pre><button class="ptd-copy-btn">Copy</button></div>
-  <p class="ptd-p">React components and hooks for checkout buttons and embedded checkout flows. Uses <code>@pinetreepayments/js</code> under the hood with a <code>pk_live_*</code> public key.</p>
+  <p class="ptd-p">React components and hooks for checkout buttons. Uses <code>@pinetreepayments/js</code> under the hood with a <code>pk_live_*</code> public key.</p>
 
   <div class="ptd-code-wrap"><pre><code>import { PineTreeProvider, PineTreeCheckoutButton } from "@pinetreepayments/react"
 
-// _app.tsx or layout.tsx
 export function Providers({ children }) {
   return (
     &lt;PineTreeProvider publicKey="pk_live_your_public_key_here"&gt;
@@ -1297,11 +1309,10 @@ export function Providers({ children }) {
   )
 }
 
-// Product or cart page
 export function BuyButton({ orderId, amount }) {
   return (
     &lt;PineTreeCheckoutButton
-      amount={amount}          // major currency units
+      amount={amount}
       currency="USD"
       reference={orderId}
       successUrl={`${window.location.origin}/paid`}
@@ -1319,17 +1330,16 @@ export function BuyButton({ orderId, amount }) {
 <section class="ptd-sec" id="ptd-sec-testing">
   <span class="ptd-eyebrow">Validation</span>
   <h1 class="ptd-h1">Testing</h1>
-  <p class="ptd-lead">PineTree currently uses live keys only. There is no separate sandbox environment or test-mode key prefix. Test by running real transactions with small amounts.</p>
+  <p class="ptd-lead">PineTree currently issues only <code>pt_live_*</code> keys — there is no separate PineTree sandbox or test-mode environment. Test PineTree integrations with small live amounts and an HTTPS tunnel for local webhook development.</p>
 
   <div class="ptd-callout ptd-callout-amber">
-    <b>Live keys only</b>
-    PineTree does not issue <code>pt_test_*</code> keys. All API keys operate against live payment infrastructure. Test with small real amounts and remember that <code>amount</code> uses major currency units.
+    <b>Live keys only — provider sandboxes are separate</b>
+    PineTree issues <code>pt_live_*</code> keys only — there is no <code>pt_test_*</code> variant, and no PineTree-side sandbox. Individual payment providers behind a rail (for example Stripe) may still offer their own sandbox or test mode for testing directly with that provider; that is independent of PineTree's API, which always operates on live keys. <code>amount</code> uses major currency units.
   </div>
 
   <h2 class="ptd-h2">Test Webhooks Locally</h2>
   <p class="ptd-p">Use an HTTPS tunnel to expose your local server to PineTree's webhook delivery:</p>
-  <div class="ptd-code-wrap"><pre><code># Start a tunnel to your local server (ngrok example)
-ngrok http 3000
+  <div class="ptd-code-wrap"><pre><code>ngrok http 3000
 
 # Register the HTTPS URL in Developer → Webhooks:
 https://abc123.ngrok-free.app/webhooks/pinetree</code></pre><button class="ptd-copy-btn">Copy</button></div>
@@ -1376,7 +1386,6 @@ NEXT_PUBLIC_PINETREE_PUBLIC_KEY=pk_live_...  # browser usage</code></pre><button
     <li>Body is <strong>not</strong> JSON-parsed before calling <code>constructEvent</code>.</li>
     <li>Endpoint returns <code>2xx</code> after durable write, not before.</li>
     <li><code>PineTree-Event-Id</code> stored and checked to deduplicate at-least-once delivery.</li>
-    <li>Endpoint responds within 10 seconds (offload slow work to a queue).</li>
     <li>Dead-letter deliveries are monitored and alerted on.</li>
   </ul>
 
@@ -1390,11 +1399,13 @@ NEXT_PUBLIC_PINETREE_PUBLIC_KEY=pk_live_...  # browser usage</code></pre><button
     <li>Duplicate event handling verified.</li>
   </ul>
 
-  <h3 class="ptd-h3">Rails &amp; Configuration</h3>
+  <h3 class="ptd-h3">Rails &amp; Providers</h3>
   <ul class="ptd-checklist">
     <li>At least one payment rail is configured and verified in the merchant dashboard.</li>
-    <li>Treasury wallet addresses are verified for each enabled rail.</li>
-    <li>If card processing is enabled via Shift4: merchant onboarding is complete and approved.</li>
+    <li>Treasury wallet addresses are verified for each enabled crypto rail.</li>
+    <li>If Shift4 card processing is enabled: merchant application is approved for production processing.</li>
+    <li>If Stripe card processing is enabled (early access): Connect account is active with the capabilities your integration needs — Connect, Payments, Terminal — enabled.</li>
+    <li>If FluidPay card processing is enabled (early access): merchant onboarding and provider approval are complete.</li>
     <li>Session <code>successUrl</code> and <code>cancelUrl</code> are production HTTPS URLs.</li>
   </ul>
 </section>
@@ -1410,13 +1421,13 @@ NEXT_PUBLIC_PINETREE_PUBLIC_KEY=pk_live_...  # browser usage</code></pre><button
   <div class="ptd-tbl-wrap"><table class="ptd-tbl">
     <thead><tr><th>Capability</th><th>Notes</th></tr></thead>
     <tbody>
-      <tr><td>Refund API</td><td>Refunds are currently processed through the merchant dashboard. An API endpoint is on the roadmap.</td></tr>
+      <tr><td>Refund API</td><td>Refunds are currently processed through the merchant dashboard. A REST endpoint is planned.</td></tr>
       <tr><td>Payout / settlement API</td><td>Settlement preferences and withdrawals are configured in the dashboard. Programmatic settlement API is planned.</td></tr>
       <tr><td>Disputes API</td><td>Dispute management for card payments will be available once card processing is generally available.</td></tr>
-      <tr><td>Full sandbox / test-mode keys</td><td>PineTree currently uses live keys only. A dedicated test environment is a planned roadmap item.</td></tr>
+      <tr><td>Sandbox / test-mode keys</td><td>PineTree currently uses live keys only. A dedicated test environment is a planned roadmap item.</td></tr>
       <tr><td>Advanced reporting API</td><td>Reports are available for download and email from the merchant dashboard. A REST reporting endpoint is planned.</td></tr>
-      <tr><td>Stripe card processing</td><td>A Stripe card processing integration is in early access. Contact support for access.</td></tr>
-      <tr><td>Fluid Pay card processing</td><td>Fluid Pay is in early access. Contact support for access.</td></tr>
+      <tr><td>Stripe card processing</td><td>In early access. Contact support for access.</td></tr>
+      <tr><td>Fluid Pay card processing</td><td>In early access. Contact support for access.</td></tr>
       <tr><td>Recurring billing / subscriptions</td><td>One-time checkout sessions are supported. Subscription and recurring payment APIs are on the roadmap.</td></tr>
       <tr><td>Customer objects</td><td>Customer data is currently stored as metadata on sessions and payments. A dedicated Customer API is planned.</td></tr>
       <tr><td>Invoice API</td><td>Merchant-generated invoices are not yet available via the API.</td></tr>
@@ -1434,7 +1445,7 @@ NEXT_PUBLIC_PINETREE_PUBLIC_KEY=pk_live_...  # browser usage</code></pre><button
 <section class="ptd-sec" id="ptd-sec-support">
   <span class="ptd-eyebrow">Help</span>
   <h1 class="ptd-h1">Support</h1>
-  <p class="ptd-lead">Contact PineTree developer support for integration help, API access requests, SDK issues, and merchant onboarding questions.</p>
+  <p class="ptd-lead">Contact PineTree for integration help, API access, and merchant onboarding questions.</p>
 
   <h2 class="ptd-h2">Contact</h2>
   <div class="ptd-glance" style="grid-template-columns:1fr 1fr">
@@ -1443,35 +1454,25 @@ NEXT_PUBLIC_PINETREE_PUBLIC_KEY=pk_live_...  # browser usage</code></pre><button
   </div>
 
   <h2 class="ptd-h2">What to Include in a Support Request</h2>
-  <p class="ptd-p">Include as much of the following as is relevant to your issue. This dramatically reduces back-and-forth and resolution time:</p>
-  <ul style="font-size:13.5px;color:#334155;padding-left:20px;line-height:2.1">
-    <li><strong>Merchant account email or ID</strong> — helps us locate your account immediately.</li>
-    <li><strong>API endpoint</strong> — e.g., <code>POST /api/v1/checkout/sessions</code>.</li>
-    <li><strong>requestId</strong> — the <code>requestId</code> field from the error response JSON.</li>
-    <li><strong>Checkout Session ID</strong> — e.g., <code>cs_01abc...</code></li>
-    <li><strong>Payment ID</strong> — e.g., <code>pay_01abc...</code></li>
-    <li><strong>Webhook Event ID</strong> — the <code>eventId</code> from the event envelope.</li>
-    <li><strong>Error message and code</strong> — the <code>type</code> and <code>code</code> from the error response.</li>
-    <li><strong>Timestamp</strong> — approximate time the issue occurred (UTC preferred).</li>
-  </ul>
+  <p class="ptd-p">Include the following in support requests: merchant account email, API endpoint, <code>requestId</code> from the error response, Checkout Session ID, Payment ID, webhook Event ID, error type and code, and approximate timestamp (UTC).</p>
 
   <h2 class="ptd-h2">Common Questions</h2>
   <div style="margin-top:8px">
     <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:10px">
       <div style="background:#f8fafc;padding:12px 16px;font-size:13.5px;font-weight:600;color:#0f172a">How do I get API access?</div>
-      <div style="padding:12px 16px;font-size:13px;color:#334155;border-top:1px solid #f1f5f9">Email info@pinetree-payments.com with your business name, website, and expected monthly transaction volume. We'll get you set up with a merchant account and API keys.</div>
+      <div style="padding:12px 16px;font-size:13px;color:#334155;border-top:1px solid #f1f5f9">Email info@pinetree-payments.com with your business name, website, and expected monthly transaction volume.</div>
     </div>
     <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:10px">
       <div style="background:#f8fafc;padding:12px 16px;font-size:13.5px;font-weight:600;color:#0f172a">How do I enable card processing?</div>
-      <div style="padding:12px 16px;font-size:13px;color:#334155;border-top:1px solid #f1f5f9">Card processing via Shift4, Stripe, or Fluid Pay requires a separate merchant onboarding approval. Contact support to start the process. Crypto rails are available immediately after account approval.</div>
+      <div style="padding:12px 16px;font-size:13px;color:#334155;border-top:1px solid #f1f5f9">Shift4 is available to approved merchants through PineTree's onboarding flow. Stripe and FluidPay card processing are in early access — contact support for current status. Crypto rails are available immediately after account approval.</div>
     </div>
     <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:10px">
       <div style="background:#f8fafc;padding:12px 16px;font-size:13.5px;font-weight:600;color:#0f172a">Are there sandbox or test keys?</div>
-      <div style="padding:12px 16px;font-size:13px;color:#334155;border-top:1px solid #f1f5f9">Not yet. PineTree currently uses live keys only. Test integrations by running small-amount transactions with real wallets. A sandbox environment is on the roadmap.</div>
+      <div style="padding:12px 16px;font-size:13px;color:#334155;border-top:1px solid #f1f5f9">Not from PineTree — PineTree currently issues only <code>pt_live_*</code> keys, with no PineTree-side sandbox. A dedicated PineTree test environment is on the roadmap. Individual providers behind a rail, such as Stripe, may offer their own separate sandbox for testing with that provider directly. Test PineTree integrations by running small-amount live transactions with real wallets.</div>
     </div>
     <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:10px">
       <div style="background:#f8fafc;padding:12px 16px;font-size:13.5px;font-weight:600;color:#0f172a">Why isn't my webhook arriving?</div>
-      <div style="padding:12px 16px;font-size:13px;color:#334155;border-top:1px solid #f1f5f9">Check Developer → Webhooks → Deliveries in the dashboard. If deliveries show as <code>failed</code>, your endpoint may be returning a non-2xx status or timing out. If status is <code>dead_letter</code>, use <code>POST /api/v1/webhook-deliveries/{id}/retry</code> after fixing the endpoint issue. Include the webhook event ID in your support request if the issue persists.</div>
+      <div style="padding:12px 16px;font-size:13px;color:#334155;border-top:1px solid #f1f5f9">Check Developer → Webhooks → Deliveries in the dashboard. If deliveries show as <code>failed</code>, your endpoint may be returning a non-2xx status or timing out. If status is <code>dead_letter</code>, use <code>POST /api/v1/webhook-deliveries/{id}/retry</code> after fixing the endpoint issue.</div>
     </div>
   </div>
 </section>

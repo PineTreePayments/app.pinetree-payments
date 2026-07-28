@@ -126,9 +126,10 @@ describe("SolanaWalletPayment — single-use wallet-launch guard", () => {
     const catchBlock = src.slice(catchStart, catchStart + 600)
     expect(catchBlock).toContain("walletLaunchInFlightRef.current = false")
 
-    // startPayment's finally block.
+    // startPayment's finally block (the window now also spans the customer-
+    // facing execution-error classification added between catch and finally).
     const finallyStart = src.indexOf('const message = err instanceof Error ? err.message : "Failed to send Solana transaction"')
-    const finallyBlock = src.slice(finallyStart, finallyStart + 900)
+    const finallyBlock = src.slice(finallyStart, finallyStart + 1600)
     expect(finallyBlock).toContain("walletLaunchInFlightRef.current = false")
   })
 

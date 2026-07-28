@@ -50,12 +50,13 @@ describe("mobile dashboard hero cleanup", () => {
   })
 
   it("keeps the POS terminal action compact", () => {
+    // Commit 5e9877c intentionally replaced the shared <Button> with a raw
+    // <button> that is full-width on mobile and auto-width from sm: up.
     const pos = read("app/dashboard/pos/page.tsx")
-    const action = pos.match(/<Button[\s\S]*?onClick=\{startCreatingTerminal\}[\s\S]*?<\/Button>/)?.[0] ?? ""
+    const action = pos.match(/<button[\s\S]*?onClick=\{startCreatingTerminal\}[\s\S]*?<\/button>/)?.[0] ?? ""
 
     expect(action).toContain("primaryActionButtonClass")
-    expect(action).toContain("self-end")
-    expect(action).not.toContain("w-full")
+    expect(action).toContain("sm:w-auto")
     expect(action).not.toContain("fullWidth")
   })
 

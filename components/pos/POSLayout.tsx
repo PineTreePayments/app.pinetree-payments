@@ -30,6 +30,11 @@ import { detectCapabilitiesFromProvider } from "@/lib/basePay/strategyOrchestrat
 import { serializeWalletError } from "@/lib/pos/posBaseWalletError"
 import { classifyBaseUsdcSigningError } from "@/lib/pos/baseUsdcSigningErrorClassifier"
 import {
+  classifyWalletExecutionError,
+  friendlyWalletExecutionMessage,
+  sanitizeCustomerPaymentErrorMessage,
+} from "@/lib/payments/walletExecutionErrorClassifier"
+import {
   PosBaseUsdcWalletRequestStageGuard,
   type BaseUsdcStageOwnership,
 } from "@/lib/pos/posBaseUsdcWalletRequestStage"
@@ -1418,13 +1423,25 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         }
       }
 
+      // Prefer a validated specific cause (insufficient balance / gas / wrong
+      // network) over the raw wallet/RPC string, then sanitize whatever is
+      // left - this exact string is shown on the merchant terminal AND
+      // mirrored to the customer's phone via the session's errorMessage, so
+      // it must never be a bare timeout or an RPC dump when the wallet
+      // already reported why execution cannot succeed. The raw message is
+      // preserved in the request_failed log above.
+      const executionKind = classifyWalletExecutionError(err, { rail: "base", asset })
+      const displayMessage = isRejection
+        ? "Payment was declined in the customer's wallet."
+        : friendlyWalletExecutionMessage(executionKind, { rail: "base", asset })
+          ?? sanitizeCustomerPaymentErrorMessage(message, "Payment could not be completed. Start a new sale to retry.")
       // A superseded attempt's failure belongs to whatever sale it was for,
       // not to whatever the terminal is showing now - never let a stale
       // attempt's error/failed state clobber the current sale's screen.
       if (isOwnedBaseAttempt(myAttempt)) {
-        setPaymentError(message)
+        setPaymentError(displayMessage)
       }
-      await updatePosBaseSession(iid, { step: "failed", errorMessage: message }).catch(() => null)
+      await updatePosBaseSession(iid, { step: "failed", errorMessage: displayMessage }).catch(() => null)
       if (isOwnedBaseAttempt(myAttempt)) {
         setStatus("failed")
       } else {

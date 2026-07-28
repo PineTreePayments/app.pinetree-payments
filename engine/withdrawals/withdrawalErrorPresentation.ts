@@ -27,7 +27,10 @@ export const WITHDRAWAL_ERROR_MESSAGES: Record<WalletApiErrorCode, string> = {
   WALLET_PROVIDER_RATE_LIMITED: "Too many requests right now. Please wait a moment and try again.",
   WALLET_PROVIDER_TIMEOUT: "The request timed out. We'll confirm the result once we hear back from the provider.",
   IDEMPOTENCY_KEY_REQUIRED: "We couldn't submit this withdrawal. Please try again.",
-  IDEMPOTENCY_KEY_CONFLICT: "This withdrawal attempt already exists. PineTree restored its current status.",
+  // A conflict means the same request key was reused for DIFFERENT withdrawal
+  // details - nothing was submitted for this request and nothing "already
+  // happened". Never phrase this as an existing/completed withdrawal.
+  IDEMPOTENCY_KEY_CONFLICT: "These withdrawal details don't match the earlier attempt they were submitted under. Review the withdrawal again and submit it as a new request.",
   INSUFFICIENT_BALANCE: "The available balance is insufficient for this withdrawal.",
   INTERNAL_ERROR: "Something went wrong on our end. Please try again.",
   INVALID_DESTINATION: "Enter a valid destination address for the selected asset and network.",
@@ -36,7 +39,9 @@ export const WITHDRAWAL_ERROR_MESSAGES: Record<WalletApiErrorCode, string> = {
   MAXIMUM_AMOUNT: "This amount exceeds the maximum allowed for this withdrawal type.",
   NETWORK_FEE_TOO_HIGH: "Network fees are unusually high right now. Try a smaller amount or try again later.",
   DESTINATION_NOT_CONFIGURED: "Set up a payout destination before withdrawing.",
-  DUPLICATE_WITHDRAWAL: "This withdrawal attempt already exists. PineTree restored its current status.",
+  // Only claim an existing withdrawal when one genuinely exists - and even
+  // then, say its status is being checked rather than implying completion.
+  DUPLICATE_WITHDRAWAL: "A matching withdrawal request already exists. PineTree is checking its status with the provider - do not submit it again.",
   WITHDRAWAL_ALREADY_PROCESSING: "This withdrawal is already being processed.",
   UNSUPPORTED_NETWORK: "This network isn't supported for withdrawals yet.",
   UNSUPPORTED_ASSET: "This asset isn't supported for withdrawals on this network.",

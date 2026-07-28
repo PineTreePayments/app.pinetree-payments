@@ -9546,6 +9546,14 @@ function PineTreeWalletRuntime() {
   }
 
   function handleEditWithdrawal() {
+    // Editing after a DEFINITIVE failure starts a new logical attempt - the
+    // old idempotency key must not survive into it, or an unchanged resubmit
+    // would silently restore the failed operation instead of retrying.
+    // An ambiguous (status-unknown) outcome deliberately keeps the key so an
+    // unchanged resubmit restores/reconciles rather than double-submitting.
+    if (withdrawalScreen === "failed" && withdrawalApprovalError !== withdrawalStatusUnknownMessage) {
+      setInstantSendIdempotencyKey(null)
+    }
     setWithdrawalScreen("form")
     setWithdrawalSubmitResult(null)
     setWithdrawalApprovalError("")
@@ -10071,8 +10079,14 @@ function PineTreeWalletRuntime() {
     if (!token) return
     const attemptKey = `dynamic:${withdrawalId}`
     emitWalletSetupDebugEvent("withdrawal_reconciliation_started", { requestId: withdrawalId, provider: "dynamic" })
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 1600))
+    // Follow the withdrawal all the way to a terminal state instead of giving
+    // up after ~8 seconds: 5 fast checks, then 5s intervals up to ~2 minutes.
+    // The status GET reconciles processing rows against the chain server-side,
+    // so without this the result card could sit on "Submitted"/"Processing"
+    // for the rest of the session even after the withdrawal confirmed.
+    let submittedBalanceSyncTriggered = false
+    for (let attempt = 0; attempt < 29; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, attempt < 5 ? 1600 : 5000))
       if (activeWithdrawalAttemptRef.current !== attemptKey) return
       try {
         const res = await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}`, {
@@ -10104,12 +10118,13 @@ function PineTreeWalletRuntime() {
           void syncPineTreeWallet()
           return
         }
-        if (lifecycle === "CONFIRMING" || lifecycle === "SUBMITTED") {
+        if ((lifecycle === "CONFIRMING" || lifecycle === "SUBMITTED") && !submittedBalanceSyncTriggered) {
+          submittedBalanceSyncTriggered = true
           void syncPineTreeWallet()
-          return
         }
       } catch {
-        return
+        // Transient network failure - keep polling; the loop itself is bounded.
+        continue
       }
     }
   }
@@ -10128,8 +10143,11 @@ function PineTreeWalletRuntime() {
     if (!token) return
     const attemptKey = `bitcoin:${operationId}`
     emitWalletSetupDebugEvent("withdrawal_reconciliation_started", { requestId: operationId, provider: "speed" })
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 1600))
+    // Same schedule as pollWithdrawalRequest: follow the operation to a
+    // terminal state (each GET pulls a fresh Speed status) for up to ~2
+    // minutes instead of abandoning the card at "Processing" after 8 seconds.
+    for (let attempt = 0; attempt < 29; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, attempt < 5 ? 1600 : 5000))
       if (activeWithdrawalAttemptRef.current !== attemptKey) return
       try {
         const res = await fetch(`/api/wallets/withdrawals/${encodeURIComponent(operationId)}`, {
@@ -10166,7 +10184,8 @@ function PineTreeWalletRuntime() {
           return
         }
       } catch {
-        return
+        // Transient network failure - keep polling; the loop itself is bounded.
+        continue
       }
     }
   }
@@ -10245,6 +10264,18 @@ function PineTreeWalletRuntime() {
         setWithdrawalScreen("failed")
         return
       }
+      // A retry after a DEFINITIVE failure is a new logical attempt and must
+      // carry a new idempotency identity - replaying the old key would only
+      // restore the already-failed operation and silently no-op the retry.
+      // An ambiguous outcome (status-unknown) keeps the same key so the
+      // server restores/reconciles the existing operation instead of ever
+      // double-submitting; the failed screen also hides "Try again" then.
+      const isRetryAfterDefinitiveFailure =
+        withdrawalScreen === "failed" && withdrawalApprovalError !== withdrawalStatusUnknownMessage
+      const submitIdempotencyKey = isRetryAfterDefinitiveFailure
+        ? crypto.randomUUID()
+        : instantSendIdempotencyKey
+      if (isRetryAfterDefinitiveFailure) setInstantSendIdempotencyKey(submitIdempotencyKey)
       setSubmittingWithdrawal(true)
       setWithdrawalError("")
       setWithdrawalApprovalError("")
@@ -10259,7 +10290,7 @@ function PineTreeWalletRuntime() {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
-            "Idempotency-Key": instantSendIdempotencyKey,
+            "Idempotency-Key": submitIdempotencyKey,
             "X-PineTree-Withdrawal-Correlation": correlationId,
           },
           body: JSON.stringify({
@@ -10280,6 +10311,10 @@ function PineTreeWalletRuntime() {
             code: result.error?.code as WalletApiErrorCode | undefined,
             rawMessage: result.error?.message,
           })
+          // The cached key belongs to a different, conflicting request - it can
+          // never succeed again. Drop it so the next review/submit mints a
+          // fresh identity instead of dead-ending on the same conflict.
+          if (presented.code === "IDEMPOTENCY_KEY_CONFLICT") setInstantSendIdempotencyKey(null)
           emitWalletSetupDebugEvent("provider_submission_failed", { correlationId, rail: "bitcoin", asset: "BTC", provider: "speed", errorCode: presented.code || "UNKNOWN" })
           setWithdrawalApprovalError(presented.code === "STATUS_UNKNOWN" ? withdrawalStatusUnknownMessage : presented.message)
           setWithdrawalScreen(presented.code === "INSUFFICIENT_BALANCE" ? "review" : "failed")
