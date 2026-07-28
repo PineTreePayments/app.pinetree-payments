@@ -33,6 +33,7 @@ import {
   type DynamicSignerRail,
   type DynamicWalletLike,
 } from "@/lib/wallets/dynamicSignerLookup"
+import { raceDynamicSignatureEvidence } from "@/lib/wallets/dynamicSignatureRace"
 import {
   PineTreeInsightsCard,
   ProviderStatusPill,
@@ -1039,6 +1040,46 @@ function validatePreparedSolanaTransaction(
 // with no way out. Same 45s bound and "ambiguous, not failed" classification
 // as Solana's existing timeout.
 const DYNAMIC_EVM_SIGN_TIMEOUT_MS = 45_000
+// How long the client keeps racing the Dynamic SDK against chain discovery
+// before reporting an ambiguous (never failed) outcome. Deliberately shorter
+// than the SDK's own signing timeouts: discovery normally produces evidence
+// within a few seconds of broadcast, so the merchant leaves Dynamic's
+// spinning confirmation state without waiting on its modal lifecycle.
+const DYNAMIC_SIGNATURE_RACE_TIMEOUT_MS = 40_000
+
+/**
+ * Posts discovered/late transaction evidence to the canonical submit
+ * endpoint. Used by the late-signature adoption path, where the race has
+ * already been decided but Dynamic finally produced the signature (typically
+ * when the merchant closes a stuck confirmation modal). The server validates
+ * the hash and replays idempotently if evidence is already attached.
+ */
+async function submitDynamicWithdrawalEvidence(
+  withdrawalId: string,
+  txHash: string,
+  token: string,
+  correlationId: string
+): Promise<void> {
+  try {
+    await fetch(`/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/submit`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-PineTree-Withdrawal-Correlation": correlationId,
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        tx_hash: txHash,
+        provider_reference: txHash,
+        signed_payload: { late_signature_adopted: true },
+      }),
+    })
+  } catch {
+    // Best effort: the recovery marker still holds the hash, and server-side
+    // chain discovery remains as the final fallback.
+  }
+}
 const DYNAMIC_EVM_SIGN_TIMEOUT_MESSAGE = "Withdrawal approval is still pending. Check your wallet activity before trying again."
 
 async function sendDynamicPreparedWithdrawal(
@@ -2561,10 +2602,14 @@ function WithdrawalResultCard({
   if (kind === "submitted" && submitResult) {
     const lifecycle = submitResult.lifecycle ?? normalizeRequestWithdrawalLifecycle(submitResult.request)
     const confirmed = lifecycle === "CONFIRMED" || merchantStatus === "Confirmed" || merchantStatus === "Withdrawal confirmed"
+    // Name the network while finality is pending so the merchant can see the
+    // withdrawal is progressing on-chain rather than stalled.
     const title = confirmed
       ? "Withdrawal confirmed"
       : lifecycle === "CONFIRMING"
-        ? "Withdrawal confirming"
+        ? review?.review.rail
+          ? `Confirming on ${railDisplayName(review.review.rail)}`
+          : "Withdrawal confirming"
         : "Withdrawal submitted"
     const supportingCopy = confirmed
       ? "Your withdrawal has been confirmed."
@@ -10570,7 +10615,15 @@ function PineTreeWalletRuntime() {
         emitWalletSetupDebugEvent("wallet_withdrawal_signature_started", { correlationId, requestId: withdrawalId })
         setWithdrawalProviderAuthorizationActive(true)
         setWithdrawalScreen("review")
-        const dynamicSubmission = await sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, dynamicRuntime.wallets, dynamicRuntime.primaryWallet, {
+        // Dynamic's SDK does NOT hand back the signature when the transaction
+        // is broadcast: its TransactionConfirmationModal delivers the response
+        // only from its unmount handler, so a modal that keeps spinning holds
+        // the signature hostage while the funds have already moved on-chain
+        // (production incident, 0.38 Solana USDC). Race the SDK promise
+        // against server-side chain discovery so the first authoritative
+        // evidence wins, and never abandon the SDK promise - a late
+        // resolution (merchant finally closes the modal) is still adopted.
+        const signingPromise = sendDynamicPreparedWithdrawal(prepared as WithdrawalPrepareResponse, dynamicRuntime.wallets, dynamicRuntime.primaryWallet, {
           selectedRail: withdrawalRail,
           selectedAsset: withdrawalAsset,
           destinationAddress: withdrawalReview?.review.destinationAddress ?? withdrawalDestination,
@@ -10581,10 +10634,68 @@ function PineTreeWalletRuntime() {
           correlationId,
           emitDynamicStage: emitWalletSetupDebugEvent,
         })
+        const raceResult = await raceDynamicSignatureEvidence({
+          signingPromise,
+          discover: async () => {
+            const res = await fetch(
+              `/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(withdrawalId)}/discover`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "X-PineTree-Withdrawal-Correlation": correlationId,
+                },
+                credentials: "include",
+                cache: "no-store",
+              }
+            )
+            if (!res.ok) return null
+            const json = (await res.json()) as { request?: { tx_hash?: string | null } }
+            return { txHash: json.request?.tx_hash ?? null }
+          },
+          timeoutMs: DYNAMIC_SIGNATURE_RACE_TIMEOUT_MS,
+          onLateSignature: (evidence) => {
+            // The signature arrived after the race was decided (typically the
+            // merchant closing a stuck Dynamic modal). Persist it rather than
+            // discarding it - this is exactly the evidence the old
+            // Promise.race threw away, forcing the slow chain-scan recovery.
+            emitWalletSetupDebugEvent("wallet_withdrawal_late_signature_adopted", {
+              correlationId,
+              requestId: withdrawalId,
+            })
+            persistActiveWithdrawalMarker(merchantId, {
+              kind: "dynamic",
+              id: withdrawalId,
+              rail: review.review.rail,
+              asset: review.review.asset,
+              destinationAddress: review.review.destinationAddress,
+              amountDecimal: review.review.amountDecimal,
+              txHash: evidence.txHash,
+            })
+            void submitDynamicWithdrawalEvidence(withdrawalId, evidence.txHash, token, correlationId)
+          },
+          onStage: (stage, details) => {
+            emitWalletSetupDebugEvent(stage, { correlationId, requestId: withdrawalId, ...(details || {}) })
+          },
+        })
+        if (raceResult.outcome === "rejected") throw raceResult.error
+        if (raceResult.outcome === "ambiguous") {
+          // Broadcast may have happened - never claim failure, never invite a
+          // blind retry. Server recovery reconciles from chain evidence.
+          throw makeDynamicPostPrepareError(
+            "Withdrawal outcome is being verified.",
+            "DYNAMIC_SIGNING_TIMEOUT"
+          )
+        }
+        const dynamicSubmission: { txHash?: string; providerReference?: string; signedPsbtBase64?: string } =
+          raceResult.outcome === "evidence"
+            ? { txHash: raceResult.evidence.txHash, providerReference: raceResult.evidence.providerReference }
+            : { signedPsbtBase64: raceResult.signedPsbtBase64 }
         emitWalletSetupDebugEvent("wallet_withdrawal_signature_returned", {
           correlationId,
           hasTxHash: Boolean(dynamicSubmission.txHash),
           hasSignedPsbt: Boolean(dynamicSubmission.signedPsbtBase64),
+          evidenceSource: raceResult.outcome === "evidence" ? raceResult.evidence.source : "signed_payload",
         })
         setWithdrawalProviderAuthorizationActive(false)
         setWithdrawalScreen("approving")

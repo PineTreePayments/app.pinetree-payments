@@ -421,9 +421,9 @@ export async function listProcessingWithdrawalsForReconciliation(
 export async function listPendingDynamicWithdrawalsForRecovery(
   limit: number,
   merchantId?: string,
-  minAgeMs = 2 * 60 * 1000
+  minAgeMs = 2 * 60 * 1000,
+  withdrawalId?: string
 ): Promise<WalletWithdrawalRequestRecord[]> {
-  const cutoff = new Date(Date.now() - minAgeMs).toISOString()
   let query = db
     .from(TABLE)
     .select("*")
@@ -433,10 +433,14 @@ export async function listPendingDynamicWithdrawalsForRecovery(
     .is("tx_hash", null)
     .is("provider_reference", null)
     .not("unsigned_transaction_payload", "is", null)
-    .lt("updated_at", cutoff)
     .order("created_at", { ascending: true })
     .limit(limit)
 
+  // The age cutoff exists only to avoid racing a live browser /submit during
+  // the background sweep. An explicit, per-withdrawal discovery request
+  // (minAgeMs 0) is deliberate and targeted, so it must not be delayed.
+  if (minAgeMs > 0) query = query.lt("updated_at", new Date(Date.now() - minAgeMs).toISOString())
+  if (withdrawalId) query = query.eq("id", withdrawalId)
   if (merchantId) query = query.eq("merchant_id", merchantId)
 
   const { data, error } = await query

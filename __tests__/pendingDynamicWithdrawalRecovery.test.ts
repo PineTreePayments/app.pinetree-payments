@@ -210,6 +210,46 @@ describe("recoverPendingDynamicWithdrawals - Solana", () => {
   })
 })
 
+describe("targeted client-triggered discovery", () => {
+  it("scopes to one withdrawal and bypasses the background grace window", async () => {
+    const ata = await destinationUsdcAta()
+    listMock.mockResolvedValue([solanaUsdcRequest()])
+    mockRpc({
+      getSignaturesForAddress: () => [{ signature: SIGNATURE, blockTime: BLOCK_TIME_S, err: null }],
+      getTransaction: () => ({
+        meta: { err: null },
+        transaction: {
+          message: {
+            instructions: [{
+              program: "spl-token",
+              parsed: { type: "transferChecked", info: { authority: SOURCE, mint: USDC_MINT, destination: ata, tokenAmount: { amount: "1030000" } } },
+            }],
+          },
+        },
+      }),
+    })
+
+    const result = await recoverPendingDynamicWithdrawals({
+      limit: 1,
+      merchantId: "merchant_1",
+      withdrawalId: "b591c14b-b97f-4ef5-9e38-8d8d31b2c311",
+      minAgeMs: 0,
+    })
+
+    expect(result.recovered).toBe(1)
+    // The query must be scoped by merchant AND withdrawal, with no age delay:
+    // the grace window only exists to avoid racing a live /submit during the
+    // background sweep, which an explicit per-row request cannot do.
+    expect(listMock).toHaveBeenCalledWith(1, "merchant_1", 0, "b591c14b-b97f-4ef5-9e38-8d8d31b2c311")
+  })
+
+  it("the background sweep keeps its default grace window", async () => {
+    listMock.mockResolvedValue([])
+    await recoverPendingDynamicWithdrawals({ limit: 20 })
+    expect(listMock).toHaveBeenCalledWith(20, undefined, undefined, undefined)
+  })
+})
+
 describe("recoverPendingDynamicWithdrawals - Base", () => {
   it("adopts an exact successful ETH transfer via alchemy_getAssetTransfers + receipt", async () => {
     listMock.mockResolvedValue([baseEthRequest()])

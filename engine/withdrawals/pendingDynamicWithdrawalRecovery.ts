@@ -264,13 +264,26 @@ function preparedSourceAddress(request: WalletWithdrawalRequestRecord): string |
 export async function recoverPendingDynamicWithdrawals(options: {
   limit?: number
   merchantId?: string
+  /**
+   * Targeted, client-triggered discovery for a single withdrawal the browser
+   * is signing right now. Combined with minAgeMs 0 this bypasses the
+   * background sweep's grace window, which exists only to avoid racing a live
+   * /submit - an explicit request for this exact row has no such race.
+   */
+  withdrawalId?: string
+  minAgeMs?: number
 }): Promise<PendingRecoveryResult> {
   const limit = options.limit ?? 20
   const result: PendingRecoveryResult = { candidates: 0, recovered: 0, unmatched: 0, errors: 0 }
 
   let candidates: WalletWithdrawalRequestRecord[]
   try {
-    candidates = await listPendingDynamicWithdrawalsForRecovery(limit, options.merchantId)
+    candidates = await listPendingDynamicWithdrawalsForRecovery(
+      limit,
+      options.merchantId,
+      options.minAgeMs,
+      options.withdrawalId
+    )
   } catch (error) {
     console.warn("[pinetree-withdrawals] PENDING_RECOVERY_LIST_FAILED", {
       error: error instanceof Error ? error.message : String(error),

@@ -2031,7 +2031,12 @@ describe("PineTree embedded wallet setup", () => {
     expect(page).toContain("kind: \"solana_transaction\"")
     expect(page).toContain("transactionBase64")
     expect(dynamicSignerLookup).toContain("resolveDynamicSolanaSignAndSendCapability")
-    expect(page).toContain("const dynamicSubmission = await sendDynamicPreparedWithdrawal")
+    // The signing call is no longer a bare await: its promise is raced against
+    // server-side chain discovery (raceDynamicSignatureEvidence) so a Dynamic
+    // modal that never unmounts cannot withhold the broadcast signature.
+    expect(page).toContain("const signingPromise = sendDynamicPreparedWithdrawal")
+    expect(page).toContain("raceDynamicSignatureEvidence")
+    expect(page).toContain("onLateSignature")
     expect(page).toContain("if (review.review.approvalMethod === \"dynamic_browser\")")
     expect(page).toContain("Unable to sign this withdrawal. Please try again.")
     expect(page).not.toContain("action: \"submit\"")
