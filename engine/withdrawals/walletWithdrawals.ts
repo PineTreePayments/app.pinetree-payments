@@ -164,8 +164,8 @@ const SUPPORTED_ASSETS: Record<WalletWithdrawalRail, WalletWithdrawalAsset[]> = 
   bitcoin: ["BTC"],
 }
 
-const BASE_USDC_TOKEN_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+export const BASE_USDC_TOKEN_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+export const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 const BASE_CHAIN_ID = "8453"
 const BASE_USDC_TRANSFER_ABI = [{
   type: "function",

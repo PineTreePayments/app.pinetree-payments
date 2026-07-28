@@ -407,6 +407,44 @@ export async function listProcessingWithdrawalsForReconciliation(
 }
 
 /**
+ * Dynamic-signed Base/Solana withdrawals whose prepared transaction was
+ * signed and broadcast in the browser but whose completion call never
+ * persisted the hash: status is still "pending", the unsigned payload is
+ * present, and there is no tx_hash/provider_reference. These rows are
+ * invisible to the processing reconciler even though funds may already have
+ * moved on-chain (production incident b591c14b-...: 1.03 Solana USDC
+ * delivered on-chain while PineTree stayed "Waiting" forever). The recovery
+ * engine scans the chain for the matching transaction and adopts it.
+ * minAgeMs keeps a grace window so a normal in-flight browser /submit is
+ * never raced.
+ */
+export async function listPendingDynamicWithdrawalsForRecovery(
+  limit: number,
+  merchantId?: string,
+  minAgeMs = 2 * 60 * 1000
+): Promise<WalletWithdrawalRequestRecord[]> {
+  const cutoff = new Date(Date.now() - minAgeMs).toISOString()
+  let query = db
+    .from(TABLE)
+    .select("*")
+    .eq("status", "pending")
+    .eq("approval_method", "dynamic_browser")
+    .in("rail", ["base", "solana"])
+    .is("tx_hash", null)
+    .is("provider_reference", null)
+    .not("unsigned_transaction_payload", "is", null)
+    .lt("updated_at", cutoff)
+    .order("created_at", { ascending: true })
+    .limit(limit)
+
+  if (merchantId) query = query.eq("merchant_id", merchantId)
+
+  const { data, error } = await query
+  if (error) throw new Error(`Failed to list pending dynamic withdrawals for recovery: ${error.message}`)
+  return (data || []).map((row) => normalize(row as Record<string, unknown>))
+}
+
+/**
  * Bitcoin/Lightning withdrawals executed via Speed's Instant Send never get
  * an on-chain tx_hash (Lightning is off-chain, and Speed's onchain sends are
  * tracked by provider_reference), so they need a dedicated reconciliation

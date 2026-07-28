@@ -15,7 +15,18 @@ export async function GET(
       return NextResponse.json({ error: "Withdrawal request not found." }, { status: 404 })
     }
     const hasProviderEvidence = Boolean(String(request.tx_hash || request.provider_reference || "").trim())
-    if (request.status === "processing" && hasProviderEvidence) {
+    // A "pending" dynamic_browser row with a prepared payload but no evidence
+    // may hold a transaction that was signed and broadcast in the browser
+    // whose completion call never landed - the reconcile pass below includes
+    // chain-evidence recovery (pendingDynamicWithdrawalRecovery) which can
+    // adopt the on-chain tx and advance the row, so reading the withdrawal's
+    // details heals it instead of projecting "Waiting" forever.
+    const isPossiblySignedButUncompleted =
+      request.status === "pending" &&
+      request.approval_method === "dynamic_browser" &&
+      Boolean(request.unsigned_transaction_payload) &&
+      !hasProviderEvidence
+    if ((request.status === "processing" && hasProviderEvidence) || isPossiblySignedButUncompleted) {
       await reconcileProcessingWithdrawals({ limit: 10, merchantId }).catch((error) => {
         console.warn("[pinetree-withdrawals] status_endpoint_reconciliation_failed", {
           merchantId,

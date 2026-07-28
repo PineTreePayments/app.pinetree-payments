@@ -2418,6 +2418,14 @@ type ActiveWithdrawalMarker = {
   asset: WithdrawalAsset
   destinationAddress: string
   amountDecimal: string
+  /**
+   * Set the moment Dynamic signing returns a broadcast hash/signature -
+   * BEFORE the /submit persistence call. If that call never lands (tab
+   * killed, mobile hand-off), refresh recovery uses this to complete the
+   * withdrawal instead of losing the only copy of the hash (production
+   * incident b591c14b: funds delivered on-chain, row stuck on "Waiting").
+   */
+  txHash?: string
 }
 
 function activeWithdrawalStorageKey(merchantId: string) {
@@ -9626,10 +9634,45 @@ function PineTreeWalletRuntime() {
           })
           if (!res.ok) return
           const json = (await res.json()) as { request?: WithdrawalReviewResponse["request"] }
-          const request = json.request
+          let request = json.request
+          if (request && request.status === "pending" && marker.txHash) {
+            // The transaction was signed and broadcast, but the /submit call
+            // never persisted the hash (this marker holds the only copy).
+            // Complete it now - the server validates the hash format and the
+            // prepared source before persisting, and replays idempotently if
+            // another path already attached evidence.
+            const completeRes = await fetch(
+              `/api/wallets/pinetree-wallet/withdrawals/${encodeURIComponent(marker.id)}/submit`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+                credentials: "include",
+                body: JSON.stringify({
+                  tx_hash: marker.txHash,
+                  provider_reference: marker.txHash,
+                  signed_payload: { recovered_from_marker: true },
+                }),
+              }
+            ).catch(() => null)
+            if (completeRes?.ok) {
+              const completed = (await completeRes.json().catch(() => null)) as { request?: WithdrawalReviewResponse["request"] } | null
+              if (completed?.request) request = completed.request
+            }
+          }
           if (!request || !["processing", "confirmed", "failed"].includes(request.status)) {
+            if (request && request.status === "pending" && marker.txHash) {
+              // Completion didn't land this time - keep the marker (it holds
+              // the only client-side copy of the hash) so the next page load
+              // or the server's chain-evidence recovery can still finish it.
+              return
+            }
             // Never reached provider submission (still review_required/pending/draft/
-            // blocked/canceled) - nothing meaningful to resume; let it expire normally.
+            // blocked/canceled) and no broadcast hash is known - nothing
+            // meaningful to resume; let it expire normally. The server-side
+            // pending recovery sweep still scans these rows against the chain.
             clearActiveWithdrawalMarker(merchantId)
             return
           }
@@ -10546,6 +10589,21 @@ function PineTreeWalletRuntime() {
         setWithdrawalProviderAuthorizationActive(false)
         setWithdrawalScreen("approving")
         signedBeforeSubmitCall = Boolean(dynamicSubmission.txHash || dynamicSubmission.signedPsbtBase64)
+        // The broadcast hash exists only in this browser until /submit
+        // persists it - stash it in the recovery marker immediately so a
+        // killed tab or lost network between here and /submit can never
+        // strand the canonical row on "pending" with the hash lost.
+        if (dynamicSubmission.txHash) {
+          persistActiveWithdrawalMarker(merchantId, {
+            kind: "dynamic",
+            id: withdrawalId,
+            rail: review.review.rail,
+            asset: review.review.asset,
+            destinationAddress: review.review.destinationAddress,
+            amountDecimal: review.review.amountDecimal,
+            txHash: dynamicSubmission.txHash,
+          })
+        }
         emitWalletSetupDebugEvent("DYNAMIC_SUBMIT_REQUESTED", {
           correlationId,
           requestId: withdrawalId,

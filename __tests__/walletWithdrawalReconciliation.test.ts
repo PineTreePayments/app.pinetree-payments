@@ -18,6 +18,11 @@ vi.mock("@/database/walletWithdrawalRequests", () => ({
   listProcessingWithdrawalsForReconciliation: mocks.listProcessingWithdrawalsForReconciliation,
   listProcessingBitcoinWithdrawalsForReconciliation: mocks.listProcessingBitcoinWithdrawalsForReconciliation,
   updateWalletWithdrawalRequest: mocks.updateWalletWithdrawalRequest,
+  // The pending-recovery pass (signed-but-never-completed Dynamic
+  // withdrawals) has its own dedicated suite; here it must simply find no
+  // candidates so the processing-reconciliation behavior under test is
+  // unaffected.
+  listPendingDynamicWithdrawalsForRecovery: vi.fn().mockResolvedValue([]),
 }))
 
 vi.mock("@/database/merchantAuditEvents", () => ({
@@ -151,6 +156,7 @@ describe("reconcileProcessingWithdrawals", () => {
       still_processing: 0,
       skipped: 0,
       errors: 0,
+      recoveredPending: 0,
     })
     expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
     expect(mocks.insertWithdrawalAuditEvent).not.toHaveBeenCalled()

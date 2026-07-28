@@ -13,6 +13,7 @@ import { getMerchantLightningProfile } from "@/database/merchantLightningProfile
 import { getConnectedAccountSendStatus } from "@/providers/lightning/speedWalletManagement"
 import { getWalletWithdrawal } from "@/engine/wallet/walletOperations"
 import { syncPineTreeWalletBalances } from "@/engine/pineTreeWalletSync"
+import { recoverPendingDynamicWithdrawals } from "@/engine/withdrawals/pendingDynamicWithdrawalRecovery"
 
 export type ReconciliationResult = {
   candidates: number
@@ -24,6 +25,8 @@ export type ReconciliationResult = {
   still_processing: number
   skipped: number
   errors: number
+  /** Pending rows whose broadcast tx was found on-chain and adopted this pass. */
+  recoveredPending: number
 }
 
 type OnChainStatus = "confirmed" | "failed" | "pending"
@@ -436,6 +439,17 @@ export async function reconcileProcessingWithdrawals(options: {
 }): Promise<ReconciliationResult> {
   const limit = options.limit ?? 50
   const merchantId = options.merchantId
+  // Chain-evidence recovery for signed-but-never-completed Dynamic
+  // withdrawals runs FIRST so an adopted row (pending -> processing with
+  // tx hash) is picked up by the processing scan below and can reach
+  // CONFIRMED in this same pass. Failures here never block the normal
+  // processing reconciliation.
+  const pendingRecovery = await recoverPendingDynamicWithdrawals({ limit, merchantId }).catch((error) => {
+    console.warn("[reconcile-withdrawals] pending recovery pass failed", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return { candidates: 0, recovered: 0, unmatched: 0, errors: 1 }
+  })
   const [onChainWithdrawals, bitcoinWithdrawals, walletOperations] = await Promise.all([
     listProcessingWithdrawalsForReconciliation(limit, merchantId),
     listProcessingBitcoinWithdrawalsForReconciliation(limit, merchantId),
@@ -452,7 +466,7 @@ export async function reconcileProcessingWithdrawals(options: {
   })
 
   const result: ReconciliationResult = {
-    candidates: withdrawals.length + walletOperations.candidates,
+    candidates: withdrawals.length + walletOperations.candidates + pendingRecovery.candidates,
     checked: withdrawals.length + walletOperations.checked,
     missingProviderReference: walletOperations.missingProviderReference,
     confirmed: walletOperations.confirmed,
@@ -460,7 +474,8 @@ export async function reconcileProcessingWithdrawals(options: {
     stillProcessing: walletOperations.still_processing,
     still_processing: walletOperations.still_processing,
     skipped: walletOperations.skipped,
-    errors: walletOperations.errors,
+    errors: walletOperations.errors + pendingRecovery.errors,
+    recoveredPending: pendingRecovery.recovered,
   }
 
   for (const withdrawal of withdrawals) {
