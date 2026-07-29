@@ -60,48 +60,43 @@ export function TransactionResult({
   const normalized = normalizeTransactionResultState(state)
 
   return (
-    <section
-      className={`w-full rounded-[1.35rem] border border-[#0052FF]/10 bg-[radial-gradient(circle_at_top_right,rgba(0,82,255,0.10),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f8fbff_52%,#eef5ff_100%)] px-5 ${compact ? "py-5" : "py-7"} text-center shadow-[0_18px_60px_rgba(0,82,255,0.12)] sm:px-7 ${compact ? "sm:py-6" : "sm:py-8"} ${className}`}
-      aria-live="polite"
+    <PaymentStatusVisual
+      status={normalized}
+      size={compact ? "compact" : "default"}
+      variant="card"
+      className={className}
     >
-      <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
-        PineTree Checkout
-      </p>
-
-      <PaymentStatusVisual
-        status={normalized}
-        size={compact ? "compact" : "default"}
-        className="mt-4"
-      />
-
-      {children ? <div className="mt-5 w-full">{children}</div> : null}
-
-      {actions.length > 0 ? (
-        <div className="mt-6 w-full space-y-2">
-          {actions.map((action) => {
-            if (action.href) {
-              return (
-                <a key={action.label} href={action.href} className="block">
-                  <Button fullWidth variant={action.variant || "secondary"} disabled={action.disabled}>
+      {children || actions.length > 0 ? (
+        <div className="w-full space-y-5">
+          {children ? <div className="w-full">{children}</div> : null}
+          {actions.length > 0 ? (
+            <div className="w-full space-y-2">
+              {actions.map((action) => {
+                if (action.href) {
+                  return (
+                    <a key={action.label} href={action.href} className="block">
+                      <Button fullWidth variant={action.variant || "secondary"} disabled={action.disabled}>
+                        {action.label}
+                      </Button>
+                    </a>
+                  )
+                }
+                return (
+                  <Button
+                    key={action.label}
+                    fullWidth
+                    variant={action.variant}
+                    disabled={action.disabled}
+                    onClick={action.onClick}
+                  >
                     {action.label}
                   </Button>
-                </a>
-              )
-            }
-            return (
-              <Button
-                key={action.label}
-                fullWidth
-                variant={action.variant}
-                disabled={action.disabled}
-                onClick={action.onClick}
-              >
-                {action.label}
-              </Button>
-            )
-          })}
+                )
+              })}
+            </div>
+          ) : null}
         </div>
       ) : null}
-    </section>
+    </PaymentStatusVisual>
   )
 }

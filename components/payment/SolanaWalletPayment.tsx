@@ -836,11 +836,8 @@ export default function SolanaWalletPayment({
 
   if (terminalStatus) {
     return (
-      <div className="space-y-3" onClick={(event) => event.stopPropagation()}>
-        <div className="text-center text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
-          Solana Network Payment
-        </div>
-        <PaymentStatusVisual status={terminalStatus} variant="card" />
+      <div onClick={(event) => event.stopPropagation()}>
+        <PaymentStatusVisual status={terminalStatus} />
       </div>
     )
   }

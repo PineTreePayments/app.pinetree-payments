@@ -13,7 +13,7 @@ The visible positive terminal label is **Confirmed**. Do not use **Success** as 
 | Confirmed | Payment confirmed | Yes | Green |
 | Failed | Provider/network/payment attempt failed | Yes | Red |
 | Incomplete | Request ended without payment submission | Yes | Amber |
-| Expired | Payment window timed out | Yes | Amber |
+| Expired | Payment window timed out | Yes | Muted red |
 | Canceled | Customer or merchant explicitly canceled the payment | Yes | Gray |
 | Refunded | Settled funds were returned | Yes | Orange |
 | Unknown | Status is not recognized | No | Neutral gray |

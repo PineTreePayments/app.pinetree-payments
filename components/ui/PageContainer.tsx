@@ -5,7 +5,7 @@ type Props = {
 
 export default function PageContainer({ children, className = "" }: Props) {
   return (
-    <main className={`min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#e0ecff] via-[#f5f8ff] to-white ${className}`}>
+    <main className={`min-h-screen flex items-center justify-center bg-gray-50 p-6 ${className}`}>
       {children}
     </main>
   )

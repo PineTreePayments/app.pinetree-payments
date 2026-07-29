@@ -103,7 +103,7 @@ describe("Merchant Status Architecture contract", () => {
     expect(getPaymentDisplayStatus("PROCESSING")).toMatchObject({ label: "Processing", tone: "processing", icon: "spinner", spin: true })
     expect(getPaymentDisplayStatus("CONFIRMED")).toMatchObject({ label: "Confirmed", tone: "confirmed", icon: "check-circle" })
     expect(getPaymentDisplayStatus("FAILED")).toMatchObject({ label: "Failed", tone: "failed", icon: "x-circle" })
-    expect(getPaymentDisplayStatus("EXPIRED")).toMatchObject({ label: "Expired", tone: "expired", icon: "alert-triangle" })
+    expect(getPaymentDisplayStatus("EXPIRED")).toMatchObject({ label: "Expired", tone: "expired", icon: "clock" })
     expect(getPaymentDisplayStatus("CANCELED")).toMatchObject({ label: "Canceled", tone: "canceled", icon: "x-circle" })
     expect(getPaymentDisplayStatus("INCOMPLETE")).toMatchObject({ label: "Incomplete", tone: "incomplete", icon: "alert-triangle" })
     expect(getPaymentDisplayStatus("REFUNDED")).toMatchObject({ label: "Refunded", tone: "refunded", icon: "refund" })

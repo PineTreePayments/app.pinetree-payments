@@ -79,17 +79,15 @@ describe("responsive UX corrections", () => {
     expect(keypad).toContain("min-h-12")
   })
 
-  it("uses a reduced-motion-safe blue waiting pulse for pending payments", () => {
+  it("uses a flat blue waiting treatment without glow effects", () => {
     const visual = read("components/payment/PaymentStatusVisual.tsx")
     const css = read("app/globals.css")
     const status = read("lib/utils/paymentStatus.ts")
 
-    expect(status).toContain("text-[#2f5bea]")
-    expect(status).toContain('iconBgClassName: "bg-transparent"')
-    expect(visual).toContain("config.tone === \"waiting\"")
-    expect(visual).toContain("pinetree-waiting-indicator")
-    expect(visual).toContain('${isWaiting ? "pinetree-waiting-indicator" : ""}')
-    expect(css).toContain("@keyframes pinetreeWaitingPulse")
-    expect(css).toContain("@media (prefers-reduced-motion: reduce)")
+    expect(status).toContain('iconClassName: "text-blue-600"')
+    expect(status).toContain('iconBgClassName: "bg-blue-50"')
+    expect(visual).not.toContain("pinetree-waiting")
+    expect(css).not.toContain("pinetreeWaiting")
+    expect(css).not.toContain("pinetree-waiting-glow")
   })
 })

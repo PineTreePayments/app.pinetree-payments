@@ -16,7 +16,7 @@ describe("shared payment status display", () => {
     ["INCOMPLETE", "Incomplete", "incomplete", "alert-triangle"],
     ["ACTION_REQUIRED", "Action required", "incomplete", "alert-triangle"],
     ["REQUIRES_ACTION", "Action required", "incomplete", "alert-triangle"],
-    ["EXPIRED",    "Expired",    "expired",    "alert-triangle"],
+    ["EXPIRED",    "Expired",    "expired",    "clock"],
     ["CANCELED",   "Canceled",   "canceled",   "x-circle"],
     ["REFUNDED",   "Refunded",   "refunded",   "refund"],
     ["DISPUTED",   "Disputed",   "disputed",   "alert-triangle"],
@@ -69,7 +69,8 @@ describe("shared payment status display", () => {
   it("Waiting uses PineTree blue classes", () => {
     const display = getPaymentDisplayStatus("PENDING")
     expect(display.classes).toContain("blue")
-    expect(display.iconClassName).toContain("#2f5bea")
+    expect(display.iconClassName).toContain("blue")
+    expect(display.iconBgClassName).toContain("blue")
     expect(display.tone).toBe("waiting")
   })
 
@@ -101,9 +102,10 @@ describe("shared payment status display", () => {
     expect(display.tone).toBe("incomplete")
   })
 
-  it("Expired uses the canonical amber treatment", () => {
+  it("Expired uses the canonical muted-red treatment", () => {
     const display = getPaymentDisplayStatus("EXPIRED")
-    expect(display.classes).toContain("amber")
+    expect(display.classes).toContain("rose")
+    expect(display.classes).not.toContain("amber")
     expect(display.tone).toBe("expired")
   })
 
@@ -118,7 +120,7 @@ describe("shared payment status display", () => {
     const failed     = getPaymentDisplayStatus("FAILED")
 
     expect(incomplete.classes).toContain("amber")
-    expect(expired.classes).toContain("amber")
+    expect(expired.classes).toContain("rose")
     expect(failed.classes).toContain("red")
     expect(expired.classes).not.toBe(failed.classes)
 
@@ -140,7 +142,7 @@ describe("shared payment status display", () => {
     ["FAILED", "Payment failed", "The payment could not be completed."],
     ["EXPIRED", "Payment expired", "This payment request has expired."],
     ["CANCELED", "Payment canceled", "This payment was canceled."],
-    ["UNKNOWN", "Checking payment status", "We are verifying whether the payment was submitted."],
+    ["UNKNOWN", "Checking payment status", "We are verifying the current payment status."],
   ])("%s has one canonical title and message", (status, title, message) => {
     expect(getPaymentDisplayStatus(status)).toMatchObject({ title, message })
   })

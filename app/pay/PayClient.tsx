@@ -14,6 +14,7 @@ import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
 import LightningPayment from "@/components/payment/LightningPayment"
 import { StripeCardPayment } from "@/components/payment/StripeCardPayment"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import { TransactionResult } from "@/components/payment/TransactionResult"
 import {
   getHostedCheckoutTerminalEvent,
   postHostedCheckoutEvent,
@@ -1500,18 +1501,10 @@ export default function PayClient() {
     const returnLabel = isConfirmed ? "Return to merchant" : "Return to store"
     return (
       <PageContainer>
-        <div className="w-full max-w-md space-y-3 text-center">
-          <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
-          <PaymentStatusVisual status={terminalPaymentStatus} variant="card" />
-          {returnUrl && (
-            <a
-              href={returnUrl}
-              className="inline-block rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:border-[#0052FF]/30 hover:text-[#0052FF]"
-            >
-              {returnLabel}
-            </a>
-          )}
-        </div>
+        <TransactionResult
+          state={terminalPaymentStatus}
+          actions={returnUrl ? [{ label: returnLabel, href: returnUrl, variant: "secondary" }] : []}
+        />
       </PageContainer>
     )
   }
@@ -1523,10 +1516,7 @@ export default function PayClient() {
   ) {
     return (
       <PageContainer>
-        <div className="w-full max-w-md space-y-3 text-center">
-          <p className="text-xs font-semibold uppercase tracking-widest text-[#0052FF]">PineTree Checkout</p>
-          <PaymentStatusVisual status="PROCESSING" variant="card" />
-        </div>
+        <TransactionResult state="PROCESSING" />
       </PageContainer>
     )
   }

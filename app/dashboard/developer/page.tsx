@@ -701,7 +701,7 @@ function DocSectionPaymentStates() {
           ["Processing", "Payment detected, awaiting final confirmation", "No", "Darker blue"],
           ["Confirmed", "Payment confirmed", "Yes", "Green"],
           ["Failed", "Provider/network/payment attempt failed", "Yes", "Red"],
-          ["Expired", "Payment window timed out", "Yes", "Amber"],
+          ["Expired", "Payment window timed out", "Yes", "Muted red"],
           ["Canceled", "Customer abandoned/backed out/no funds sent", "Yes", "Gray"],
           ["Incomplete", "Attempt ended without a more specific terminal outcome", "Yes", "Amber"],
           ["Refunded", "Settled funds were returned", "Yes", "Orange"],

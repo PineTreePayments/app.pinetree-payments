@@ -43,7 +43,8 @@ describe("BasePosCheckoutMirror — canonical status overrides stale session ste
     const start = src.indexOf('if (terminalStatus === "CONFIRMED")')
     const end = src.indexOf("if (terminalStatus) {", start)
     const block = src.slice(start, end)
-    expect(block).toContain('<PaymentStatusVisual status="CONFIRMED" variant="card"')
+    expect(block).toContain('<PaymentStatusVisual status="CONFIRMED"')
+    expect(block).not.toContain('variant="card"')
   })
 
   it("renders a non-CONFIRMED terminal status (FAILED/INCOMPLETE/EXPIRED/CANCELED) driven by canonical status alone", () => {

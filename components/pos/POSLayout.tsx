@@ -8,6 +8,7 @@ import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import { TransactionResult } from "@/components/payment/TransactionResult"
 import PosCardPaymentExperience, {
   type PosCardCapabilities,
   type PosCardView,
@@ -2005,10 +2006,14 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     ? fmtUsd(breakdown.totalAmount)
     : fmtUsd(subtotalNum)
 
+  const showsStandalonePaymentStateCard =
+    (paymentMode === "card" && ["waiting", "processing", "approved", "declined"].includes(cardView)) ||
+    (paymentMode !== "card" && ["confirmed", "incomplete", "failed", "expired", "cancelled"].includes(status))
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col items-center justify-center overflow-hidden px-0">
 
-      <div className={`${paymentMode === "card" ? "bg-[#F4F8FF]" : "bg-white"} max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] overflow-y-auto overscroll-contain rounded-2xl p-4 shadow-lg sm:p-6`}>
+      <div className={`${showsStandalonePaymentStateCard ? "bg-transparent p-0 shadow-none" : `${paymentMode === "card" ? "bg-[#F4F8FF]" : "bg-white"} rounded-2xl p-4 shadow-lg sm:p-6`} max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] overflow-y-auto overscroll-contain`}>
 
         {/* -- READY -- */}
         {status === "ready" && (
@@ -2266,113 +2271,83 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         )}
 
         {paymentMode !== "card" && (status === "waiting" || status === "processing") && (
-          <div className="space-y-3">
-
-            {qrCodeUrl ? (
-              <div className="flex flex-col items-center rounded-2xl border border-blue-100/70 bg-gradient-to-br from-white to-blue-50/40 px-4 py-4 shadow-[0_12px_32px_rgba(0,82,255,0.08)]">
-                <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-                  Scan to Pay
-                </p>
-                <Image
-                  src={qrCodeUrl}
-                  width={172}
-                  height={172}
-                  alt="QR code"
-                  className="rounded-xl shadow-sm"
-                />
-                <PaymentStatusVisual
-                  status={status === "waiting" ? "PENDING" : "PROCESSING"}
-                  size="compact"
-                  iconSize={18}
-                  showMessage={false}
-                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]"
-                  className="mt-3 gap-1.5"
-                />
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-blue-100/70 bg-blue-50/50 px-4 py-4 text-center">
-                <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
-                <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-                  Preparing payment…
-                </p>
-              </div>
-            )}
-
-            {breakdown && (
-              <div className="space-y-1.5 rounded-2xl border border-gray-100 bg-gray-50/80 px-3.5 py-3 text-sm shadow-inner shadow-white">
-                <div className="flex justify-between text-gray-700">
-                  <span>Subtotal</span>
-                  <span>{fmtUsd(breakdown.subtotalAmount)}</span>
+          <PaymentStatusVisual status={status === "waiting" ? "PENDING" : "PROCESSING"}>
+            <div className="space-y-4">
+              {qrCodeUrl ? (
+                <div className="flex flex-col items-center border-t border-gray-100 pt-4">
+                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+                    Scan to Pay
+                  </p>
+                  <Image
+                    src={qrCodeUrl}
+                    width={172}
+                    height={172}
+                    alt="QR code"
+                    className="rounded-xl"
+                  />
                 </div>
-                {breakdown.taxEnabled && (
+              ) : (
+                <div className="border-t border-gray-100 pt-4 text-center">
+                  <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
+                  <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+                    Preparing payment…
+                  </p>
+                </div>
+              )}
+
+              {breakdown && (
+                <div className="space-y-1.5 border-y border-gray-100 bg-gray-50 px-3.5 py-3 text-sm">
                   <div className="flex justify-between text-gray-700">
-                    <span>Tax ({breakdown.taxRate}%)</span>
-                    <span>{fmtUsd(breakdown.taxAmount)}</span>
+                    <span>Subtotal</span>
+                    <span>{fmtUsd(breakdown.subtotalAmount)}</span>
                   </div>
-                )}
-                <div className="flex justify-between text-gray-700">
-                  <span>Service fee</span>
-                  <span>{fmtUsd(breakdown.serviceFee)}</span>
+                  {breakdown.taxEnabled && (
+                    <div className="flex justify-between text-gray-700">
+                      <span>Tax ({breakdown.taxRate}%)</span>
+                      <span>{fmtUsd(breakdown.taxAmount)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-gray-700">
+                    <span>Service fee</span>
+                    <span>{fmtUsd(breakdown.serviceFee)}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-gray-200 pt-1.5 font-semibold text-gray-900">
+                    <span>Total</span>
+                    <span>{fmtUsd(breakdown.totalAmount)}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-1.5">
-                  <span>Total</span>
-                  <span>{fmtUsd(breakdown.totalAmount)}</span>
-                </div>
-              </div>
-            )}
+              )}
 
-            <Button variant="danger" fullWidth disabled={canceling} onClick={() => void cancelSale()}>
-              {canceling ? "Canceling…" : "Cancel Payment"}
-            </Button>
-
-          </div>
+              <Button variant="danger" fullWidth disabled={canceling} onClick={() => void cancelSale()}>
+                {canceling ? "Canceling…" : "Cancel Payment"}
+              </Button>
+            </div>
+          </PaymentStatusVisual>
         )}
 
         {/* -- CONFIRMED -- */}
         {paymentMode !== "card" && status === "confirmed" && (
-          <div className="py-3">
-            <PaymentStatusVisual status="CONFIRMED" variant="card" />
-          </div>
+          <TransactionResult state="CONFIRMED" compact />
         )}
 
         {/* -- INCOMPLETE -- */}
         {paymentMode !== "card" && status === "incomplete" && (
-          <div className="flex flex-col items-center gap-3 py-3">
-            <PaymentStatusVisual status="INCOMPLETE" variant="card" />
-            <Button variant="secondary" fullWidth onClick={resetSale}>
-              Back
-            </Button>
-          </div>
+          <TransactionResult state="INCOMPLETE" compact actions={[{ label: "Back", onClick: resetSale, variant: "secondary" }]} />
         )}
 
         {/* -- FAILED -- */}
         {paymentMode !== "card" && status === "failed" && (
-          <div className="flex flex-col items-center gap-3 py-3">
-            <PaymentStatusVisual status="FAILED" variant="card" />
-            <Button fullWidth onClick={resetSale}>
-              New Sale
-            </Button>
-          </div>
+          <TransactionResult state="FAILED" compact actions={[{ label: "New Sale", onClick: resetSale }]} />
         )}
 
         {/* -- EXPIRED -- */}
         {paymentMode !== "card" && status === "expired" && (
-          <div className="flex flex-col items-center gap-3 py-3">
-            <PaymentStatusVisual status="EXPIRED" variant="card" />
-            <Button variant="secondary" fullWidth onClick={resetSale}>
-              Back
-            </Button>
-          </div>
+          <TransactionResult state="EXPIRED" compact actions={[{ label: "Back", onClick: resetSale, variant: "secondary" }]} />
         )}
 
         {/* -- CANCELLED -- */}
         {paymentMode !== "card" && status === "cancelled" && (
-          <div className="flex flex-col items-center gap-3 py-3">
-            <PaymentStatusVisual status="CANCELED" variant="card" />
-            <Button variant="secondary" fullWidth onClick={resetSale}>
-              Back
-            </Button>
-          </div>
+          <TransactionResult state="CANCELED" compact actions={[{ label: "Back", onClick: resetSale, variant: "secondary" }]} />
         )}
 
 

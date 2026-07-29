@@ -530,14 +530,14 @@ export default function BasePosCheckoutMirror({
   if (terminalStatus === "CONFIRMED") {
     return (
       <div className="py-3">
-        <PaymentStatusVisual status="CONFIRMED" variant="card" />
+        <PaymentStatusVisual status="CONFIRMED" />
       </div>
     )
   }
   if (terminalStatus) {
     return (
       <div className="flex flex-col items-center gap-3 py-3">
-        <PaymentStatusVisual status={terminalStatus} variant="card" />
+        <PaymentStatusVisual status={terminalStatus} />
         <Button variant="secondary" fullWidth onClick={onCancel}>
           Back
         </Button>
@@ -661,7 +661,6 @@ export default function BasePosCheckoutMirror({
       <div className="space-y-3">
         <PaymentStatusVisual
           status={paymentStatus || "PENDING"}
-          variant="card"
           messageOverride={session.errorMessage || undefined}
         />
         <Button variant="secondary" fullWidth onClick={onAbandon || onCancel}>

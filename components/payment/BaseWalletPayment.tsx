@@ -3467,12 +3467,7 @@ export default function BaseWalletPayment({
   // ── Render helpers ────────────────────────────────────────────────────────
   if (terminalStatus) {
     return (
-      <div className="space-y-3">
-        <div className="text-center text-xs font-semibold uppercase tracking-widest text-[#0052FF]">
-          Base Network Payment
-        </div>
-        <PaymentStatusVisual status={terminalStatus} variant="card" />
-      </div>
+      <PaymentStatusVisual status={terminalStatus} />
     )
   }
   const amountDisplay = (

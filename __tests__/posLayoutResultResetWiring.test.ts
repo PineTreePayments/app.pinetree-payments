@@ -66,7 +66,7 @@ describe("POSLayout — post-result auto-reset wiring", () => {
   it("every manual dismissal button on a terminal result screen calls the same central resetSale (directly, or onDone which is resetSale)", () => {
     // Non-card terminal screens (INCOMPLETE/FAILED/EXPIRED/CANCELLED) call resetSale directly.
     const nonCardTerminalSection = src.slice(src.indexOf('{/* -- INCOMPLETE -- */}'), src.indexOf('{/* -- CANCELLED -- */}') + 500)
-    const resetSaleCallCount = [...nonCardTerminalSection.matchAll(/onClick=\{resetSale\}/g)].length
+    const resetSaleCallCount = [...nonCardTerminalSection.matchAll(/onClick(?::|=\{)\s*resetSale/g)].length
     expect(resetSaleCallCount).toBeGreaterThanOrEqual(3)
 
     // Card rail's "New Sale" action is wired directly to resetSale.

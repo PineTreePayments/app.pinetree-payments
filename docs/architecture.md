@@ -90,7 +90,7 @@ dispute processing exists today.
 | Confirmed | Payment completed successfully. | Green | Check circle |
 | Failed | Provider or network evidence proves failure. | Red | X circle |
 | Incomplete | The request ended without submitted or authoritative failure evidence. | Amber | Warning triangle |
-| Expired | An unpaid payment request timed out. | Amber | Clock/warning |
+| Expired | An unpaid payment request timed out. | Muted red | Clock |
 | Canceled | The payment was explicitly canceled before completion. | Gray | X circle |
 | Refunded | Settled funds were returned after confirmation. | Orange | Refund arrow |
 | Disputed | Reserved presentation for future dispute architecture. | Amber | Warning triangle |

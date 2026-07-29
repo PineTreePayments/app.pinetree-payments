@@ -494,12 +494,7 @@ export default function LightningPayment({
 
   if (terminalStatus) {
     return (
-      <div className="space-y-3">
-        <div className="text-center text-xs font-semibold uppercase tracking-widest text-gray-500">
-          Bitcoin Lightning Payment
-        </div>
-        <PaymentStatusVisual status={terminalStatus} variant="card" />
-      </div>
+      <PaymentStatusVisual status={terminalStatus} />
     )
   }
 
