@@ -66,7 +66,7 @@ export function PaymentStatusVisual({
     ? "max-w-sm text-xs leading-5 text-gray-600"
     : "max-w-sm text-sm leading-6 text-gray-600"
   const variantClass = isCard
-    ? "w-full max-w-md rounded-2xl border border-gray-200 bg-white px-5 py-7 shadow-sm sm:px-7 sm:py-8"
+    ? "w-full max-w-md rounded-2xl border border-[#DDEBFF] bg-[#F7FAFF] px-5 py-7 shadow-sm sm:px-7 sm:py-8"
     : ""
 
   return (

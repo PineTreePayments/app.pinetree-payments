@@ -29,13 +29,13 @@ describe("shared payment-state visual contract", () => {
     expect(visual).not.toMatch(/\bpx-\d+[^\n]*data-payment-state-icon-circle/)
   })
 
-  it("uses one flat, solid, neutral status card with no gradient or glow", () => {
+  it("uses one flat, solid, subtly PineTree-tinted status card with no gradient or glow", () => {
     const page = read("components/ui/PageContainer.tsx")
     const css = read("app/globals.css")
     const sharedSurfaces = `${visual}\n${result}\n${page}`
 
     expect(visual).toContain("data-payment-state-card")
-    expect(visual).toContain("border border-gray-200 bg-white")
+    expect(visual).toContain("border border-[#DDEBFF] bg-[#F7FAFF]")
     expect(visual).toContain("rounded-2xl")
     expect(visual).toContain("shadow-sm")
     expect(sharedSurfaces).not.toMatch(/gradient|backdrop-blur|radial-gradient|linear-gradient/)

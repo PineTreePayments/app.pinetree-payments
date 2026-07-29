@@ -1,13 +1,12 @@
 ﻿"use client"
 
 import { useState, useEffect, useRef } from "react"
-import Image from "next/image"
 import { supabase } from "@/lib/supabaseClient"
 import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
 import Button from "@/components/ui/Button"
-import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import ActiveQrCheckout from "@/components/pos/ActiveQrCheckout"
 import { TransactionResult } from "@/components/payment/TransactionResult"
 import PosCardPaymentExperience, {
   type PosCardCapabilities,
@@ -2271,58 +2270,12 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         )}
 
         {paymentMode !== "card" && (status === "waiting" || status === "processing") && (
-          <PaymentStatusVisual status={status === "waiting" ? "PENDING" : "PROCESSING"}>
-            <div className="space-y-4">
-              {qrCodeUrl ? (
-                <div className="flex flex-col items-center border-t border-gray-100 pt-4">
-                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-                    Scan to Pay
-                  </p>
-                  <Image
-                    src={qrCodeUrl}
-                    width={172}
-                    height={172}
-                    alt="QR code"
-                    className="rounded-xl"
-                  />
-                </div>
-              ) : (
-                <div className="border-t border-gray-100 pt-4 text-center">
-                  <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
-                  <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
-                    Preparing payment…
-                  </p>
-                </div>
-              )}
-
-              {breakdown && (
-                <div className="space-y-1.5 border-y border-gray-100 bg-gray-50 px-3.5 py-3 text-sm">
-                  <div className="flex justify-between text-gray-700">
-                    <span>Subtotal</span>
-                    <span>{fmtUsd(breakdown.subtotalAmount)}</span>
-                  </div>
-                  {breakdown.taxEnabled && (
-                    <div className="flex justify-between text-gray-700">
-                      <span>Tax ({breakdown.taxRate}%)</span>
-                      <span>{fmtUsd(breakdown.taxAmount)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-gray-700">
-                    <span>Service fee</span>
-                    <span>{fmtUsd(breakdown.serviceFee)}</span>
-                  </div>
-                  <div className="flex justify-between border-t border-gray-200 pt-1.5 font-semibold text-gray-900">
-                    <span>Total</span>
-                    <span>{fmtUsd(breakdown.totalAmount)}</span>
-                  </div>
-                </div>
-              )}
-
-              <Button variant="danger" fullWidth disabled={canceling} onClick={() => void cancelSale()}>
-                {canceling ? "Canceling…" : "Cancel Payment"}
-              </Button>
-            </div>
-          </PaymentStatusVisual>
+          <ActiveQrCheckout
+            qrCodeUrl={qrCodeUrl}
+            breakdown={breakdown}
+            canceling={canceling}
+            onCancel={() => void cancelSale()}
+          />
         )}
 
         {/* -- CONFIRMED -- */}

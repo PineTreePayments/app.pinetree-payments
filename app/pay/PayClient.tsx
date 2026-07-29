@@ -13,7 +13,6 @@ import BasePosCheckoutMirror from "@/components/payment/BasePosCheckoutMirror"
 import SolanaWalletPayment from "@/components/payment/SolanaWalletPayment"
 import LightningPayment from "@/components/payment/LightningPayment"
 import { StripeCardPayment } from "@/components/payment/StripeCardPayment"
-import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import { TransactionResult } from "@/components/payment/TransactionResult"
 import {
   getHostedCheckoutTerminalEvent,
