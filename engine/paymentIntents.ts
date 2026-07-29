@@ -21,7 +21,11 @@ import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import { merchantProviderCanProcessPayments } from "@/providers/cardProviderReadiness"
-import { buildPineTreeRailReadiness, getPineTreeRailReadinessDiagnostics } from "@/lib/pinetreeRailReadiness"
+import {
+  buildPineTreeRailReadiness,
+  getPineTreeRailReadinessDiagnostics,
+  isSpeedAccountReadyForPayments,
+} from "@/lib/pinetreeRailReadiness"
 import { getPaymentRailDefinition } from "@/types/payment"
 
 // Deliberately NOT derived from the full canonical rail set
@@ -218,14 +222,11 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
     setup_status?: string
   }
   const speedConfig = getPineTreeSpeedConfigStatus()
-  const speedAccountReady = Boolean(
-    lightningProfile?.status === "ready" ||
-    (
-      String(speedCredentials.speed_account_id || speedCredentials.account_id || "").trim() &&
-      (String(speedCredentials.setup_status || "").trim() === "ready" ||
-        String(speedCredentials.setup_status || "").trim() === "ready_for_payments")
-    )
-  )
+  const speedAccountReady = isSpeedAccountReadyForPayments({
+    profileStatus: lightningProfile?.status,
+    credentialAccountId: speedCredentials.speed_account_id || speedCredentials.account_id,
+    credentialSetupStatus: speedCredentials.setup_status,
+  })
   const railReadiness = buildPineTreeRailReadiness({
     providers,
     walletProfile: pineTreeWalletProfile,

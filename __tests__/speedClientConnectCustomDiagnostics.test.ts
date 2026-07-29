@@ -368,7 +368,15 @@ describe("speedClient /connect/custom", () => {
       expect(speedError.fieldErrors).toMatchObject([
         { field: "last_name", message: "Last name is required" },
       ])
-      expect(speedError.message).toBe("Speed API returned 400")
+      // The propagated message keeps the "Speed API returned <status>" prefix
+      // that callers classify on, and now carries the sanitized provider code
+      // and message inline so a failure is diagnosable from the error alone.
+      expect(speedError.message).toContain("Speed API returned 400")
+      expect(speedError.message).toContain("validation_failed")
+      expect(speedError.message).toContain("Last name is required")
+      // Request secrets must never reach the propagated error string.
+      expect(speedError.message).not.toContain("temporary-secret")
+      expect(speedError.message).not.toContain("merchant@example.test")
       return true
     })
   })

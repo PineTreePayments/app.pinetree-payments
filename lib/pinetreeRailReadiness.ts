@@ -28,6 +28,32 @@ export type PineTreeWalletProfileReadinessInput = {
   btc_payout_enabled?: boolean | null
 }
 
+/**
+ * Whether the merchant's Speed account can currently accept a payment.
+ *
+ * A `ready` profile qualifies directly; otherwise legacy merchants still
+ * qualify through connected provider credentials. `needs_attention` is an
+ * explicit, provider-verified failure (for example Speed reporting that the
+ * connected account no longer exists), so it vetoes the credentials fallback
+ * outright — stale `ready_for_payments` credentials must not keep offering a
+ * rail that cannot complete a payment.
+ */
+export function isSpeedAccountReadyForPayments(input: {
+  profileStatus?: string | null
+  credentialAccountId?: string | null
+  credentialSetupStatus?: string | null
+}): boolean {
+  const profileStatus = String(input.profileStatus || "").trim()
+  if (profileStatus === "needs_attention") return false
+  if (profileStatus === "ready") return true
+
+  const setupStatus = String(input.credentialSetupStatus || "").trim()
+  return Boolean(
+    String(input.credentialAccountId || "").trim() &&
+    (setupStatus === "ready" || setupStatus === "ready_for_payments")
+  )
+}
+
 export type PineTreeSpeedReadinessInput = {
   configured?: boolean | null
   accountReady?: boolean | null

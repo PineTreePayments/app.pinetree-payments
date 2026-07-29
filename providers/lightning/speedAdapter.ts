@@ -9,7 +9,10 @@
 import type { ProviderAdapter, ProviderCapabilities, LightningInvoiceRequest } from "@/types/provider"
 import { registerProvider } from "@/providers/registry"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
-import { getMerchantLightningProfile } from "@/database/merchantLightningProfiles"
+import {
+  getMerchantLightningProfile,
+  upsertMerchantLightningProfile,
+} from "@/database/merchantLightningProfiles"
 import { resolveSpeedHeaderAccountId } from "./speedHeaderAccountResolver"
 import {
   createSpeedLightningPayment,
@@ -17,6 +20,9 @@ import {
   verifySpeedWebhookSignature,
   isSpeedPaymentPaid,
   isSpeedPlatformTreasurySweepEnabled,
+  isSpeedConnectedAccountMissingError,
+  sanitizeSpeedDiagnosticMessage,
+  describeSpeedApiError,
   SPEED_PLATFORM_TREASURY_SWEEP_MODE
 } from "./speedClient"
 import { convertUsdFeeToSats } from "@/lib/bitcoin/feeConversion"
@@ -97,6 +103,53 @@ export async function retrieveMerchantSpeedPayment(paymentId: string, merchantId
   })
 }
 
+/**
+ * Speed reporting that the configured connected account does not exist is a
+ * permanent merchant-configuration fault, so the stored `ready` readiness is
+ * stale and Bitcoin Lightning must stop being offered until the merchant
+ * reconnects. Moves the profile to the existing `needs_attention` state via the
+ * normal upsert boundary — idempotent by merchant_id, so repeating the same
+ * permanent failure rewrites one row instead of accumulating records.
+ *
+ * The invalid account id is deliberately preserved for diagnosis, no provider
+ * history is deleted, and the original provider error is always rethrown: this
+ * never decides a payment's lifecycle, which stays with the Engine.
+ */
+async function withSpeedReadinessInvalidation<T>(
+  merchantId: string,
+  run: () => Promise<T>
+): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    if (!isSpeedConnectedAccountMissingError(error)) throw error
+
+    const diagnostics = describeSpeedApiError(error)
+    const providerErrorMessage = sanitizeSpeedDiagnosticMessage(
+      (diagnostics?.providerMessage as string | null) || "Speed connected account could not be found"
+    )
+    try {
+      await upsertMerchantLightningProfile({
+        merchantId,
+        status: "needs_attention",
+        providerErrorMessage,
+      })
+      console.error("[speed] connected_account_missing_readiness_invalidated", {
+        merchantId,
+        profileStatus: "needs_attention",
+        ...diagnostics,
+      })
+    } catch (invalidationError) {
+      // Never let bookkeeping mask the provider failure the caller must see.
+      console.error("[speed] connected_account_missing_readiness_invalidation_failed", {
+        merchantId,
+        error: invalidationError instanceof Error ? invalidationError.message : String(invalidationError),
+      })
+    }
+    throw error
+  }
+}
+
 export const speedAdapter: ProviderAdapter = {
   metadata: {
     adapterId: SPEED_ADAPTER_ID,
@@ -139,22 +192,24 @@ export const speedAdapter: ProviderAdapter = {
       }
     }
 
-    const speedPayment = await createSpeedLightningPayment({
-      amount: Number(input.grossAmount),
-      currency: input.currency || "USD",
-      merchantAmount: Number(input.merchantAmount),
-      pineTreeFeeAmount,
-      pineTreeFeeSats,
-      btcPriceUsdAtFeeQuote: Number.isFinite(btcPriceUsd) && btcPriceUsd > 0 ? btcPriceUsd : undefined,
-      merchantSpeedAccountId,
-      pineTreePaymentId: input.paymentId,
-      pineTreePaymentIntentId: String(input.metadata?.paymentIntentId || ""),
-      merchantId: input.merchantId,
-      settlementMode: treasurySweepEnabled
-        ? SPEED_PLATFORM_TREASURY_SWEEP_MODE
-        : "speed_connect_split",
-      metadata: input.metadata
-    })
+    const speedPayment = await withSpeedReadinessInvalidation(input.merchantId, () =>
+      createSpeedLightningPayment({
+        amount: Number(input.grossAmount),
+        currency: input.currency || "USD",
+        merchantAmount: Number(input.merchantAmount),
+        pineTreeFeeAmount,
+        pineTreeFeeSats,
+        btcPriceUsdAtFeeQuote: Number.isFinite(btcPriceUsd) && btcPriceUsd > 0 ? btcPriceUsd : undefined,
+        merchantSpeedAccountId,
+        pineTreePaymentId: input.paymentId,
+        pineTreePaymentIntentId: String(input.metadata?.paymentIntentId || ""),
+        merchantId: input.merchantId,
+        settlementMode: treasurySweepEnabled
+          ? SPEED_PLATFORM_TREASURY_SWEEP_MODE
+          : "speed_connect_split",
+        metadata: input.metadata
+      })
+    )
 
     console.info("[speed] bitcoin_fee_request", {
       canonicalTransactionId: input.paymentId,

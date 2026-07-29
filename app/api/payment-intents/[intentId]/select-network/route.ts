@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { selectPaymentIntentNetworkEngine } from "@/engine/paymentIntents"
 import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
-import { getSafeSpeedCustomerErrorMessage, SpeedApiError, SpeedTransportError } from "@/providers/lightning/speedClient"
+import {
+  describeSpeedApiError,
+  getSafeSpeedCustomerErrorMessage,
+  isSpeedConnectedAccountMissingError,
+  SpeedApiError,
+  SpeedTransportError,
+} from "@/providers/lightning/speedClient"
 
 type Params = { params: Promise<{ intentId: string }> }
 
@@ -36,8 +42,10 @@ function classifySelectNetworkError(message: string) {
 export async function POST(req: NextRequest, { params }: Params) {
   let isBase = false
   let selectedNetwork = ""
+  let correlationIntentId = ""
   try {
     const { intentId } = await params
+    correlationIntentId = String(intentId || "").trim()
 
     const authHeader = req.headers.get("authorization") || ""
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : ""
@@ -115,7 +123,14 @@ export async function POST(req: NextRequest, { params }: Params) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to select payment network"
     const { status, code } = error instanceof SpeedApiError
-      ? { status: error.status >= 500 ? 503 : error.status, code: error.retryable ? "LIGHTNING_PROVIDER_TEMPORARY" : "LIGHTNING_PAYMENT_INVALID" }
+      ? {
+          status: error.status >= 500 ? 503 : error.status,
+          code: isSpeedConnectedAccountMissingError(error)
+            ? "LIGHTNING_ACCOUNT_NOT_CONNECTED"
+            : error.retryable
+              ? "LIGHTNING_PROVIDER_TEMPORARY"
+              : "LIGHTNING_PAYMENT_INVALID",
+        }
       : error instanceof SpeedTransportError
         ? { status: 503, code: "LIGHTNING_PROVIDER_TEMPORARY" }
         : classifySelectNetworkError(message)
@@ -133,6 +148,20 @@ export async function POST(req: NextRequest, { params }: Params) {
         code
       })
     }
+
+    // Sanitized provider detail is attached to the primary failure log so a
+    // provider rejection is diagnosable here, without correlating against a
+    // separate provider_error_detail entry. describeSpeedApiError emits only
+    // status, provider code/message, and request id — never request headers,
+    // secret material, or the raw provider payload.
+    console.error("[api/select-network] failed", {
+      intentId: correlationIntentId || null,
+      network: selectedNetwork || null,
+      code,
+      status,
+      error: message,
+      provider: describeSpeedApiError(error),
+    })
 
     return NextResponse.json({ error: customerMessage, code }, { status })
   }

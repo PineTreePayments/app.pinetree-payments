@@ -19,7 +19,10 @@ import {
 } from "./config"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { isProviderHealthy } from "@/providers/registry"
-import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
+import {
+  buildPineTreeRailReadiness,
+  isSpeedAccountReadyForPayments,
+} from "@/lib/pinetreeRailReadiness"
 import { getMerchantBusinessProfile } from "./businessProfile"
 
 type ReadinessNetwork = "solana" | "base" | "bitcoin_lightning"
@@ -207,14 +210,11 @@ export async function getPaymentReadinessEngine(input: { merchantId?: string }) 
     setup_status?: string
   }
   const speedConfig = getPineTreeSpeedConfigStatus()
-  const speedAccountReady = Boolean(
-    lightningProfile?.status === "ready" ||
-    (
-      String(speedCredentials.speed_account_id || speedCredentials.account_id || "").trim() &&
-      (String(speedCredentials.setup_status || "").trim() === "ready" ||
-        String(speedCredentials.setup_status || "").trim() === "ready_for_payments")
-    )
-  )
+  const speedAccountReady = isSpeedAccountReadyForPayments({
+    profileStatus: lightningProfile?.status,
+    credentialAccountId: speedCredentials.speed_account_id || speedCredentials.account_id,
+    credentialSetupStatus: speedCredentials.setup_status,
+  })
   const railReadiness = buildPineTreeRailReadiness({
     providers: connectedProviders,
     walletProfile: pineTreeWalletProfile,

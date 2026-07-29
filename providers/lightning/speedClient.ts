@@ -955,11 +955,17 @@ export async function speedRequestWithStatus<T>(
       throw new Error(SPEED_TRANSFER_SPLIT_ERROR)
     }
 
+    // The thrown message is what propagates to callers and to the top-level
+    // route log. Carry the sanitized provider code/message/request id inline so
+    // a failure is diagnosable from the error line alone, without having to
+    // locate the matching provider_error_detail entry. The "Speed API returned
+    // <status>" prefix is load-bearing: getSafeSpeedCustomerErrorMessage and
+    // callers below match on it.
     const safeMessage = response.status === 401
       ? "Speed authentication failed."
       : response.status === 403
         ? "Speed denied this operation."
-        : `Speed API returned ${response.status}`
+        : `Speed API returned ${response.status}${describeSpeedErrorSuffix(providerCode, fieldErrors[0]?.message ?? null, requestId)}`
     throw new SpeedApiError(safeMessage, response.status, providerCode, fieldErrors, null, requestId, retryAfterMs, responseDiagnostics)
   }
 
@@ -1033,6 +1039,85 @@ function isSpeedTransferPercentageValidationMessage(message: string): boolean {
   )
 }
 
+// Provider-authored strings only. Anything that looks like a credential is
+// dropped rather than truncated, so a Speed message that ever echoed a key
+// cannot reach an application error string or a log line.
+const CREDENTIAL_LIKE = /\b(sk_(live|test)_|pk_(live|test)_|bearer\s|authorization|api[_-]?key|secret|token|password)\b/i
+
+export function sanitizeSpeedDiagnosticMessage(
+  value: unknown,
+  maxLength = 160
+): string | null {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim()
+  if (!text) return null
+  if (CREDENTIAL_LIKE.test(text)) return "[redacted provider message]"
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text
+}
+
+function describeSpeedErrorSuffix(
+  providerCode: string | null,
+  providerMessage: string | null,
+  requestId: string | null
+): string {
+  const parts = [
+    sanitizeSpeedDiagnosticMessage(providerCode, 60),
+    sanitizeSpeedDiagnosticMessage(providerMessage),
+    requestId ? `request ${sanitizeSpeedDiagnosticMessage(requestId, 60)}` : null,
+  ].filter(Boolean)
+  return parts.length ? ` (${parts.join(": ")})` : ""
+}
+
+/**
+ * Sanitized structured view of a Speed failure for application logs. Never
+ * includes headers, credentials, or the full provider payload — the complete
+ * (already sanitized) body stays in provider_error_detail.
+ */
+export function describeSpeedApiError(error: unknown): Record<string, unknown> | null {
+  if (error instanceof SpeedApiError) {
+    return {
+      provider: "speed",
+      httpStatus: error.status,
+      providerCode: sanitizeSpeedDiagnosticMessage(error.providerCode, 60),
+      providerMessage: sanitizeSpeedDiagnosticMessage(error.providerMessage),
+      requestId: sanitizeSpeedDiagnosticMessage(error.requestId, 60),
+      fieldErrorCount: error.fieldErrors.length,
+      retryClassification: error.retryable ? "transient_retryable" : "permanent_no_retry",
+      connectedAccountMissing: isSpeedConnectedAccountMissingError(error),
+    }
+  }
+  if (error instanceof SpeedTransportError) {
+    return {
+      provider: "speed",
+      httpStatus: null,
+      providerCode: "transport_error",
+      providerMessage: sanitizeSpeedDiagnosticMessage(error.message),
+      requestId: null,
+      fieldErrorCount: 0,
+      retryClassification: "transient_retryable",
+      connectedAccountMissing: false,
+    }
+  }
+  return null
+}
+
+/**
+ * Speed reports a connected account that does not exist under the configured
+ * platform account as a 400 invalid_request_error whose message names the
+ * account. This is a permanent configuration fault: retrying cannot fix it and
+ * the stored merchant readiness is stale.
+ */
+export function isSpeedConnectedAccountMissingError(error: unknown): boolean {
+  if (!(error instanceof SpeedApiError)) return false
+  if (error.status !== 400) return false
+  const haystack = [
+    error.providerMessage,
+    ...error.fieldErrors.map((fieldError) => fieldError.message),
+  ]
+    .map((value) => String(value ?? "").toLowerCase())
+    .join(" ")
+  return /connected account (could not be found|not found|does not exist)/.test(haystack)
+}
+
 export function getSafeSpeedCustomerErrorMessage(error: unknown): string | null {
   const message = error instanceof Error ? error.message : String(error || "")
   if (message === SPEED_TRANSFER_SPLIT_ERROR || isSpeedTransferPercentageValidationMessage(message)) {
@@ -1040,6 +1125,12 @@ export function getSafeSpeedCustomerErrorMessage(error: unknown): string | null 
   }
   if (error instanceof SpeedTransportError || (error instanceof SpeedApiError && error.retryable)) {
     return "We couldn't prepare the Bitcoin Lightning payment. Check your connection and try again."
+  }
+  // Merchant-side configuration fault. Retrying this rail cannot succeed, so
+  // point the customer at another method instead of inviting a retry. The
+  // provider account id stays out of the customer-facing string.
+  if (isSpeedConnectedAccountMissingError(error)) {
+    return "Bitcoin Lightning isn't available for this merchant right now. Please choose another payment method."
   }
   if (error instanceof SpeedApiError || message.startsWith("Speed API returned")) {
     return "We couldn't create this Bitcoin Lightning payment. Please choose another payment method or try again."

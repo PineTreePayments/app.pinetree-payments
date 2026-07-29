@@ -13,6 +13,7 @@ import {
 import {
   buildPineTreeRailReadiness,
   getPineTreeRailReadinessDiagnostics,
+  isSpeedAccountReadyForPayments,
   type PineTreeRailReadinessMap
 } from "@/lib/pinetreeRailReadiness"
 import { assertMerchantBusinessProfileComplete, getMerchantBusinessProfile, type MerchantBusinessProfile } from "./businessProfile"
@@ -548,14 +549,11 @@ export async function getProvidersDashboardEngine(merchantId: string): Promise<P
   const speedProvider = providerRows.find((row) => row.provider === SPEED_PROVIDER_NAME)
   const speedCredentials = (speedProvider?.credentials || {}) as JsonObject
   const speedConfig = getPineTreeSpeedConfigStatus()
-  const speedAccountReady = Boolean(
-    lightningProfile?.status === "ready" ||
-    (
-      String(speedCredentials.speed_account_id || speedCredentials.account_id || "").trim() &&
-      (String(speedCredentials.setup_status || "").trim() === "ready" ||
-        String(speedCredentials.setup_status || "").trim() === "ready_for_payments")
-    )
-  )
+  const speedAccountReady = isSpeedAccountReadyForPayments({
+    profileStatus: lightningProfile?.status,
+    credentialAccountId: String(speedCredentials.speed_account_id || speedCredentials.account_id || ""),
+    credentialSetupStatus: String(speedCredentials.setup_status || ""),
+  })
   const railReadiness = buildPineTreeRailReadiness({
     providers: providerRows,
     walletProfile: pineTreeWalletProfile,
