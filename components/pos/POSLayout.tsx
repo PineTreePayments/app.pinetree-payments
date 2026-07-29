@@ -2348,16 +2348,9 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         {/* -- FAILED -- */}
         {paymentMode !== "card" && status === "failed" && (
           <div className="flex flex-col items-center gap-3 py-3">
-            <PaymentStatusVisual
-              status="FAILED"
-              variant="card"
-              messageOverride={paymentError || undefined}
-            />
-            {paymentError && (
-              <span className="sr-only">{paymentError}</span>
-            )}
+            <PaymentStatusVisual status="FAILED" variant="card" />
             <Button fullWidth onClick={resetSale}>
-              Try Again
+              New Sale
             </Button>
           </div>
         )}

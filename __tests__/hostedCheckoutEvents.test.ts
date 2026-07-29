@@ -14,7 +14,7 @@ describe("hosted checkout postMessage bridge", () => {
     ["FAILED", { event: "failed", status: "failed" }],
     ["EXPIRED", { event: "expired", status: "expired" }],
     ["CANCELED", { event: "canceled", status: "canceled" }],
-    ["INCOMPLETE", { event: "canceled", status: "canceled" }],
+    ["INCOMPLETE", { event: "incomplete", status: "incomplete" }],
   ])("maps %s to a browser lifecycle event", (status, expected) => {
     expect(getHostedCheckoutTerminalEvent(status)).toEqual(expected)
   })

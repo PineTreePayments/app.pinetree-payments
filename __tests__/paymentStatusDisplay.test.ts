@@ -101,9 +101,9 @@ describe("shared payment status display", () => {
     expect(display.tone).toBe("incomplete")
   })
 
-  it("Expired uses muted red classes", () => {
+  it("Expired uses the canonical amber treatment", () => {
     const display = getPaymentDisplayStatus("EXPIRED")
-    expect(display.classes).toContain("red")
+    expect(display.classes).toContain("amber")
     expect(display.tone).toBe("expired")
   })
 
@@ -118,7 +118,7 @@ describe("shared payment status display", () => {
     const failed     = getPaymentDisplayStatus("FAILED")
 
     expect(incomplete.classes).toContain("amber")
-    expect(expired.classes).toContain("red")
+    expect(expired.classes).toContain("amber")
     expect(failed.classes).toContain("red")
     expect(expired.classes).not.toBe(failed.classes)
 
@@ -130,5 +130,18 @@ describe("shared payment status display", () => {
   it("Incomplete and Expired have distinct merchant outcomes", () => {
     expect(getPaymentStatusLabel("INCOMPLETE")).toBe("Incomplete")
     expect(getPaymentStatusLabel("EXPIRED")).toBe("Expired")
+  })
+
+  it.each([
+    ["PENDING", "Waiting for payment", "Complete the payment using your selected method."],
+    ["PROCESSING", "Payment processing", "We are confirming your payment."],
+    ["CONFIRMED", "Payment complete", "Your payment was completed successfully."],
+    ["INCOMPLETE", "Payment incomplete", "The payment was not completed before the request ended."],
+    ["FAILED", "Payment failed", "The payment could not be completed."],
+    ["EXPIRED", "Payment expired", "This payment request has expired."],
+    ["CANCELED", "Payment canceled", "This payment was canceled."],
+    ["UNKNOWN", "Checking payment status", "We are verifying whether the payment was submitted."],
+  ])("%s has one canonical title and message", (status, title, message) => {
+    expect(getPaymentDisplayStatus(status)).toMatchObject({ title, message })
   })
 })

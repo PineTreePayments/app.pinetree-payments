@@ -3,6 +3,7 @@ export type PublicCheckoutSessionStatus =
   | "processing"
   | "paid"
   | "failed"
+  | "incomplete"
   | "expired"
   | "canceled"
 
@@ -13,6 +14,7 @@ export function mapInternalCheckoutSessionStatus(status: unknown): PublicCheckou
   if (["PROCESSING", "IN_PROGRESS", "SETTLING"].includes(normalized)) return "processing"
   if (["FAILED", "ERROR", "REJECTED", "DECLINED"].includes(normalized)) return "failed"
   if (["EXPIRED", "TIMED_OUT", "TIMEOUT"].includes(normalized)) return "expired"
-  if (["DISABLED", "CANCELED", "CANCELLED", "INCOMPLETE"].includes(normalized)) return "canceled"
+  if (normalized === "INCOMPLETE") return "incomplete"
+  if (["DISABLED", "CANCELED", "CANCELLED"].includes(normalized)) return "canceled"
   return "open"
 }

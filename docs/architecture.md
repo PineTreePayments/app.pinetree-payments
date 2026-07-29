@@ -63,11 +63,11 @@ Customer payment:
 
 ## State Machine
 
-CREATED → PENDING → PROCESSING → CONFIRMED
+CREATED -> PENDING -> PROCESSING -> CONFIRMED
 
-Alternative:
-- PENDING → INCOMPLETE
-- PROCESSING → FAILED
+Terminal alternatives:
+- PENDING -> INCOMPLETE, EXPIRED, or CANCELED
+- PROCESSING -> FAILED
 
 ---
 
@@ -77,11 +77,11 @@ This section is the single source of truth for merchant-facing financial status
 presentation. Provider, blockchain, wallet, and integration terminology must be
 translated at system boundaries and must never determine labels in the UI.
 
-The canonical payment database state machine remains the six-state lifecycle
-above. Expired and Canceled are presentation outcomes derived from terminal
-`INCOMPLETE` lifecycle evidence. Refunded is a post-settlement transaction
-adjustment; it is not a payment-state transition. Disputed is reserved for future
-architecture and must not imply that dispute processing exists today.
+The canonical payment database state machine uses `CREATED`, `PENDING`,
+`PROCESSING`, `CONFIRMED`, `FAILED`, `INCOMPLETE`, `EXPIRED`, and `CANCELED`.
+Refunded is a post-settlement transaction adjustment; it is not a payment-state
+transition. Disputed is reserved for future architecture and must not imply that
+dispute processing exists today.
 
 | Merchant status | Meaning | Color | Icon |
 |---|---|---|---|
@@ -89,8 +89,9 @@ architecture and must not imply that dispute processing exists today.
 | Processing | Payment was detected and awaits confirmation. | Darker blue | Animated spinner |
 | Confirmed | Payment completed successfully. | Green | Check circle |
 | Failed | Provider or network evidence proves failure. | Red | X circle |
-| Expired | An unpaid payment request timed out. | Muted red | X circle |
-| Canceled | The payment was intentionally canceled or otherwise abandoned. | Gray | X circle |
+| Incomplete | The request ended without submitted or authoritative failure evidence. | Amber | Warning triangle |
+| Expired | An unpaid payment request timed out. | Amber | Clock/warning |
+| Canceled | The payment was explicitly canceled before completion. | Gray | X circle |
 | Refunded | Settled funds were returned after confirmation. | Orange | Refund arrow |
 | Disputed | Reserved presentation for future dispute architecture. | Amber | Warning triangle |
 | Unknown | A value is not recognized. Defensive fallback only. | Neutral gray | Minus circle |
@@ -100,7 +101,16 @@ Rules:
 - UI, reports, receipts, notifications, email, and merchant APIs use the shared
   Engine-owned presentation contract in `lib/utils/paymentStatus.ts`.
 - `CREATED` and `PENDING` display as Waiting. Merchant surfaces never display Pending.
-- A bare `INCOMPLETE` record displays as Canceled; explicit expiry evidence displays Expired.
+- `INCOMPLETE`, `EXPIRED`, and `CANCELED` remain distinct through storage,
+  public APIs, events, details, activity, POS, and hosted checkout.
+- Query parameters, modal state, wallet errors, timers, and provider-local state
+  may provide actionable guidance but never choose a canonical terminal state.
+- Every terminal surface renders `PaymentStatusVisual` or `TransactionResult`,
+  both backed by `lib/utils/paymentStatus.ts`; custom terminal copy, icons,
+  colors, and retry actions are prohibited.
+- Terminal attempts reject provider preparation and asset switching. A retry
+  starts from a merchant-created intent/new sale with a new payment ID; the old
+  payment and its event history remain immutable.
 - Legacy aliases such as `CANCELLED`, `payment.cancelled`, `PAID`, `COMPLETED`,
   provider `ERROR`, and provider `REJECTED` may be accepted at boundaries but are
   never emitted as merchant labels.

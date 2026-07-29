@@ -9,6 +9,7 @@ import { markPaymentCanceled } from "@/engine/paymentStateActions"
 import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import { verifyTerminalSession } from "@/lib/api/terminalAuth"
 import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
+import { normalizePaymentCorrelationId, PAYMENT_CORRELATION_HEADER } from "@/lib/payment/paymentCorrelation"
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -119,7 +120,10 @@ export async function POST(
 
     const changed = await markPaymentCanceled(paymentId, {
       providerEvent: "payment.user_rejected",
-      rawPayload: { source: "ui_cancel" }
+      rawPayload: {
+        source: "ui_cancel",
+        correlationId: normalizePaymentCorrelationId(req.headers.get(PAYMENT_CORRELATION_HEADER)) || null,
+      }
     })
 
     if (!changed) {

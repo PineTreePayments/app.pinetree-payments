@@ -24,6 +24,7 @@ type Props = {
   selectedAsset?: BaseAsset
   baseUsdcStrategy?: BaseUsdcStrategy
   checkoutToken?: string
+  correlationId?: string
   onPaymentCreated?: (paymentId: string) => void
   onSuccess?: (txHash: string, paymentId: string) => void | Promise<void>
   onError?: (error: string) => void
@@ -978,6 +979,7 @@ export default function BaseWalletPayment({
   selectedAsset = "ETH",
   baseUsdcStrategy: directBaseUsdcStrategy,
   checkoutToken,
+  correlationId,
   onPaymentCreated,
   onSuccess,
   onError,
@@ -1016,7 +1018,7 @@ export default function BaseWalletPayment({
   // this attempt emits, so a duplicate mount for the same paymentId (e.g. two
   // checkout tabs) is visible as two different IDs logging the same stage.
   const sessionAttemptIdRef = useRef<string>("")
-  if (!sessionAttemptIdRef.current) sessionAttemptIdRef.current = createSessionAttemptId()
+  if (!sessionAttemptIdRef.current) sessionAttemptIdRef.current = correlationId || createSessionAttemptId()
   const isSendingBaseTxRef = useRef(false)
   const autoResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autoResumeRetryRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -1678,7 +1680,10 @@ export default function BaseWalletPayment({
         if (kind === "eth_payment") {
           await fetch(`/api/payments/${encodeURIComponent(paymentId)}/fail`, {
             method: "POST",
-            headers: checkoutTokenRef.current ? { Authorization: `Bearer ${checkoutTokenRef.current}` } : {},
+            headers: {
+              "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
+              ...(checkoutTokenRef.current ? { Authorization: `Bearer ${checkoutTokenRef.current}` } : {}),
+            },
           }).catch(() => null)
           if (intentId) window.location.href = `/pay?intent=${encodeURIComponent(intentId)}&status=cancelled`
         }
@@ -1789,6 +1794,7 @@ export default function BaseWalletPayment({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
             ...(checkoutTokenRef.current ? { Authorization: `Bearer ${checkoutTokenRef.current}` } : {}),
           },
           body: JSON.stringify({ network: "base", asset: selectedAsset }),
@@ -2687,7 +2693,10 @@ export default function BaseWalletPayment({
         })
         await fetch(`/api/payments/${encodeURIComponent(createdPaymentId)}/fail`, {
           method: "POST",
-          headers: checkoutTokenRef.current ? { Authorization: `Bearer ${checkoutTokenRef.current}` } : {},
+          headers: {
+            "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
+            ...(checkoutTokenRef.current ? { Authorization: `Bearer ${checkoutTokenRef.current}` } : {}),
+          },
         }).catch(() => null)
         // Keep checkout open — customer can still try another rail (Solana, Lightning).
       }

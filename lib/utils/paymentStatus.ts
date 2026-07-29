@@ -23,6 +23,7 @@ export type PaymentStatusIcon = "clock" | "spinner" | "check-circle" | "x-circle
 export type PaymentDisplayStatus = {
   status: string
   label: "Waiting" | "Processing" | "Confirmed" | "Failed" | "Incomplete" | "Action required" | "Expired" | "Canceled" | "Refunded" | "Disputed" | "Unknown"
+  title: string
   message: string
   tone: PaymentStatusTone
   icon: PaymentStatusIcon
@@ -35,7 +36,8 @@ export type PaymentDisplayStatus = {
 const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "status">> = {
   waiting: {
     label: "Waiting",
-    message: "Payment request created and awaiting customer action.",
+    title: "Waiting for payment",
+    message: "Complete the payment using your selected method.",
     tone: "waiting",
     icon: "clock",
     classes: "border border-blue-200 bg-blue-50 text-blue-800",
@@ -44,7 +46,8 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
   },
   processing: {
     label: "Processing",
-    message: "Payment detected and awaiting confirmation.",
+    title: "Payment processing",
+    message: "We are confirming your payment.",
     tone: "processing",
     icon: "spinner",
     classes: "border border-blue-300 bg-blue-200 text-blue-900",
@@ -54,7 +57,8 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
   },
   confirmed: {
     label: "Confirmed",
-    message: "Payment successfully completed.",
+    title: "Payment complete",
+    message: "Your payment was completed successfully.",
     tone: "confirmed",
     icon: "check-circle",
     classes: "border border-green-200 bg-green-100 text-green-800",
@@ -63,7 +67,8 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
   },
   failed: {
     label: "Failed",
-    message: "Payment attempt failed validation, was rejected, or could not complete.",
+    title: "Payment failed",
+    message: "The payment could not be completed.",
     tone: "failed",
     icon: "x-circle",
     classes: "border border-red-200 bg-red-100 text-red-800",
@@ -72,6 +77,7 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
   },
   incomplete: {
     label: "Incomplete",
+    title: "Payment incomplete",
     message: "The payment was not completed before the request ended.",
     tone: "incomplete",
     icon: "alert-triangle",
@@ -81,16 +87,18 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
   },
   expired: {
     label: "Expired",
-    message: "The payment request timed out naturally.",
+    title: "Payment expired",
+    message: "This payment request has expired.",
     tone: "expired",
     icon: "alert-triangle",
-    classes: "border border-red-200 bg-red-50 text-red-700",
-    iconClassName: "text-red-500",
-    iconBgClassName: "bg-red-50",
+    classes: "border border-amber-200 bg-amber-100 text-amber-900",
+    iconClassName: "text-amber-700",
+    iconBgClassName: "bg-amber-50",
   },
   canceled: {
     label: "Canceled",
-    message: "The payment was canceled before completion.",
+    title: "Payment canceled",
+    message: "This payment was canceled.",
     tone: "canceled",
     icon: "x-circle",
     classes: "border border-gray-300 bg-gray-100 text-gray-800",
@@ -99,6 +107,7 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
   },
   refunded: {
     label: "Refunded",
+    title: "Payment refunded",
     message: "The settled payment was returned to the customer.",
     tone: "refunded",
     icon: "refund",
@@ -108,6 +117,7 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
   },
   disputed: {
     label: "Disputed",
+    title: "Payment disputed",
     message: "The payment is under dispute.",
     tone: "disputed",
     icon: "alert-triangle",
@@ -117,7 +127,8 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
   },
   unknown: {
     label: "Unknown",
-    message: "The payment status is not recognized.",
+    title: "Checking payment status",
+    message: "We are verifying whether the payment was submitted.",
     tone: "unknown",
     icon: "minus",
     classes: "border border-gray-300 bg-gray-100 text-gray-800",
@@ -165,6 +176,7 @@ export function getPaymentDisplayStatus(status: string | null | undefined): Paym
       status: normalizedStatus,
       ...config,
       label: "Action required",
+      title: "Action required",
       message: "Manual review is needed before this wallet operation can be retried.",
     }
   }

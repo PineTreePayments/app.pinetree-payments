@@ -109,6 +109,7 @@ type Props = {
   usdAmount: number
   paymentStatus?: string
   checkoutToken?: string
+  correlationId?: string
   onPaymentCreated?: () => void
   onExecutionStarted?: () => void
   onCancel?: () => void
@@ -206,6 +207,7 @@ export default function LightningPayment({
   usdAmount,
   paymentStatus,
   checkoutToken,
+  correlationId,
   onPaymentCreated,
   onExecutionStarted,
   onCancel,
@@ -228,7 +230,7 @@ export default function LightningPayment({
   // initializes WalletConnect or any blockchain wallet adapter — these logs
   // exist only to time invoice preparation, wallet hand-off, and detection.
   const sessionAttemptIdRef = useRef<string>("")
-  if (!sessionAttemptIdRef.current) sessionAttemptIdRef.current = createSessionAttemptId()
+  if (!sessionAttemptIdRef.current) sessionAttemptIdRef.current = correlationId || createSessionAttemptId()
   const walletListReadyLoggedRef = useRef(false)
   const confirmedLoggedRef = useRef(false)
   const checkoutTokenRef = useRef(checkoutToken)
@@ -273,6 +275,7 @@ export default function LightningPayment({
           headers: {
             "Content-Type": "application/json",
             "Idempotency-Key": creationIdempotencyKey,
+            "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
             ...(checkoutToken ? { Authorization: `Bearer ${checkoutToken}` } : {}),
           },
           body: JSON.stringify({ network: "bitcoin_lightning", asset: "BTC" }),

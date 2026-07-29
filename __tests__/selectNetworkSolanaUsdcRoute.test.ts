@@ -55,4 +55,24 @@ describe("payment intent select-network route", () => {
       idempotencyKey: "intent-1-usdc",
     })
   })
+
+  it("returns a non-retryable conflict for terminal or submitted attempts", async () => {
+    selectPaymentIntentNetworkEngine.mockRejectedValue(
+      new Error("This payment attempt has ended. Start a new payment request.")
+    )
+    const request = new NextRequest("https://example.test/api/payment-intents/intent-1/select-network", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer checkout-token",
+        "Content-Type": "application/json",
+        "X-PineTree-Correlation-Id": "attempt-123",
+      },
+      body: JSON.stringify({ network: "solana", asset: "USDC" }),
+    })
+
+    const response = await POST(request, { params: Promise.resolve({ intentId: "intent-1" }) })
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toMatchObject({ code: "PAYMENT_NOT_RETRYABLE" })
+  })
 })

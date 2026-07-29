@@ -216,14 +216,13 @@ export default function PosCardPaymentExperience(props: Props) {
       <TransactionResult
         state="PENDING"
         compact
-        description="Awaiting customer action."
         actions={[{ label: props.loading ? "Cancelling..." : "Cancel Payment", onClick: props.onCancel, variant: "danger", disabled: props.loading }]}
       />
     )
   }
 
   if (props.view === "processing") {
-    return <TransactionResult state="PROCESSING" compact description="Payment is processing." />
+    return <TransactionResult state="PROCESSING" compact />
   }
 
   if (props.view === "approved") {
@@ -231,7 +230,6 @@ export default function PosCardPaymentExperience(props: Props) {
       <TransactionResult
         state="CONFIRMED"
         compact
-        description="Payment successfully completed."
         actions={[
           { label: "New Sale", onClick: props.onDone },
           { label: "View Receipt", onClick: props.onViewReceipt, variant: "secondary", disabled: !props.paymentId },
@@ -245,7 +243,6 @@ export default function PosCardPaymentExperience(props: Props) {
       <TransactionResult
         state="FAILED"
         compact
-        description={props.error || "Payment could not be completed. Please try again."}
         actions={[
           { label: "Try Again", onClick: props.onTryAgain },
           { label: "New Sale", onClick: props.onDone, variant: "secondary" },

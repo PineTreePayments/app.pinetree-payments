@@ -22,6 +22,7 @@ import {
 import PaymentStatusBadge from "@/components/ui/StatusBadge"
 import { normalizeTransactionAsset } from "@/lib/transactionDisplay"
 import { normalizeStoredPaymentStatus } from "@/lib/utils/canonicalPaymentStatus"
+import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -159,17 +160,6 @@ const STATUSES = [
   { value: "CANCELED",   label: "Canceled" },
   { value: "EXPIRED",    label: "Expired" },
 ]
-
-const STATUS_DESCRIPTIONS: Record<string, string> = {
-  CREATED:    "Payment request created and awaiting customer action.",
-  PENDING:    "Payment request created and awaiting customer action.",
-  PROCESSING: "Payment detected and awaiting confirmation.",
-  CONFIRMED:  "Payment successfully completed.",
-  INCOMPLETE: "Customer left the payment or switched payment methods before sending funds.",
-  CANCELED:   "Payment was explicitly canceled before completion.",
-  FAILED:     "Payment attempt failed validation, was rejected, or could not complete.",
-  EXPIRED:    "The payment request timed out naturally.",
-}
 
 const TERMINAL_STATUSES = new Set([
   "CONFIRMED",
@@ -1160,9 +1150,7 @@ export default function AdminTransactionsPage() {
                           {isT ? "Terminal" : "Non-terminal"}
                         </span>
                       </div>
-                      {STATUS_DESCRIPTIONS[status] && (
-                        <p className="text-xs text-gray-500">{STATUS_DESCRIPTIONS[status]}</p>
-                      )}
+                      <p className="text-xs text-gray-500">{getPaymentDisplayStatus(status).message}</p>
                       <div className="grid grid-cols-3 gap-3 pt-1">
                         <div>
                           <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Gross Total</p>

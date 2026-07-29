@@ -537,6 +537,38 @@ export async function selectPaymentIntentNetworkEngine(input: {
     throw new Error("Selected network is not enabled for this merchant")
   }
 
+  const linkedPayment = intent.payment_id
+    ? await getPaymentById(intent.payment_id)
+    : null
+  const linkedStatus = String(linkedPayment?.status || "").trim().toUpperCase()
+
+  // A terminal attempt is immutable. A retry must begin from a merchant-created
+  // intent/new sale so every surface moves to the same new payment ID together.
+  if (["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED", "CANCELLED"].includes(linkedStatus)) {
+    throw new Error("This payment attempt has ended. Start a new payment request.")
+  }
+
+  // POS follows the child payment ID once one is linked. Replacing that child
+  // in-place would leave POS on the old terminal row while checkout follows the
+  // new row. A rail change therefore requires a merchant-created new sale.
+  if (
+    intent.terminal_id &&
+    linkedPayment &&
+    (normalizedNetwork === "stripe" || !isActiveReusablePayment(linkedPayment, normalizedNetwork, selectedAsset))
+  ) {
+    throw new Error("This POS payment attempt cannot switch rails. Start a new payment request.")
+  }
+
+  // Once submission is underway, a stale tab may resume only the same rail.
+  // It must never replace the intent's canonical payment with another rail.
+  if (
+    linkedStatus === "PROCESSING" &&
+    linkedPayment &&
+    (normalizedNetwork === "stripe" || !isActiveReusablePayment(linkedPayment, normalizedNetwork, selectedAsset))
+  ) {
+    throw new Error("Payment already submitted; confirmation is still being checked.")
+  }
+
   // Fast-path: reuse an active payment when the intent already has one for the same
   // network and asset. This prevents creating a duplicate payment (and marking the
   // active one INCOMPLETE) when the checkout resumes after a browser suspension —
@@ -545,14 +577,13 @@ export async function selectPaymentIntentNetworkEngine(input: {
   // Stripe client secrets are deliberately never persisted. A repeated Stripe
   // selection therefore creates a fresh PaymentIntent instead of returning an
   // unusable response or storing a reusable secret in PineTree metadata.
-  if (intent.payment_id && normalizedNetwork !== "stripe") {
-    const existingPayment = await getPaymentById(intent.payment_id)
-    if (existingPayment && isActiveReusablePayment(existingPayment, normalizedNetwork, selectedAsset)) {
+  if (linkedPayment && normalizedNetwork !== "stripe") {
+    if (isActiveReusablePayment(linkedPayment, normalizedNetwork, selectedAsset)) {
       console.info("[payment-intent] select-network:reuse-existing", {
         intentId: intent.id,
-        paymentId: existingPayment.id,
+        paymentId: linkedPayment.id,
         network: normalizedNetwork,
-        status: existingPayment.status,
+        status: linkedPayment.status,
         durationMs: Date.now() - startedAt
       })
 
@@ -560,7 +591,7 @@ export async function selectPaymentIntentNetworkEngine(input: {
         intentId: intent.id,
         normalizedNetwork,
         selectedAsset,
-        existingPayment
+        existingPayment: linkedPayment
       })
     }
   }
@@ -770,7 +801,11 @@ export class PaymentAlreadySubmittedError extends Error {
   }
 }
 
-export async function cancelPaymentIntentEngine(intentId: string): Promise<void> {
+async function endPaymentIntentEngine(
+  intentId: string,
+  outcome: "CANCELED" | "INCOMPLETE",
+  correlationId?: string
+): Promise<void> {
   const intent = await getPaymentIntentById(intentId)
   if (!intent) throw new Error("Payment intent not found")
   if (intent.status === "EXPIRED") return
@@ -841,13 +876,29 @@ export async function cancelPaymentIntentEngine(intentId: string): Promise<void>
       }
     }
 
-    const changed = await markPaymentCanceled(intent.payment_id, {
-      providerEvent: "terminal_cancel",
-      rawPayload: { reason: "merchant_canceled", intentId }
-    })
-    if (!changed && status !== "CANCELED" && status !== "CANCELLED") return
+    const changed = outcome === "INCOMPLETE"
+      ? await markPaymentIncomplete(intent.payment_id, {
+          providerEvent: "checkout_abandoned",
+          rawPayload: { reason: "customer_left_wallet_flow", intentId, correlationId: correlationId || null }
+        })
+      : await markPaymentCanceled(intent.payment_id, {
+          providerEvent: "terminal_cancel",
+          rawPayload: { reason: "merchant_canceled", intentId }
+        })
+    const alreadyAtOutcome = outcome === "INCOMPLETE"
+      ? status === "INCOMPLETE"
+      : status === "CANCELED" || status === "CANCELLED"
+    if (!changed && !alreadyAtOutcome) return
   }
 
   // Expire the intent so any subsequent select-network calls are rejected.
   await expirePaymentIntent(intentId)
+}
+
+export async function cancelPaymentIntentEngine(intentId: string): Promise<void> {
+  return endPaymentIntentEngine(intentId, "CANCELED")
+}
+
+export async function abandonPaymentIntentEngine(intentId: string, correlationId?: string): Promise<void> {
+  return endPaymentIntentEngine(intentId, "INCOMPLETE", correlationId)
 }

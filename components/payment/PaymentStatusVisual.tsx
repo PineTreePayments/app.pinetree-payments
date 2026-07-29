@@ -74,7 +74,7 @@ export function PaymentStatusVisual({
         </span>
       </div>
       <div className="space-y-0.5">
-        <h1 className={labelClass}>{labelOverride || config.label}</h1>
+        <h1 className={labelClass}>{labelOverride || config.title}</h1>
         {showMessage ? <p className={messageClass}>{messageOverride || config.message}</p> : null}
       </div>
     </div>

@@ -42,6 +42,7 @@ type Props = {
   paymentId?: string
   paymentStatus?: string
   checkoutToken?: string
+  correlationId?: string
   walletOptions?: Array<{ id: string; label: string; url?: string; href?: string }>
   onPaymentCreated?: (paymentId: string) => void
   onError?: (error: string) => void
@@ -227,6 +228,7 @@ export default function SolanaWalletPayment({
   paymentId: directPaymentId,
   paymentStatus,
   checkoutToken,
+  correlationId,
   onPaymentCreated,
   onError,
   onExecutionStarted,
@@ -283,7 +285,7 @@ export default function SolanaWalletPayment({
   // different IDs logging the same stage for one paymentId is the signal of
   // a duplicate wallet session, not a single legitimate one.
   const sessionAttemptIdRef = useRef<string>("")
-  if (!sessionAttemptIdRef.current) sessionAttemptIdRef.current = createSessionAttemptId()
+  if (!sessionAttemptIdRef.current) sessionAttemptIdRef.current = correlationId || createSessionAttemptId()
   const walletListReadyLoggedRef = useRef(false)
   const refreshWallets = useCallback(() => {
     const detected = getDetectedSolanaWallets()
@@ -448,6 +450,7 @@ export default function SolanaWalletPayment({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
           ...(checkoutTokenRef.current ? { Authorization: `Bearer ${checkoutTokenRef.current}` } : {}),
         },
         body: JSON.stringify({ network: "solana", asset: selectedAsset }),
@@ -553,8 +556,11 @@ export default function SolanaWalletPayment({
       void logSolana("detect_called", { paymentId: preparedPayment.paymentId, rail: "solana", signaturePrefix: signature.slice(0, 8) })
       await fetch(`/api/payments/${encodeURIComponent(preparedPayment.paymentId)}/detect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ txHash: signature }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
+        },
+        body: JSON.stringify({ txHash: signature, sessionAttemptId: sessionAttemptIdRef.current }),
       }).catch(() => null)
       void logSolana("detect_completed", { paymentId: preparedPayment.paymentId, rail: "solana" })
       logPaymentSession("solana", "transaction_hash_stored", {

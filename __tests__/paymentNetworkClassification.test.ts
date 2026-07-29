@@ -54,6 +54,7 @@ vi.mock("@/lib/pinetreeRailReadiness", () => ({
 }))
 
 const {
+  abandonPaymentIntentEngine,
   cancelPaymentIntentEngine,
   PaymentAlreadySubmittedError,
   selectPaymentIntentNetworkEngine,
@@ -482,6 +483,108 @@ describe("selectPaymentIntentNetworkEngine — concurrent selection", () => {
         metadata: {},
       },
     } as never)
+  })
+
+  it("marks a pre-submission wallet exit incomplete and expires its intent", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+      id: "intent-1",
+      payment_id: "payment-1",
+      status: "SELECTED"
+    } as never)
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({ status: "PENDING" } as never)
+    vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
+    mockNoStoredEvidence()
+
+    await abandonPaymentIntentEngine("intent-1", "attempt-123")
+
+    expect(paymentStateActions.markPaymentIncomplete).toHaveBeenCalledWith(
+      "payment-1",
+      expect.objectContaining({
+        providerEvent: "checkout_abandoned",
+        rawPayload: expect.objectContaining({ correlationId: "attempt-123" })
+      })
+    )
+    expect(paymentStateActions.markPaymentCanceled).not.toHaveBeenCalled()
+    expect(paymentIntentDb.expirePaymentIntent).toHaveBeenCalledWith("intent-1")
+  })
+
+  it.each(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED"])(
+    "rejects provider preparation against a terminal %s attempt",
+    async (status) => {
+      vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+        ...baseIntent,
+        payment_id: "closed-payment-1",
+      } as never)
+      vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({
+        ...winnerPayment,
+        id: "closed-payment-1",
+        status,
+      } as never)
+
+      await expect(
+        selectPaymentIntentNetworkEngine({ intentId: "intent-1", network: "base" })
+      ).rejects.toThrow("payment attempt has ended")
+      expect(createPayment).not.toHaveBeenCalled()
+      expect(paymentIntentDb.markPaymentIntentSelectedIfUnchanged).not.toHaveBeenCalled()
+      expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+    }
+  )
+
+  it("rejects switching rails after submission evidence exists", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+      ...baseIntent,
+      available_networks: ["base", "solana"],
+      payment_id: "processing-payment-1",
+    } as never)
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({
+      ...winnerPayment,
+      id: "processing-payment-1",
+      status: "PROCESSING",
+    } as never)
+
+    await expect(
+      selectPaymentIntentNetworkEngine({ intentId: "intent-1", network: "solana", asset: "SOL" })
+    ).rejects.toThrow("Payment already submitted")
+    expect(createPayment).not.toHaveBeenCalled()
+  })
+
+  it("rejects switching a POS-linked pending attempt to another rail", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+      ...baseIntent,
+      terminal_id: "terminal-1",
+      available_networks: ["base", "solana"],
+      payment_id: "pos-payment-1",
+    } as never)
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({
+      ...winnerPayment,
+      id: "pos-payment-1",
+      status: "PENDING",
+    } as never)
+
+    await expect(
+      selectPaymentIntentNetworkEngine({ intentId: "intent-1", network: "solana", asset: "SOL" })
+    ).rejects.toThrow("cannot switch rails")
+    expect(createPayment).not.toHaveBeenCalled()
+    expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+  })
+
+  it("rejects repeated Stripe preparation after the canonical attempt is processing", async () => {
+    vi.mocked(paymentIntentDb.getPaymentIntentById).mockResolvedValue({
+      ...baseIntent,
+      available_networks: ["stripe"],
+      payment_id: "processing-card-1",
+    } as never)
+    vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({
+      ...winnerPayment,
+      id: "processing-card-1",
+      network: "stripe",
+      status: "PROCESSING",
+    } as never)
+
+    await expect(
+      selectPaymentIntentNetworkEngine({ intentId: "intent-1", network: "stripe" })
+    ).rejects.toThrow("Payment already submitted")
+    expect(createPayment).not.toHaveBeenCalled()
   })
 
   it("derives a deterministic per-attempt-epoch idempotency key when the caller supplies none", async () => {

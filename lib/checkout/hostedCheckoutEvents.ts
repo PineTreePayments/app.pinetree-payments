@@ -1,6 +1,7 @@
 export type HostedCheckoutEventName =
   | "complete"
   | "failed"
+  | "incomplete"
   | "expired"
   | "canceled"
   | "closed"
@@ -21,9 +22,8 @@ export function getHostedCheckoutTerminalEvent(status: unknown): {
   if (normalized === "CONFIRMED") return { event: "complete", status: "paid" }
   if (normalized === "FAILED") return { event: "failed", status: "failed" }
   if (normalized === "EXPIRED") return { event: "expired", status: "expired" }
-  if (["CANCELED", "CANCELLED", "INCOMPLETE"].includes(normalized)) {
-    return { event: "canceled", status: "canceled" }
-  }
+  if (normalized === "INCOMPLETE") return { event: "incomplete", status: "incomplete" }
+  if (["CANCELED", "CANCELLED"].includes(normalized)) return { event: "canceled", status: "canceled" }
   return null
 }
 

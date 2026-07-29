@@ -9,7 +9,7 @@ describe("public checkout session status mapping", () => {
     ["CONFIRMED", "paid"],
     ["FAILED", "failed"],
     ["EXPIRED", "expired"],
-    ["INCOMPLETE", "canceled"],
+    ["INCOMPLETE", "incomplete"],
     ["disabled", "canceled"],
   ])("maps %s to %s", (internal, expected) => {
     expect(mapInternalCheckoutSessionStatus(internal)).toBe(expected)

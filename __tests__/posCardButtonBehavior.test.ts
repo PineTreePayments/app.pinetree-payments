@@ -66,15 +66,12 @@ describe("dedicated PineTree POS Card experience", () => {
   it("renders waiting, processing, approved, and declined states", () => {
     expect(card).toContain('<TransactionResult')
     expect(card).toContain('state="PENDING"')
-    expect(card).toContain("Awaiting customer action.")
     expect(card).toContain('state="PROCESSING"')
-    expect(card).toContain("Payment is processing.")
     expect(card).toContain('state="CONFIRMED"')
-    expect(card).toContain("Payment successfully completed.")
     expect(card).toContain("New Sale")
     expect(card).toContain("View Receipt")
     expect(card).toContain('state="FAILED"')
-    expect(card).toContain("Payment could not be completed. Please try again.")
+    expect(card).not.toContain("description=")
   })
 
   it("keeps manual entry inside POS and mounts Stripe Payment Element", () => {

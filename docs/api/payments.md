@@ -65,7 +65,10 @@ CREATED ──► PENDING ──► PROCESSING ──► CONFIRMED (paid)
 
 ### Terminal states
 
-Strict engine terminal states are `CONFIRMED`, `FAILED`, and `INCOMPLETE`. Public API and display layers may show `paid`, `failed`, `expired`, `canceled`, or refund adjustments depending on lifecycle metadata and provider evidence. The public API uses `paid` for compatibility; PineTree's visible label is **Confirmed**.
+Strict engine terminal states are `CONFIRMED`, `FAILED`, `INCOMPLETE`,
+`EXPIRED`, and `CANCELED`. Public API status preserves `incomplete`, `expired`,
+and `canceled` as distinct outcomes. The public API uses `paid` for confirmed
+payments; PineTree's visible merchant label is **Confirmed**.
 
 ### Idempotency note
 

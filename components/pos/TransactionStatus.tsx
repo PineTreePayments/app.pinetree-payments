@@ -23,7 +23,7 @@ export default function TransactionStatus({
   }
 
   if (status === "error" || status === "failed") {
-    return <TransactionResult state="FAILED" compact actions={[{ label: "Try Again", onClick: resetPOS }]} />
+    return <TransactionResult state="FAILED" compact actions={[{ label: "New Sale", onClick: resetPOS }]} />
   }
 
   if (status === "incomplete") {
@@ -31,7 +31,7 @@ export default function TransactionStatus({
   }
 
   if (status === "expired") {
-    return <TransactionResult state="EXPIRED" compact actions={[{ label: "Create New Payment", onClick: resetPOS }]} />
+    return <TransactionResult state="EXPIRED" compact actions={[{ label: "New Sale", onClick: resetPOS }]} />
   }
 
   if (status === "canceled" || status === "cancelled") {
@@ -39,7 +39,7 @@ export default function TransactionStatus({
   }
 
   if (status === "refunded") {
-    return <TransactionResult state="INCOMPLETE" compact actions={[{ label: "New Sale", onClick: resetPOS }]} />
+    return <TransactionResult state="REFUNDED" compact actions={[{ label: "New Sale", onClick: resetPOS }]} />
   }
 
   return null

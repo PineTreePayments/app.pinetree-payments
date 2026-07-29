@@ -12,8 +12,9 @@ The visible positive terminal label is **Confirmed**. Do not use **Success** as 
 | Processing | Payment detected, awaiting final confirmation | No | Darker blue |
 | Confirmed | Payment confirmed | Yes | Green |
 | Failed | Provider/network/payment attempt failed | Yes | Red |
-| Expired | Payment window timed out | Yes | Red |
-| Canceled | Customer canceled or abandoned the payment | Yes | Gray |
+| Incomplete | Request ended without payment submission | Yes | Amber |
+| Expired | Payment window timed out | Yes | Amber |
+| Canceled | Customer or merchant explicitly canceled the payment | Yes | Gray |
 | Refunded | Settled funds were returned | Yes | Orange |
 | Unknown | Status is not recognized | No | Neutral gray |
 
@@ -27,7 +28,9 @@ CREATED -> PENDING -> PROCESSING -> CONFIRMED
                          PROCESSING -> FAILED
 ```
 
-`CONFIRMED`, `FAILED`, and `INCOMPLETE` are terminal engine states. `EXPIRED`, `CANCELED`/`CANCELLED`, provider-specific success/failure words, and refund adjustments are normalized or displayed around that strict model; they are not separate forward-transition states in the payment state machine.
+`CONFIRMED`, `FAILED`, `INCOMPLETE`, `EXPIRED`, and `CANCELED` are terminal
+engine states. Provider-specific words are normalized at adapter boundaries;
+refund adjustments remain outside the payment state machine.
 
 ## Internal and public mapping
 
@@ -39,11 +42,14 @@ CREATED -> PENDING -> PROCESSING -> CONFIRMED
 | `CONFIRMED` | `paid` | Confirmed | `payment.confirmed` |
 | `FAILED` | `failed` | Failed | `payment.failed` |
 | `EXPIRED` provider/display input | `expired` | Expired | `payment.expired` |
-| `INCOMPLETE` | `canceled` | Canceled, or Expired with explicit expiry evidence | `payment.incomplete` or `payment.expired` |
+| `INCOMPLETE` | `incomplete` | Incomplete | `payment.incomplete` |
 | `CANCELED` or `CANCELLED` provider/display input | `canceled` | Canceled | `payment.canceled` |
 | `REFUNDED` transaction adjustment | refund-specific object/event | Refunded | `payment.refunded` |
 
-Public checkout sessions currently expose `open`, `processing`, `paid`, `failed`, `expired`, and `canceled`. Payment objects use the same mapper in code, so the positive public value is `paid` while the visible product label is **Confirmed**.
+Public checkout sessions expose `open`, `processing`, `paid`, `failed`,
+`incomplete`, `expired`, and `canceled`. Payment objects use the same mapper in
+code, so the positive public value is `paid` while the visible product label is
+**Confirmed**.
 
 ## Terminal behavior
 
@@ -51,7 +57,10 @@ Public checkout sessions currently expose `open`, `processing`, `paid`, `failed`
 
 - `Failed` means an attempted payment failed validation, provider handling, or network execution.
 - `Expired` means an explicit provider/payment/session window timed out.
-- `Canceled` means the customer abandoned, backed out, switched methods, or no funds were sent before stale cleanup.
+- `Incomplete` means the request ended without submission or authoritative failure evidence.
+- `Canceled` means the customer or merchant explicitly canceled the canonical payment.
 - `Refunded` means a previously settled payment was returned.
 
-Stale or abandoned payments are marked `INCOMPLETE` internally when the stale payment sweep handles them and display as Canceled. Explicit expiry evidence displays as Expired.
+Stale or abandoned payments are marked `INCOMPLETE` by the stale payment sweep
+and display as Incomplete. Explicit expiry and cancellation evidence remain
+Expired and Canceled respectively.

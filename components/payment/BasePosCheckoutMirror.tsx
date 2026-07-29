@@ -39,9 +39,11 @@ type Props = {
   selectedAsset: "ETH" | "USDC"
   usdAmount: number
   checkoutToken: string
+  correlationId?: string
   paymentStatus?: string
   onExecutionStarted?: () => void
   onCancel?: () => void
+  onAbandon?: () => void
   onPaymentCreated?: () => void
 }
 
@@ -228,9 +230,11 @@ export default function BasePosCheckoutMirror({
   paymentId,
   selectedAsset,
   checkoutToken,
+  correlationId,
   paymentStatus,
   onExecutionStarted,
   onCancel,
+  onAbandon,
   onPaymentCreated,
 }: Props) {
   const terminalStatus = normalizeTerminalStatus(paymentStatus)
@@ -289,6 +293,7 @@ export default function BasePosCheckoutMirror({
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              ...(correlationId ? { "X-PineTree-Correlation-Id": correlationId } : {}),
               Authorization: `Bearer ${checkoutToken}`,
             },
             body: JSON.stringify({ network: "base", asset: selectedAsset }),
@@ -309,7 +314,7 @@ export default function BasePosCheckoutMirror({
     }
 
     void run()
-  }, [intentId, paymentId, selectedAsset, checkoutToken, onPaymentCreated])
+  }, [intentId, paymentId, selectedAsset, checkoutToken, correlationId, onPaymentCreated])
 
   // Poll the POS-owned session for the pairing URI and status updates.
   // Coalesced against overlapping callers (the steady interval, a burst
@@ -654,11 +659,13 @@ export default function BasePosCheckoutMirror({
   if (step === "failed") {
     return (
       <div className="space-y-3">
-        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-          {session.errorMessage || "Payment could not be completed. Please try again."}
-        </div>
-        <Button variant="danger" fullWidth onClick={onCancel}>
-          Try Again
+        <PaymentStatusVisual
+          status={paymentStatus || "PENDING"}
+          variant="card"
+          messageOverride={session.errorMessage || undefined}
+        />
+        <Button variant="secondary" fullWidth onClick={onAbandon || onCancel}>
+          Back
         </Button>
       </div>
     )

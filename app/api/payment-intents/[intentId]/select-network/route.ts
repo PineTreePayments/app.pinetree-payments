@@ -8,6 +8,7 @@ import {
   SpeedApiError,
   SpeedTransportError,
 } from "@/providers/lightning/speedClient"
+import { normalizePaymentCorrelationId, PAYMENT_CORRELATION_HEADER } from "@/lib/payment/paymentCorrelation"
 
 type Params = { params: Promise<{ intentId: string }> }
 
@@ -16,6 +17,14 @@ function classifySelectNetworkError(message: string) {
 
   if (normalized.includes("timed out")) {
     return { status: 504, code: "PAYMENT_DETAILS_TIMEOUT" }
+  }
+
+  if (
+    normalized.includes("payment attempt has ended") ||
+    normalized.includes("payment already submitted") ||
+    normalized.includes("cannot switch rails")
+  ) {
+    return { status: 409, code: "PAYMENT_NOT_RETRYABLE" }
   }
 
   if (
@@ -43,9 +52,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   let isBase = false
   let selectedNetwork = ""
   let correlationIntentId = ""
+  let correlationId: string | undefined
   try {
     const { intentId } = await params
     correlationIntentId = String(intentId || "").trim()
+    correlationId = normalizePaymentCorrelationId(req.headers.get(PAYMENT_CORRELATION_HEADER))
 
     const authHeader = req.headers.get("authorization") || ""
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : ""
@@ -76,6 +87,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       console.info("[PineTreeBaseTrace] select-network called", {
         step: "route-entry",
         intentId,
+        correlationId: correlationId || null,
         network,
         asset: asset || null
       })
@@ -114,6 +126,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     console.info("[api/select-network] returning paymentUrl", {
       intentId,
+      correlationId: correlationId || null,
       network: result.network,
       paymentId: result.paymentId,
       paymentUrl: result.paymentUrl
@@ -156,6 +169,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     // secret material, or the raw provider payload.
     console.error("[api/select-network] failed", {
       intentId: correlationIntentId || null,
+      correlationId: correlationId || null,
       network: selectedNetwork || null,
       code,
       status,

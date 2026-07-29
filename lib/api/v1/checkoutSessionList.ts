@@ -6,6 +6,7 @@ const SUPPORTED_STATUSES: PublicCheckoutSessionStatus[] = [
   "processing",
   "paid",
   "failed",
+  "incomplete",
   "expired",
   "canceled",
 ]

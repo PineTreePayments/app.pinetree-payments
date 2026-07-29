@@ -399,12 +399,11 @@ export default function PayClient() {
 
   const normalizedPaymentStatus = String(paymentStatus || "").toUpperCase()
   const isIntentMode = Boolean(intentId && intentPayload)
-  const normalizedStatusOverride = normalizeTerminalPaymentStatus(statusOverride || "")
+  // Query-string return hints are navigation state, never lifecycle evidence.
+  // Terminal UI is projected only from the canonical payment loaded above.
   const terminalPaymentStatus = isTerminalPaymentStatus(normalizedPaymentStatus)
-    ? normalizedPaymentStatus
-    : normalizedStatusOverride === "FAILED" || normalizedStatusOverride === "CANCELED"
-      ? normalizedStatusOverride
-      : ""
+    ? normalizeTerminalPaymentStatus(normalizedPaymentStatus)
+    : ""
   const intentCardsRef = useRef<HTMLDivElement | null>(null)
   const emittedCheckoutEventRef = useRef<string>("")
 
@@ -480,6 +479,29 @@ export default function PayClient() {
 
   const loadIntentCallback = useCallback(loadIntent, [intentId])
 
+  const endPosAttempt = useCallback(async (outcome: "cancel" | "abandon") => {
+    if (!intentId || !checkoutTokenRef.current) return
+    try {
+      const response = await fetch(
+        `/api/payment-intents/${encodeURIComponent(intentId)}/${outcome}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${checkoutTokenRef.current}`,
+            "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
+          },
+        }
+      )
+      const body = await response.json().catch(() => null) as { error?: string } | null
+      if (!response.ok) {
+        throw new Error(body?.error || "Unable to end this payment attempt.")
+      }
+      await loadIntentCallback()
+    } catch (error) {
+      setIntentLoadError(error instanceof Error ? error.message : "Unable to end this payment attempt.")
+    }
+  }, [intentId, loadIntentCallback])
+
   // Asset selection: pure UI — no API calls, no payment creation
   function selectAsset(assetId: string) {
     if (selectedAssetId === assetId) {
@@ -516,6 +538,7 @@ export default function PayClient() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ network: "shift4" }),
@@ -556,6 +579,7 @@ export default function PayClient() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({ network: "stripe" }),
@@ -607,7 +631,10 @@ export default function PayClient() {
         `/api/payments/${encodeURIComponent(paymentId)}/detect`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
+          },
           body: JSON.stringify({ txHash: normalizedTxHash, sessionAttemptId: sessionAttemptIdRef.current }),
         }
       ).catch(() => null)
@@ -1677,8 +1704,10 @@ export default function PayClient() {
                               usdAmount={displayAmount}
                               paymentStatus={normalizedPaymentStatus}
                               checkoutToken={checkoutToken}
+                              correlationId={sessionAttemptIdRef.current}
                               onExecutionStarted={() => setBaseExecutionActive(true)}
-                              onCancel={resetBaseRailSelectionOnly}
+                              onCancel={() => void endPosAttempt("cancel")}
+                              onAbandon={() => void endPosAttempt("abandon")}
                               onPaymentCreated={() => {
                                 void loadIntentCallback()
                               }}
@@ -1690,6 +1719,7 @@ export default function PayClient() {
                               usdAmount={displayAmount}
                               paymentStatus={normalizedPaymentStatus}
                               checkoutToken={checkoutToken}
+                              correlationId={sessionAttemptIdRef.current}
                               onExecutionStarted={() => setBaseExecutionActive(true)}
                               onCancel={resetBaseRailSelectionOnly}
                               onPaymentCreated={() => {
@@ -1710,9 +1740,12 @@ export default function PayClient() {
                             usdAmount={displayAmount}
                             paymentStatus={normalizedPaymentStatus}
                             checkoutToken={checkoutToken}
+                            correlationId={sessionAttemptIdRef.current}
                             initialError={getPhantomRetryMessage(phantomError) || getSolflareRetryMessage(solflareError)}
                             onExecutionStarted={() => setSolanaExecutionActive(true)}
-                            onCancel={handleSolanaCancelPayment}
+                            onCancel={intentPayload?.terminalId
+                              ? () => void endPosAttempt("abandon")
+                              : handleSolanaCancelPayment}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}
@@ -1744,10 +1777,13 @@ export default function PayClient() {
                             usdAmount={displayAmount}
                             paymentStatus={normalizedPaymentStatus}
                             checkoutToken={checkoutToken}
+                            correlationId={sessionAttemptIdRef.current}
                             onPaymentCreated={() => {
                               void loadIntentCallback()
                             }}
-                            onCancel={handleLightningCancelPayment}
+                            onCancel={intentPayload?.terminalId
+                              ? () => void endPosAttempt("abandon")
+                              : handleLightningCancelPayment}
                           />
                         ) : null}
 
@@ -1784,7 +1820,10 @@ export default function PayClient() {
                         `/api/payment-intents/${encodeURIComponent(intentId)}/cancel`,
                         {
                           method: "POST",
-                          headers: { Authorization: `Bearer ${checkoutTokenRef.current}` },
+                          headers: {
+                            Authorization: `Bearer ${checkoutTokenRef.current}`,
+                            "X-PineTree-Correlation-Id": sessionAttemptIdRef.current,
+                          },
                           keepalive: true,
                         }
                       )

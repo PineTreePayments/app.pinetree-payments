@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { runPaymentDetectForPayment } from "@/engine/paymentDetect"
 import { schedulePaymentMaintenance } from "@/lib/api/paymentMaintenance"
+import { normalizePaymentCorrelationId, PAYMENT_CORRELATION_HEADER } from "@/lib/payment/paymentCorrelation"
 
 export async function POST(
   req: NextRequest,
@@ -21,10 +22,11 @@ export async function POST(
     try {
       const body = (await req.json()) as { txHash?: string; sessionAttemptId?: string }
       txHash = body.txHash
-      sessionAttemptId = body.sessionAttemptId
+      sessionAttemptId = normalizePaymentCorrelationId(body.sessionAttemptId)
     } catch {
       // body is optional
     }
+    sessionAttemptId ||= normalizePaymentCorrelationId(req.headers.get(PAYMENT_CORRELATION_HEADER))
 
     const result = await runPaymentDetectForPayment(paymentId, { txHash, sessionAttemptId })
     return NextResponse.json(result.body, { status: result.httpStatus })
