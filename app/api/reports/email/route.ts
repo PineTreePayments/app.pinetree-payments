@@ -7,7 +7,7 @@ import {
 
 export async function POST(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantId = await requireMerchantIdFromRequest(req, "payments:read")
 
     const body = (await req.json()) as {
       type?: string

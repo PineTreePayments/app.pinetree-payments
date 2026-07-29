@@ -15,7 +15,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 
 export async function GET(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantId = await requireMerchantIdFromRequest(req, "payments:read")
     schedulePaymentMaintenance("dashboard.overview")
     const sync = req.nextUrl.searchParams.get("sync") === "1"
     const data = sync

@@ -26,7 +26,7 @@ export function normalizeStripePaymentStatus(status?: string): PaymentStatus {
     case "succeeded":
       return "CONFIRMED"
     case "canceled":
-      return "INCOMPLETE"
+      return "CANCELED"
     default:
       console.warn("[stripe] unknown payment status", { providerStatus: status || null })
       return "UNKNOWN"

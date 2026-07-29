@@ -2,7 +2,7 @@
  * PineTree Payment Status Update
  *
  * Handles payment status transitions with proper state machine validation.
- * After each terminal-relevant transition (CONFIRMED, FAILED, INCOMPLETE),
+ * After each terminal-relevant transition,
  * fires the corresponding merchant webhook in a fire-and-forget fashion so
  * that webhook delivery failures never block the payment status update.
  */
@@ -35,6 +35,8 @@ import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 const STATUS_TO_WEBHOOK_EVENT: Partial<Record<PaymentStatus, WebhookEvent>> = {
   CONFIRMED: "payment.confirmed",
   FAILED: "payment.failed",
+  EXPIRED: "payment.expired",
+  CANCELED: "payment.canceled",
   INCOMPLETE: "payment.incomplete",
 }
 
@@ -58,7 +60,7 @@ export async function updatePaymentStatus(
 
   const currentStatus = normalizeToStrictPaymentStatus(payment.status)
 
-  if (nextStatus === "INCOMPLETE") {
+  if (nextStatus === "INCOMPLETE" || nextStatus === "EXPIRED" || nextStatus === "CANCELED") {
     const [transaction, events] = await Promise.all([
       getTransactionByPaymentId(paymentId),
       getPaymentEvents(paymentId).catch(() => [])
@@ -67,7 +69,7 @@ export async function updatePaymentStatus(
       paymentHasProcessingEvidence({ payment, transaction, events }) &&
       !isExplicitUnpaidInvoiceExpiry(metadata)
     ) {
-      throw new Error("Cannot mark payment INCOMPLETE after provider or transaction evidence exists")
+      throw new Error(`Cannot mark payment ${nextStatus} after provider or transaction evidence exists`)
     }
   }
 
@@ -167,7 +169,13 @@ export async function updatePaymentStatus(
   // Whenever a payment reaches a terminal state, keep the linked transaction row
   // in sync. This is best-effort: a reconciliation failure must never block the
   // authoritative payment status write.
-  if (nextStatus === "CONFIRMED" || nextStatus === "FAILED" || nextStatus === "INCOMPLETE") {
+  if (
+    nextStatus === "CONFIRMED" ||
+    nextStatus === "FAILED" ||
+    nextStatus === "EXPIRED" ||
+    nextStatus === "CANCELED" ||
+    nextStatus === "INCOMPLETE"
+  ) {
     try {
       const reconcileResult = await reconcileTransactionForPayment(paymentId, nextStatus)
       if (!reconcileResult.skipped) {
@@ -222,9 +230,11 @@ export async function updatePaymentStatus(
         ? "checkout.session.completed"
         : nextStatus === "FAILED"
           ? "checkout.session.failed"
-          : nextStatus === "INCOMPLETE"
-            ? "checkout.session.canceled"
-            : null
+          : nextStatus === "EXPIRED"
+            ? "checkout.session.expired"
+            : nextStatus === "CANCELED" || nextStatus === "INCOMPLETE"
+              ? "checkout.session.canceled"
+              : null
   if (checkoutLinkId && v1Event) {
     void import("./publicCheckoutSessions")
       .then(({ getPublicCheckoutSession }) =>
@@ -247,17 +257,14 @@ function statusToEventType(
   status: PaymentStatus,
   metadata?: { providerEvent?: string; rawPayload?: unknown }
 ): PaymentEventType {
-  if (status === "INCOMPLETE") {
-    const providerEvent = String(metadata?.providerEvent || "").toLowerCase()
-    if (/cancel|user_rejected/.test(providerEvent)) return "payment.canceled"
-    if (/expir|timeout/.test(providerEvent)) return "payment.expired"
-  }
   const mapping: Record<PaymentStatus, PaymentEventType> = {
     CREATED: "payment.created",
     PENDING: "payment.pending",
     PROCESSING: "payment.processing",
     CONFIRMED: "payment.confirmed",
     FAILED: "payment.failed",
+    EXPIRED: "payment.expired",
+    CANCELED: "payment.canceled",
     INCOMPLETE: "payment.incomplete"
   }
 
@@ -289,5 +296,5 @@ export async function expirePayment(
   paymentId: string,
   metadata?: { providerEvent?: string; rawPayload?: unknown }
 ) {
-  return updatePaymentStatus(paymentId, "INCOMPLETE", metadata)
+  return updatePaymentStatus(paymentId, "EXPIRED", metadata)
 }

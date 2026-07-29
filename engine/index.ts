@@ -89,3 +89,11 @@ export {
 export { getMarketPricesUSD } from "./marketPrices"
 export { refreshWalletBalancesEngine, getWalletOverviewEngine } from "./walletOverview"
 export { getDashboardOverviewEngine } from "./dashboardOverview"
+export {
+  getCanonicalTransactionPage,
+  getAllCanonicalTransactions,
+  getCanonicalTransactionById,
+  projectCanonicalTransaction,
+  projectCanonicalTransactions,
+} from "./canonicalTransactions"
+export type { CanonicalTransaction } from "./canonicalTransactions"

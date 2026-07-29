@@ -29,7 +29,7 @@ export async function getPaymentIncompleteEligibility(
   }
 
   const status = String(payment.status || "").toUpperCase()
-  if (["CONFIRMED", "FAILED", "INCOMPLETE"].includes(status)) {
+  if (["CONFIRMED", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE"].includes(status)) {
     return { eligible: false, status, reason: "terminal_status_not_eligible" }
   }
   if (status === "PROCESSING") {
@@ -102,6 +102,48 @@ export async function markPaymentIncomplete(
       !message.includes("Invalid payment transition") &&
       !message.includes("Concurrent payment transition skipped") &&
       !message.includes("Cannot mark payment INCOMPLETE after provider or transaction evidence exists")
+    ) {
+      throw error
+    }
+    return false
+  }
+}
+
+/**
+ * Persist an explicit cancellation without conflating it with an abandoned
+ * attempt. The shared eligibility check prevents submitted-payment evidence
+ * from being overwritten.
+ */
+export async function markPaymentCanceled(
+  paymentId: string,
+  metadata?: {
+    providerEvent?: string
+    rawPayload?: unknown
+  }
+): Promise<boolean> {
+  try {
+    const eligibility = await getPaymentIncompleteEligibility(paymentId)
+    if (!eligibility.eligible) return eligibility.status === "CANCELED"
+
+    if (eligibility.status === "CREATED") {
+      await updatePaymentStatus(paymentId, "PENDING", {
+        providerEvent: metadata?.providerEvent,
+        rawPayload: {
+          ...(metadata?.rawPayload && typeof metadata.rawPayload === "object"
+            ? metadata.rawPayload as Record<string, unknown>
+            : {}),
+          stateMachineStep: "created_to_pending_before_canceled"
+        }
+      })
+    }
+    await updatePaymentStatus(paymentId, "CANCELED", metadata)
+    return true
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (
+      !message.includes("Invalid payment transition") &&
+      !message.includes("Concurrent payment transition skipped") &&
+      !message.includes("Cannot mark payment CANCELED after provider or transaction evidence exists")
     ) {
       throw error
     }

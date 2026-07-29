@@ -223,6 +223,7 @@ export type PaymentStatus =
   | "FAILED"
   | "INCOMPLETE"
   | "EXPIRED"
+  | "CANCELED"
   | "REFUNDED"
   | "UNKNOWN"
 

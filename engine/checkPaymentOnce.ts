@@ -126,7 +126,13 @@ async function runPaymentWatcherInternal(
 
   // Nothing left to do for terminal states.
   const status = String(payment.status || "").toUpperCase()
-  if (status === "CONFIRMED" || status === "FAILED" || status === "INCOMPLETE") {
+  if (
+    status === "CONFIRMED" ||
+    status === "FAILED" ||
+    status === "EXPIRED" ||
+    status === "CANCELED" ||
+    status === "INCOMPLETE"
+  ) {
     console.info("[watcher:evm] scan stopped: payment already terminal", { paymentId, status })
     return false
   }

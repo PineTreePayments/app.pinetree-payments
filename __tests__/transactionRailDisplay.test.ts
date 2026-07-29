@@ -36,6 +36,7 @@ describe("cash transaction rail display", () => {
       businessName: "Merchant",
       businessAddress: null,
       createdAt: "2026-06-10T12:00:00Z",
+      timeZone: "America/Chicago",
       amount: 10,
       currency: "USD",
       provider: "cash",

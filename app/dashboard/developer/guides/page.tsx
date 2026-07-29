@@ -48,7 +48,7 @@ export default function DeveloperGuidesPage() {
             ["API keys", "Secret and public-key usage.", "/dashboard/developer/api-keys"],
             ["Webhooks", "Endpoint setup, events, delivery history, and retries.", "/dashboard/developer/webhooks"],
             ["SDKs", "Package names and installation commands.", "/dashboard/developer/sdks"],
-            ["Payment states", "CREATED, PENDING, PROCESSING, CONFIRMED, FAILED, and INCOMPLETE.", "/dashboard/help"],
+            ["Payment states", "CREATED, PENDING, PROCESSING, CONFIRMED, FAILED, EXPIRED, CANCELED, and INCOMPLETE.", "/dashboard/help"],
             ["Go live", "Validate keys, webhooks, payment flows, and environment readiness.", "/dashboard/help"],
             ["Support", "Find integration help and troubleshooting material.", "/dashboard/help"],
           ].map(([title, detail, href]) => (

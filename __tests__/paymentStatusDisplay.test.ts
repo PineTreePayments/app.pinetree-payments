@@ -101,9 +101,9 @@ describe("shared payment status display", () => {
     expect(display.tone).toBe("incomplete")
   })
 
-  it("Expired uses amber classes", () => {
+  it("Expired uses muted red classes", () => {
     const display = getPaymentDisplayStatus("EXPIRED")
-    expect(display.classes).toContain("amber")
+    expect(display.classes).toContain("red")
     expect(display.tone).toBe("expired")
   })
 
@@ -118,8 +118,9 @@ describe("shared payment status display", () => {
     const failed     = getPaymentDisplayStatus("FAILED")
 
     expect(incomplete.classes).toContain("amber")
-    expect(expired.classes).toContain("amber")
+    expect(expired.classes).toContain("red")
     expect(failed.classes).toContain("red")
+    expect(expired.classes).not.toBe(failed.classes)
 
     expect(incomplete.label).toBe("Incomplete")
     expect(expired.label).toBe("Expired")

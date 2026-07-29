@@ -262,7 +262,7 @@ function coinbaseStatusToPineTree(status: CoinbaseStatus) {
     case "EXPIRED":
       return { status: "EXPIRED" as const }
     case "CANCELED":
-      return { status: "INCOMPLETE" as const }
+      return { status: "CANCELED" as const }
     default:
       console.warn("[coinbase] unknown payment status", { providerStatus: status || null })
       return { status: "UNKNOWN" as const }

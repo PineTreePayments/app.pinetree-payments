@@ -5,7 +5,9 @@ import { ChevronDown, X } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { useDashboardAutoRefresh } from "@/hooks/useDashboardAutoRefresh"
-import TransactionActivityTable from "../TransactionActivityTable"
+import TransactionActivityTable, {
+  type DashboardTransactionRow
+} from "../TransactionActivityTable"
 import {
   ChartCard,
   DashboardSection,
@@ -33,27 +35,13 @@ import {
 } from "@/components/dashboard/TransactionVolumeChart"
 import TransactionVolumeChart from "@/components/dashboard/TransactionVolumeChart"
 
-type Payment = {
-  id?: string | null
-  created_at: string
-  gross_amount: number
-  merchant_amount: number
-  pinetree_fee: number
-  currency: string
-  status: string
-  provider_reference?: string | null
-}
-
-type Transaction = {
-  id: string
-  payment_id?: string | null
+type Transaction = DashboardTransactionRow & {
+  paymentId: string
+  canonicalStatus: string
+  occurredAt: string
   provider: string
-  status: string
-  provider_transaction_id: string
-  network: string | null
+  network: string
   channel?: string | null
-  payments: Payment | Payment[] | null
-  created_at?: string
 }
 
 type ChartRow = {
@@ -93,6 +81,7 @@ type TransactionsDashboardResponse = {
   todayVolume?: number
   todayTransactions?: number
   confirmedRate?: number
+  timeZone?: string
   pagination?: { page: number; pageSize: number; total: number; totalPages: number }
   error?: string
 }
@@ -130,36 +119,6 @@ function normalizeNetworkFilterValue(value: string | null | undefined) {
   return normalized.replace(/\s+/g, "_")
 }
 
-function getTimeFilterBounds(value: TimeFilter) {
-  const now = new Date()
-  const start = new Date(now)
-
-  if (value === "last_hour") {
-    start.setHours(start.getHours() - 1)
-    return { startDate: start.toISOString(), endDate: now.toISOString() }
-  }
-  if (value === "last_24_hours") {
-    start.setDate(start.getDate() - 1)
-    return { startDate: start.toISOString(), endDate: now.toISOString() }
-  }
-  if (value === "last_7_days") {
-    start.setDate(start.getDate() - 7)
-    return { startDate: start.toISOString(), endDate: now.toISOString() }
-  }
-  if (value === "last_30_days") {
-    start.setDate(start.getDate() - 30)
-    return { startDate: start.toISOString(), endDate: now.toISOString() }
-  }
-  if (value === "this_month") {
-    return {
-      startDate: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString(),
-      endDate: now.toISOString()
-    }
-  }
-
-  return { startDate: "", endDate: "" }
-}
-
 function parseTimestamp(value: string) {
   const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value)
   return new Date(hasTimezone ? value : `${value}Z`)
@@ -172,6 +131,7 @@ export default function TransactionsPage() {
   const [todayVolume, setTodayVolume] = useState(0)
   const [todayTransactions, setTodayTransactions] = useState(0)
   const [confirmedRate, setConfirmedRate] = useState(0)
+  const [timeZone, setTimeZone] = useState("UTC")
 
   const [networkFilter, setNetworkFilter] = useState("all")
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all")
@@ -262,23 +222,13 @@ export default function TransactionsPage() {
   }, [])
 
   const calculateInsights = useCallback((data: Transaction[]) => {
-    const qualifying = data.filter((tx) => {
-      const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-      const authoritativeStatus = String(payment?.status || tx.status || "").trim().toUpperCase()
-      return authoritativeStatus === "CONFIRMED"
-    })
+    const qualifying = data.filter((tx) => tx.canonicalStatus === "CONFIRMED")
     const hourMap: Record<string, number> = {}
     const dayMap: Record<string, number> = {}
     const channelMap: Record<string, number> = {}
 
     qualifying.forEach((tx) => {
-      const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-      if (!payment) return
-
-      const sourceTime = tx.created_at || payment.created_at
-      if (!sourceTime) return
-
-      const d = parseTimestamp(sourceTime)
+      const d = parseTimestamp(tx.occurredAt)
       if (Number.isNaN(d.getTime())) return
 
       const hour = String(d.getHours())
@@ -335,14 +285,13 @@ export default function TransactionsPage() {
       setTransactionError(null)
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
       if (networkFilter !== "all") params.set("network", networkFilter)
-      const timeBounds = getTimeFilterBounds(timeFilter)
-      if (timeBounds.startDate) params.set("startDate", timeBounds.startDate)
-      if (timeBounds.endDate) params.set("endDate", timeBounds.endDate)
+      if (timeFilter !== "all") params.set("timeFilter", timeFilter)
       const payload = (await callTransactionsApi("GET", undefined, `?${params.toString()}`)) as TransactionsDashboardResponse
 
       setTodayVolume(Number(payload.todayVolume || 0))
       setTodayTransactions(Number(payload.todayTransactions || 0))
       setConfirmedRate(Number(payload.confirmedRate || 0))
+      setTimeZone(payload.timeZone || "UTC")
       const responseTotalPages = payload.pagination?.totalPages || 1
       setTotalPages(responseTotalPages)
       setTotalTransactions(payload.pagination?.total || 0)
@@ -508,10 +457,7 @@ export default function TransactionsPage() {
       <PineTreeInsightsCard
         insights={[transactionInsight]}
         emptyText={buildNeutralInsight(
-          transactions.some((tx) => {
-            const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-            return String(payment?.status || tx.status || "").trim().toUpperCase() === "CONFIRMED"
-          }),
+          transactions.some((tx) => tx.canonicalStatus === "CONFIRMED"),
           "Complete more transactions to unlock activity insights."
         ) || "Complete more transactions to unlock activity insights."}
       />
@@ -569,7 +515,7 @@ export default function TransactionsPage() {
             {transactionError} <button type="button" onClick={() => void loadDashboardData()} className="ml-2 font-semibold underline">Try again</button>
           </div>
         ) : null}
-        {loadingTransactions ? <p className="px-4 py-8 text-center text-sm text-gray-500">Loading transactions…</p> : <TransactionActivityTable transactions={filteredTransactions} />}
+        {loadingTransactions ? <p className="px-4 py-8 text-center text-sm text-gray-500">Loading transactions…</p> : <TransactionActivityTable transactions={filteredTransactions} timeZone={timeZone} />}
         <PaginationControls
           totalLabel={`${totalTransactions} transactions`}
           page={page}

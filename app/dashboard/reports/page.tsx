@@ -26,15 +26,25 @@ type ReportPeriod = "end_of_day" | "today" | "weekly" | "month" | "year" | "cust
 type LedgerRow = {
   dateTime: string
   paymentId: string
+  attemptId: string | null
   reference: string
+  providerReference: string | null
+  transactionHash: string | null
   provider: string
   rail: string
   network: string
   asset: string
+  currency: string
+  amountMinor: number
+  displayAmount: string
   gross: number
   pinetreeFee: number
   status: string
   canonicalStatus: string
+  occurredAt: string
+  createdAt: string
+  confirmedAt: string | null
+  source: string
 }
 
 type ReportSummary = {
@@ -129,25 +139,28 @@ function reportInsights(summary: ReportSummary | null) {
 
 function toDashboardTransactionRows(rows: LedgerRow[]): DashboardTransactionRow[] {
   return rows.map((row) => ({
-    id: row.paymentId || row.reference,
+    id: row.attemptId,
+    paymentId: row.paymentId,
+    attemptId: row.attemptId,
+    providerReference: row.providerReference,
+    transactionHash: row.transactionHash,
+    rail: row.rail,
+    asset: row.asset,
+    currency: row.currency,
+    amountMinor: row.amountMinor,
+    displayAmount: row.displayAmount,
+    canonicalStatus: row.canonicalStatus,
+    displayStatus: row.status,
+    occurredAt: row.occurredAt,
+    createdAt: row.createdAt,
+    confirmedAt: row.confirmedAt,
+    source: row.source,
     payment_id: row.paymentId,
     provider: row.provider,
-    status: row.canonicalStatus || row.status,
-    provider_transaction_id: row.reference,
+    status: row.canonicalStatus,
+    provider_transaction_id: row.providerReference,
     network: row.network,
     created_at: row.dateTime,
-    payments: {
-      id: row.paymentId,
-      created_at: row.dateTime,
-      gross_amount: row.gross,
-      pinetree_fee: row.pinetreeFee,
-      currency: "USD",
-      status: row.canonicalStatus || row.status,
-      provider_reference: row.reference,
-      metadata: {
-        selectedAsset: row.asset
-      }
-    }
   }))
 }
 
@@ -452,6 +465,7 @@ export default function ReportsPage() {
                   <TransactionActivityTable
                     transactions={reportTransactionRows}
                     emptyMessage="No transactions were recorded in this period."
+                    timeZone={summary.timeZone}
                   />
                 </div>
                 <PaginationControls

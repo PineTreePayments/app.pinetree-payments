@@ -100,9 +100,9 @@ describe("overlapping payment transition idempotency", () => {
   })
 
   it("records explicit cancellation distinctly from generic incomplete state", async () => {
-    mockDbUpdate.mockResolvedValueOnce({ ...pendingPayment, status: "INCOMPLETE" })
+    mockDbUpdate.mockResolvedValueOnce({ ...pendingPayment, status: "CANCELED" })
 
-    await updatePaymentStatus("pay-1", "INCOMPLETE", {
+    await updatePaymentStatus("pay-1", "CANCELED", {
       providerEvent: "terminal_cancel",
       rawPayload: { reason: "merchant_canceled" }
     })

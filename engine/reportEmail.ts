@@ -37,16 +37,18 @@ function currency(value: number) {
   return `$${value.toFixed(2)}`
 }
 
-function formatDate(value: string) {
+function formatDate(value: string, timeZone: string) {
   return new Date(value).toLocaleDateString("en-US", {
+    timeZone,
     year: "numeric",
     month: "short",
     day: "2-digit"
   })
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(value: string, timeZone: string) {
   return new Date(value).toLocaleString("en-US", {
+    timeZone,
     year: "numeric",
     month: "short",
     day: "2-digit",
@@ -77,7 +79,7 @@ function buildInsightText(report: ReportSummary, isExport: boolean): string {
     : "No confirmed transactions were recorded in this report period."
 }
 
-function buildEmailHtml(report: ReportSummary, filename: string): string {
+function buildEmailHtml(report: ReportSummary): string {
   const isExport = report.reportType === "transactions"
   const H = REPORT_HEX
 
@@ -134,7 +136,7 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
               <h1 style="margin:0 0 6px;font-size:26px;font-weight:800;color:#0f1728;letter-spacing:-0.5px;">${report.title}</h1>
               <p style="margin:0 0 4px;font-size:14px;color:#6b7280;font-weight:500;">${report.merchant.name}</p>
               <p style="margin:0 0 28px;font-size:14px;color:#9ba3af;">
-                ${formatDate(report.startDate)} &mdash; ${formatDate(report.endDate)}
+                ${formatDate(report.startDate, report.timeZone)} &mdash; ${formatDate(report.endDate, report.timeZone)}
               </p>
 
               ${isExport ? "" : `
@@ -199,7 +201,7 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
               ${isExport ? `
               <!-- Export note -->
               <div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;margin-bottom:28px;">
-                <div style="font-size:13px;color:#6b7280;">This email contains a full CSV transaction export for the period <strong style="color:#0f1728;">${formatDate(report.startDate)} &mdash; ${formatDate(report.endDate)}</strong>. The export includes ${report.transactionCount} transaction${report.transactionCount !== 1 ? "s" : ""}.</div>
+                <div style="font-size:13px;color:#6b7280;">This email contains a full CSV transaction export for the period <strong style="color:#0f1728;">${formatDate(report.startDate, report.timeZone)} &mdash; ${formatDate(report.endDate, report.timeZone)}</strong>. The export includes ${report.transactionCount} transaction${report.transactionCount !== 1 ? "s" : ""}.</div>
               </div>
               ` : ""}
 
@@ -215,7 +217,7 @@ function buildEmailHtml(report: ReportSummary, filename: string): string {
 
               <!-- Generated at -->
               <p style="font-size:12px;color:#9ba3af;margin:0;">
-                Generated ${formatDateTime(report.generatedAt)} &middot; PineTree Payments
+                Generated ${formatDateTime(report.generatedAt, report.timeZone)} &middot; PineTree Payments
               </p>
             </td>
           </tr>
@@ -265,7 +267,7 @@ export async function emailReportEngine(input: ReportEmailInput): Promise<Report
   }
 
   const subject = REPORT_SUBJECT[reportType] ?? "PineTree Report"
-  const html = buildEmailHtml(report, attachmentFilename)
+  const html = buildEmailHtml(report)
 
   const emailId = await sendReportEmail({
     to: recipientEmail,

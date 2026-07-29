@@ -187,7 +187,13 @@ export async function runPaymentDetectForPayment(
     }
   }
 
-  if (currentStatus === "CONFIRMED" || currentStatus === "FAILED" || currentStatus === "INCOMPLETE") {
+  if (
+    currentStatus === "CONFIRMED" ||
+    currentStatus === "FAILED" ||
+    currentStatus === "EXPIRED" ||
+    currentStatus === "CANCELED" ||
+    currentStatus === "INCOMPLETE"
+  ) {
     return {
       httpStatus: 200,
       body: { detected: false, skipped: true, status: currentStatus }

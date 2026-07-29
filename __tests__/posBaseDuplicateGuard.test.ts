@@ -67,8 +67,8 @@ describe("PosBaseDuplicateGuard", () => {
     })
   })
 
-  it("server-truth check blocks a restart for PROCESSING, CONFIRMED, FAILED, EXPIRED, and INCOMPLETE payment statuses", () => {
-    for (const status of ["PROCESSING", "CONFIRMED", "FAILED", "EXPIRED", "INCOMPLETE"]) {
+  it("server-truth check blocks a restart for every processing or terminal payment status", () => {
+    for (const status of ["PROCESSING", "CONFIRMED", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE"]) {
       expect(guard.evaluateServerState({ paymentStatus: status })).toEqual({
         blocked: true,
         reason: `payment_status_${status}`,

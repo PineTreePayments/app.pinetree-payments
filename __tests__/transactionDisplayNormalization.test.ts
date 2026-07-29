@@ -26,10 +26,12 @@ describe("transaction display normalization", () => {
     expect(normalizeTransactionAsset({ provider: "solana", network: "solana" })).toBe("Unknown asset")
   })
 
-  it("distinguishes canceled and expired evidence without overriding canonical incomplete", () => {
-    expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.cancelled" }])).toBe("CANCELED")
-    expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.canceled" }])).toBe("CANCELED")
-    expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.expired" }])).toBe("EXPIRED")
+  it("keeps payments.status authoritative when audit events disagree", () => {
+    expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.cancelled" }])).toBe("INCOMPLETE")
+    expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.canceled" }])).toBe("INCOMPLETE")
+    expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.expired" }])).toBe("INCOMPLETE")
     expect(resolveLifecycleDisplayStatus("INCOMPLETE", [{ event_type: "payment.incomplete" }])).toBe("INCOMPLETE")
+    expect(resolveLifecycleDisplayStatus("CANCELED", [{ event_type: "payment.incomplete" }])).toBe("CANCELED")
+    expect(resolveLifecycleDisplayStatus("EXPIRED", [{ event_type: "payment.incomplete" }])).toBe("EXPIRED")
   })
 })

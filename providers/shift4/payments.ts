@@ -98,7 +98,7 @@ export function normalizeShift4PaymentStatus(status: unknown): PaymentStatus {
     return "FAILED"
   }
   if (normalized === "expired") return "EXPIRED"
-  if (normalized === "canceled" || normalized === "cancelled") return "INCOMPLETE"
+  if (normalized === "canceled" || normalized === "cancelled") return "CANCELED"
   if (normalized === "refunded") return "REFUNDED"
 
   // Unknown provider statuses must never confirm a payment.

@@ -438,7 +438,7 @@ function DocSectionOverview() {
       <DocH2>Core concepts</DocH2>
       {[
         ["Checkout Session", "A payment intent with a hosted checkout URL. Customers pick a network and pay. Sessions expire after 24 hours."],
-        ["Payment", "Tracks on-chain status. Lifecycle: open → processing → paid | failed | incomplete."],
+        ["Payment", "Tracks canonical payment status: waiting → processing → confirmed, failed, expired, canceled, or incomplete."],
         ["Webhook Event", "HMAC-signed HTTP POST when payment status changes. Use payment.confirmed to fulfill orders."],
       ].map(([title, desc]) => (
         <div key={title} className="mb-2.5 rounded-2xl border border-gray-200/80 bg-white p-3.5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
@@ -647,7 +647,9 @@ function DocSectionPayments() {
       <DocH2>Payment lifecycle</DocH2>
       <CodeBlock>{`CREATED → PENDING → PROCESSING → CONFIRMED (public status: "paid")
                              └→ FAILED    (public status: "failed")
-              └→ INCOMPLETE               (public status: "canceled")`}</CodeBlock>
+              ├→ EXPIRED                  (public status: "expired")
+              ├→ CANCELED                 (public status: "canceled")
+              └→ INCOMPLETE               (public compatibility status: "canceled")`}</CodeBlock>
       <div className="mt-3 rounded-2xl border border-amber-200/80 bg-amber-50/70 p-3.5 text-xs leading-5 text-amber-800">
         <strong>Status naming:</strong> The API returns <code className="rounded bg-amber-100 px-1 text-xs">status: &quot;paid&quot;</code> when a payment is confirmed — not <code className="rounded bg-amber-100 px-1 text-xs">&quot;confirmed&quot;</code>.
         The visible merchant state is called <strong>Confirmed</strong>. For fulfillment use the <code className="rounded bg-amber-100 px-1 text-xs">payment.confirmed</code> webhook. For polling, check <code className="rounded bg-amber-100 px-1 text-xs">status === &quot;paid&quot;</code>.
@@ -701,6 +703,7 @@ function DocSectionPaymentStates() {
           ["Failed", "Provider/network/payment attempt failed", "Yes", "Red"],
           ["Expired", "Payment window timed out", "Yes", "Red"],
           ["Canceled", "Customer abandoned/backed out/no funds sent", "Yes", "Gray"],
+          ["Incomplete", "Attempt ended without a more specific terminal outcome", "Yes", "Amber"],
           ["Refunded", "Settled funds were returned", "Yes", "Orange"],
           ["Unknown", "Status is not recognized", "No", "Neutral gray"],
         ]}

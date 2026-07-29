@@ -13,7 +13,7 @@ import {
 
 export async function GET(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantId = await requireMerchantIdFromRequest(req, "payments:read")
     const { searchParams } = new URL(req.url)
     const type = normalizeReportType(searchParams.get("type"))
     const requestedFormat = searchParams.get("format")

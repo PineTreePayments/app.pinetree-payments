@@ -51,7 +51,7 @@ export async function checkNwcPaymentOnce(paymentId: string): Promise<boolean> {
   }
 
   const currentStatus = normalizeToStrictPaymentStatus(payment.status)
-  const TERMINAL = new Set<string>(["CONFIRMED", "FAILED", "INCOMPLETE"])
+  const TERMINAL = new Set<string>(["CONFIRMED", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE"])
   if (TERMINAL.has(currentStatus)) return false
 
   const meta = payment.metadata as {
@@ -75,7 +75,7 @@ export async function checkNwcPaymentOnce(paymentId: string): Promise<boolean> {
     if (Number.isFinite(expiresAtMs) && expiresAtMs > 0 && Date.now() > expiresAtMs) {
       console.info("[nwc/check] Invoice expired — advancing to INCOMPLETE", { paymentId, expiresAt })
       try {
-        await updatePaymentStatus(paymentId, "INCOMPLETE", {
+        await updatePaymentStatus(paymentId, "EXPIRED", {
           providerEvent: "nwc_invoice_expired",
           rawPayload: { paymentHash, expiresAt }
         })

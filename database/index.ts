@@ -10,6 +10,9 @@ export * from "./payments"
 // Transactions
 export * from "./transactions"
 
+// Canonical transaction reads (payments-root read model)
+export * from "./canonicalTransactions"
+
 // Payment Events
 export * from "./paymentEvents"
 

@@ -11,6 +11,7 @@ export type ReceiptData = {
   businessName: string | null
   businessAddress: string | null
   createdAt: string
+  timeZone: string
   amount: number
   currency: string
   provider: string
@@ -39,11 +40,11 @@ function formatAmount(amount: number, currency: string) {
   }).format(amount)
 }
 
-function formatDate(value: string) {
+function formatDate(value: string, timeZone: string) {
   return new Date(value).toLocaleString("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "America/Chicago"
+    timeZone
   })
 }
 
@@ -58,8 +59,8 @@ export function renderReceiptHtml(receipt: ReceiptData) {
   const displayRail = getReceiptDisplayRail(receipt)
   const rows = [
     ["Receipt ID", receipt.paymentId],
-    ["Transaction ID", receipt.transactionId],
-    ["Date / Time", formatDate(receipt.createdAt)],
+    ["Attempt ID", receipt.transactionId],
+    ["Date / Time", formatDate(receipt.createdAt, receipt.timeZone)],
     ["Amount", formatAmount(receipt.amount, receipt.currency)],
     ["Currency", receipt.currency],
     ["Asset", receipt.assetLabel],

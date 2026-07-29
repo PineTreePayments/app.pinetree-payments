@@ -1,47 +1,52 @@
 import { supabaseAdmin, supabase } from "@/database"
-import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
-import { resolveTransactionDisplayStatus } from "@/lib/utils/canonicalPaymentStatus"
-import { resolveLifecycleDisplayStatus, type TransactionLifecycleEvent } from "@/lib/transactionDisplay"
+import {
+  getAllCanonicalTransactions,
+  getCanonicalTransactionPage,
+  type CanonicalTransaction,
+} from "@/engine/canonicalTransactions"
+import { getPaymentAssetDisplay } from "@/lib/paymentAssetDisplay"
+import { normalizeTimeZone, resolveMerchantReportRange } from "@/engine/reportPeriods"
+import type { TransactionLifecycleEvent } from "@/lib/transactionDisplay"
 
 const db = supabaseAdmin || supabase
-
-type PaymentRow = {
-  id?: string | null
-  created_at: string
-  gross_amount?: number | string | null
-  merchant_amount: number
-  pinetree_fee: number
-  currency: string
-  provider?: string | null
-  network?: string | null
-  status: string
-  displayStatus?: string
-  provider_reference?: string | null
-  metadata?: Record<string, unknown> | null
-}
-
-type TransactionRow = {
-  id: string
-  payment_id?: string | null
-  provider: string
-  status: string
-  displayStatus?: string
-  provider_transaction_id: string
-  network: string | null
-  channel?: string | null
-  total_amount?: number | string | null
-  payments: PaymentRow | PaymentRow[] | null
-  created_at?: string
-  terminal_at?: string | null
-  terminal_reason?: string | null
-  lifecycle_events?: NormalizedTransactionEvent[]
-}
 
 export type NormalizedTransactionEvent = {
   type: string
   status: string
   occurredAt: string | null
   message: string
+}
+
+export type MerchantTransactionAssetDetails = {
+  amountPaidLabel: string | null
+  rateLabel: string | null
+  lightningInvoice: string | null
+}
+
+/**
+ * Explicit merchant response DTO. Keep this list intentionally narrow: the
+ * canonical engine model also contains internal metadata, raw values,
+ * diagnostics, provider event ids, and every transaction attempt. None of
+ * those fields belongs in an ordinary `payments:read` response.
+ */
+export type MerchantTransactionReadRow = {
+  paymentId: string
+  attemptId: string | null
+  providerReference: string | null
+  transactionHash: string | null
+  rail: CanonicalTransaction["rail"]
+  network: string
+  asset: string
+  currency: string
+  amountMinor: number
+  displayAmount: string
+  canonicalStatus: CanonicalTransaction["canonicalStatus"]
+  displayStatus: string
+  occurredAt: string
+  provider: string
+  channel: string | null
+  assetPaymentDetails: MerchantTransactionAssetDetails
+  lifecycle_events: NormalizedTransactionEvent[]
 }
 
 export type TransactionsChartRow = {
@@ -55,10 +60,11 @@ export type TransactionsChartRow = {
 }
 
 export type TransactionsDashboardData = {
-  transactions: TransactionRow[]
+  transactions: MerchantTransactionReadRow[]
   todayVolume: number
   todayTransactions: number
   confirmedRate: number
+  timeZone: string
   pagination: {
     page: number
     pageSize: number
@@ -79,8 +85,32 @@ export type TransactionsDashboardFilters = {
   method?: string | null
   startDate?: string | null
   endDate?: string | null
+  timeFilter?: "last_hour" | "last_24_hours" | "last_7_days" | "last_30_days" | "this_month" | "all" | null
   page?: number
   pageSize?: number
+}
+
+export function resolveTransactionsTimeFilter(
+  value: TransactionsDashboardFilters["timeFilter"],
+  timeZone: string,
+  now = new Date()
+): { startDate?: string; endDate?: string } {
+  if (!value || value === "all") return {}
+  if (value === "this_month") {
+    const range = resolveMerchantReportRange({ type: "month", timeZone, now })
+    return { startDate: range.startDate, endDate: range.endDate }
+  }
+  const durationMs: Record<Exclude<NonNullable<TransactionsDashboardFilters["timeFilter"]>, "this_month" | "all">, number> = {
+    last_hour: 60 * 60 * 1_000,
+    last_24_hours: 24 * 60 * 60 * 1_000,
+    last_7_days: 7 * 24 * 60 * 60 * 1_000,
+    last_30_days: 30 * 24 * 60 * 60 * 1_000,
+  }
+  const duration = durationMs[value]
+  return {
+    startDate: new Date(now.getTime() - duration).toISOString(),
+    endDate: now.toISOString(),
+  }
 }
 
 export function normalizeTransactionEvent(event: TransactionLifecycleEvent): NormalizedTransactionEvent {
@@ -97,6 +127,7 @@ export function normalizeTransactionEvent(event: TransactionLifecycleEvent): Nor
     CANCELED: "Payment canceled before completion.",
     EXPIRED: "Payment request expired.",
     REFUNDED: "Payment refunded.",
+    DISPUTED: "Payment disputed.",
   }
   return {
     type,
@@ -110,16 +141,10 @@ export function isTerminalTransactionEvent(event: NormalizedTransactionEvent): b
   return ["CONFIRMED", "FAILED", "INCOMPLETE", "CANCELED", "EXPIRED", "REFUNDED"].includes(event.status)
 }
 
-type TransactionsChartProviderKey = Exclude<keyof TransactionsChartRow, "time">
-
-type TransactionChartContext = {
-  channel: string | null
-  provider: string | null
-  network: string | null
-  totalAmount: number | string | null
-}
-
-/** PostgREST represents a requested page beyond the result set as HTTP 416/PGRST103. */
+/**
+ * Retained for callers/tests that handle raw PostgREST range results. The
+ * canonical page loader now owns this database detail for the merchant list.
+ */
 export function isTransactionsEmptyPageResult(result: {
   status?: number
   error?: unknown
@@ -131,6 +156,145 @@ export function isTransactionsEmptyPageResult(result: {
   )
 }
 
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function boundedText(value: unknown, maxLength: number): string | null {
+  if (typeof value !== "string") return null
+  const normalized = value.trim()
+  return normalized && normalized.length <= maxLength ? normalized : null
+}
+
+function merchantAssetPaymentDetails(
+  transaction: CanonicalTransaction
+): MerchantTransactionAssetDetails {
+  const display = getPaymentAssetDisplay(
+    transaction.network,
+    transaction.metadata,
+    transaction.amountMinor / 100
+  )
+  const split = record(record(transaction.metadata)?.split)
+
+  return {
+    amountPaidLabel: display.amountPaidLabel,
+    rateLabel: display.rateLabel,
+    // A BOLT11 invoice is already customer-visible payment evidence, but it
+    // is copied explicitly and bounded rather than exposing the split object.
+    lightningInvoice: boundedText(split?.lightningInvoice, 4_096),
+  }
+}
+
+/**
+ * Surface adapter for merchant-visible fields. Never spread the canonical
+ * object here: new internal fields must remain private until deliberately
+ * reviewed and added to this DTO.
+ */
+export function toMerchantTransactionReadRow(
+  transaction: CanonicalTransaction
+): MerchantTransactionReadRow {
+  return {
+    paymentId: transaction.paymentId,
+    attemptId: transaction.attemptId,
+    providerReference: transaction.providerReference,
+    transactionHash: transaction.transactionHash,
+    rail: transaction.rail,
+    network: transaction.network,
+    asset: transaction.asset,
+    currency: transaction.currency,
+    amountMinor: transaction.amountMinor,
+    displayAmount: transaction.displayAmount,
+    canonicalStatus: transaction.canonicalStatus,
+    displayStatus: transaction.displayStatus,
+    occurredAt: transaction.occurredAt,
+    provider: transaction.provider,
+    channel: transaction.channel,
+    assetPaymentDetails: merchantAssetPaymentDetails(transaction),
+    lifecycle_events: transaction.lifecycleEvents.map((event) => normalizeTransactionEvent({
+      event_type: event.type,
+      created_at: event.occurredAt || undefined,
+    })),
+  }
+}
+
+export function summarizeCanonicalTransactionActivity(rows: readonly CanonicalTransaction[]) {
+  const confirmed = rows.filter((row) => row.canonicalStatus === "CONFIRMED")
+  return {
+    volume: confirmed.reduce((sum, row) => sum + row.amountMinor / 100, 0),
+    transactionCount: rows.length,
+    confirmedCount: confirmed.length,
+    confirmedRate: rows.length > 0 ? Math.round((confirmed.length / rows.length) * 100) : 0,
+  }
+}
+
+async function getMerchantTimeZone(merchantId: string): Promise<string> {
+  const { data, error } = await db
+    .from("merchant_settings")
+    .select("timezone")
+    .eq("merchant_id", merchantId)
+    .maybeSingle()
+
+  if (error) throw new Error(`Failed to load merchant timezone: ${error.message}`)
+  return normalizeTimeZone(data?.timezone)
+}
+
+export async function getTransactionsDashboardEngine(
+  merchantId: string,
+  filters: TransactionsDashboardFilters = {}
+): Promise<TransactionsDashboardData> {
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(filters.pageSize || 50)))
+  const page = Math.max(1, Math.trunc(filters.page || 1))
+  const scope = { type: "merchant" as const, merchantId }
+  const timeZone = await getMerchantTimeZone(merchantId)
+  const todayRange = resolveMerchantReportRange({ type: "today", timeZone })
+  const semanticRange = resolveTransactionsTimeFilter(filters.timeFilter, timeZone)
+  const startDate = semanticRange.startDate || filters.startDate
+  const endDate = semanticRange.endDate || filters.endDate
+
+  const [canonicalPage, todayRows] = await Promise.all([
+    getCanonicalTransactionPage({
+      scope,
+      provider: filters.provider,
+      network: filters.network,
+      channel: filters.channel,
+      status: filters.status,
+      rail: filters.rail,
+      asset: filters.asset,
+      currency: filters.currency,
+      source: filters.source,
+      method: filters.method,
+      startDate,
+      endDate,
+      page,
+      pageSize,
+    }),
+    getAllCanonicalTransactions({
+      scope,
+      startDate: todayRange.startDate,
+      endDate: todayRange.endDate,
+    }),
+  ])
+
+  const today = summarizeCanonicalTransactionActivity(todayRows)
+  return {
+    transactions: canonicalPage.rows.map(toMerchantTransactionReadRow),
+    todayVolume: today.volume,
+    todayTransactions: today.transactionCount,
+    confirmedRate: today.confirmedRate,
+    timeZone,
+    pagination: {
+      page: canonicalPage.page,
+      pageSize: canonicalPage.pageSize,
+      total: canonicalPage.totalCount,
+      totalPages: canonicalPage.totalPages,
+    },
+  }
+}
+
+type TransactionsChartProviderKey = Exclude<keyof TransactionsChartRow, "time">
+
 function bucket(label: string): TransactionsChartRow {
   return {
     time: label,
@@ -139,72 +303,61 @@ function bucket(label: string): TransactionsChartRow {
     lightning: 0,
     coinbase: 0,
     shift4: 0,
-    cash: 0
+    cash: 0,
   }
 }
 
-function buildBuckets(range: string) {
+function chartLabel(date: Date, range: string, timeZone: string): string {
+  if (range === "24h") {
+    const hour = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour: "numeric",
+      hourCycle: "h23",
+    }).format(date)
+    return `${Number(hour)}:00`
+  }
+  if (range === "1y") {
+    return new Intl.DateTimeFormat("en-US", { timeZone, month: "short" }).format(date)
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(date)
+}
+
+function buildBuckets(range: string, timeZone: string, now = new Date()) {
   const buckets: Record<string, TransactionsChartRow> = {}
-  const start = new Date()
+  let start = new Date(now)
 
   if (range === "24h") {
     for (let i = 23; i >= 0; i--) {
-      const d = new Date()
-      d.setHours(d.getHours() - i)
-      const label = `${d.getHours()}:00`
+      const d = new Date(now.getTime() - i * 60 * 60 * 1_000)
+      const label = chartLabel(d, range, timeZone)
       buckets[label] = bucket(label)
     }
-    start.setHours(start.getHours() - 24)
+    start = new Date(now.getTime() - 24 * 60 * 60 * 1_000)
   }
 
-  if (range === "7d") {
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      const label = d.toLocaleDateString()
+  const dayCounts: Record<string, number> = { "7d": 7, "1m": 30, "3m": 90, "6m": 180 }
+  const dayCount = dayCounts[range]
+  if (dayCount) {
+    for (let i = dayCount - 1; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1_000)
+      const label = chartLabel(d, range, timeZone)
       buckets[label] = bucket(label)
     }
-    start.setDate(start.getDate() - 7)
-  }
-
-  if (range === "1m") {
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      const label = d.toLocaleDateString()
-      buckets[label] = bucket(label)
-    }
-    start.setMonth(start.getMonth() - 1)
-  }
-
-  if (range === "3m") {
-    for (let i = 89; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      const label = d.toLocaleDateString()
-      buckets[label] = bucket(label)
-    }
-    start.setMonth(start.getMonth() - 3)
-  }
-
-  if (range === "6m") {
-    for (let i = 179; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      const label = d.toLocaleDateString()
-      buckets[label] = bucket(label)
-    }
-    start.setMonth(start.getMonth() - 6)
+    start = new Date(now.getTime() - dayCount * 24 * 60 * 60 * 1_000)
   }
 
   if (range === "1y") {
     for (let i = 11; i >= 0; i--) {
-      const d = new Date()
-      d.setMonth(d.getMonth() - i)
-      const label = d.toLocaleString("default", { month: "short" })
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 15, 12))
+      const label = chartLabel(d, range, timeZone)
       buckets[label] = bucket(label)
     }
-    start.setFullYear(start.getFullYear() - 1)
+    start = new Date(now.getTime() - 366 * 24 * 60 * 60 * 1_000)
   }
 
   return { buckets, start }
@@ -233,6 +386,7 @@ function normalizeChartProvider(
     provider === "bitcoin_lightning" ||
     provider === "bitcoin lightning" ||
     network === "bitcoin_lightning" ||
+    network === "bitcoin lightning" ||
     network === "btc_lightning" ||
     network === "lightning_btc" ||
     network === "lightning"
@@ -243,306 +397,31 @@ function normalizeChartProvider(
   return null
 }
 
-function metadataNumber(metadata: Record<string, unknown> | null | undefined, key: string) {
-  const value = metadata?.[key]
-  if (typeof value !== "number" && typeof value !== "string") return null
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric : null
-}
-
-function centsToDollars(value: number | string | null | undefined) {
-  const numeric = Number(value || 0)
-  if (!Number.isFinite(numeric) || numeric <= 0) return null
-  return numeric > 999 ? numeric / 100 : numeric
-}
-
-function getChartAmountUsd(
-  payment: PaymentRow,
-  transactionContext?: TransactionChartContext
-) {
-  const grossAmount = Number(payment.gross_amount ?? 0)
-  if (Number.isFinite(grossAmount) && grossAmount > 0) return grossAmount
-
-  const metadata = payment.metadata
-  return (
-    metadataNumber(metadata, "grossAmount") ||
-    metadataNumber(metadata, "invoiceAmountUsd") ||
-    metadataNumber(metadata, "amountUsd") ||
-    metadataNumber(metadata, "usdAmount") ||
-    metadataNumber(metadata, "fiat_amount_usd") ||
-    metadataNumber(metadata, "normalized_amount_usd") ||
-    centsToDollars(transactionContext?.totalAmount) ||
-    0
-  )
-}
-
-export async function getTransactionsDashboardEngine(
-  merchantId: string,
-  filters: TransactionsDashboardFilters = {}
-): Promise<TransactionsDashboardData> {
-  const pageSize = Math.min(100, Math.max(1, Math.trunc(filters.pageSize || 50)))
-  const page = Math.max(1, Math.trunc(filters.page || 1))
-  const offset = (page - 1) * pageSize
-  const status = String(filters.status || "").trim().toUpperCase()
-  const asset = String(filters.asset || "").trim().toUpperCase().replace(/[^A-Z0-9._-]/g, "")
-  const currency = String(filters.currency || "").trim().toUpperCase().replace(/[^A-Z0-9._-]/g, "")
-  const source = String(filters.source || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "")
-  const paymentJoin = status || asset || currency || source ? "payments!inner" : "payments"
-  // Use transactions table directly — includes cash, crypto, and all channels
-  let transactionQuery = db
-    .from("transactions")
-    .select(`
-      id,
-      payment_id,
-      provider,
-      status,
-      provider_transaction_id,
-      network,
-      channel,
-      total_amount,
-      created_at,
-      ${paymentJoin} (
-        id,
-        created_at,
-        gross_amount,
-        merchant_amount,
-        pinetree_fee,
-        currency,
-        provider,
-        network,
-        status,
-        provider_reference,
-        metadata
-      )
-    `, { count: "exact" })
-    .eq("merchant_id", merchantId)
-    .order("created_at", { ascending: false })
-    .order("id", { ascending: false })
-    .range(offset, offset + pageSize - 1)
-
-  if (filters.provider === "lightning_speed") {
-    transactionQuery = transactionQuery.in("provider", ["lightning_speed", "speed", "lightning"])
-  } else if (filters.provider) {
-    transactionQuery = transactionQuery.eq("provider", filters.provider)
-  }
-  if (filters.network) transactionQuery = transactionQuery.eq("network", filters.network)
-  if (filters.channel) transactionQuery = transactionQuery.eq("channel", filters.channel)
-  if (status) transactionQuery = transactionQuery.eq("payments.status", status)
-  if (currency) transactionQuery = transactionQuery.eq("payments.currency", currency)
-  if (source) transactionQuery = transactionQuery.eq("payments.metadata->>source", source)
-  if (asset) {
-    // Crypto checkouts retain USD as their settlement currency and record the
-    // selected asset in metadata. Match either representation while keeping
-    // the relation inner-joined so count/pagination remain exact.
-    transactionQuery = transactionQuery.or(
-      `currency.eq.${asset},metadata->>selectedAsset.eq.${asset},metadata->>asset.eq.${asset}`,
-      { referencedTable: "payments" }
-    )
-  }
-
-  const rail = String(filters.rail || "").trim().toLowerCase()
-  if (rail === "card") transactionQuery = transactionQuery.in("provider", ["stripe", "shift4", "fluidpay"])
-  if (rail === "cash") transactionQuery = transactionQuery.eq("provider", "cash")
-  if (["solana", "base", "bitcoin_lightning"].includes(rail)) {
-    transactionQuery = transactionQuery.eq("network", rail)
-  }
-
-  const method = String(filters.method || "").trim().toLowerCase()
-  if (method === "card") transactionQuery = transactionQuery.in("provider", ["stripe", "shift4", "fluidpay"])
-  if (method === "cash") transactionQuery = transactionQuery.eq("provider", "cash")
-  if (method === "crypto") {
-    transactionQuery = transactionQuery.in("network", ["solana", "base", "ethereum", "bitcoin_lightning", "lightning"])
-  }
-  if (filters.startDate) transactionQuery = transactionQuery.gte("created_at", filters.startDate)
-  if (filters.endDate) transactionQuery = transactionQuery.lte("created_at", filters.endDate)
-
-  const transactionResult = await transactionQuery
-  const { data: txData, error: txError, count } = transactionResult
-
-  if (txError && !isTransactionsEmptyPageResult(transactionResult)) {
-    throw new Error(`Failed to load transactions: ${txError.message}`)
-  }
-
-  const dashboardPaymentIds = ((txData || []) as TransactionRow[])
-    .map((transaction) => String(transaction.payment_id || "").trim())
-    .filter(Boolean)
-  const lifecycleEventsByPaymentId = new Map<string, TransactionLifecycleEvent[]>()
-  if (dashboardPaymentIds.length) {
-    const { data: lifecycleEvents, error: lifecycleError } = await db
-      .from("payment_events")
-      .select("payment_id,event_type,provider_event,created_at")
-      .in("payment_id", dashboardPaymentIds)
-      .order("created_at", { ascending: true })
-
-    if (lifecycleError) {
-      throw new Error(`Failed to load transaction lifecycle events: ${lifecycleError.message}`)
-    }
-    for (const event of lifecycleEvents || []) {
-      const paymentId = String(event.payment_id || "").trim()
-      if (!paymentId) continue
-      const existing = lifecycleEventsByPaymentId.get(paymentId) || []
-      existing.push(event)
-      lifecycleEventsByPaymentId.set(paymentId, existing)
-    }
-  }
-
-  const startOfDay = new Date()
-  startOfDay.setHours(0, 0, 0, 0)
-
-  const { data: paymentRows, error: paymentError } = await db
-    .from("payments")
-    .select("gross_amount,status")
-    .eq("merchant_id", merchantId)
-    .gte("created_at", startOfDay.toISOString())
-
-  if (paymentError) {
-    throw new Error(`Failed to load transaction analytics: ${paymentError.message}`)
-  }
-
-  const safePayments = paymentRows || []
-  const todayVolume = safePayments
-    .filter((payment) => payment.status === "CONFIRMED")
-    .reduce((sum, payment) => sum + Number(payment.gross_amount || 0), 0)
-  const todayTransactions = safePayments.length
-  const confirmed = safePayments.filter((p) => p.status === "CONFIRMED").length
-
-  const transactions = ((txData || []) as TransactionRow[]).map((transaction) => {
-    const authoritativePayment = Array.isArray(transaction.payments)
-      ? transaction.payments[0]
-      : transaction.payments
-    const rawAuthoritativeStatus = String(authoritativePayment?.status || transaction.status || "").toUpperCase()
-    const knownStatus = ["CREATED", "PENDING", "PROCESSING", "CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED", "CANCELLED", "REFUNDED"].includes(rawAuthoritativeStatus)
-    const canonicalStatus = knownStatus
-      ? resolveTransactionDisplayStatus(transaction.status, authoritativePayment?.status)
-      : "UNKNOWN"
-    const lifecycleEvents = lifecycleEventsByPaymentId.get(String(transaction.payment_id || "")) || []
-    const status = resolveLifecycleDisplayStatus(
-      canonicalStatus,
-      lifecycleEvents
-    )
-    const normalizedEvents = lifecycleEvents.map(normalizeTransactionEvent)
-    const terminalEventIndex = normalizedEvents.findLastIndex(isTerminalTransactionEvent)
-    const terminalEvent = terminalEventIndex >= 0 ? lifecycleEvents[terminalEventIndex] : undefined
-    const normalizedTerminalEvent = terminalEventIndex >= 0 ? normalizedEvents[terminalEventIndex] : undefined
-    const payments = Array.isArray(transaction.payments)
-      ? transaction.payments.map((payment) => ({
-          ...payment,
-          displayStatus: getPaymentStatusLabel(payment.status)
-        }))
-      : transaction.payments
-        ? {
-            ...transaction.payments,
-            displayStatus: getPaymentStatusLabel(transaction.payments.status)
-          }
-        : null
-
-    return {
-      ...transaction,
-      status,
-      terminal_at: terminalEvent?.created_at || null,
-      terminal_reason: normalizedTerminalEvent?.message || null,
-      lifecycle_events: normalizedEvents,
-      displayStatus: getPaymentStatusLabel(status),
-      payments
-    }
-  })
-
-  return {
-    transactions,
-    todayVolume,
-    todayTransactions,
-    confirmedRate: todayTransactions ? Math.round((confirmed / todayTransactions) * 100) : 0,
-    pagination: {
-      page,
-      pageSize,
-      total: count || 0,
-      totalPages: Math.max(1, Math.ceil((count || 0) / pageSize))
-    }
-  }
-}
-
 export async function getTransactionsChartEngine(
   merchantId: string,
   range: string,
   mode: "all" | "pos" | "online"
 ) {
-  const { buckets, start } = buildBuckets(range)
-
-  const { data: paymentData, error: paymentError } = await db
-    .from("payments")
-    .select("id,provider,network,created_at,gross_amount,metadata,status")
-    .eq("merchant_id", merchantId)
-    .eq("status", "CONFIRMED")
-    .gte("created_at", start.toISOString())
-
-  if (paymentError) {
-    throw new Error(`Failed to load chart payment data: ${paymentError.message}`)
-  }
-
-  const payments = (paymentData || []) as PaymentRow[]
-  const paymentIds = payments
-    .map((payment) => String(payment.id || "").trim())
-    .filter(Boolean)
-
-  const transactionContextByPaymentId = new Map<string, TransactionChartContext>()
-
-  if (paymentIds.length) {
-    const { data: transactionData, error: transactionError } = await db
-      .from("transactions")
-      .select("payment_id,channel,provider,network,total_amount")
-      .eq("merchant_id", merchantId)
-      .in("payment_id", paymentIds)
-
-    if (transactionError) {
-      throw new Error(`Failed to load chart transaction channels: ${transactionError.message}`)
-    }
-
-    ;(transactionData || []).forEach((tx) => {
-      const paymentId = String(tx.payment_id || "").trim()
-      if (!paymentId || transactionContextByPaymentId.has(paymentId)) return
-      transactionContextByPaymentId.set(paymentId, {
-        channel: tx.channel || null,
-        provider: tx.provider || null,
-        network: tx.network || null,
-        totalAmount: tx.total_amount || null
-      })
-    })
-  }
+  const timeZone = await getMerchantTimeZone(merchantId)
+  const { buckets, start } = buildBuckets(range, timeZone)
+  const payments = await getAllCanonicalTransactions({
+    scope: { type: "merchant", merchantId },
+    startDate: start.toISOString(),
+    status: "CONFIRMED",
+    mode,
+  })
 
   payments.forEach((payment) => {
-    const paymentId = String(payment.id || "").trim()
-    const metadataChannel =
-      payment.metadata && typeof payment.metadata === "object"
-        ? String(payment.metadata.channel || "").trim() || null
-        : null
-    const transactionContext = transactionContextByPaymentId.get(paymentId)
-    const channel = transactionContext?.channel || metadataChannel
-
-    if (mode === "pos" && channel !== "pos") return
-    if (mode === "online" && channel !== "online") return
-
-    const amount = getChartAmountUsd(payment, transactionContext)
-
-    const d = new Date(payment.created_at)
+    const amount = payment.amountMinor / 100
+    const d = new Date(payment.occurredAt)
+    if (Number.isNaN(d.getTime())) return
     let label = ""
 
-    if (range === "24h") label = `${d.getHours()}:00`
-    if (range === "7d" || range === "1m" || range === "3m" || range === "6m") {
-      label = d.toLocaleDateString()
-    }
-    if (range === "1y") {
-      label = d.toLocaleString("default", { month: "short" })
-    }
-
+    label = chartLabel(d, range, timeZone)
     if (!buckets[label]) return
 
-    const chartProvider = normalizeChartProvider(
-      payment.provider || transactionContext?.provider,
-      payment.network || transactionContext?.network
-    )
-
-    if (!chartProvider) return
-    buckets[label][chartProvider] += amount
+    const chartProvider = normalizeChartProvider(payment.provider, payment.network)
+    if (chartProvider) buckets[label][chartProvider] += amount
   })
 
   return Object.values(buckets)

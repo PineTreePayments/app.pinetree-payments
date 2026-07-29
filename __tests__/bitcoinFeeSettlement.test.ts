@@ -730,6 +730,7 @@ describe("a permanent payment.retrieve 404 is not retried indefinitely", () => {
     advancePaymentToTargetStatus: vi.fn(),
     processPaymentEvent: vi.fn(),
     retrieveMerchantSpeedPayment: vi.fn(),
+    retrieveSpeedPayment: vi.fn(),
   }))
 
   beforeEach(() => {
@@ -739,7 +740,7 @@ describe("a permanent payment.retrieve 404 is not retried indefinitely", () => {
     mocks.updatePaymentMetadata.mockResolvedValue({ id: "pay-404" })
   })
 
-  it("logs the 404 as stale and flags the payment so it is skipped on the next reconciliation pass, without repeatedly polling Speed", async () => {
+  it("checks merchant and legacy platform scope once, then skips an unresolved 404 on later passes", async () => {
     vi.doMock("@/database", () => ({ getPaymentById: mocks.getPaymentById }))
     vi.doMock("@/database/payments", () => ({ updatePaymentMetadata: mocks.updatePaymentMetadata }))
     vi.doMock("@/engine/eventProcessor", () => ({
@@ -752,31 +753,56 @@ describe("a permanent payment.retrieve 404 is not retried indefinitely", () => {
     const { SpeedApiError, isSpeedPaymentPaid } = await vi.importActual<typeof import("@/providers/lightning/speedClient")>(
       "@/providers/lightning/speedClient"
     )
-    vi.doMock("@/providers/lightning/speedClient", () => ({ SpeedApiError, isSpeedPaymentPaid }))
+    vi.doMock("@/providers/lightning/speedClient", () => ({
+      SpeedApiError,
+      isSpeedPaymentPaid,
+      retrieveSpeedPayment: mocks.retrieveSpeedPayment,
+    }))
 
-    mocks.retrieveMerchantSpeedPayment.mockRejectedValue(
-      new SpeedApiError("Speed API returned 404", 404, "not_found", [{ field: null, message: "Invalid payment id. Your request cannot be completed." }], null, "req_404")
+    const notFound = () => new SpeedApiError(
+      "Speed API returned 404",
+      404,
+      "not_found",
+      [{ field: null, message: "Invalid payment id. Your request cannot be completed." }],
+      null,
+      "req_404"
     )
+    mocks.retrieveMerchantSpeedPayment.mockRejectedValue(notFound())
+    mocks.retrieveSpeedPayment.mockRejectedValue(notFound())
 
     const { reconcileSpeedLightningPayment } = await import("@/engine/lightningSpeedReconciliation")
 
-    // First call: hits the 404, flags the payment as stale.
+    // First call: neither connected-account nor legacy platform scope resolves
+    // the reference, so the bounded fallback is recorded as exhausted.
     const firstResult = await reconcileSpeedLightningPayment({
       id: "pay-404", status: "PROCESSING", provider_reference: "speed_pay_stale", merchant_id: "merchant-1",
     } as never)
     expect(firstResult.checked).toBe(true)
     expect(firstResult.detected).toBe(false)
-    expect(mocks.updatePaymentMetadata).toHaveBeenCalledWith("pay-404", expect.objectContaining({ speedRetrieveStale: true }))
+    expect(mocks.updatePaymentMetadata).toHaveBeenCalledWith("pay-404", expect.objectContaining({
+      speedRetrieveStale: true,
+      speedLegacyPlatformFallbackCheckedAt: expect.any(String),
+    }))
     expect(mocks.retrieveMerchantSpeedPayment).toHaveBeenCalledTimes(1)
+    expect(mocks.retrieveSpeedPayment).toHaveBeenCalledTimes(1)
 
     // Second call: payment now has the stale flag persisted - must skip Speed entirely.
-    mocks.getPaymentById.mockResolvedValue({ id: "pay-404", status: "PROCESSING", metadata: { speedRetrieveStale: true, speedRetrieveStaleAt: "2026-07-23T00:00:00.000Z" } })
+    mocks.getPaymentById.mockResolvedValue({
+      id: "pay-404",
+      status: "PROCESSING",
+      metadata: {
+        speedRetrieveStale: true,
+        speedRetrieveStaleAt: "2026-07-23T00:00:00.000Z",
+        speedLegacyPlatformFallbackCheckedAt: "2026-07-23T00:00:00.000Z",
+      },
+    })
     const secondResult = await reconcileSpeedLightningPayment({
       id: "pay-404", status: "PROCESSING", provider_reference: "speed_pay_stale", merchant_id: "merchant-1",
     } as never)
     expect(secondResult.checked).toBe(false)
     // Still only ever called once total across both reconciliation attempts.
     expect(mocks.retrieveMerchantSpeedPayment).toHaveBeenCalledTimes(1)
+    expect(mocks.retrieveSpeedPayment).toHaveBeenCalledTimes(1)
 
     // The canonical payment record itself was never mutated in status - only
     // the stale-reference flag was recorded, preserving it for support review.

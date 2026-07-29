@@ -71,12 +71,30 @@ const STATUS_ANSWERS: Record<string, Omit<PineTreeAssistantAnswer, "matchedArtic
       "Escalate if the customer believes funds moved despite the failed status."
     ]
   },
-  incomplete: {
-    title: "INCOMPLETE means the customer did not finish the payment",
-    body: "INCOMPLETE usually means the checkout or POS attempt was abandoned, expired, canceled, or never reached a usable payment signal.",
+  expired: {
+    title: "EXPIRED means the payment window ended",
+    body: "EXPIRED is the terminal state for a payment whose provider or checkout window ended before PineTree received payment evidence.",
     bullets: [
       "It is not a successful payment state.",
-      "Check whether the customer closed checkout or never approved the wallet/provider step.",
+      "Confirm that no funds were sent before creating a new attempt.",
+      "If a wallet or provider shows funds moved, open a support ticket with the payment ID and transaction reference."
+    ]
+  },
+  canceled: {
+    title: "CANCELED means the payment was explicitly stopped",
+    body: "CANCELED is the terminal state for an explicit merchant or customer cancellation before a completed payment.",
+    bullets: [
+      "It is distinct from Expired and Incomplete.",
+      "Confirm that no funds were sent before creating a new attempt.",
+      "If a wallet or provider shows funds moved, open a support ticket with the payment ID and transaction reference."
+    ]
+  },
+  incomplete: {
+    title: "INCOMPLETE means the attempt ended without a more specific outcome",
+    body: "INCOMPLETE is the terminal state used when a payment cannot continue and PineTree has no authoritative Failed, Expired, or Canceled outcome.",
+    bullets: [
+      "It is not a successful payment state.",
+      "Check whether the customer abandoned the attempt or never approved the wallet/provider step.",
       "Create a new attempt only after confirming no funds were sent."
     ]
   }
@@ -259,7 +277,7 @@ function findMentionedPayment(question: string, context: PineTreeAssistantContex
 
 function latestRelevantPayment(context: PineTreeAssistantContext) {
   return context.recentPayments.find((payment) =>
-    ["PENDING", "PROCESSING", "FAILED", "INCOMPLETE", "CREATED"].includes(String(payment.status))
+    ["PENDING", "PROCESSING", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE", "CREATED"].includes(String(payment.status))
   ) || context.recentPayments[0]
 }
 
@@ -534,7 +552,11 @@ function withContextAnswer(
                 ? "PineTree completed the payment successfully."
                 : status === "FAILED"
                   ? "something went wrong and the payment did not complete."
-                  : "the customer abandoned or the payment did not finish before funds were sent."
+                  : status === "EXPIRED"
+                    ? "the payment window ended before PineTree received payment evidence."
+                    : status === "CANCELED"
+                      ? "the payment was explicitly stopped before completion."
+                      : "the attempt ended without a more specific terminal outcome."
       }`,
       bullets: [
         `Provider/rail: ${payment.provider || "unknown"}${payment.network ? ` on ${payment.network}` : ""}.`,

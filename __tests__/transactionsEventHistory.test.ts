@@ -31,19 +31,24 @@ describe("merchant transaction event history", () => {
     expect(JSON.stringify(event)).not.toContain("secret")
   })
 
-  it("queries merchant-scoped event rows and never selects raw payloads", () => {
-    const source = fs.readFileSync(
+  it("projects event history from the canonical merchant-scoped read without raw payloads", () => {
+    const engineSource = fs.readFileSync(
       path.join(process.cwd(), "engine/transactionsDashboard.ts"),
       "utf8"
     )
-    const eventQuery = source.slice(
-      source.indexOf('.from("payment_events")'),
-      source.indexOf("const startOfDay")
+    const dataSource = fs.readFileSync(
+      path.join(process.cwd(), "database/canonicalTransactions.ts"),
+      "utf8"
     )
 
-    expect(eventQuery).toContain('.select("payment_id,event_type,provider_event,created_at")')
-    expect(eventQuery).not.toContain("raw_payload")
-    expect(source).toContain("lifecycle_events: normalizedEvents")
+    expect(dataSource).toContain("payment_events (")
+    expect(dataSource).toContain("provider_event")
+    expect(dataSource).not.toContain("raw_payload")
+    expect(dataSource).toContain("const merchantId = filters.scope.merchantId.trim()")
+    expect(dataSource).toContain('.eq("merchant_id", merchantId)')
+    expect(dataSource).toContain('.eq("transactions.merchant_id", merchantId)')
+    expect(engineSource).toContain("transaction.lifecycleEvents.map")
+    expect(engineSource).not.toContain('.from("payment_events")')
   })
 
   it("does not treat ordinary lifecycle updates as terminal events", () => {

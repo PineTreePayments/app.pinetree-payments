@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
 import {
-  getPlatformReport,
   getAdminStaleDiagnostic,
   type PlatformReportPeriod,
   type PlatformReportMode,
 } from "@/database/adminReports"
+import { getPlatformReportEngine } from "@/engine/adminReports"
 
 const VALID_PERIODS = new Set<string>(["7d", "30d", "month", "quarter", "year"])
 const VALID_MODES = new Set<string>(["all", "live", "test"])
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
       ? (rawMode as PlatformReportMode)
       : "all"
 
-    const result = await getPlatformReport(period, mode)
+    const result = await getPlatformReportEngine(period, mode)
     return NextResponse.json(result)
   } catch (err) {
     const status = getRouteErrorStatus(err)

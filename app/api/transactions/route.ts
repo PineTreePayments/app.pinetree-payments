@@ -13,9 +13,25 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
+const TRANSACTION_TIME_FILTERS = new Set([
+  "last_hour",
+  "last_24_hours",
+  "last_7_days",
+  "last_30_days",
+  "this_month",
+])
+
+function transactionTimeFilter(value: string | undefined) {
+  if (!value) return undefined
+  if (!TRANSACTION_TIME_FILTERS.has(value)) {
+    throw Object.assign(new Error("Invalid transaction time filter"), { status: 400 })
+  }
+  return value as "last_hour" | "last_24_hours" | "last_7_days" | "last_30_days" | "this_month"
+}
+
 export async function GET(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantId = await requireMerchantIdFromRequest(req, "payments:read")
     schedulePaymentMaintenance("transactions.list")
 
     const { searchParams } = new URL(req.url)
@@ -40,6 +56,7 @@ export async function GET(req: NextRequest) {
       method: filter("method"),
       startDate,
       endDate,
+      timeFilter: transactionTimeFilter(filter("timeFilter")),
       page: Number(searchParams.get("page") || 1),
       pageSize: Number(searchParams.get("pageSize") || 50)
     })
@@ -66,7 +83,7 @@ function normalizeDateBoundary(value: string | undefined, endOfDay: boolean): st
 
 export async function POST(req: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantId = await requireMerchantIdFromRequest(req, "payments:read")
 
     const body = (await req.json()) as {
       action?: string

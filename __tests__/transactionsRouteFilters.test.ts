@@ -44,6 +44,7 @@ describe("transactions route filters", () => {
     const response = await GET(request)
 
     expect(response.status).toBe(200)
+    expect(mocks.requireMerchantId).toHaveBeenCalledWith(request, "payments:read")
     expect(mocks.listTransactions).toHaveBeenCalledWith("merchant-1", {
       provider: "stripe",
       network: "base",
@@ -67,6 +68,15 @@ describe("transactions route filters", () => {
       provider: undefined,
       page: 1,
       pageSize: 50,
+    }))
+  })
+
+  it("passes semantic time filters to the Engine for merchant-timezone resolution", async () => {
+    await GET(new NextRequest("https://app.test/api/transactions?timeFilter=this_month"))
+    expect(mocks.listTransactions).toHaveBeenCalledWith("merchant-1", expect.objectContaining({
+      timeFilter: "this_month",
+      startDate: undefined,
+      endDate: undefined,
     }))
   })
 })

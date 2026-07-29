@@ -23,11 +23,11 @@ describe("responsive UX corrections", () => {
     expect(page).not.toContain("Apply filters")
     expect(page).not.toContain("Clear filters")
     expect(page).not.toContain("Status filter")
-    expect(page).not.toContain("Status:")
+    expect(page).not.toMatch(/>\s*Status:\s*</)
     expect(page).not.toContain("All Wallets")
     expect(page).not.toContain("grid min-w-0 grid-cols-2 gap-1.5 sm:grid-cols-4")
     expect(page).toContain("Complete more transactions to unlock activity insights.")
-    expect(page).toContain('authoritativeStatus === "CONFIRMED"')
+    expect(page).toContain('tx.canonicalStatus === "CONFIRMED"')
   })
 
   it("routes developer management areas to dedicated pages", () => {

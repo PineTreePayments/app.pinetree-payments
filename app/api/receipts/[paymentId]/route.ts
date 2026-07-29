@@ -7,7 +7,7 @@ export async function GET(
   context: { params: Promise<{ paymentId: string }> }
 ) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(req)
+    const merchantId = await requireMerchantIdFromRequest(req, "payments:read")
     const { paymentId } = await context.params
     const receipt = await getMerchantReceipt(merchantId, paymentId)
     return new NextResponse(renderReceiptHtml(receipt), {

@@ -473,7 +473,7 @@ function cardMetadata(payment: { metadata?: unknown }): CardMetadata | null {
 async function requireOwnedPayablePayment(merchantId: string, paymentId: string) {
   const payment = await getPaymentById(paymentId)
   if (!payment || payment.merchant_id !== merchantId) throw statusError("Payment not found", 404)
-  if (["CONFIRMED", "FAILED", "INCOMPLETE"].includes(payment.status)) {
+  if (["CONFIRMED", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE"].includes(payment.status)) {
     throw statusError("This payment is no longer payable", 409)
   }
   return payment
@@ -599,12 +599,12 @@ export async function cancelTerminalPaymentEngine(merchantId: string, paymentId:
   if (payment.provider_reference) {
     await cancelCardPaymentIntent({ connectedAccountId: accountId, paymentIntentId: payment.provider_reference }).catch(() => undefined)
   }
-  await advancePaymentToTargetStatus(payment.id, "INCOMPLETE", {
+  await advancePaymentToTargetStatus(payment.id, "CANCELED", {
     providerEvent: "terminal.reader.action_canceled",
     rawPayload: { reason: "merchant_canceled", paymentIntentId: payment.provider_reference || null }
   })
   await releaseTerminalReaderClaim(payment.id)
-  return { paymentId: payment.id, status: "INCOMPLETE" as const }
+  return { paymentId: payment.id, status: "CANCELED" as const }
 }
 
 export async function createManualEntryPaymentEngine(input: {

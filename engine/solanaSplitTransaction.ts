@@ -126,7 +126,13 @@ export async function buildSolanaSplitTransactionEngine(input: {
   }
 
   const status = normalizeToStrictPaymentStatus(payment.status)
-  if (status === "CONFIRMED" || status === "FAILED" || status === "INCOMPLETE") {
+  if (
+    status === "CONFIRMED" ||
+    status === "FAILED" ||
+    status === "EXPIRED" ||
+    status === "CANCELED" ||
+    status === "INCOMPLETE"
+  ) {
     console.error("[SOLANA ENGINE][TX] terminal payment rejected", { paymentId, status })
     throw new Error("Payment is no longer payable")
   }

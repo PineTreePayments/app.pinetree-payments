@@ -1,15 +1,14 @@
 import {
-  getMerchantPaymentsForReport,
   getMerchantReportContext,
-  type MerchantReportContext,
-  type MerchantReportPaymentRow
+  type MerchantReportContext
 } from "@/database/reports"
+import { normalizeReportProvider } from "./reportDisplayNormalization"
 import {
-  normalizeReportAsset,
-  normalizeReportNetwork,
-  normalizeReportProvider,
-  normalizeReportStatus
-} from "./reportDisplayNormalization"
+  getAllCanonicalTransactions,
+  type CanonicalTransaction,
+  type CanonicalTransactionAdjustmentStatus,
+  type CanonicalTransactionRail
+} from "./canonicalTransactions"
 import {
   formatInMerchantTimeZone,
   resolveMerchantReportRange,
@@ -38,12 +37,18 @@ export type ReportInput = {
 export type ReportLedgerRow = {
   dateTime: string
   paymentId: string
+  attemptId: string | null
   reference: string
+  providerReference: string | null
+  transactionHash: string | null
   provider: string
-  rail: "Card" | "Crypto" | "Cash" | "Other"
+  rail: CanonicalTransactionRail
   network: string
   asset: string
+  currency: string
   channel: string
+  amountMinor: number
+  displayAmount: string
   subtotal: number
   tax: number
   pinetreeFee: number
@@ -51,6 +56,11 @@ export type ReportLedgerRow = {
   netSettlement: number
   status: string
   canonicalStatus: string
+  occurredAt: string
+  createdAt: string
+  confirmedAt: string | null
+  source: string
+  adjustmentStatus: CanonicalTransactionAdjustmentStatus
 }
 
 export type ReportSummary = {
@@ -158,16 +168,6 @@ function displayChannelName(channel: string) {
   return channel || "Unknown"
 }
 
-function transactionCentsToDollars(value: number | string | null | undefined) {
-  const numeric = Number(value || 0)
-  return Number.isFinite(numeric) ? fromMinorUnits(Math.round(numeric)) : 0
-}
-
-function money(value: number | string | null | undefined) {
-  const numeric = Number(value || 0)
-  return Number.isFinite(numeric) ? fromMinorUnits(toMinorUnits(numeric)) : 0
-}
-
 const MONEY_SCALE = 100
 
 function toMinorUnits(value: number): number {
@@ -178,22 +178,11 @@ function fromMinorUnits(value: number): number {
   return value / MONEY_SCALE
 }
 
-function getMetadataNumber(metadata: Record<string, unknown> | null | undefined, key: string) {
+function getMetadataMinor(metadata: Record<string, unknown> | null | undefined, key: string) {
   const value = metadata?.[key]
-  return typeof value === "number" || typeof value === "string" ? Number(value || 0) : 0
-}
-
-function getRawAsset(payment: MerchantReportPaymentRow) {
-  const metadata = payment.metadata || {}
-  const selectedAsset = String(metadata.selectedAsset || metadata.asset || "").trim().toUpperCase()
-  if (selectedAsset) return selectedAsset
-  return String(payment.currency || "USD").trim().toUpperCase() || "USD"
-}
-
-function primaryTransaction(payment: MerchantReportPaymentRow) {
-  return Array.isArray(payment.transactions) && payment.transactions.length > 0
-    ? payment.transactions[0]
-    : null
+  if (typeof value !== "number" && typeof value !== "string") return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? toMinorUnits(numeric) : null
 }
 
 function addMinorTotal(target: Record<string, number>, key: string, value: number) {
@@ -207,72 +196,75 @@ function minorTotalsToMoney(target: Record<string, number>): Record<string, numb
   )
 }
 
-function resolveRail(provider: string, network: string, channel: string): ReportLedgerRow["rail"] {
-  const normalizedProvider = provider.toLowerCase()
-  if (normalizedProvider === "cash" || network === "Cash" || channel === "Cash") return "Cash"
-  if (["stripe", "shift4", "fluidpay"].some((value) => normalizedProvider.includes(value))) return "Card"
-  if (["Solana", "Base", "Ethereum", "Bitcoin Lightning"].includes(network)) return "Crypto"
+function reportRailGroup(rail: CanonicalTransactionRail): "Card" | "Crypto" | "Cash" | "Other" {
+  if (rail === "Card" || rail === "Cash") return rail
+  if (["Base", "Solana", "Ethereum", "Bitcoin Lightning", "Crypto"].includes(rail)) return "Crypto"
   return "Other"
 }
 
-function buildLedgerRow(payment: MerchantReportPaymentRow): ReportLedgerRow {
-  const tx = primaryTransaction(payment)
-  const metadata = payment.metadata || {}
-  const transactionStatus = String(tx?.status || "").trim().toUpperCase()
-  const hasRefundedTransaction = Array.isArray(payment.transactions) && payment.transactions.some(
-    (transaction) => String(transaction.status || "").trim().toUpperCase() === "REFUNDED"
+/**
+ * Report projection is intentionally an adapter over the shared canonical
+ * transaction row. It never reads a second status field or replays events.
+ */
+export function buildReportLedgerRow(payment: CanonicalTransaction): ReportLedgerRow {
+  const merchantAmountMinor = payment.merchantAmountMinor ?? payment.amountMinor
+  const metadataTaxMinor = getMetadataMinor(payment.metadata, "taxAmount")
+  const metadataSubtotalMinor =
+    getMetadataMinor(payment.metadata, "subtotalAmount") ??
+    getMetadataMinor(payment.metadata, "merchantAmount")
+  const subtotalMinor = metadataSubtotalMinor ?? payment.subtotalAmountMinor ?? Math.max(
+    0,
+    merchantAmountMinor - (metadataTaxMinor ?? 0)
   )
-  const statusCode = hasRefundedTransaction || transactionStatus === "REFUNDED"
-    ? "REFUNDED"
-    : String(payment.status || tx?.status || "PENDING").trim().toUpperCase()
-  const status = normalizeReportStatus(statusCode, payment.created_at)
-  // A recorded zero is authoritative (for example, a waived historical fee).
-  // Fall back to the transaction only when the payment column is absent.
-  const gross = payment.gross_amount == null
-    ? transactionCentsToDollars(tx?.total_amount)
-    : money(payment.gross_amount)
-  const pinetreeFee = payment.pinetree_fee == null
-    ? transactionCentsToDollars(tx?.platform_fee)
-    : money(payment.pinetree_fee)
-  const metadataSubtotal = getMetadataNumber(metadata, "subtotalAmount") || getMetadataNumber(metadata, "merchantAmount")
-  const transactionSubtotal = transactionCentsToDollars(tx?.subtotal_amount)
-  const subtotal = money(metadataSubtotal || transactionSubtotal || Math.max(0, money(payment.merchant_amount) - getMetadataNumber(metadata, "taxAmount")))
-  const metadataTax = getMetadataNumber(metadata, "taxAmount")
-  const tax = money(metadataTax || Math.max(0, money(payment.merchant_amount) - subtotal))
-  const rawProvider = String(tx?.provider || payment.provider || "")
-  const rawNetwork = tx?.network || payment.network
-  const provider = normalizeReportProvider(rawProvider || "unknown")
-  const network = normalizeReportNetwork(rawNetwork, rawProvider)
-  const asset = normalizeReportAsset(getRawAsset(payment), rawNetwork, rawProvider, payment.currency)
-  const channel = displayChannelName(String(tx?.channel || metadata.channel || "online"))
-  const rail = resolveRail(provider, network, channel)
-  const reference = String(tx?.provider_transaction_id || payment.provider_reference || payment.id)
+  const taxMinor = metadataTaxMinor ?? Math.max(0, merchantAmountMinor - subtotalMinor)
+  const grossMinor = payment.grossAmountMinor ?? payment.transactionAmountMinor ?? payment.amountMinor
+  const feeMinor = payment.feeAmountMinor ?? 0
+  const reference = payment.providerReference || payment.transactionHash || payment.paymentId
 
   return {
-    dateTime: payment.created_at,
-    paymentId: payment.id,
+    dateTime: payment.occurredAt,
+    paymentId: payment.paymentId,
+    attemptId: payment.attemptId,
     reference,
-    provider,
-    rail,
-    network,
-    asset,
-    channel,
-    subtotal,
-    tax,
-    pinetreeFee,
-    gross,
-    netSettlement: money(Math.max(0, gross - pinetreeFee)),
-    status,
-    canonicalStatus: statusCode
+    providerReference: payment.providerReference,
+    transactionHash: payment.transactionHash,
+    provider: normalizeReportProvider(payment.provider),
+    rail: payment.rail,
+    network: payment.network,
+    asset: payment.asset,
+    currency: payment.currency,
+    channel: displayChannelName(payment.channel || "online"),
+    amountMinor: payment.amountMinor,
+    displayAmount: payment.displayAmount,
+    subtotal: fromMinorUnits(subtotalMinor),
+    tax: fromMinorUnits(taxMinor),
+    pinetreeFee: fromMinorUnits(feeMinor),
+    gross: fromMinorUnits(grossMinor),
+    netSettlement: fromMinorUnits(Math.max(0, grossMinor - feeMinor)),
+    status: payment.displayStatus,
+    canonicalStatus: payment.canonicalStatus,
+    occurredAt: payment.occurredAt,
+    createdAt: payment.createdAt,
+    confirmedAt: payment.confirmedAt,
+    source: payment.source,
+    adjustmentStatus: payment.adjustmentStatus,
   }
+}
+
+function matchesReportStatus(row: ReportLedgerRow, rawFilter: string | null | undefined) {
+  const filter = String(rawFilter || "").trim().toUpperCase().replace(/[-\s]+/g, "_")
+  if (!filter) return true
+  if (filter === "REFUNDED" || filter === "DISPUTED") return row.adjustmentStatus === filter
+  if (filter === "WAITING") return row.canonicalStatus === "CREATED" || row.canonicalStatus === "PENDING"
+  return row.canonicalStatus === (filter === "CANCELLED" ? "CANCELED" : filter)
 }
 
 export async function generateReportEngine(input: ReportInput): Promise<ReportSummary> {
   const reportType = normalizeReportType(input.type)
   const context = await getMerchantReportContext(input.merchantId)
   const range = resolveReportRange({ ...input, timeZone: context.settings.timezone })
-  const payments = await getMerchantPaymentsForReport({
-    merchantId: input.merchantId,
+  const payments = await getAllCanonicalTransactions({
+    scope: { type: "merchant", merchantId: input.merchantId },
     startDate: range.startDate,
     endDate: range.endDate
   })
@@ -282,12 +274,9 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
   const railTotalsMinor: Record<string, number> = {}
   const networkTotalsMinor: Record<string, number> = {}
   const assetTotalsMinor: Record<string, number> = {}
-  const statusFilter = input.status
-    ? normalizeReportStatus(input.status, "")
-    : null
   const transactionsTable = payments
-    .map(buildLedgerRow)
-    .filter((row) => !statusFilter || row.status === statusFilter)
+    .map(buildReportLedgerRow)
+    .filter((row) => matchesReportStatus(row, input.status))
 
   let grossVolumeMinor = 0
   let netSettlementsMinor = 0
@@ -308,6 +297,10 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
 
   for (const row of transactionsTable) {
     statusCounts[row.status] = (statusCounts[row.status] || 0) + 1
+    if (row.adjustmentStatus === "REFUNDED") {
+      refundedCount++
+      refundedAmountMinor += toMinorUnits(row.gross)
+    }
     if (row.status === "Confirmed") {
       confirmedCount++
       const grossMinor = toMinorUnits(row.gross)
@@ -318,9 +311,9 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
       taxableSalesMinor += toMinorUnits(row.subtotal)
       addMinorTotal(providerTotalsMinor, row.provider, grossMinor)
       addMinorTotal(channelTotalsMinor, row.channel, grossMinor)
-      addMinorTotal(railTotalsMinor, row.rail, grossMinor)
+      addMinorTotal(railTotalsMinor, reportRailGroup(row.rail), grossMinor)
       addMinorTotal(networkTotalsMinor, row.network, grossMinor)
-      if (row.rail === "Crypto") addMinorTotal(assetTotalsMinor, row.asset, grossMinor)
+      if (reportRailGroup(row.rail) === "Crypto") addMinorTotal(assetTotalsMinor, row.asset, grossMinor)
     } else if (row.status === "Failed") {
       failedCount++
     } else if (row.status === "Waiting") {
@@ -333,9 +326,6 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
       expiredCount++
     } else if (row.status === "Canceled") {
       canceledCount++
-    } else if (row.status === "Refunded") {
-      refundedCount++
-      refundedAmountMinor += toMinorUnits(row.gross)
     } else {
       unknownCount++
     }
@@ -423,41 +413,61 @@ export function generateReportCsv(report: ReportSummary) {
   const headers = [
     "date_time",
     "payment_id",
-    "reference",
+    "attempt_id",
+    "provider_reference",
+    "transaction_hash",
     "provider",
     "rail",
     "network",
-    "asset_currency",
+    "asset",
+    "currency",
     "channel",
     "subtotal",
     "tax",
     "pinetree_fee",
     "gross_total",
     "net_settlement",
-    "status"
+    "canonical_status",
+    "display_status",
+    "adjustment_status",
+    "source"
   ]
 
   const rows = report.transactionsTable.map((row) => [
     formatInMerchantTimeZone(row.dateTime, report.timeZone),
     row.paymentId,
-    row.reference,
+    row.attemptId || "",
+    row.providerReference || "",
+    row.transactionHash || "",
     row.provider,
     row.rail,
     row.network,
     row.asset,
+    row.currency,
     row.channel,
     row.subtotal,
     row.tax,
     row.pinetreeFee,
     row.gross,
     row.netSettlement,
-    row.status
+    row.canonicalStatus,
+    row.status,
+    row.adjustmentStatus || "",
+    row.source,
+  ])
+
+  const numericColumns = new Set([
+    "subtotal",
+    "tax",
+    "pinetree_fee",
+    "gross_total",
+    "net_settlement",
   ])
 
   return [
     headers.join(","),
     ...rows.map((row) => row.map((value, index) => {
-      const numericColumn = index >= 8 && index <= 12
+      const numericColumn = numericColumns.has(headers[index])
       return csvValue(numericColumn && typeof value === "number" ? value.toFixed(2) : value, !numericColumn)
     }).join(","))
   ].join("\n")

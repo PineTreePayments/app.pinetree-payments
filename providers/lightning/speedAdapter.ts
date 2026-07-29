@@ -75,7 +75,7 @@ export function normalizeSpeedStatus(status: string) {
   if (normalized === "processing" || normalized === "settling") return "PROCESSING" as const
   if (normalized === "pending" || normalized === "unpaid" || normalized === "created") return "PENDING" as const
   if (normalized === "expired") return "EXPIRED" as const
-  if (normalized === "cancelled" || normalized === "canceled") return "INCOMPLETE" as const
+  if (normalized === "cancelled" || normalized === "canceled") return "CANCELED" as const
   console.warn("[speed] unknown payment status", { providerStatus: normalized || null })
   return "UNKNOWN" as const
 }

@@ -334,15 +334,15 @@ describe("Scenario 4 — CONFIRMED is never downgraded (Rule 10)", () => {
     }
   })
 
-  it("resolveTransactionDisplayStatus: CONFIRMED tx wins even with non-CONFIRMED payment", () => {
-    expect(resolveTransactionDisplayStatus("CONFIRMED", "FAILED")).toBe("CONFIRMED")
-    expect(resolveTransactionDisplayStatus("CONFIRMED", "INCOMPLETE")).toBe("CONFIRMED")
-    expect(resolveTransactionDisplayStatus("CONFIRMED", "PENDING")).toBe("CONFIRMED")
+  it("resolveTransactionDisplayStatus: payments.status wins even when a transaction snapshot disagrees", () => {
+    expect(resolveTransactionDisplayStatus("CONFIRMED", "FAILED")).toBe("FAILED")
+    expect(resolveTransactionDisplayStatus("CONFIRMED", "INCOMPLETE")).toBe("INCOMPLETE")
+    expect(resolveTransactionDisplayStatus("CONFIRMED", "PENDING")).toBe("PENDING")
   })
 
-  it("normalizeStoredPaymentStatus preserves REFUNDED", () => {
+  it("keeps transaction refunds separate from a confirmed payment lifecycle", () => {
     expect(normalizeStoredPaymentStatus("REFUNDED")).toBe("REFUNDED")
-    expect(resolveTransactionDisplayStatus("REFUNDED", "CONFIRMED")).toBe("REFUNDED")
+    expect(resolveTransactionDisplayStatus("REFUNDED", "CONFIRMED")).toBe("CONFIRMED")
   })
 
   it("getPaymentIncompleteEligibility: CONFIRMED payment is always ineligible", async () => {
@@ -365,16 +365,17 @@ describe("Scenario 5 — FAILED is never converted to INCOMPLETE (Rule 11)", () 
     expect(result).not.toBe("INCOMPLETE")
   })
 
-  it("resolveTransactionDisplayStatus: FAILED tx + INCOMPLETE payment → keeps FAILED (CONFIRMED-or-FAILED wins)", () => {
+  it("resolveTransactionDisplayStatus: FAILED tx + INCOMPLETE payment keeps canonical INCOMPLETE", () => {
     const result = resolveTransactionDisplayStatus("FAILED", "INCOMPLETE")
-    expect(result).toBe("FAILED")
-    expect(result).not.toBe("INCOMPLETE")
+    expect(result).toBe("INCOMPLETE")
+    expect(result).not.toBe("FAILED")
   })
 
   it("isTerminalFailureStatus returns true for FAILED and INCOMPLETE", () => {
     expect(isTerminalFailureStatus("FAILED")).toBe(true)
     expect(isTerminalFailureStatus("INCOMPLETE")).toBe(true)
-    expect(isTerminalFailureStatus("EXPIRED")).toBe(true) // EXPIRED → INCOMPLETE
+    expect(isTerminalFailureStatus("EXPIRED")).toBe(true)
+    expect(isTerminalFailureStatus("CANCELED")).toBe(true)
   })
 
   it("isTerminalFailureStatus returns false for non-failure statuses", () => {
@@ -393,10 +394,9 @@ describe("Scenario 5 — FAILED is never converted to INCOMPLETE (Rule 11)", () 
     expect(eligibility.reason).toBe("terminal_status_not_eligible")
   })
 
-  it("normalizeStoredPaymentStatus: EXPIRED normalises to INCOMPLETE (not FAILED)", () => {
-    expect(normalizeStoredPaymentStatus("EXPIRED")).toBe("INCOMPLETE")
-    // FAILED is never the result of normalising EXPIRED
-    expect(normalizeStoredPaymentStatus("EXPIRED")).not.toBe("FAILED")
+  it("normalizeStoredPaymentStatus preserves EXPIRED as a distinct lifecycle outcome", () => {
+    expect(normalizeStoredPaymentStatus("EXPIRED")).toBe("EXPIRED")
+    expect(normalizeStoredPaymentStatus("EXPIRED")).not.toBe("INCOMPLETE")
   })
 })
 
@@ -415,6 +415,7 @@ describe("Scenario 6 — admin and merchant mappers return identical status for 
     "FAILED",
     "INCOMPLETE",
     "EXPIRED",
+    "CANCELED",
   ]
 
   it.each(allDbStatuses)(
@@ -450,7 +451,7 @@ describe("Scenario 6 — admin and merchant mappers return identical status for 
 
 // ── normalizeStoredPaymentStatus — exhaustive coverage ───────────────────────
 
-describe("normalizeStoredPaymentStatus — canonical 6-state normalisation", () => {
+describe("normalizeStoredPaymentStatus — canonical lifecycle normalisation", () => {
   it.each([
     ["CREATED",    "CREATED"],
     ["PENDING",    "PENDING"],
@@ -458,8 +459,9 @@ describe("normalizeStoredPaymentStatus — canonical 6-state normalisation", () 
     ["CONFIRMED",  "CONFIRMED"],
     ["FAILED",     "FAILED"],
     ["INCOMPLETE", "INCOMPLETE"],
-    ["EXPIRED",    "INCOMPLETE"],   // EXPIRED collapses to INCOMPLETE
-    ["CANCELLED",  "INCOMPLETE"],   // CANCELLED collapses to INCOMPLETE
+    ["EXPIRED",    "EXPIRED"],
+    ["CANCELED",   "CANCELED"],
+    ["CANCELLED",  "CANCELED"],
     ["REFUNDED",   "REFUNDED"],
     ["",           "UNKNOWN"],
     [null,         "UNKNOWN"],
@@ -475,7 +477,7 @@ describe("normalizeStoredPaymentStatus — canonical 6-state normalisation", () 
 // ── isTerminalStatus ──────────────────────────────────────────────────────────
 
 describe("isTerminalStatus", () => {
-  it.each(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "REFUNDED"])(
+  it.each(["CONFIRMED", "FAILED", "INCOMPLETE", "EXPIRED", "CANCELED", "REFUNDED"])(
     "%s is terminal",
     (s) => expect(isTerminalStatus(s)).toBe(true)
   )

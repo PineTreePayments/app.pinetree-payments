@@ -8,6 +8,7 @@ export type PaymentStatus =
   | "FAILED"
   | "INCOMPLETE"
   | "EXPIRED"
+  | "CANCELED"
   | "REFUNDED"
   | "UNKNOWN"
 
@@ -71,6 +72,7 @@ export type LightningInvoiceStatus =
   | "FAILED"
   | "INCOMPLETE"
   | "EXPIRED"
+  | "CANCELED"
   | "UNKNOWN"
 
 export type StandardPaymentEvent = {

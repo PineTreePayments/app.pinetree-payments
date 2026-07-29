@@ -158,7 +158,8 @@ export type PaymentFreshnessResult = {
 }
 
 function isTerminalPaymentStatus(status: string): status is TerminalPaymentStatus {
-  return status === "CONFIRMED" || status === "FAILED" || status === "INCOMPLETE"
+  return status === "CONFIRMED" || status === "FAILED" || status === "EXPIRED" ||
+    status === "CANCELED" || status === "CANCELLED" || status === "INCOMPLETE"
 }
 
 function isOlderThan(value: string | null | undefined, ageMs: number): boolean {
@@ -305,6 +306,30 @@ export async function runPaymentMaintenanceTick(options?: {
   lease.lastStartedAt = now
 
   try {
+    // Speed is the authority for Lightning invoice state. Reconcile those
+    // invoices before the generic abandonment sweep so an old but paid invoice
+    // can never be classified from local age alone.
+    let lightningReconciled = 0
+    let lightningErrors = 0
+    const lightningLimit = Math.max(1, Math.min(options?.lightningReconcileLimit ?? 5, 25))
+    const lightningCutoff = new Date(now - LIGHTNING_RECONCILE_MIN_AGE_MS).toISOString()
+    const lightningCandidates = await getLightningReconciliationCandidates({
+      limit: lightningLimit,
+      cutoff: lightningCutoff
+    })
+    for (const payment of lightningCandidates) {
+      try {
+        const result = await reconcileSpeedLightningPayment(payment)
+        if (result.checked) lightningReconciled += 1
+      } catch (error) {
+        lightningErrors += 1
+        console.warn("[payment-maintenance] lightning reconciliation failed", {
+          paymentId: payment.id,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+
     const sweep = await sweepStalePayments({
       maxRows: options?.sweepLimit ?? 10,
       staleAfterMs: CHECKOUT_TIMEOUT_MS
@@ -382,27 +407,6 @@ export async function runPaymentMaintenanceTick(options?: {
       } catch (error) {
         reconcileErrors += 1
         console.warn("[payment-maintenance] transaction reconciliation failed", {
-          paymentId: payment.id,
-          error: error instanceof Error ? error.message : String(error)
-        })
-      }
-    }
-
-    let lightningReconciled = 0
-    let lightningErrors = 0
-    const lightningLimit = Math.max(1, Math.min(options?.lightningReconcileLimit ?? 5, 25))
-    const lightningCutoff = new Date(now - LIGHTNING_RECONCILE_MIN_AGE_MS).toISOString()
-    const lightningCandidates = await getLightningReconciliationCandidates({
-      limit: lightningLimit,
-      cutoff: lightningCutoff
-    })
-    for (const payment of lightningCandidates) {
-      try {
-        const result = await reconcileSpeedLightningPayment(payment)
-        if (result.checked) lightningReconciled += 1
-      } catch (error) {
-        lightningErrors += 1
-        console.warn("[payment-maintenance] lightning reconciliation failed", {
           paymentId: payment.id,
           error: error instanceof Error ? error.message : String(error)
         })

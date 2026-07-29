@@ -84,9 +84,9 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     message: "The payment request timed out naturally.",
     tone: "expired",
     icon: "alert-triangle",
-    classes: "border border-amber-200 bg-amber-100 text-amber-900",
-    iconClassName: "text-amber-700",
-    iconBgClassName: "bg-amber-50",
+    classes: "border border-red-200 bg-red-50 text-red-700",
+    iconClassName: "text-red-500",
+    iconBgClassName: "bg-red-50",
   },
   canceled: {
     label: "Canceled",

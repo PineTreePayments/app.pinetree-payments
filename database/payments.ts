@@ -7,6 +7,8 @@ export type PaymentStatus =
   | "PROCESSING"
   | "CONFIRMED"
   | "FAILED"
+  | "EXPIRED"
+  | "CANCELED"
   | "INCOMPLETE"
 
 export type Payment = {

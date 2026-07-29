@@ -11,18 +11,22 @@ export type PaymentStatus =
   | "PROCESSING"
   | "CONFIRMED"
   | "FAILED"
+  | "EXPIRED"
+  | "CANCELED"
   | "INCOMPLETE"
 
 export function normalizeToStrictPaymentStatus(status: unknown): PaymentStatus {
   const normalized = String(status || "").toUpperCase().trim()
 
-  if (normalized === "EXPIRED") return "INCOMPLETE"
+  if (normalized === "CANCELLED") return "CANCELED"
   if (
     normalized === "CREATED" ||
     normalized === "PENDING" ||
     normalized === "PROCESSING" ||
     normalized === "CONFIRMED" ||
     normalized === "FAILED" ||
+    normalized === "EXPIRED" ||
+    normalized === "CANCELED" ||
     normalized === "INCOMPLETE"
   ) {
     return normalized
@@ -39,11 +43,11 @@ export function normalizeToStrictPaymentStatus(status: unknown): PaymentStatus {
  */
 const validTransitions: Record<PaymentStatus, PaymentStatus[]> = {
   // Strict lifecycle: CREATED -> PENDING -> PROCESSING -> CONFIRMED
-  // Abandoned checkout sessions can also move CREATED -> INCOMPLETE before funding.
+  // New records must be presented before any terminal customer outcome.
   CREATED: ["PENDING"],
 
-  // Allowed alternative path: PENDING -> INCOMPLETE
-  PENDING: ["PROCESSING", "INCOMPLETE"],
+  // Waiting payments can start processing or end with one exact unpaid outcome.
+  PENDING: ["PROCESSING", "EXPIRED", "CANCELED", "INCOMPLETE"],
 
   // Allowed alternative path: PROCESSING -> FAILED
   PROCESSING: ["CONFIRMED", "FAILED"],
@@ -53,6 +57,8 @@ const validTransitions: Record<PaymentStatus, PaymentStatus[]> = {
 
   // Terminal states - no further transitions
   FAILED: [],
+  EXPIRED: [],
+  CANCELED: [],
   INCOMPLETE: []
 }
 

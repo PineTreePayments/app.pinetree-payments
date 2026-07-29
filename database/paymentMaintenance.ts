@@ -4,6 +4,13 @@ import { SPEED_PROVIDER_NAME } from "./merchantProviders"
 
 const db = supabaseAdmin || supabaseAnon
 
+const LIGHTNING_NETWORK_FILTER = "bitcoin_lightning,btc_lightning,lightning_btc,lightning"
+const SPEED_PROVIDER_FILTER = "lightning_speed,speed,tryspeed"
+const ACTIVE_SPEED_RECONCILIATION_FILTER =
+  "metadata->>speedRetrieveStale.neq.true," +
+  "metadata->>speedRetrieveStale.is.null," +
+  "metadata->>speedLegacyPlatformFallbackCheckedAt.is.null"
+
 export type StalePaymentMaintenanceCandidate = Pick<Payment, "id" | "updated_at">
 
 export async function getStalePaymentMaintenanceCandidates(input: {
@@ -18,6 +25,13 @@ export async function getStalePaymentMaintenanceCandidates(input: {
     .select("id,updated_at")
     .in("status", ["CREATED", "PENDING"])
     .lt("updated_at", input.cutoff)
+    // Provider-backed Lightning invoices must be reconciled before any generic
+    // abandonment sweep. Null-root legacy rows are conservatively excluded too;
+    // their selected attempt is classified by the provider-specific queue.
+    .not("network", "is", null)
+    .not("provider", "is", null)
+    .not("network", "in", `(${LIGHTNING_NETWORK_FILTER})`)
+    .not("provider", "in", `(${SPEED_PROVIDER_FILTER},lightning_nwc,nwc,lightning)`)
     .order("updated_at", { ascending: true })
     .order("id", { ascending: true })
     .range(boundedOffset, boundedOffset + boundedLimit - 1)
@@ -49,35 +63,50 @@ export async function getTerminalPaymentMaintenanceCandidates(
   limit: number
 ): Promise<Array<Pick<Payment, "id" | "status">>> {
   const boundedLimit = Math.max(1, Math.min(limit, 25))
-  const perStatusLimit = Math.max(1, Math.ceil(boundedLimit / 3))
-  const terminalStatuses = ["CONFIRMED", "FAILED", "INCOMPLETE"] as const
-  const results = await Promise.all(terminalStatuses.map(async (status) => {
+  const terminalMappings = [
+    { paymentStatus: "CONFIRMED", transactionStatus: "CONFIRMED" },
+    { paymentStatus: "FAILED", transactionStatus: "FAILED" },
+    { paymentStatus: "INCOMPLETE", transactionStatus: "INCOMPLETE" },
+    { paymentStatus: "EXPIRED", transactionStatus: "INCOMPLETE" },
+    { paymentStatus: "CANCELED", transactionStatus: "INCOMPLETE" },
+    { paymentStatus: "CANCELLED", transactionStatus: "INCOMPLETE" },
+  ] as const
+  const results = await Promise.all(terminalMappings.map(async ({ paymentStatus, transactionStatus }) => {
     const { data, error } = await db
       .from("payments")
-      .select("id,status,transactions!inner(status)")
-      .eq("status", status)
-      .neq("transactions.status", status)
+      .select("id,status,updated_at,transactions!inner(status)")
+      .eq("status", paymentStatus)
+      .neq("transactions.status", transactionStatus)
       .order("updated_at", { ascending: true })
-      .limit(perStatusLimit)
+      // Each status can contribute the full bounded page. The merged result is
+      // sorted globally below, so a fixed status ordering cannot permanently
+      // crowd EXPIRED/CANCELED retries out of a small maintenance batch.
+      .limit(boundedLimit)
 
     if (error) {
       throw new Error(
-        `Failed to load ${status} payment maintenance candidates: ${error.message}`
+        `Failed to load ${paymentStatus} payment maintenance candidates: ${error.message}`
       )
     }
 
     return (data || []).map((row) => ({
       id: String(row.id),
-      status: row.status as Payment["status"]
+      status: row.status as Payment["status"],
+      updated_at: String(row.updated_at || "")
     }))
   }))
 
-  const unique = new Map<string, Pick<Payment, "id" | "status">>()
+  const unique = new Map<string, Pick<Payment, "id" | "status" | "updated_at">>()
   for (const row of results.flat()) {
     unique.set(row.id, row)
   }
 
-  return Array.from(unique.values()).slice(0, boundedLimit)
+  return Array.from(unique.values())
+    .sort((left, right) =>
+      left.updated_at.localeCompare(right.updated_at) || left.id.localeCompare(right.id)
+    )
+    .slice(0, boundedLimit)
+    .map(({ id, status }) => ({ id, status }))
 }
 
 /**
@@ -95,21 +124,61 @@ export async function getLightningReconciliationCandidates(input: {
   cutoff: string
 }): Promise<Payment[]> {
   const boundedLimit = Math.max(1, Math.min(input.limit, 25))
-  const { data, error } = await db
+  const directQuery = db
     .from("payments")
     .select("*")
     .in("status", ["PENDING", "PROCESSING"])
-    .eq("network", "bitcoin_lightning")
-    .eq("provider", SPEED_PROVIDER_NAME)
+    .or(`network.in.(${LIGHTNING_NETWORK_FILTER}),provider.in.(${SPEED_PROVIDER_FILTER})`)
+    .or(ACTIVE_SPEED_RECONCILIATION_FILTER)
     .lt("updated_at", input.cutoff)
     .order("updated_at", { ascending: true })
     .limit(boundedLimit)
 
-  if (error) {
-    throw new Error(`Failed to load Lightning reconciliation candidates: ${error.message}`)
+  // Historical rows can have null payment-root rail fields even though their
+  // selected transaction attempt still identifies Speed/Lightning. Keep them
+  // out of the generic abandonment sweep and recover them through that durable
+  // attempt evidence instead of leaving them invisible to every queue.
+  const relatedAttemptQuery = db
+    .from("payments")
+    .select("*,transactions!inner(provider,network)")
+    .in("status", ["PENDING", "PROCESSING"])
+    .or("network.is.null,provider.is.null")
+    .or(
+      `network.in.(${LIGHTNING_NETWORK_FILTER}),provider.in.(${SPEED_PROVIDER_FILTER})`,
+      { referencedTable: "transactions" }
+    )
+    .or(ACTIVE_SPEED_RECONCILIATION_FILTER)
+    .lt("updated_at", input.cutoff)
+    .order("updated_at", { ascending: true })
+    .limit(boundedLimit)
+
+  const [directResult, relatedAttemptResult] = await Promise.all([
+    directQuery,
+    relatedAttemptQuery,
+  ])
+
+  if (directResult.error) {
+    throw new Error(`Failed to load Lightning reconciliation candidates: ${directResult.error.message}`)
+  }
+  if (relatedAttemptResult.error) {
+    throw new Error(
+      `Failed to load legacy Lightning reconciliation candidates: ${relatedAttemptResult.error.message}`
+    )
   }
 
-  return (data || []) as Payment[]
+  const unique = new Map<string, Payment>()
+  for (const rawRow of [...(directResult.data || []), ...(relatedAttemptResult.data || [])]) {
+    const candidate = { ...(rawRow as Payment) } as Payment & { transactions?: unknown }
+    delete candidate.transactions
+    if (candidate.id) unique.set(candidate.id, candidate)
+  }
+
+  return Array.from(unique.values())
+    .sort((left, right) =>
+      String(left.updated_at || "").localeCompare(String(right.updated_at || "")) ||
+      left.id.localeCompare(right.id)
+    )
+    .slice(0, boundedLimit)
 }
 
 /**
@@ -147,7 +216,7 @@ export async function getIncompleteBasePaymentReconciliationCandidates(input: {
   const { data, error } = await db
     .from("payments")
     .select("id,updated_at")
-    .in("status", ["INCOMPLETE", "FAILED"])
+    .in("status", ["INCOMPLETE", "FAILED", "EXPIRED", "CANCELED", "CANCELLED"])
     .eq("network", "base")
     .gte("created_at", input.since)
     .order("updated_at", { ascending: false })

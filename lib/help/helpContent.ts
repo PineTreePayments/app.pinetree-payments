@@ -348,13 +348,31 @@ export const helpArticles: HelpArticle[] = [
     keywords: ["payment failed", "declined", "try again"]
   },
   {
+    id: "status-expired",
+    title: "What Expired means",
+    category: "Transaction Statuses",
+    description: "Expired means the provider or checkout payment window ended before payment evidence arrived.",
+    body: "Expired is a distinct terminal lifecycle state. PineTree uses it only when provider or checkout evidence says the payment window ended without a completed payment.\n\nWhat this means: The payment is not successful and is not merely a generic Incomplete attempt.\n\nWhat to check: Payment ID, expiration time, provider reference, and whether any funds or transaction hash exist before creating a new attempt.",
+    tags: ["expired", "status", "timeout"],
+    keywords: ["payment expired", "window ended"]
+  },
+  {
+    id: "status-canceled",
+    title: "What Canceled means",
+    category: "Transaction Statuses",
+    description: "Canceled means a merchant or customer explicitly stopped the payment before completion.",
+    body: "Canceled is a distinct terminal lifecycle state backed by an explicit cancellation action or provider outcome.\n\nWhat this means: The payment is not successful, and it is different from Expired or a generic Incomplete attempt.\n\nWhat to check: Payment ID, cancellation event and time, provider reference, and whether any funds or transaction hash exist before creating a new attempt.",
+    tags: ["canceled", "cancelled", "status"],
+    keywords: ["payment canceled", "merchant canceled"]
+  },
+  {
     id: "status-incomplete",
     title: "What Incomplete means",
     category: "Transaction Statuses",
-    description: "Incomplete means the payment did not complete and is treated as an unfinished terminal state.",
-    body: "Incomplete is used when a payment cannot continue through the normal lifecycle, such as an expired or canceled path that maps into PineTree's strict payment state model.\n\nWhat this means: The payment is not successful, but it may not have failed due to provider rejection. It may simply have been abandoned, expired, or canceled.\n\nWhat to check: Customer behavior, checkout close/cancel action, expiration, and whether a new payment should be created.",
-    tags: ["incomplete", "expired", "canceled", "status"],
-    keywords: ["cancelled", "canceled", "expired"]
+    description: "Incomplete means the payment ended without a more specific authoritative terminal outcome.",
+    body: "Incomplete is used when a payment cannot continue through the normal lifecycle and PineTree has no authoritative Failed, Expired, or Canceled outcome.\n\nWhat this means: The payment is not successful, but it is not silently reclassified as a provider rejection, expiration, or explicit cancellation.\n\nWhat to check: Customer behavior, provider or wallet evidence, and whether a new payment should be created.",
+    tags: ["incomplete", "unfinished", "status"],
+    keywords: ["unfinished", "abandoned", "no terminal evidence"]
   },
   {
     id: "payment-mismatch-incorrect-amount",

@@ -28,6 +28,8 @@ import PaymentStatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/SegmentedButtons"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
+import { normalizeTransactionAsset } from "@/lib/transactionDisplay"
+import { normalizeStoredPaymentStatus } from "@/lib/utils/canonicalPaymentStatus"
 
 // ─── Overview types ────────────────────────────────────────────────────────────
 
@@ -38,6 +40,7 @@ type Metrics = {
   pendingTransactions: number
   failedTransactions: number
   incompleteTransactions: number
+  canceledTransactions: number
   expiredTransactions: number
   totalConfirmedVolume: number
   totalFeesCollected: number
@@ -53,14 +56,23 @@ type Growth = {
 }
 
 type RecentTx = {
-  id: string
-  merchant_id: string
-  status: string
+  id?: string
+  paymentId?: string
+  merchant_id?: string
+  merchantId?: string
+  status?: string
+  canonicalStatus?: string
   provider: string | null
   network: string | null
-  gross_amount: number
+  rail?: string | null
+  asset?: string | null
+  gross_amount?: number
+  amountMinor?: number
+  displayAmount?: string
   currency: string
-  created_at: string
+  created_at?: string
+  createdAt?: string
+  occurredAt?: string
 }
 
 type RecentTicketPreview = {
@@ -132,26 +144,47 @@ type Feedback = {
 }
 
 type AdminTxDetail = {
-  id: string
-  merchant_id: string
-  status: string
+  id?: string
+  paymentId?: string
+  merchant_id?: string
+  merchantId?: string
+  status?: string
+  canonicalStatus?: string
   provider: string | null
   network: string | null
-  gross_amount: number
-  merchant_amount: number
-  pinetree_fee: number
+  rail?: string | null
+  asset?: string | null
+  selectedAsset?: string | null
+  selected_asset?: string | null
+  nativeSymbol?: string | null
+  gross_amount?: number
+  amountMinor?: number
+  grossAmountMinor?: number | null
+  merchant_amount?: number
+  merchantAmountMinor?: number | null
+  pinetree_fee?: number
+  feeAmountMinor?: number | null
   currency: string
-  provider_reference: string | null
+  provider_reference?: string | null
+  providerReference?: string | null
+  transactionHash?: string | null
+  paymentMode?: "live" | "test"
   metadata: unknown
-  created_at: string
-  updated_at: string
+  created_at?: string
+  createdAt?: string
+  occurredAt?: string
+  updated_at?: string
+  updatedAt?: string
 }
 
 type TxEvent = {
   id: string
-  event_type: string
-  provider_event: string | null
-  created_at: string
+  event_type?: string
+  type?: string
+  provider_event?: string | null
+  providerEvent?: string | null
+  created_at?: string
+  occurredAt?: string | null
 }
 
 type ProviderOnboarding = {
@@ -265,7 +298,7 @@ const EVENT_LABELS: Record<string, string> = {
   "payment.failed":     "Failed",
   "payment.cancelled":  "Canceled",
   "payment.canceled":   "Canceled",
-  "payment.incomplete": "Canceled",
+  "payment.incomplete": "Incomplete",
   "payment.expired":    "Expired",
   "payment.refunded":   "Refunded",
 }
@@ -274,6 +307,111 @@ function paymentModeFromMetadata(metadata: unknown): "live" | "test" {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return "live"
   const m = (metadata as Record<string, unknown>).payment_mode
   return m === "test" ? "test" : "live"
+}
+
+function recentPaymentId(payment: RecentTx): string {
+  return payment.paymentId || payment.id || ""
+}
+
+function recentStatus(payment: RecentTx): string {
+  return normalizeStoredPaymentStatus(payment.canonicalStatus || payment.status)
+}
+
+function recentRail(payment: RecentTx): string | null {
+  return payment.rail || payment.network || null
+}
+
+function recentCreatedAt(payment: RecentTx): string {
+  return payment.occurredAt || payment.createdAt || payment.created_at || ""
+}
+
+function recentAmount(payment: RecentTx): number {
+  return payment.amountMinor != null
+    ? payment.amountMinor / 100
+    : Number(payment.gross_amount ?? 0)
+}
+
+function detailPaymentId(payment: AdminTxDetail): string {
+  return payment.paymentId || payment.id || ""
+}
+
+function detailMerchantId(payment: AdminTxDetail): string {
+  return payment.merchantId || payment.merchant_id || ""
+}
+
+function detailStatus(payment: AdminTxDetail): string {
+  return normalizeStoredPaymentStatus(payment.canonicalStatus || payment.status)
+}
+
+function detailRail(payment: AdminTxDetail): string | null {
+  return payment.rail || payment.network || null
+}
+
+function detailAsset(payment: AdminTxDetail): string {
+  const metadata = payment.metadata && typeof payment.metadata === "object" && !Array.isArray(payment.metadata)
+    ? payment.metadata as Record<string, unknown>
+    : {}
+  const split = metadata.split && typeof metadata.split === "object" && !Array.isArray(metadata.split)
+    ? metadata.split as Record<string, unknown>
+    : null
+  return normalizeTransactionAsset({
+    provider: payment.provider,
+    network: detailRail(payment),
+    currency: payment.currency,
+    metadata: {
+      selectedAsset: payment.selectedAsset ?? payment.selected_asset ?? (metadata.selectedAsset ?? metadata.selected_asset) as string | null | undefined,
+      asset: payment.asset ?? (metadata.asset ?? metadata.token) as string | null | undefined,
+      split: {
+        asset: split?.asset as string | null | undefined,
+        nativeSymbol: payment.nativeSymbol ?? split?.nativeSymbol as string | null | undefined,
+      },
+    },
+  })
+}
+
+function detailPaymentMode(payment: AdminTxDetail): "live" | "test" {
+  return payment.paymentMode === "test" ? "test" : paymentModeFromMetadata(payment.metadata)
+}
+
+function detailGrossAmount(payment: AdminTxDetail): number {
+  const minor = payment.grossAmountMinor ?? payment.amountMinor
+  return minor != null ? minor / 100 : Number(payment.gross_amount ?? 0)
+}
+
+function detailMerchantAmount(payment: AdminTxDetail): number {
+  return payment.merchantAmountMinor != null
+    ? payment.merchantAmountMinor / 100
+    : Number(payment.merchant_amount ?? 0)
+}
+
+function detailFeeAmount(payment: AdminTxDetail): number {
+  return payment.feeAmountMinor != null
+    ? payment.feeAmountMinor / 100
+    : Number(payment.pinetree_fee ?? 0)
+}
+
+function detailCreatedAt(payment: AdminTxDetail): string {
+  return payment.occurredAt || payment.createdAt || payment.created_at || ""
+}
+
+function detailUpdatedAt(payment: AdminTxDetail): string {
+  return payment.updatedAt || payment.updated_at || detailCreatedAt(payment)
+}
+
+function detailReference(payment: AdminTxDetail): string | null {
+  return payment.transactionHash || payment.providerReference || payment.provider_reference || null
+}
+
+function timelineEventType(event: TxEvent): string {
+  return event.type || event.event_type || "payment.unknown"
+}
+
+function timelineProviderEvent(event: TxEvent): string | null {
+  return event.providerEvent || event.provider_event || null
+}
+
+function timelineOccurredAt(event: TxEvent): string {
+  return event.occurredAt || event.created_at || ""
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -847,10 +985,16 @@ export default function AdminPage() {
                     detail="Hard provider failure"
                   />
                   <CompactMetricTile
-                    label="Canceled"
+                    label="Incomplete"
                     value={m ? fmt(m.incompleteTransactions) : "—"}
                     tone="amber"
-                    detail="Customer abandoned"
+                    detail="Payment was not completed"
+                  />
+                  <CompactMetricTile
+                    label="Canceled"
+                    value={m ? fmt(m.canceledTransactions) : "—"}
+                    tone="slate"
+                    detail="Explicitly canceled"
                   />
                   <CompactMetricTile
                     label="Expired"
@@ -997,34 +1141,38 @@ export default function AdminPage() {
                           </div>
                         ))}
                       </div>
-                      {overview.recentTransactions.map((tx) => (
+                      {overview.recentTransactions.map((tx) => {
+                        const paymentId = recentPaymentId(tx)
+                        const rail = recentRail(tx)
+                        return (
                         <button
-                          key={tx.id}
-                          onClick={() => openTxDetail(tx.id, token)}
+                          key={paymentId}
+                          onClick={() => openTxDetail(paymentId, token)}
                           className="w-full text-left flex items-center gap-3 px-5 py-3.5 sm:grid sm:grid-cols-[1fr_120px_110px_130px_100px] sm:gap-4 transition-colors hover:bg-[#0052FF]/[0.025] focus:outline-none"
                         >
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-mono text-xs text-gray-700">
-                              {tx.id.slice(0, 16)}…
+                              {paymentId.slice(0, 16)}{paymentId.length > 16 ? "…" : ""}
                             </p>
                             <p className="mt-0.5 text-[11px] text-gray-400">
-                              {fmtDate(tx.created_at)}
+                              {fmtDate(recentCreatedAt(tx))}
                             </p>
                           </div>
                           <div className="hidden text-sm text-gray-600 sm:block">
                             {tx.provider ? formatDashboardProvider(tx.provider) : <span className="text-gray-300">—</span>}
                           </div>
                           <div className="hidden text-sm text-gray-600 sm:block">
-                            {tx.network ? formatDashboardNetwork(tx.network) : <span className="text-gray-300">—</span>}
+                            {rail ? formatDashboardNetwork(rail) : <span className="text-gray-300">—</span>}
                           </div>
                           <div className="hidden text-sm font-medium text-gray-900 sm:block">
-                            {fmtUSD(Number(tx.gross_amount ?? 0))}
+                            {tx.displayAmount || fmtUSD(recentAmount(tx))}
                           </div>
                           <div>
-                            <PaymentStatusBadge status={tx.status} />
+                            <PaymentStatusBadge status={recentStatus(tx)} />
                           </div>
                         </button>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -1423,7 +1571,7 @@ export default function AdminPage() {
                     Platform Transaction Detail
                   </p>
                   <h2 className="mt-1 font-mono text-sm text-gray-800 break-all">
-                    {selectedTxId}
+                    {txDetail ? detailPaymentId(txDetail.payment) : selectedTxId}
                   </h2>
                 </div>
                 <button
@@ -1446,28 +1594,28 @@ export default function AdminPage() {
                 {/* Status + amounts */}
                 <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
                   <div className="flex items-center justify-between gap-3 mb-4">
-                    <PaymentStatusBadge status={txDetail.payment.status} />
-                    <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${paymentModeFromMetadata(txDetail.payment.metadata) === "test" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
-                      {paymentModeFromMetadata(txDetail.payment.metadata) === "test" ? "Test" : "Live"}
+                    <PaymentStatusBadge status={detailStatus(txDetail.payment)} />
+                    <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${detailPaymentMode(txDetail.payment) === "test" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+                      {detailPaymentMode(txDetail.payment) === "test" ? "Test" : "Live"}
                     </span>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Total</p>
                       <p className="mt-1 text-lg font-bold text-gray-900">
-                        {fmtUSD(Number(txDetail.payment.gross_amount ?? 0))}
+                        {fmtUSD(detailGrossAmount(txDetail.payment))}
                       </p>
                     </div>
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Merchant</p>
                       <p className="mt-1 text-lg font-bold text-gray-900">
-                        {fmtUSD(Number(txDetail.payment.merchant_amount ?? 0))}
+                        {fmtUSD(detailMerchantAmount(txDetail.payment))}
                       </p>
                     </div>
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Fee</p>
                       <p className="mt-1 text-lg font-bold text-[#0052FF]">
-                        {fmtUSD(Number(txDetail.payment.pinetree_fee ?? 0))}
+                        {fmtUSD(detailFeeAmount(txDetail.payment))}
                       </p>
                     </div>
                   </div>
@@ -1477,19 +1625,23 @@ export default function AdminPage() {
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
                   <div>
                     <p className="text-gray-400">Merchant ID</p>
-                    <p className="mt-0.5 font-mono text-gray-700 break-all">{txDetail.payment.merchant_id}</p>
+                    <p className="mt-0.5 font-mono text-gray-700 break-all">{detailMerchantId(txDetail.payment)}</p>
                   </div>
                   <div>
                     <p className="text-gray-400">Currency</p>
                     <p className="mt-0.5 text-gray-700">{txDetail.payment.currency || "USD"}</p>
                   </div>
                   <div>
-                    <p className="text-gray-400">Network</p>
+                    <p className="text-gray-400">Network / Rail</p>
                     <p className="mt-0.5 text-gray-700">
-                      {txDetail.payment.network
-                        ? formatDashboardNetwork(txDetail.payment.network)
+                      {detailRail(txDetail.payment)
+                        ? formatDashboardNetwork(detailRail(txDetail.payment))
                         : "—"}
                     </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400">Asset</p>
+                    <p className="mt-0.5 text-gray-700">{detailAsset(txDetail.payment)}</p>
                   </div>
                   <div>
                     <p className="text-gray-400">Provider</p>
@@ -1501,17 +1653,17 @@ export default function AdminPage() {
                   </div>
                   <div>
                     <p className="text-gray-400">Created</p>
-                    <p className="mt-0.5 text-gray-700">{fmtDateTime(txDetail.payment.created_at)}</p>
+                    <p className="mt-0.5 text-gray-700">{fmtDateTime(detailCreatedAt(txDetail.payment))}</p>
                   </div>
                   <div>
                     <p className="text-gray-400">Updated</p>
-                    <p className="mt-0.5 text-gray-700">{fmtDateTime(txDetail.payment.updated_at)}</p>
+                    <p className="mt-0.5 text-gray-700">{fmtDateTime(detailUpdatedAt(txDetail.payment))}</p>
                   </div>
-                  {txDetail.payment.provider_reference && (
+                  {detailReference(txDetail.payment) && (
                     <div className="col-span-2">
                       <p className="text-gray-400">Tx Hash / Reference</p>
                       <p className="mt-0.5 font-mono text-gray-700 break-all text-[11px]">
-                        {txDetail.payment.provider_reference}
+                        {detailReference(txDetail.payment)}
                       </p>
                     </div>
                   )}
@@ -1533,14 +1685,14 @@ export default function AdminPage() {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-xs font-medium text-gray-800">
-                                {EVENT_LABELS[ev.event_type] ?? ev.event_type}
+                                {EVENT_LABELS[timelineEventType(ev)] ?? timelineEventType(ev)}
                               </p>
                               <p className="shrink-0 text-[11px] text-gray-400">
-                                {fmtDateTime(ev.created_at)}
+                                {fmtDateTime(timelineOccurredAt(ev))}
                               </p>
                             </div>
-                            {ev.provider_event && (
-                              <p className="mt-0.5 text-[11px] text-gray-400">{ev.provider_event}</p>
+                            {timelineProviderEvent(ev) && (
+                              <p className="mt-0.5 text-[11px] text-gray-400">{timelineProviderEvent(ev)}</p>
                             )}
                           </div>
                         </div>
@@ -1558,7 +1710,7 @@ export default function AdminPage() {
                 {/* View in explorer */}
                 <div className="border-t border-gray-100 pt-4">
                   <Link
-                    href={`/dashboard/admin/transactions?search=${encodeURIComponent(txDetail.payment.id)}`}
+                    href={`/dashboard/admin/transactions?search=${encodeURIComponent(detailPaymentId(txDetail.payment))}`}
                     className="text-xs font-medium text-[#0052FF] hover:underline"
                     onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
                   >

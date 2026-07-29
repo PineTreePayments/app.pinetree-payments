@@ -50,12 +50,14 @@ type DashboardOverviewResponse = {
   chartData?: ChartPoint[]
   walletValue?: number
   lastRun?: string | null
+  timeZone?: string
   today?: {
     volume: number
     transactionCount: number
     averageTransaction: number
     confirmed: number
     incomplete: number
+    canceled: number
     failed: number
   }
   railBreakdown?: Record<string, { count: number; volume: number }>
@@ -99,6 +101,7 @@ export default function DashboardPage() {
   const [volume, setVolume] = useState(0)
   const [txCount, setTxCount] = useState(0)
   const [successRate, setSuccessRate] = useState(0)
+  const [timeZone, setTimeZone] = useState("UTC")
   const [recentTx, setRecentTx] = useState<DashboardTransactionRow[]>([])
   const [chartData, setChartData] = useState<ChartPoint[]>([])
   const [today, setToday] = useState<NonNullable<DashboardOverviewResponse["today"]>>({
@@ -107,6 +110,7 @@ export default function DashboardPage() {
     averageTransaction: 0,
     confirmed: 0,
     incomplete: 0,
+    canceled: 0,
     failed: 0
   })
   const [railReadiness, setRailReadiness] = useState<NonNullable<DashboardOverviewResponse["railReadiness"]>>([])
@@ -146,6 +150,7 @@ export default function DashboardPage() {
     setSuccessRate(Number(payload.successRate ?? 0))
     setChartData(payload.chartData || [])
     setRecentTx(payload.recentTx || [])
+    setTimeZone(payload.timeZone || "UTC")
     if (payload.today) setToday(payload.today)
     setRailReadiness(payload.railReadiness || [])
     setBusinessProfileStatus(payload.businessProfile || null)
@@ -265,7 +270,7 @@ export default function DashboardPage() {
             Today&apos;s Successful Sales
           </p>
           <h2 className={`mt-1 font-medium ${dashboardSupportingTextClass}`}>
-            Successful merchant payment volume since midnight
+            Successful merchant payment volume since merchant-local midnight
           </h2>
           <div className={`mt-0.5 ${dashboardHeroValueClass}`}>
             {formatUsd(today.volume)}
@@ -283,9 +288,10 @@ export default function DashboardPage() {
           </div>
         </GroupedMetricSurface>
         <GroupedMetricSurface title="Activity Health" titleTone="blue">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4">
             <InlineMetric label="Success Rate" value={`${successRate}%`} />
-            <InlineMetric label="Canceled" value={today.incomplete} />
+            <InlineMetric label="Incomplete" value={today.incomplete} />
+            <InlineMetric label="Canceled" value={today.canceled} />
             <InlineMetric label="Failed" value={today.failed} />
           </div>
         </GroupedMetricSurface>
@@ -421,6 +427,7 @@ export default function DashboardPage() {
         <TransactionActivityTable
           transactions={recentTx}
           emptyMessage="No transactions yet."
+          timeZone={timeZone}
         />
       </DashboardSection>
 

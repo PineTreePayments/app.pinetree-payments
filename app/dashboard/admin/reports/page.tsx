@@ -37,6 +37,7 @@ type PlatformReport = {
   pinetreeFees: number
   processingTransactions: number
   incompleteTransactions: number
+  canceledTransactions?: number
   failedTransactions: number
   expiredTransactions: number
   awaitingTransactions: number
@@ -107,7 +108,9 @@ const MODES: { value: PlatformReportMode; label: string }[] = [
 const NETWORK_LABELS: Record<string, string> = {
   solana:           "Solana",
   base:             "Base",
-  bitcoin_lightning: "Lightning",
+  bitcoin_lightning: "Bitcoin Lightning",
+  btc_lightning:     "Bitcoin Lightning",
+  lightning:         "Bitcoin Lightning",
   ethereum:         "Ethereum",
   unknown:          "Cash",
 }
@@ -117,7 +120,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   coinbase:  "Coinbase",
   shift4:    "Shift4",
   base:      "Base Pay",
-  lightning: "Lightning",
+  lightning: "Bitcoin Lightning",
   cash:      "Cash",
   unknown:   "Unknown",
 }
@@ -440,7 +443,8 @@ export default function AdminReportsPage() {
               <CompactMetricTile label="Service fees"     value={r ? fmtUSD(r.pinetreeFees) : "—"}        tone="blue" />
               <CompactMetricTile label="Processing"       value={r ? fmt(r.processingTransactions) : "—"} tone="amber" detail="In-flight on-chain" />
               <CompactMetricTile label="Waiting"          value={r ? fmt(r.awaitingTransactions) : "—"}   detail="Waiting for customer action" />
-              <CompactMetricTile label="Canceled"         value={r ? fmt(r.incompleteTransactions) : "—"} detail="Customer abandoned" />
+              <CompactMetricTile label="Incomplete"       value={r ? fmt(r.incompleteTransactions) : "—"} tone="amber" detail="Payment was not completed" />
+              <CompactMetricTile label="Canceled"         value={r ? fmt(r.canceledTransactions ?? 0) : "—"} tone="slate" detail="Explicitly canceled" />
               <CompactMetricTile label="Failed"           value={r ? fmt(r.failedTransactions) : "—"}     tone="red" />
               <CompactMetricTile label="Expired"          value={r ? fmt(r.expiredTransactions) : "—"} />
             </MetricGrid>

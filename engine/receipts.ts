@@ -3,6 +3,7 @@ import { supabaseAdmin, supabase } from "@/database"
 import { cashTransactionSecondaryLabel } from "@/lib/transactionRailDisplay"
 import { getPaymentAssetDisplay, type PaymentMetadataForAssetDisplay } from "@/lib/paymentAssetDisplay"
 import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
+import { getCanonicalTransactionById } from "./canonicalTransactions"
 import {
   getReceiptDisplayRail,
   renderReceiptHtml,
@@ -20,11 +21,11 @@ function formatAmount(amount: number, currency: string) {
   }).format(amount)
 }
 
-function formatDate(value: string) {
+function formatDate(value: string, timeZone: string) {
   return new Date(value).toLocaleString("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "America/Chicago"
+    timeZone
   })
 }
 
@@ -32,25 +33,14 @@ export async function getMerchantReceipt(
   merchantId: string,
   paymentId: string
 ): Promise<ReceiptData> {
-  const [{ data: payment, error: paymentError }, { data: transaction }, { data: settings }, { data: receiptSettings }] =
+  const [payment, { data: settings, error: settingsError }, { data: receiptSettings }] =
     await Promise.all([
-      db
-        .from("payments")
-        .select("id,merchant_id,gross_amount,currency,provider,network,status,provider_reference,created_at,metadata")
-        .eq("id", paymentId)
-        .eq("merchant_id", merchantId)
-        .maybeSingle(),
-      db
-        .from("transactions")
-        .select("id,provider_transaction_id")
-        .eq("payment_id", paymentId)
-        .eq("merchant_id", merchantId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+      getCanonicalTransactionById(paymentId, {
+        scope: { type: "merchant", merchantId },
+      }),
       db
         .from("merchant_settings")
-        .select("business_name,address,address_line_2,city,state,zip")
+        .select("business_name,address,address_line_2,city,state,zip,timezone")
         .eq("merchant_id", merchantId)
         .maybeSingle(),
       db
@@ -60,9 +50,9 @@ export async function getMerchantReceipt(
         .maybeSingle()
     ])
 
-  if (paymentError) throw new Error(`Failed to load receipt: ${paymentError.message}`)
+  if (settingsError) throw new Error(`Failed to load receipt settings: ${settingsError.message}`)
   if (!payment) throw new Error("Payment not found")
-  if (payment.status !== "CONFIRMED") throw new Error("Receipt is available after payment confirmation")
+  if (payment.canonicalStatus !== "CONFIRMED") throw new Error("Receipt is available after payment confirmation")
 
   const showBusinessName = receiptSettings?.show_business_name !== false
   const showBusinessAddress = receiptSettings?.show_business_address !== false
@@ -77,27 +67,28 @@ export async function getMerchantReceipt(
   ].filter(Boolean).join("\n")
 
   const assetDisplay = getPaymentAssetDisplay(
-    String(payment.network || "") || null,
+    payment.network || null,
     payment.metadata as PaymentMetadataForAssetDisplay | null,
-    Number(payment.gross_amount || 0)
+    payment.amountMinor / 100
   )
 
   return {
-    paymentId: String(payment.id),
-    transactionId: showTransactionId ? String(transaction?.id || "") || null : null,
+    paymentId: payment.paymentId,
+    transactionId: showTransactionId ? payment.attemptId : null,
     businessName: showBusinessName ? String(settings?.business_name || "PineTree Merchant") : null,
     businessAddress: showBusinessAddress ? address || null : null,
-    createdAt: String(payment.created_at),
-    amount: Number(payment.gross_amount || 0),
-    currency: String(payment.currency || "USD"),
-    provider: showProvider ? String(payment.provider || "Unknown") : "",
-    network: showNetwork ? String(payment.network || "") || null : null,
-    status: String(payment.status),
+    createdAt: payment.occurredAt,
+    timeZone: String(settings?.timezone || "UTC"),
+    amount: payment.amountMinor / 100,
+    currency: payment.currency,
+    provider: showProvider ? payment.provider : "",
+    network: showNetwork ? payment.network : null,
+    status: payment.canonicalStatus,
     reference: showWalletReference
-      ? String(transaction?.provider_transaction_id || payment.provider_reference || "") || null
+      ? payment.transactionHash || payment.providerReference
       : null,
     footer: String(receiptSettings?.receipt_footer || "") || null,
-    assetLabel: assetDisplay.assetLabel,
+    assetLabel: payment.asset || assetDisplay.assetLabel,
     amountPaidLabel: assetDisplay.amountPaidLabel,
     rateLabel: assetDisplay.rateLabel
   }
@@ -132,8 +123,8 @@ export async function renderReceiptPdf(receipt: ReceiptData) {
   y -= 38
 
   line("Receipt ID", receipt.paymentId)
-  if (receipt.transactionId) line("Transaction ID", receipt.transactionId)
-  line("Date / Time", formatDate(receipt.createdAt))
+  if (receipt.transactionId) line("Attempt ID", receipt.transactionId)
+  line("Date / Time", formatDate(receipt.createdAt, receipt.timeZone))
   line("Currency", receipt.currency)
   if (receipt.assetLabel) line("Asset", receipt.assetLabel)
   if (receipt.amountPaidLabel) line("Amount Paid", receipt.amountPaidLabel)

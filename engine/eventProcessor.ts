@@ -50,8 +50,8 @@ const eventToStatus: Record<TranslatedEvent["event"], PaymentStatus> = {
   "payment.processing": "PROCESSING",
   "payment.confirmed": "CONFIRMED",
   "payment.failed": "FAILED",
-  "payment.expired": "INCOMPLETE",
-  "payment.canceled": "INCOMPLETE",
+  "payment.expired": "EXPIRED",
+  "payment.canceled": "CANCELED",
   "payment.incomplete": "INCOMPLETE"
 }
 
@@ -193,6 +193,17 @@ export async function advancePaymentToTargetStatus(
       return
     }
     // currentStatus === "PROCESSING" is caught by the early-return above — no-op.
+    return
+  }
+
+  // A provider terminal event can arrive before the payment-created flow has
+  // committed PENDING. Preserve the strict CREATED -> PENDING boundary first.
+  if (
+    currentStatus === "CREATED" &&
+    (targetStatus === "EXPIRED" || targetStatus === "CANCELED" || targetStatus === "INCOMPLETE")
+  ) {
+    await updatePaymentStatus(paymentId, "PENDING", resolvedMetadata)
+    await updatePaymentStatus(paymentId, targetStatus, resolvedMetadata)
     return
   }
 
@@ -344,7 +355,7 @@ export async function processWebhook({
 
   // Idempotency guard — if the payment is already in a terminal state, a duplicate
   // webhook has arrived. Log and return without writing anything to the database.
-  const TERMINAL_STATES = new Set<string>(["CONFIRMED", "FAILED", "INCOMPLETE"])
+  const TERMINAL_STATES = new Set<string>(["CONFIRMED", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE"])
   const currentStatus = normalizeToStrictPaymentStatus(payment.status)
   if (provider === SPEED_PROVIDER_NAME) {
     console.info("[lightning/confirmation] webhook translated", {
@@ -449,7 +460,10 @@ export async function processWebhook({
     }
 
 
-    if (provider === "stripe" && (status === "CONFIRMED" || status === "FAILED" || status === "INCOMPLETE")) {
+    if (
+      provider === "stripe" &&
+      (status === "CONFIRMED" || status === "FAILED" || status === "EXPIRED" || status === "CANCELED" || status === "INCOMPLETE")
+    ) {
       await releaseTerminalReaderClaim(paymentId).catch(() => undefined)
     }
 
@@ -647,7 +661,7 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
   }
 
   let currentStatus = normalizeToStrictPaymentStatus(payment.status)
-  const TERMINAL_STATES = new Set<string>(["CONFIRMED", "FAILED", "INCOMPLETE"])
+  const TERMINAL_STATES = new Set<string>(["CONFIRMED", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE"])
   if (TERMINAL_STATES.has(currentStatus)) {
     // Self-healing reconciliation: a payment that was marked INCOMPLETE/FAILED before
     // the engine ever saw this (now independently verified) on-chain evidence
@@ -655,7 +669,14 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
     // ever left — see engine/paymentReconciliation.ts for the guarded bypass.
     // Every other terminal state (or a non-reconciliation caller) is skipped
     // exactly as before.
-    if ((currentStatus === "INCOMPLETE" || currentStatus === "FAILED") && event.reconcile && targetStatus !== "FAILED") {
+    if (
+      (currentStatus === "INCOMPLETE" ||
+        currentStatus === "FAILED" ||
+        currentStatus === "EXPIRED" ||
+        currentStatus === "CANCELED") &&
+      event.reconcile &&
+      targetStatus !== "FAILED"
+    ) {
       const repair = await repairTerminalPaymentForReconciliation(paymentId, { txHash, value, from })
       if (!repair.repaired) {
         console.info("[eventProcessor] processPaymentEvent: reconciliation repair skipped", {

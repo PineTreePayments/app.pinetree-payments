@@ -278,6 +278,45 @@ describe("payment maintenance", () => {
     expect(reconcileTransactionForPayment).toHaveBeenCalledWith("pay-confirmed", "CONFIRMED")
   })
 
+  it.each(["EXPIRED", "CANCELED"] as const)(
+    "retries %s transaction synchronization on the next maintenance tick after an update error",
+    async (status) => {
+      vi.mocked(getTerminalPaymentMaintenanceCandidates).mockResolvedValue([
+        { id: `pay-${status.toLowerCase()}`, status }
+      ] as never)
+      vi.mocked(reconcileTransactionForPayment)
+        .mockResolvedValueOnce({
+          transactionId: "tx-1",
+          previousStatus: "PENDING",
+          newStatus: null,
+          skipped: true,
+          skipReason: "update_error: transient database failure"
+        })
+        .mockResolvedValueOnce({
+          transactionId: "tx-1",
+          previousStatus: "PENDING",
+          newStatus: "INCOMPLETE",
+          skipped: false
+        })
+
+      const first = await runPaymentMaintenanceTick({ now: 120_000, throttleMs: 1_000 })
+      const second = await runPaymentMaintenanceTick({ now: 121_000, throttleMs: 1_000 })
+
+      expect(first).toMatchObject({ reconcileErrors: 1, transactionSnapshotsReconciled: 0 })
+      expect(second).toMatchObject({ reconcileErrors: 0, transactionSnapshotsReconciled: 1 })
+      expect(reconcileTransactionForPayment).toHaveBeenNthCalledWith(
+        1,
+        `pay-${status.toLowerCase()}`,
+        status
+      )
+      expect(reconcileTransactionForPayment).toHaveBeenNthCalledWith(
+        2,
+        `pay-${status.toLowerCase()}`,
+        status
+      )
+    }
+  )
+
   it("reconciles stuck Speed Lightning payments during a tick, independent of local evidence", async () => {
     const lightningPayment = payment("PENDING", {
       id: "pay-lightning",
@@ -296,6 +335,11 @@ describe("payment maintenance", () => {
     const result = await runPaymentMaintenanceTick({ now: 120_000 })
 
     expect(reconcileSpeedLightningPayment).toHaveBeenCalledWith(lightningPayment)
+    expect(
+      vi.mocked(reconcileSpeedLightningPayment).mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      vi.mocked(sweepStalePayments).mock.invocationCallOrder[0]
+    )
     expect(getLightningReconciliationCandidates).toHaveBeenCalledWith({
       limit: expect.any(Number),
       cutoff: expect.any(String)

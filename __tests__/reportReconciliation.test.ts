@@ -1,15 +1,57 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/database/reports", () => ({
-  getMerchantPaymentsForReport: vi.fn(),
   getMerchantReportContext: vi.fn(),
 }))
 
-import { getMerchantPaymentsForReport, getMerchantReportContext } from "@/database/reports"
+vi.mock("@/engine/canonicalTransactions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/engine/canonicalTransactions")>()
+  return { ...actual, getAllCanonicalTransactions: vi.fn() }
+})
+
+import { getMerchantReportContext } from "@/database/reports"
+import {
+  getAllCanonicalTransactions,
+  projectCanonicalTransaction,
+  type RawCanonicalTransactionPayment,
+} from "@/engine/canonicalTransactions"
 import { generateReportCsv, generateReportEngine } from "@/engine/reports"
 
-const payments = vi.mocked(getMerchantPaymentsForReport)
+const payments = vi.mocked(getAllCanonicalTransactions)
 const context = vi.mocked(getMerchantReportContext)
+
+function canonicalPayment(overrides: Partial<RawCanonicalTransactionPayment> = {}) {
+  const id = String(overrides.id || "pay-1")
+  return projectCanonicalTransaction({
+    id,
+    merchant_id: "merchant-1",
+    merchant_amount: 9.85,
+    pinetree_fee: 0.15,
+    gross_amount: 10,
+    currency: "USD",
+    provider: "stripe",
+    provider_reference: `provider-${id}`,
+    status: "CONFIRMED",
+    network: "stripe",
+    metadata: { source: "pos" },
+    created_at: "2026-07-17T12:00:00.000Z",
+    updated_at: "2026-07-17T12:01:00.000Z",
+    transactions: [{
+      id: `attempt-${id}`,
+      payment_id: id,
+      provider: "stripe",
+      network: "stripe",
+      status: "CONFIRMED",
+      channel: "pos",
+      total_amount: 1000,
+      subtotal_amount: 985,
+      platform_fee: 15,
+      created_at: "2026-07-17T12:00:30.000Z",
+    }],
+    payment_events: [],
+    ...overrides,
+  })
+}
 
 describe("report reconciliation", () => {
   beforeEach(() => {
@@ -30,50 +72,41 @@ describe("report reconciliation", () => {
     })
   })
 
-  it("counts only confirmed sales and reconciles provider and rail totals", async () => {
+  it("counts only canonical confirmed sales and reconciles provider, rail, and asset totals", async () => {
     payments.mockResolvedValue([
-      {
+      canonicalPayment({
         id: "pay-card",
         merchant_amount: 10,
         pinetree_fee: 0.15,
         gross_amount: 10.15,
-        currency: "USD",
         provider: "stripe",
-        status: "CONFIRMED",
-        created_at: "2026-07-17T12:00:00.000Z",
-        transactions: [{ id: "tx-card", provider: "stripe", network: null, status: "PENDING" }],
-      },
-      {
+        network: "stripe",
+      }),
+      canonicalPayment({
         id: "pay-crypto",
         merchant_amount: 20,
         pinetree_fee: 0.15,
         gross_amount: 20.15,
-        currency: "USD",
         provider: "lightning_speed",
         network: "bitcoin_lightning",
-        status: "CONFIRMED",
-        created_at: "2026-07-17T13:00:00.000Z",
-      },
-      {
+        transactions: [],
+      }),
+      canonicalPayment({
         id: "pay-incomplete",
         merchant_amount: 50,
         pinetree_fee: 0.15,
         gross_amount: 50.15,
-        currency: "USD",
-        provider: "stripe",
         status: "INCOMPLETE",
-        created_at: "2026-07-17T14:00:00.000Z",
-      },
-      {
+      }),
+      canonicalPayment({
         id: "pay-failed",
         merchant_amount: 40,
         pinetree_fee: 0.15,
         gross_amount: 40.15,
-        currency: "USD",
         provider: "fluidpay",
+        network: "fluidpay",
         status: "FAILED",
-        created_at: "2026-07-17T15:00:00.000Z",
-      },
+      }),
     ])
 
     const report = await generateReportEngine({
@@ -101,17 +134,14 @@ describe("report reconciliation", () => {
   })
 
   it("preserves recorded historical fees and prevents CSV formula injection", async () => {
-    payments.mockResolvedValue([{
+    payments.mockResolvedValue([canonicalPayment({
       id: "=malicious",
       merchant_amount: 9.9,
       pinetree_fee: 0.1,
       gross_amount: 10,
-      currency: "USD",
-      provider: "stripe",
       provider_reference: "+cmd",
-      status: "CONFIRMED",
-      created_at: "2026-07-17T12:00:00.000Z",
-    }])
+    })])
+
     const report = await generateReportEngine({
       merchantId: "merchant-1",
       startDate: "2026-07-17",
@@ -125,31 +155,30 @@ describe("report reconciliation", () => {
   })
 
   it("preserves an explicitly recorded zero historical fee", async () => {
-    payments.mockResolvedValue([{
+    payments.mockResolvedValue([canonicalPayment({
       id: "pay-waived-fee",
       merchant_amount: 10,
       pinetree_fee: 0,
       gross_amount: 10,
-      currency: "USD",
-      provider: "stripe",
-      status: "CONFIRMED",
-      created_at: "2026-07-17T12:00:00.000Z",
-      transactions: [{ id: "tx-waived-fee", provider: "stripe", status: "CONFIRMED", platform_fee: 15 }],
-    }])
+      transactions: [{
+        id: "attempt-waived-fee",
+        provider: "stripe",
+        status: "CONFIRMED",
+        platform_fee: 15,
+        created_at: "2026-07-17T12:00:30.000Z",
+      }],
+    })])
     const report = await generateReportEngine({ merchantId: "merchant-1", startDate: "2026-07-17", endDate: "2026-07-17" })
     expect(report.pineTreeFees).toBe(0)
     expect(report.netSettlements).toBe(10)
   })
 
   it("totals many small values in integer minor units without floating-point drift", async () => {
-    payments.mockResolvedValue(Array.from({ length: 100 }, (_, index) => ({
+    payments.mockResolvedValue(Array.from({ length: 100 }, (_, index) => canonicalPayment({
       id: `pay-small-${index}`,
       merchant_amount: 0.01,
       pinetree_fee: index % 2 === 0 ? 0.1 : 0.15,
       gross_amount: 0.01,
-      currency: "USD",
-      provider: "stripe",
-      status: "CONFIRMED",
       created_at: `2026-07-17T12:${String(index % 60).padStart(2, "0")}:00.000Z`,
     })))
     const report = await generateReportEngine({ merchantId: "merchant-1", startDate: "2026-07-17", endDate: "2026-07-17" })
@@ -159,29 +188,32 @@ describe("report reconciliation", () => {
     expect(report.reconciliation.variance).toBe(0)
   })
 
-  it("returns exact zero totals for an empty period and separates refunds from sales", async () => {
+  it("returns exact zero totals for an empty period and keeps refunds separate from lifecycle status", async () => {
     payments.mockResolvedValue([])
     const empty = await generateReportEngine({ merchantId: "merchant-1", startDate: "2026-07-17", endDate: "2026-07-17" })
     expect(empty.grossVolume).toBe(0)
     expect(empty.avgTransaction).toBe(0)
     expect(empty.reconciliation).toMatchObject({ providerMatchesGross: true, railMatchesGross: true, assetMatchesCrypto: true, variance: 0 })
 
-    payments.mockResolvedValue([{
+    payments.mockResolvedValue([canonicalPayment({
       id: "pay-refund",
       merchant_amount: 4.85,
       pinetree_fee: 0.15,
       gross_amount: 5,
-      currency: "USD",
-      provider: "stripe",
-      status: "CONFIRMED",
-      created_at: "2026-07-17T12:00:00.000Z",
       transactions: [
-        { id: "tx-original", provider: "stripe", status: "CONFIRMED" },
-        { id: "tx-refund", provider: "stripe", status: "REFUNDED" },
+        { id: "tx-original", provider: "stripe", status: "CONFIRMED", created_at: "2026-07-17T12:00:00.000Z" },
+        { id: "tx-refund", provider: "stripe", status: "REFUNDED", created_at: "2026-07-17T13:00:00.000Z" },
       ],
-    }])
+    })])
     const refunded = await generateReportEngine({ merchantId: "merchant-1", startDate: "2026-07-17", endDate: "2026-07-17" })
-    expect(refunded.grossVolume).toBe(0)
+    expect(refunded.transactionsTable[0]).toMatchObject({
+      paymentId: "pay-refund",
+      canonicalStatus: "CONFIRMED",
+      status: "Confirmed",
+      adjustmentStatus: "REFUNDED",
+    })
+    expect(refunded.grossVolume).toBe(5)
+    expect(refunded.confirmedCount).toBe(1)
     expect(refunded.refundedAmount).toBe(5)
     expect(refunded.refundedCount).toBe(1)
   })

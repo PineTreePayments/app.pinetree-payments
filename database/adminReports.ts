@@ -19,6 +19,7 @@ export type PlatformReportMetrics = {
   pinetreeFees: number
   processingTransactions: number
   incompleteTransactions: number
+  canceledTransactions: number
   failedTransactions: number
   expiredTransactions: number
   awaitingTransactions: number
@@ -38,6 +39,7 @@ export const PLATFORM_REPORT_DEFAULT: PlatformReportMetrics = {
   pinetreeFees: 0,
   processingTransactions: 0,
   incompleteTransactions: 0,
+  canceledTransactions: 0,
   failedTransactions: 0,
   expiredTransactions: 0,
   awaitingTransactions: 0,
@@ -192,6 +194,7 @@ export async function getPlatformReport(
     let pinetreeFees = 0
     let processingTransactions = 0
     let incompleteTransactions = 0
+    let canceledTransactions = 0
     let failedTransactions = 0
     let expiredTransactions = 0
     let awaitingTransactions = 0
@@ -241,6 +244,10 @@ export async function getPlatformReport(
         case "INCOMPLETE":
           incompleteTransactions++
           break
+        case "CANCELED":
+        case "CANCELLED":
+          canceledTransactions++
+          break
         case "FAILED":
           failedTransactions++
           break
@@ -265,6 +272,7 @@ export async function getPlatformReport(
       pinetreeFees,
       processingTransactions,
       incompleteTransactions,
+      canceledTransactions,
       failedTransactions,
       expiredTransactions,
       awaitingTransactions,

@@ -31,7 +31,7 @@ export type CreatePosPaymentResult = {
   paymentId: string
   intentId?: string
   provider: string
-  state: "CREATED" | "PENDING" | "PROCESSING" | "CONFIRMED" | "FAILED" | "INCOMPLETE"
+  state: "CREATED" | "PENDING" | "PROCESSING" | "CONFIRMED" | "FAILED" | "EXPIRED" | "CANCELED" | "INCOMPLETE"
   paymentUrl: string
   qrCodeUrl: string
   nativeAmount?: number

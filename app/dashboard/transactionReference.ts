@@ -7,6 +7,10 @@ type PaymentReferenceFields = {
 
 type TransactionReferenceFields = {
   id?: string | null
+  paymentId?: string | null
+  attemptId?: string | null
+  providerReference?: string | null
+  transactionHash?: string | null
   payment_id?: string | null
   provider?: string | null
   provider_transaction_id?: string | null
@@ -49,10 +53,14 @@ export function formatProviderReference(
 
 export function getTransactionReferenceParts(tx: TransactionReferenceFields) {
   const payment = Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
-  const paymentId = firstReferenceValue(payment?.id) || firstReferenceValue(tx.payment_id)
-  const transactionId = firstReferenceValue(tx.id)
-  const blockchainReference = firstReferenceValue(tx.provider_transaction_id)
-  const providerReference = firstReferenceValue(payment?.provider_reference)
+  const paymentId = firstReferenceValue(tx.paymentId)
+    || firstReferenceValue(payment?.id)
+    || firstReferenceValue(tx.payment_id)
+  const transactionId = firstReferenceValue(tx.attemptId) || firstReferenceValue(tx.id)
+  const blockchainReference = firstReferenceValue(tx.transactionHash)
+    || firstReferenceValue(tx.provider_transaction_id)
+  const providerReference = firstReferenceValue(tx.providerReference)
+    || firstReferenceValue(payment?.provider_reference)
 
   return {
     paymentId,

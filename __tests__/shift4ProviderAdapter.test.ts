@@ -80,7 +80,7 @@ describe("Shift4 provider adapter", () => {
     ["failed", "FAILED"],
     ["voided", "FAILED"],
     ["expired", "EXPIRED"],
-    ["cancelled", "INCOMPLETE"],
+    ["cancelled", "CANCELED"],
     ["refunded", "REFUNDED"],
     ["mystery_state", "UNKNOWN"],
   ] as const)("normalizes status %s to %s", async (providerStatus, expectedStatus) => {

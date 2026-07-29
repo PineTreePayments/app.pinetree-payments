@@ -9,6 +9,7 @@ export type AdminOverviewMetrics = {
   pendingTransactions: number      // CREATED + PENDING (awaiting customer)
   failedTransactions: number       // FAILED only (hard provider failure)
   incompleteTransactions: number   // INCOMPLETE (customer abandoned)
+  canceledTransactions: number     // CANCELED/CANCELLED (explicit cancellation)
   expiredTransactions: number      // EXPIRED (timed out)
   totalConfirmedVolume: number
   totalFeesCollected: number
@@ -63,6 +64,7 @@ export const PAYMENT_METRICS_DEFAULT: Pick<
   | "pendingTransactions"
   | "failedTransactions"
   | "incompleteTransactions"
+  | "canceledTransactions"
   | "expiredTransactions"
   | "totalConfirmedVolume"
   | "totalFeesCollected"
@@ -73,6 +75,7 @@ export const PAYMENT_METRICS_DEFAULT: Pick<
   pendingTransactions: 0,
   failedTransactions: 0,
   incompleteTransactions: 0,
+  canceledTransactions: 0,
   expiredTransactions: 0,
   totalConfirmedVolume: 0,
   totalFeesCollected: 0,
@@ -104,6 +107,7 @@ export async function getAdminPaymentMetrics(): Promise<
     | "pendingTransactions"
     | "failedTransactions"
     | "incompleteTransactions"
+    | "canceledTransactions"
     | "expiredTransactions"
     | "totalConfirmedVolume"
     | "totalFeesCollected"
@@ -130,6 +134,7 @@ export async function getAdminPaymentMetrics(): Promise<
     let pendingTransactions = 0
     let failedTransactions = 0
     let incompleteTransactions = 0
+    let canceledTransactions = 0
     let expiredTransactions = 0
     let totalConfirmedVolume = 0
     let totalFeesCollected = 0
@@ -158,6 +163,10 @@ export async function getAdminPaymentMetrics(): Promise<
         case "INCOMPLETE":
           incompleteTransactions++
           break
+        case "CANCELED":
+        case "CANCELLED":
+          canceledTransactions++
+          break
         case "EXPIRED":
           expiredTransactions++
           break
@@ -171,6 +180,7 @@ export async function getAdminPaymentMetrics(): Promise<
       pendingTransactions,
       failedTransactions,
       incompleteTransactions,
+      canceledTransactions,
       expiredTransactions,
       totalConfirmedVolume,
       totalFeesCollected,
@@ -236,40 +246,20 @@ export async function getAdminGrowthMetrics(): Promise<AdminGrowthMetrics> {
     const now = new Date()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
 
-    const [
-      { count: usersThisMonth, error: userErr },
-      { data: txRows, error: txErr },
-    ] = await Promise.all([
-      db
-        .from("merchants")
-        .select("id", { count: "exact", head: true })
-        .gte("created_at", monthStart),
-      db
-        .from("payments")
-        .select("gross_amount, status")
-        .gte("created_at", monthStart),
-    ])
+    const { count: usersThisMonth, error: userErr } = await db
+      .from("merchants")
+      .select("id", { count: "exact", head: true })
+      .gte("created_at", monthStart)
 
     if (userErr) {
       console.error("[admin/overview] getAdminGrowthMetrics (users) failed", userErr.message)
     }
-    if (txErr) {
-      console.error("[admin/overview] getAdminGrowthMetrics (payments) failed", txErr.message)
-    }
-
-    const rows = (txRows || []) as Array<{
-      gross_amount: number | string | null
-      status: string | null
-    }>
-
-    const volumeThisMonth = rows
-      .filter((r) => r.status === "CONFIRMED")
-      .reduce((sum, r) => sum + Number(r.gross_amount ?? 0), 0)
-
     return {
       usersThisMonth: usersThisMonth ?? 0,
-      transactionsThisMonth: rows.length,
-      volumeThisMonth,
+      // Payment growth is derived by engine/adminOverview from the canonical
+      // payment-root dataset; this database helper owns merchant growth only.
+      transactionsThisMonth: 0,
+      volumeThisMonth: 0,
     }
   } catch (err) {
     console.error("[admin/overview] getAdminGrowthMetrics exception", err)

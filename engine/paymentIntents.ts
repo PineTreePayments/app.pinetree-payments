@@ -14,7 +14,7 @@ import QRCode from "qrcode"
 import { createPayment, buildCreatePaymentRequest } from "./createPayment"
 import { normalizeWalletNetwork, type WalletNetwork } from "./providerMappings"
 import { PINETREE_FEE } from "./config"
-import { markPaymentIncomplete, markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
+import { markPaymentCanceled, markPaymentIncomplete, markPaymentIncompleteIfAbandoned } from "./paymentStateActions"
 import { loadProviders } from "./loadProviders"
 import { getMerchantProviders } from "@/database/merchants"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
@@ -840,11 +840,11 @@ export async function cancelPaymentIntentEngine(intentId: string): Promise<void>
       }
     }
 
-    const changed = await markPaymentIncomplete(intent.payment_id, {
+    const changed = await markPaymentCanceled(intent.payment_id, {
       providerEvent: "terminal_cancel",
       rawPayload: { reason: "merchant_canceled", intentId }
     })
-    if (!changed && status !== "INCOMPLETE") return
+    if (!changed && status !== "CANCELED" && status !== "CANCELLED") return
   }
 
   // Expire the intent so any subsequent select-network calls are rejected.

@@ -28,6 +28,7 @@ vi.mock("@/database/transactions", () => ({ getTransactionByPaymentId: vi.fn() }
 vi.mock("@/database/paymentEvents", () => ({ getPaymentEvents: vi.fn() }))
 vi.mock("@/engine/createPayment", () => ({ createPayment: vi.fn(), buildCreatePaymentRequest: vi.fn() }))
 vi.mock("@/engine/paymentStateActions", () => ({
+  markPaymentCanceled: vi.fn(),
   markPaymentIncomplete: vi.fn(),
   markPaymentIncompleteIfAbandoned: vi.fn(),
 }))
@@ -175,12 +176,12 @@ describe("cancelPaymentIntentEngine", () => {
       status: "SELECTED"
     } as never)
     vi.mocked(paymentIntentDb.getPaymentById).mockResolvedValue({ status: "PENDING" } as never)
-    vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
+    vi.mocked(paymentStateActions.markPaymentCanceled).mockResolvedValue(true)
     mockNoStoredEvidence()
 
     await cancelPaymentIntentEngine("intent-1")
 
-    expect(paymentStateActions.markPaymentIncomplete).toHaveBeenCalledWith(
+    expect(paymentStateActions.markPaymentCanceled).toHaveBeenCalledWith(
       "payment-1",
       expect.objectContaining({ providerEvent: "terminal_cancel" })
     )
@@ -201,7 +202,7 @@ describe("cancelPaymentIntentEngine", () => {
         PaymentAlreadySubmittedError
       )
 
-      expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+      expect(paymentStateActions.markPaymentCanceled).not.toHaveBeenCalled()
       expect(paymentIntentDb.expirePaymentIntent).not.toHaveBeenCalled()
     }
   )
@@ -214,7 +215,7 @@ describe("cancelPaymentIntentEngine", () => {
 
     await cancelPaymentIntentEngine("intent-1")
 
-    expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+    expect(paymentStateActions.markPaymentCanceled).not.toHaveBeenCalled()
     expect(paymentIntentDb.expirePaymentIntent).not.toHaveBeenCalled()
   })
 })
@@ -258,7 +259,7 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
       "payment-1",
       expect.objectContaining({ timeoutMs: expect.any(Number) })
     )
-    expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+    expect(paymentStateActions.markPaymentCanceled).not.toHaveBeenCalled()
     expect(paymentIntentDb.expirePaymentIntent).not.toHaveBeenCalled()
   })
 
@@ -281,11 +282,11 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
       status: "PENDING",
       reason: "no_chain_evidence_in_window"
     })
-    vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
+    vi.mocked(paymentStateActions.markPaymentCanceled).mockResolvedValue(true)
 
     await cancelPaymentIntentEngine("intent-1")
 
-    expect(paymentStateActions.markPaymentIncomplete).toHaveBeenCalledWith(
+    expect(paymentStateActions.markPaymentCanceled).toHaveBeenCalledWith(
       "payment-1",
       expect.objectContaining({ providerEvent: "terminal_cancel" })
     )
@@ -306,11 +307,11 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
     vi.mocked(baseChainReconciliation.reconcileBasePaymentFromChain).mockRejectedValue(
       new Error("RPC unreachable")
     )
-    vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
+    vi.mocked(paymentStateActions.markPaymentCanceled).mockResolvedValue(true)
 
     await cancelPaymentIntentEngine("intent-1")
 
-    expect(paymentStateActions.markPaymentIncomplete).toHaveBeenCalled()
+    expect(paymentStateActions.markPaymentCanceled).toHaveBeenCalled()
     expect(paymentIntentDb.expirePaymentIntent).toHaveBeenCalledWith("intent-1")
   })
 
@@ -325,12 +326,12 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
       network: "solana"
     } as never)
     mockNoStoredEvidence()
-    vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
+    vi.mocked(paymentStateActions.markPaymentCanceled).mockResolvedValue(true)
 
     await cancelPaymentIntentEngine("intent-1")
 
     expect(baseChainReconciliation.reconcileBasePaymentFromChain).not.toHaveBeenCalled()
-    expect(paymentStateActions.markPaymentIncomplete).toHaveBeenCalled()
+    expect(paymentStateActions.markPaymentCanceled).toHaveBeenCalled()
   })
 
   it("skips the chain pre-check when the payment is already INCOMPLETE (self-heal owns that recovery path)", async () => {
@@ -343,7 +344,7 @@ describe("cancelPaymentIntentEngine — Base pre-cancel chain check", () => {
       status: "INCOMPLETE",
       network: "base"
     } as never)
-    vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(false)
+    vi.mocked(paymentStateActions.markPaymentCanceled).mockResolvedValue(false)
 
     await cancelPaymentIntentEngine("intent-1")
 
@@ -386,7 +387,7 @@ describe("cancelPaymentIntentEngine — stored submitted-transaction evidence gu
     await expect(cancelPaymentIntentEngine("intent-1")).rejects.toBeInstanceOf(
       PaymentAlreadySubmittedError
     )
-    expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+    expect(paymentStateActions.markPaymentCanceled).not.toHaveBeenCalled()
     expect(paymentIntentDb.expirePaymentIntent).not.toHaveBeenCalled()
     // The DB-only check is cheap and runs first — no live chain call needed.
     expect(baseChainReconciliation.reconcileBasePaymentFromChain).not.toHaveBeenCalled()
@@ -413,7 +414,7 @@ describe("cancelPaymentIntentEngine — stored submitted-transaction evidence gu
     await expect(cancelPaymentIntentEngine("intent-1")).rejects.toBeInstanceOf(
       PaymentAlreadySubmittedError
     )
-    expect(paymentStateActions.markPaymentIncomplete).not.toHaveBeenCalled()
+    expect(paymentStateActions.markPaymentCanceled).not.toHaveBeenCalled()
   })
 
   it("proceeds with the normal cancel when there is genuinely no submitted evidence", async () => {
@@ -427,11 +428,11 @@ describe("cancelPaymentIntentEngine — stored submitted-transaction evidence gu
       network: "solana"
     } as never)
     mockNoStoredEvidence()
-    vi.mocked(paymentStateActions.markPaymentIncomplete).mockResolvedValue(true)
+    vi.mocked(paymentStateActions.markPaymentCanceled).mockResolvedValue(true)
 
     await cancelPaymentIntentEngine("intent-1")
 
-    expect(paymentStateActions.markPaymentIncomplete).toHaveBeenCalled()
+    expect(paymentStateActions.markPaymentCanceled).toHaveBeenCalled()
     expect(paymentIntentDb.expirePaymentIntent).toHaveBeenCalledWith("intent-1")
   })
 })

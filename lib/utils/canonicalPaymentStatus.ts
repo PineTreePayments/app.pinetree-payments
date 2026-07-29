@@ -19,11 +19,9 @@
  */
 
 /**
- * The 6-state canonical payment status used throughout the PineTree engine.
- *
- * EXPIRED and REFUNDED are not first-class engine states:
- *   EXPIRED  is normalised → INCOMPLETE (timed out, no payment received)
- *   REFUNDED remains a distinct post-settlement transaction adjustment.
+ * Canonical payment lifecycle statuses used throughout PineTree reads.
+ * Legacy spellings are normalized, while CANCELED, EXPIRED, and INCOMPLETE
+ * remain distinct on every surface. REFUNDED is an adjustment, not lifecycle.
  */
 export type CanonicalPaymentStatus =
   | "CREATED"
@@ -31,6 +29,8 @@ export type CanonicalPaymentStatus =
   | "PROCESSING"
   | "CONFIRMED"
   | "FAILED"
+  | "EXPIRED"
+  | "CANCELED"
   | "INCOMPLETE"
 
 export type NormalizedStoredPaymentStatus = CanonicalPaymentStatus | "REFUNDED" | "UNKNOWN"
@@ -40,18 +40,17 @@ export type TransactionDisplayStatus = NormalizedStoredPaymentStatus
  * Normalise a raw DB payment status (from either the payments or transactions
  * table) to a canonical lifecycle or post-settlement presentation state.
  *
- *   EXPIRED / CANCELLED → INCOMPLETE
- *   REFUNDED            → REFUNDED
- *   unknown / null      → UNKNOWN
+ *   CANCELLED       → CANCELED (legacy spelling only)
+ *   REFUNDED        → REFUNDED (post-settlement adjustment)
+ *   unknown / null  → UNKNOWN
  */
 export function normalizeStoredPaymentStatus(
   raw: string | null | undefined
 ): NormalizedStoredPaymentStatus {
   const s = String(raw ?? "").trim().toUpperCase()
   switch (s) {
-    case "EXPIRED":
     case "CANCELLED":
-      return "INCOMPLETE"
+      return "CANCELED"
     case "REFUNDED":
       return "REFUNDED"
     case "CREATED":
@@ -59,6 +58,8 @@ export function normalizeStoredPaymentStatus(
     case "PROCESSING":
     case "CONFIRMED":
     case "FAILED":
+    case "EXPIRED":
+    case "CANCELED":
     case "INCOMPLETE":
       return s as CanonicalPaymentStatus
     default:
@@ -80,7 +81,7 @@ export function isConfirmedStatus(raw: string | null | undefined): boolean {
  */
 export function isTerminalFailureStatus(raw: string | null | undefined): boolean {
   const norm = normalizeStoredPaymentStatus(raw)
-  return norm === "FAILED" || norm === "INCOMPLETE"
+  return norm === "FAILED" || norm === "INCOMPLETE" || norm === "EXPIRED" || norm === "CANCELED"
 }
 
 /**
@@ -89,7 +90,8 @@ export function isTerminalFailureStatus(raw: string | null | undefined): boolean
  */
 export function isTerminalStatus(raw: string | null | undefined): boolean {
   const norm = normalizeStoredPaymentStatus(raw)
-  return norm === "CONFIRMED" || norm === "FAILED" || norm === "INCOMPLETE" || norm === "REFUNDED"
+  return norm === "CONFIRMED" || norm === "FAILED" || norm === "INCOMPLETE" ||
+    norm === "EXPIRED" || norm === "CANCELED" || norm === "REFUNDED"
 }
 
 /**
@@ -106,47 +108,16 @@ export function isSafeToMarkIncomplete(raw: string | null | undefined): boolean 
 }
 
 /**
- * Resolve the canonical display status for a transaction row when both the
- * transaction status and its linked payment status are available.
- *
- * Precedence (highest first):
- *   1. CONFIRMED always wins — payment.CONFIRMED overrides tx.PENDING/PROCESSING.
- *   2. FAILED always propagates from payment → tx (see reconcileTransaction.ts
- *      fix: FAILED ignores provider_transaction_id guard).
- *   3. INCOMPLETE from payment overrides tx.PENDING when no evidence guard
- *      triggered (reconciliation handles this; this function is a display-layer
- *      safety net for rows where reconciliation hasn't run yet).
- *   4. Otherwise return the transaction's own stored status unchanged.
- *
- * NOTE: This function is only called in engine data-layer code that builds
- * transaction row objects for the dashboard.  The display function
- * getPaymentDisplayStatus() still receives a single string — it does NOT
- * perform any merging.
+ * Resolve a lifecycle value for legacy callers that still supply both fields.
+ * The transaction argument is deliberately ignored: only payments.status can
+ * represent the current payment lifecycle.
  */
 export function resolveTransactionDisplayStatus(
   txStatus: string | null | undefined,
   paymentStatus: string | null | undefined
 ): TransactionDisplayStatus {
-  const rawTxStatus = String(txStatus || "").trim().toUpperCase()
-  if (rawTxStatus === "REFUNDED") return "REFUNDED"
-  const txNorm = normalizeStoredPaymentStatus(txStatus)
+  void txStatus
   const pmtNorm = normalizeStoredPaymentStatus(paymentStatus)
-
-  if (pmtNorm === "REFUNDED") return "REFUNDED"
-
-  // Rule 10: CONFIRMED is never downgraded.
-  if (pmtNorm === "CONFIRMED") return "CONFIRMED"
-  if (txNorm === "CONFIRMED") return "CONFIRMED"
-
-  // Rule 11: FAILED is never converted to INCOMPLETE.
-  // If the payment is FAILED, the transaction must also reflect FAILED.
-  if (pmtNorm === "FAILED") return "FAILED"
-
-  // Payment INCOMPLETE and transaction not yet reconciled.
-  if (pmtNorm === "INCOMPLETE" && (txNorm === "PENDING" || txNorm === "PROCESSING")) {
-    return "INCOMPLETE"
-  }
-
-  // Default: use the transaction's own stored status.
-  return txNorm
+  if (pmtNorm !== "UNKNOWN" && pmtNorm !== "REFUNDED") return pmtNorm
+  return "UNKNOWN"
 }

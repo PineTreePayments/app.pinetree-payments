@@ -42,8 +42,9 @@ function currency(value: number) {
   return `$${value.toFixed(2)}`
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(value: string, timeZone: string) {
   return new Date(value).toLocaleString("en-US", {
+    timeZone,
     year: "numeric",
     month: "short",
     day: "2-digit",
@@ -52,8 +53,9 @@ function formatDateTime(value: string) {
   })
 }
 
-function formatDate(value: string) {
+function formatDate(value: string, timeZone: string) {
   return new Date(value).toLocaleDateString("en-US", {
+    timeZone,
     year: "numeric",
     month: "short",
     day: "2-digit"
@@ -175,7 +177,7 @@ function drawBreakdown(ctx: PdfContext, title: string, totals: Record<string, nu
 
 function drawLedger(ctx: PdfContext, report: ReportSummary) {
   section(ctx, "Transaction Ledger")
-  const headers = ["Date", "Reference", "Provider", "Network", "Asset", "Subtotal", "Tax", "Fee", "Gross", "Status"]
+  const headers = ["Date", "Payment ID", "Provider", "Network", "Asset", "Subtotal", "Tax", "Fee", "Gross", "Status"]
   const x = [50, 100, 180, 250, 310, 350, 400, 440, 480, 530]
 
   ensureSpace(ctx, 40)
@@ -189,8 +191,8 @@ function drawLedger(ctx: PdfContext, report: ReportSummary) {
   for (const row of report.transactionsTable) {
     ensureSpace(ctx, 38)
     const values = [
-      formatDate(row.dateTime),
-      truncate(row.reference, 12),
+      formatDate(row.dateTime, report.timeZone),
+      truncate(row.paymentId, 12),
       truncate(row.provider, 12),
       truncate(row.network, 10),
       truncate(row.asset, 7),
@@ -229,8 +231,8 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
   // ── Report title block ─────────────────────────────────────────────────────
   draw(ctx, report.title, { size: 20, bold: true, lineHeight: 28 })
   draw(ctx, report.merchant.name, { size: 11, color: MUTED, lineHeight: 17 })
-  draw(ctx, `${formatDate(report.startDate)} – ${formatDate(report.endDate)}`, { size: 10, color: MUTED, lineHeight: 15 })
-  draw(ctx, `Generated: ${formatDateTime(report.generatedAt)}`, { size: 9, color: MUTED, lineHeight: 22 })
+  draw(ctx, `${formatDate(report.startDate, report.timeZone)} – ${formatDate(report.endDate, report.timeZone)}`, { size: 10, color: MUTED, lineHeight: 15 })
+  draw(ctx, `Generated: ${formatDateTime(report.generatedAt, report.timeZone)}`, { size: 9, color: MUTED, lineHeight: 22 })
 
   section(ctx, "Merchant Info")
   const location = [

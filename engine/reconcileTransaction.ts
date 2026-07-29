@@ -10,7 +10,7 @@
  *   payment FAILED     → transaction FAILED       (only if non-terminal and no provider_transaction_id)
  *   payment INCOMPLETE → transaction INCOMPLETE   (only if non-terminal and no provider_transaction_id)
  *   payment EXPIRED    → transaction INCOMPLETE   (EXPIRED is not a first-class transaction state)
- *   payment CANCELLED  → transaction INCOMPLETE   (CANCELLED is not a first-class transaction state)
+ *   payment CANCELED   → transaction INCOMPLETE   (CANCELED is not a first-class transaction state)
  *
  * Called from:
  *   - engine/updatePaymentStatus.ts  (all TypeScript payment terminal transitions)
@@ -39,11 +39,11 @@ export type ReconcileResult = {
 // can use the same set rather than defining their own copy.
 export const NON_TERMINAL_TX_STATUSES = new Set<string>(["PENDING", "PROCESSING"])
 
-export type TerminalPaymentStatus = "CONFIRMED" | "FAILED" | "INCOMPLETE" | "EXPIRED" | "CANCELLED"
+export type TerminalPaymentStatus = "CONFIRMED" | "FAILED" | "INCOMPLETE" | "EXPIRED" | "CANCELED" | "CANCELLED"
 
 /**
  * Map a terminal payment status to the matching transaction status.
- * EXPIRED and CANCELLED payments have no dedicated transaction state and
+ * EXPIRED and CANCELED payments have no dedicated transaction state and
  * map to INCOMPLETE (the production-standard abandoned/incomplete state).
  */
 export function paymentToTransactionTerminalStatus(
@@ -51,7 +51,7 @@ export function paymentToTransactionTerminalStatus(
 ): TransactionStatus {
   if (paymentStatus === "CONFIRMED") return "CONFIRMED"
   if (paymentStatus === "FAILED") return "FAILED"
-  // INCOMPLETE, EXPIRED, and CANCELLED all map to INCOMPLETE on the transaction
+  // INCOMPLETE, EXPIRED, CANCELED, and legacy CANCELLED all map to INCOMPLETE on the transaction
   return "INCOMPLETE"
 }
 
@@ -62,7 +62,7 @@ export function paymentToTransactionTerminalStatus(
  *  1. No linked transaction → skip (nothing to reconcile).
  *  2. Payment CONFIRMED → always force transaction to CONFIRMED, even if FAILED/INCOMPLETE.
  *     CONFIRMED is the strongest authoritative state.
- *  3. Payment FAILED / INCOMPLETE / EXPIRED / CANCELLED:
+ *  3. Payment FAILED / INCOMPLETE / EXPIRED / CANCELED:
  *     a. Transaction already CONFIRMED → skip (never downgrade a confirmed tx).
  *     b. Transaction already in any other terminal state → skip (already settled).
  *     c. Transaction has provider_transaction_id → skip (real on-chain evidence;
@@ -125,7 +125,7 @@ export async function reconcileTransactionForPayment(
     }
   }
 
-  // ── Rules 3a–3d: FAILED / INCOMPLETE / EXPIRED / CANCELLED payment ───────────
+  // ── Rules 3a–3d: FAILED / INCOMPLETE / EXPIRED / CANCELED payment ───────────
 
   // 3a: never downgrade a confirmed transaction
   if (transaction.status === "CONFIRMED") {
@@ -149,7 +149,7 @@ export async function reconcileTransactionForPayment(
     }
   }
 
-  // 3c: skip INCOMPLETE / EXPIRED / CANCELLED when on-chain evidence exists.
+  // 3c: skip INCOMPLETE / EXPIRED / CANCELED when on-chain evidence exists.
   //
   // Rationale: these three statuses mean "abandoned with no confirmed payment."
   // If the transaction has a provider_transaction_id the customer DID submit a

@@ -13,7 +13,12 @@ import { getPaymentById } from "@/database"
 import type { Payment } from "@/database/payments"
 import { updatePaymentMetadata } from "@/database/payments"
 import { advancePaymentToTargetStatus, processPaymentEvent } from "./eventProcessor"
-import { SpeedApiError, isSpeedPaymentPaid } from "@/providers/lightning/speedClient"
+import {
+  SpeedApiError,
+  isSpeedPaymentPaid,
+  retrieveSpeedPayment,
+  type SpeedPaymentObject,
+} from "@/providers/lightning/speedClient"
 import { retrieveMerchantSpeedPayment } from "@/providers/lightning/speedAdapter"
 import { extractBitcoinFeeSettlementInfo } from "@/lib/bitcoin/feeSettlementInfo"
 import { recordSpeedApplicationFeeSettlement } from "./speedFeeSettlement"
@@ -31,8 +36,118 @@ function readMetadataRecord(metadata: unknown): Record<string, unknown> {
   return metadata && typeof metadata === "object" ? (metadata as Record<string, unknown>) : {}
 }
 
+export type SpeedRetrievalScope = "merchant_connected_account" | "legacy_platform"
+
+export type VerifiedSpeedReconciliationEvidence = {
+  speedPayment: SpeedPaymentObject
+  retrievalScope: SpeedRetrievalScope
+}
+
+function readMetadataString(metadata: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = String(metadata[key] || "").trim()
+    if (value) return value
+  }
+  return ""
+}
+
+/**
+ * An unscoped Speed GET can see platform-owned legacy payments, so it must
+ * never be trusted based on the provider ID alone. PineTree has always placed
+ * both canonical identities in payment metadata; require both before using a
+ * platform-scoped response as lifecycle evidence.
+ */
+function legacyPlatformPaymentMatchesCanonical(input: {
+  speedPayment: SpeedPaymentObject
+  speedPaymentId: string
+  paymentId: string
+  merchantId: string
+}): boolean {
+  const metadata = readMetadataRecord(input.speedPayment.metadata)
+  const canonicalPaymentId = readMetadataString(metadata, "pineTreePaymentId", "payment_id")
+  const canonicalMerchantId = readMetadataString(metadata, "merchantId", "merchant_id")
+  return (
+    String(input.speedPayment.id || "").trim() === input.speedPaymentId &&
+    canonicalPaymentId === input.paymentId &&
+    canonicalMerchantId === input.merchantId
+  )
+}
+
+function isSpeedNotFound(error: unknown): error is SpeedApiError {
+  return error instanceof SpeedApiError && error.status === 404
+}
+
+async function recordUnresolvableSpeedReference(input: {
+  paymentId: string
+  speedPaymentId: string
+  reason:
+    | "missing_provider_reference"
+    | "not_found_in_connected_or_platform_scope"
+    | "platform_identity_mismatch"
+}): Promise<void> {
+  const checkedAt = new Date().toISOString()
+  await updatePaymentMetadata(input.paymentId, {
+    speedRetrieveStale: true,
+    speedRetrieveStaleAt: checkedAt,
+    speedRetrieveStaleReference: input.speedPaymentId,
+    speedLegacyPlatformFallbackCheckedAt: checkedAt,
+    speedRetrieveStaleReason: input.reason,
+  }).catch((metadataError) => {
+    console.warn("[speed] payment_retrieve_stale_flag_failed", {
+      canonicalTransactionId: input.paymentId,
+      error: metadataError instanceof Error ? metadataError.message : String(metadataError),
+    })
+  })
+}
+
+async function retrieveLegacyPlatformPayment(input: {
+  paymentId: string
+  merchantId: string
+  speedPaymentId: string
+}): Promise<SpeedPaymentObject | null> {
+  let speedPayment: SpeedPaymentObject
+  try {
+    // Deliberately omit merchantContext. Payments created before connected-
+    // account header scoping are owned by PineTree's platform account and are
+    // invisible to the merchant-scoped GET.
+    speedPayment = await retrieveSpeedPayment(input.speedPaymentId)
+  } catch (error) {
+    if (!isSpeedNotFound(error)) throw error
+    await recordUnresolvableSpeedReference({
+      ...input,
+      reason: "not_found_in_connected_or_platform_scope",
+    })
+    return null
+  }
+
+  if (!legacyPlatformPaymentMatchesCanonical({ speedPayment, ...input })) {
+    console.warn("[speed] legacy_platform_payment_identity_mismatch", {
+      canonicalTransactionId: input.paymentId,
+      speedPaymentId: input.speedPaymentId,
+      providerPaymentIdMatches: String(speedPayment.id || "").trim() === input.speedPaymentId,
+    })
+    await recordUnresolvableSpeedReference({
+      ...input,
+      reason: "platform_identity_mismatch",
+    })
+    return null
+  }
+
+  const checkedAt = new Date().toISOString()
+  // Persist the retrieval scope before applying lifecycle evidence. If this
+  // audit write fails, leave the payment unchanged and retry safely later.
+  await updatePaymentMetadata(input.paymentId, {
+    speedRetrieveStale: false,
+    speedRetrieveScope: "legacy_platform",
+    speedLegacyPlatformFallbackCheckedAt: checkedAt,
+    speedLegacyPlatformScopeConfirmedAt: checkedAt,
+  })
+  return speedPayment
+}
+
 export async function reconcileSpeedLightningPayment(
-  payment: Pick<Payment, "id" | "status" | "provider_reference" | "merchant_id">
+  payment: Pick<Payment, "id" | "status" | "provider_reference" | "merchant_id">,
+  verifiedEvidence?: VerifiedSpeedReconciliationEvidence
 ): Promise<SpeedLightningReconciliationResult> {
   const paymentId = payment.id
   const currentStatus = String(payment.status || "").toUpperCase()
@@ -42,19 +157,30 @@ export async function reconcileSpeedLightningPayment(
 
   const speedPaymentId = String(payment.provider_reference || "").trim()
   if (!speedPaymentId) {
+    // A malformed legacy row must not occupy the oldest reconciliation slots
+    // forever. Persist the same exhausted marker used after both Speed lookup
+    // scopes fail so the candidate query evicts it on subsequent runs.
+    await recordUnresolvableSpeedReference({
+      paymentId,
+      speedPaymentId: "",
+      reason: "missing_provider_reference",
+    })
     return { checked: false, detected: false, speedStatus: "", status: currentStatus }
   }
 
-  // A payment whose Speed provider reference has already been confirmed
-  // permanently invalid (404 "Invalid payment id") must not be polled again
-  // on every maintenance sweep forever - that's a stale/missing reference,
-  // not a transient failure. The canonical PineTree payment record is left
-  // exactly as-is (untouched status) for support review; only the fact that
-  // this reference is stale is recorded so this function can skip the Speed
-  // call cheaply next time.
+  // A legacy payment created before Speed connected-account header scoping can
+  // be invisible to the merchant-scoped GET while still existing under the
+  // PineTree platform account. Existing stale flags created by the old lookup
+  // logic therefore get one bounded platform fallback attempt. A reference
+  // already checked in both scopes remains a cheap permanent skip.
   const fullPayment = await getPaymentById(paymentId)
   const existingMetadata = readMetadataRecord(fullPayment?.metadata)
-  if (existingMetadata.speedRetrieveStale === true) {
+  const knownLegacyPlatformScope = existingMetadata.speedRetrieveScope === "legacy_platform"
+  if (
+    !verifiedEvidence &&
+    existingMetadata.speedRetrieveStale === true &&
+    Boolean(existingMetadata.speedLegacyPlatformFallbackCheckedAt)
+  ) {
     console.info("[speed] payment_retrieve_stale_skip", {
       canonicalTransactionId: paymentId,
       speedPaymentId,
@@ -64,10 +190,44 @@ export async function reconcileSpeedLightningPayment(
   }
 
   let speedPayment: Awaited<ReturnType<typeof retrieveMerchantSpeedPayment>>
-  try {
-    speedPayment = await retrieveMerchantSpeedPayment(speedPaymentId, payment.merchant_id)
-  } catch (error) {
-    if (error instanceof SpeedApiError && error.status === 404) {
+  let retrievalScope: SpeedRetrievalScope = "merchant_connected_account"
+  if (verifiedEvidence) {
+    speedPayment = verifiedEvidence.speedPayment
+    retrievalScope = verifiedEvidence.retrievalScope
+    if (!legacyPlatformPaymentMatchesCanonical({
+      speedPayment,
+      paymentId,
+      merchantId: payment.merchant_id,
+      speedPaymentId,
+    })) {
+      throw new Error("Verified Speed evidence identity mismatch")
+    }
+    if (retrievalScope === "legacy_platform") {
+      const checkedAt = new Date().toISOString()
+      // Persist the broader retrieval scope before any lifecycle mutation.
+      await updatePaymentMetadata(paymentId, {
+        speedRetrieveStale: false,
+        speedRetrieveScope: "legacy_platform",
+        speedLegacyPlatformFallbackCheckedAt: checkedAt,
+        speedLegacyPlatformScopeConfirmedAt: checkedAt,
+      })
+    }
+  } else if (knownLegacyPlatformScope || existingMetadata.speedRetrieveStale === true) {
+    const legacyPayment = await retrieveLegacyPlatformPayment({
+      paymentId,
+      merchantId: payment.merchant_id,
+      speedPaymentId,
+    })
+    if (!legacyPayment) {
+      return { checked: true, detected: false, speedStatus: "stale_reference", status: currentStatus }
+    }
+    speedPayment = legacyPayment
+    retrievalScope = "legacy_platform"
+  } else {
+    try {
+      speedPayment = await retrieveMerchantSpeedPayment(speedPaymentId, payment.merchant_id)
+    } catch (error) {
+      if (!isSpeedNotFound(error)) throw error
       console.warn("[speed] payment_retrieve_permanently_stale", {
         canonicalTransactionId: paymentId,
         speedPaymentId,
@@ -76,19 +236,17 @@ export async function reconcileSpeedLightningPayment(
         requestId: error.requestId,
         operation: "payment.retrieve",
       })
-      await updatePaymentMetadata(paymentId, {
-        speedRetrieveStale: true,
-        speedRetrieveStaleAt: new Date().toISOString(),
-        speedRetrieveStaleReference: speedPaymentId,
-      }).catch((metadataError) => {
-        console.warn("[speed] payment_retrieve_stale_flag_failed", {
-          canonicalTransactionId: paymentId,
-          error: metadataError instanceof Error ? metadataError.message : String(metadataError),
-        })
+      const legacyPayment = await retrieveLegacyPlatformPayment({
+        paymentId,
+        merchantId: payment.merchant_id,
+        speedPaymentId,
       })
-      return { checked: true, detected: false, speedStatus: "stale_reference", status: currentStatus }
+      if (!legacyPayment) {
+        return { checked: true, detected: false, speedStatus: "stale_reference", status: currentStatus }
+      }
+      speedPayment = legacyPayment
+      retrievalScope = "legacy_platform"
     }
-    throw error
   }
   const detected = isSpeedPaymentPaid(speedPayment)
   const speedStatus = String(speedPayment.status || "").toLowerCase().trim()
@@ -126,9 +284,11 @@ export async function reconcileSpeedLightningPayment(
   } else if (speedStatus === "processing" || speedStatus === "settling") {
     await processPaymentEvent({ type: "payment.processing", paymentId })
   } else if (speedStatus === "expired" || speedStatus === "cancelled" || speedStatus === "canceled") {
-    await advancePaymentToTargetStatus(paymentId, "INCOMPLETE", {
-      providerEvent: "payment.expired",
-      rawPayload: { speedPaymentId, speedStatus }
+    const expired = speedStatus === "expired"
+    const providerEvent = expired ? "payment.expired" : "payment.canceled"
+    await advancePaymentToTargetStatus(paymentId, expired ? "EXPIRED" : "CANCELED", {
+      providerEvent,
+      rawPayload: { speedPaymentId, speedStatus, speedRetrievalScope: retrievalScope }
     })
   }
 

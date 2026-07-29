@@ -5,7 +5,7 @@ import {
   canUserCancelAsIncomplete,
   normalizeToStrictPaymentStatus
 } from "@/engine/paymentStateMachine"
-import { markPaymentIncomplete } from "@/engine/paymentStateActions"
+import { markPaymentCanceled } from "@/engine/paymentStateActions"
 import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import { verifyTerminalSession } from "@/lib/api/terminalAuth"
 import { verifyCheckoutSession } from "@/lib/api/checkoutAuth"
@@ -93,12 +93,18 @@ export async function POST(
     const status = normalizeToStrictPaymentStatus(payment.status)
 
     // Already terminal — idempotent
-    if (status === "CONFIRMED" || status === "FAILED" || status === "INCOMPLETE") {
+    if (
+      status === "CONFIRMED" ||
+      status === "FAILED" ||
+      status === "EXPIRED" ||
+      status === "CANCELED" ||
+      status === "INCOMPLETE"
+    ) {
       return json({ ok: true })
     }
 
-    // State machine: FAILED is only reachable from PROCESSING.
-    // CREATED/PENDING → INCOMPLETE (the cancelled terminal state).
+    // Explicit customer rejection is distinct from abandoned/incomplete.
+    // CREATED is stepped through PENDING before the terminal CANCELED write.
     if (!canUserCancelAsIncomplete(status)) {
       return json({
         ok: true,
@@ -111,7 +117,7 @@ export async function POST(
       await updatePaymentStatus(paymentId, "PENDING")
     }
 
-    const changed = await markPaymentIncomplete(paymentId, {
+    const changed = await markPaymentCanceled(paymentId, {
       providerEvent: "payment.user_rejected",
       rawPayload: { source: "ui_cancel" }
     })

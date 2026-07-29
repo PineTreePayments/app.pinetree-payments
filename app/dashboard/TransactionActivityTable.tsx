@@ -44,10 +44,26 @@ export type DashboardPaymentSummary = {
 }
 
 export type DashboardTransactionRow = {
-  id: string
+  id?: string | null
+  paymentId?: string | null
+  attemptId?: string | null
+  merchantId?: string | null
+  providerReference?: string | null
+  transactionHash?: string | null
+  rail?: string | null
+  asset?: string | null
+  currency?: string | null
+  amountMinor?: number | null
+  displayAmount?: string | null
+  canonicalStatus?: string | null
+  displayStatus?: string | null
+  occurredAt?: string | null
+  createdAt?: string | null
+  confirmedAt?: string | null
+  source?: string | null
   payment_id?: string | null
   provider?: string | null
-  status: string
+  status?: string | null
   provider_transaction_id?: string | null
   network?: string | null
   channel?: string | null
@@ -55,6 +71,11 @@ export type DashboardTransactionRow = {
   created_at?: string | null
   terminal_at?: string | null
   terminal_reason?: string | null
+  assetPaymentDetails?: {
+    amountPaidLabel: string | null
+    rateLabel: string | null
+    lightningInvoice: string | null
+  } | null
   lifecycle_events?: Array<{
     type: string
     status: string
@@ -69,12 +90,19 @@ function parseTimestamp(value: string) {
 }
 
 export function formatChicagoDateTime(value: string | null | undefined) {
+  return formatTransactionDateTime(value, "America/Chicago")
+}
+
+export function formatTransactionDateTime(
+  value: string | null | undefined,
+  timeZone = "America/Chicago"
+) {
   if (!value) return "-"
   const date = parseTimestamp(value)
   if (Number.isNaN(date.getTime())) return "-"
 
   return date.toLocaleString("en-US", {
-    timeZone: "America/Chicago",
+    timeZone,
     month: "numeric",
     day: "numeric",
     year: "numeric",
@@ -102,6 +130,38 @@ export function networkName(network: string | null | undefined) {
 
 function getPayment(tx: DashboardTransactionRow) {
   return Array.isArray(tx.payments) ? tx.payments[0] : tx.payments
+}
+
+function canonicalPaymentId(tx: DashboardTransactionRow) {
+  return String(tx.paymentId || getTransactionReferenceParts(tx).paymentId || "").trim() || null
+}
+
+function canonicalStatus(tx: DashboardTransactionRow) {
+  return String(tx.canonicalStatus || tx.status || "UNKNOWN").trim().toUpperCase()
+}
+
+function canonicalTimestamp(tx: DashboardTransactionRow, payment?: DashboardPaymentSummary | null) {
+  return tx.occurredAt || tx.createdAt || tx.created_at || payment?.created_at || null
+}
+
+function canonicalAmount(tx: DashboardTransactionRow, payment?: DashboardPaymentSummary | null) {
+  if (tx.amountMinor != null && Number.isFinite(Number(tx.amountMinor))) return Number(tx.amountMinor) / 100
+  return Number(payment?.gross_amount ?? 0)
+}
+
+function canonicalCurrency(tx: DashboardTransactionRow, payment?: DashboardPaymentSummary | null) {
+  return tx.currency || payment?.currency || "-"
+}
+
+function canonicalAsset(tx: DashboardTransactionRow, payment?: DashboardPaymentSummary | null) {
+  const projected = String(tx.asset || "").trim()
+  if (projected) return projected
+  return normalizeTransactionAsset({
+    provider: tx.provider,
+    network: tx.network,
+    currency: payment?.currency,
+    metadata: payment?.metadata ?? null
+  })
 }
 
 type DetailDisplayRow = {
@@ -136,30 +196,31 @@ function buildDetailRows(input: {
     payment?.metadata ?? null,
     Number(payment?.gross_amount ?? 0)
   )
+  const amountPaidLabel = tx.assetPaymentDetails?.amountPaidLabel ?? assetDisplay.amountPaidLabel
+  const rateLabel = tx.assetPaymentDetails?.rateLabel ?? assetDisplay.rateLabel
 
   const assetRows: DetailDisplayRow[] = []
   assetRows.push({
     label: "Asset",
-    value: assetDisplay.assetLabel || normalizeTransactionAsset({
+    value: tx.asset || assetDisplay.assetLabel || normalizeTransactionAsset({
       provider: tx.provider,
       network: tx.network,
       currency: payment?.currency,
       metadata: payment?.metadata ?? null
     })
   })
-  if (assetDisplay.amountPaidLabel) assetRows.push({ label: "Amount Paid", value: assetDisplay.amountPaidLabel })
-  if (assetDisplay.rateLabel) assetRows.push({ label: "Rate at Payment", value: assetDisplay.rateLabel })
+  if (amountPaidLabel) assetRows.push({ label: "Amount Paid", value: amountPaidLabel })
+  if (rateLabel) assetRows.push({ label: "Rate at Payment", value: rateLabel })
 
   const coreRows: DetailDisplayRow[] = [
-    { label: "Reference", value: formatTransactionReference(tx), mono: true },
-    { label: "Payment ID", value: references.paymentId, mono: true },
-    { label: "Transaction ID", value: references.transactionId, mono: true },
-    { label: "Amount", value: formatUsd(Number(payment?.gross_amount ?? 0)) },
-    { label: "Currency", value: payment?.currency || null }
+    { label: "Payment ID", value: canonicalPaymentId(tx), mono: true },
+    { label: "Attempt ID", value: tx.attemptId || references.transactionId, mono: true },
+    { label: "Amount", value: tx.displayAmount || formatUsd(canonicalAmount(tx, payment)) },
+    { label: "Currency", value: canonicalCurrency(tx, payment) }
   ]
 
   const tailRows: DetailDisplayRow[] = [
-    { label: "Status", value: statusLabel },
+    { label: "Status", value: tx.displayStatus || statusLabel },
     { label: "Created At", value: formatChicagoDateTime(statusTime) },
     ...(tx.terminal_at ? [{
       label: tx.status === "CANCELED" ? "Canceled At" : tx.status === "EXPIRED" ? "Expired At" : "Completed At",
@@ -190,14 +251,16 @@ function buildDetailRows(input: {
     provider === "lightning_nwc" ||
     provider === "nwc"
   ) {
-    const lightningInvoice = payment?.metadata?.split?.lightningInvoice || null
+    const lightningInvoice = tx.assetPaymentDetails?.lightningInvoice
+      ?? payment?.metadata?.split?.lightningInvoice
+      ?? null
     return [
       ...coreRows,
       ...assetRows,
       { label: "Network", value: "Bitcoin Lightning" },
       { label: "Provider", value: providerName(tx.provider) },
       ...tailRows,
-      { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true },
+      { label: "Provider Reference", value: formatProviderReference(tx.provider, tx.providerReference || references.providerReference), mono: true },
       { label: "Lightning Invoice", value: lightningInvoice, mono: true }
     ]
   }
@@ -209,8 +272,8 @@ function buildDetailRows(input: {
       { label: "Network", value: "Base" },
       { label: "Provider", value: "Base Pay" },
       ...tailRows,
-      { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, references.blockchainReference), mono: true },
-      { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true }
+      { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, tx.transactionHash || references.blockchainReference), mono: true },
+      { label: "Provider Reference", value: formatProviderReference(tx.provider, tx.providerReference || references.providerReference), mono: true }
     ]
   }
 
@@ -221,8 +284,8 @@ function buildDetailRows(input: {
       { label: "Network", value: "Solana" },
       { label: "Provider", value: "Solana Pay" },
       ...tailRows,
-      { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, references.blockchainReference), mono: true },
-      { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true }
+      { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, tx.transactionHash || references.blockchainReference), mono: true },
+      { label: "Provider Reference", value: formatProviderReference(tx.provider, tx.providerReference || references.providerReference), mono: true }
     ]
   }
 
@@ -232,19 +295,21 @@ function buildDetailRows(input: {
     { label: "Network", value: networkName(tx.network) },
     { label: "Provider", value: providerName(tx.provider) },
     ...tailRows,
-    { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, references.blockchainReference), mono: true },
-    { label: "Provider Reference", value: formatProviderReference(tx.provider, references.providerReference), mono: true }
+    { label: "Blockchain Transaction", value: formatProviderReference(tx.provider, tx.transactionHash || references.blockchainReference), mono: true },
+    { label: "Provider Reference", value: formatProviderReference(tx.provider, tx.providerReference || references.providerReference), mono: true }
   ]
 }
 
 export default function TransactionActivityTable({
   transactions,
   emptyMessage = "No transactions found.",
-  mobileInitialCount = 10
+  mobileInitialCount = 10,
+  timeZone = "America/Chicago"
 }: {
   transactions: DashboardTransactionRow[]
   emptyMessage?: string
   mobileInitialCount?: number
+  timeZone?: string
 }) {
   const [selectedTx, setSelectedTx] = useState<DashboardTransactionRow | null>(null)
   const [visibleMobileCount, setVisibleMobileCount] = useState(mobileInitialCount)
@@ -301,9 +366,9 @@ export default function TransactionActivityTable({
   }, [closeDetail, selectedTx])
 
   const selectedPayment = selectedTx ? getPayment(selectedTx) : null
-  const selectedStatusTime = selectedTx?.created_at || selectedPayment?.created_at || null
+  const selectedStatusTime = selectedTx ? canonicalTimestamp(selectedTx, selectedPayment) : null
   const selectedStatus = selectedTx
-    ? getPaymentDisplayStatus(selectedTx.status)
+    ? getPaymentDisplayStatus(canonicalStatus(selectedTx))
     : null
   const selectedReferences = selectedTx ? getTransactionReferenceParts(selectedTx) : null
   const selectedDetailRows = selectedTx && selectedStatus && selectedReferences
@@ -329,13 +394,13 @@ export default function TransactionActivityTable({
         )}
         {visibleMobileTransactions.map((tx) => {
           const payment = getPayment(tx)
-          const statusTime = tx.created_at || payment?.created_at || null
-          const reference = formatTransactionReference(tx)
-          const secondaryLabel = formatTransactionSecondaryLabel(tx.provider, tx.network, payment)
+           const statusTime = canonicalTimestamp(tx, payment)
+           const paymentId = canonicalPaymentId(tx)
+           const secondaryLabel = tx.asset || formatTransactionSecondaryLabel(tx.provider, tx.network, payment)
 
           return (
             <button
-              key={tx.id}
+               key={paymentId || tx.id}
               type="button"
               onClick={() => setSelectedTx(tx)}
               className="w-full border-b border-gray-100 bg-white px-4 py-3 text-left last:border-b-0 hover:bg-gray-50 focus:bg-blue-50/60 focus:outline-none"
@@ -347,18 +412,18 @@ export default function TransactionActivityTable({
                     <span className="text-gray-400 font-normal"> · {secondaryLabel}</span>
                   )}
                 </span>
-                <StatusBadge status={tx.status} />
+                <StatusBadge status={canonicalStatus(tx)} />
               </div>
               <div className="flex items-center justify-between gap-2 mb-1">
                 <span className="text-sm font-semibold text-gray-900">
-                  {formatUsd(Number(payment?.gross_amount ?? 0))}
+                  {tx.displayAmount || formatUsd(canonicalAmount(tx, payment))}
                 </span>
                 <span className="text-xs text-gray-500">
-                  {formatChicagoDateTime(statusTime)}
+                  {formatTransactionDateTime(statusTime, timeZone)}
                 </span>
               </div>
               <div className="text-xs text-gray-500 font-mono truncate">
-                {reference}
+                {paymentId || "Unknown payment"}
               </div>
             </button>
           )
@@ -397,7 +462,7 @@ export default function TransactionActivityTable({
               <th className="px-4 py-3 font-medium">Asset</th>
               <th className="px-4 py-3 font-medium">Provider</th>
               <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Reference</th>
+              <th className="px-4 py-3 font-medium">Payment ID</th>
             </tr>
           </thead>
 
@@ -412,12 +477,12 @@ export default function TransactionActivityTable({
 
             {transactions.map((tx) => {
               const payment = getPayment(tx)
-              const statusTime = tx.created_at || payment?.created_at || null
-              const reference = formatTransactionReference(tx)
+              const statusTime = canonicalTimestamp(tx, payment)
+              const paymentId = canonicalPaymentId(tx)
 
               return (
                 <tr
-                  key={tx.id}
+                  key={paymentId || tx.id}
                   tabIndex={0}
                   onClick={() => setSelectedTx(tx)}
                   onKeyDown={(event) => {
@@ -429,19 +494,19 @@ export default function TransactionActivityTable({
                   className="border-b border-gray-100 text-sm hover:bg-gray-50 cursor-pointer focus:outline-none focus:bg-blue-50/60"
                 >
                   <td className="px-4 py-4 text-gray-900 whitespace-nowrap">
-                    {formatChicagoDateTime(statusTime)}
+                    {formatTransactionDateTime(statusTime, timeZone)}
                   </td>
 
                   <td className="px-4 py-4 font-medium text-gray-900 whitespace-nowrap">
-                    {formatUsd(Number(payment?.gross_amount ?? 0))}
+                    {tx.displayAmount || formatUsd(canonicalAmount(tx, payment))}
                   </td>
 
                   <td className="px-4 py-4 text-gray-900 whitespace-nowrap">
-                    {payment?.currency || "-"}
+                    {canonicalCurrency(tx, payment)}
                   </td>
 
                   <td className="px-4 py-4 text-gray-700 whitespace-nowrap">
-                    {formatTransactionSecondaryLabel(tx.provider, tx.network, payment)}
+                    {canonicalAsset(tx, payment)}
                   </td>
 
                   <td className="px-4 py-4 text-gray-900 whitespace-nowrap">
@@ -449,12 +514,12 @@ export default function TransactionActivityTable({
                   </td>
 
                   <td className="px-4 py-4 whitespace-nowrap">
-                    <StatusBadge status={tx.status} />
+                    <StatusBadge status={canonicalStatus(tx)} />
                   </td>
 
                   <td className="px-4 py-4 text-gray-600 font-mono text-[11px]">
-                    <span className="block max-w-[220px] truncate" title={reference}>
-                      {reference}
+                    <span className="block max-w-[220px] truncate" title={paymentId || ""}>
+                      {paymentId || "Unknown payment"}
                     </span>
                   </td>
                 </tr>
@@ -514,7 +579,7 @@ export default function TransactionActivityTable({
                     <li key={`${event.type}-${event.occurredAt || index}`} className="border-l-2 border-blue-200 pl-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-sm font-semibold text-gray-900">{event.message}</span>
-                        <span className="text-xs text-gray-500">{formatChicagoDateTime(event.occurredAt)}</span>
+                        <span className="text-xs text-gray-500">{formatTransactionDateTime(event.occurredAt, timeZone)}</span>
                       </div>
                       <p className="mt-0.5 text-xs text-gray-500">{event.status}</p>
                     </li>
@@ -522,11 +587,11 @@ export default function TransactionActivityTable({
                 </ol>
               </div>
             ) : null}
-            {selectedPayment?.id && selectedPayment.status === "CONFIRMED" && (
+            {canonicalPaymentId(selectedTx) && canonicalStatus(selectedTx) === "CONFIRMED" && (
               <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
-                  onClick={() => void fetchReceipt(String(selectedPayment.id), false)}
+                  onClick={() => void fetchReceipt(String(canonicalPaymentId(selectedTx)), false)}
                   disabled={receiptLoading !== null}
                   className="inline-flex min-h-10 flex-1 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
                 >
@@ -534,7 +599,7 @@ export default function TransactionActivityTable({
                 </button>
                 <button
                   type="button"
-                  onClick={() => void fetchReceipt(String(selectedPayment.id), true)}
+                  onClick={() => void fetchReceipt(String(canonicalPaymentId(selectedTx)), true)}
                   disabled={receiptLoading !== null}
                   className="inline-flex min-h-10 flex-1 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 disabled:opacity-60"
                 >
