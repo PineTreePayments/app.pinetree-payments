@@ -1,6 +1,6 @@
 "use client"
 
-import Image from "next/image"
+import PaymentQrCode from "@/components/payment/PaymentQrCode"
 
 type Props = {
   qrCodeUrl?: string
@@ -41,19 +41,13 @@ export default function QRDisplay({
         Scan to Pay
       </div>
 
-      <div
-        className={`bg-white p-4 rounded-xl shadow transition ${canOpenWallet ? "cursor-pointer hover:scale-[1.02]" : ""}`}
+      <PaymentQrCode
+        src={qrCodeUrl}
+        size={220}
+        alt="Payment QR"
+        className={`p-4 shadow transition ${canOpenWallet ? "hover:scale-[1.02]" : ""}`}
         onClick={canOpenWallet ? openWallet : undefined}
-      >
-
-        <Image
-          src={qrCodeUrl}
-          width={220}
-          height={220}
-          alt="Payment QR"
-        />
-
-      </div>
+      />
 
       {canOpenWallet && (
 

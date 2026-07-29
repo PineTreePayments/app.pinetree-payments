@@ -20,6 +20,7 @@ function countOccurrences(source: string, needle: string) {
 describe("active POS QR checkout layout", () => {
   const pos = read("components/pos/POSLayout.tsx")
   const activeQr = read("components/pos/ActiveQrCheckout.tsx")
+  const sharedQr = read("components/payment/PaymentQrCode.tsx")
   const posActiveBranch = blockBetween(pos, '{paymentMode !== "card" && (status === "waiting" || status === "processing")', "{/* -- CONFIRMED -- */}")
 
   it("keeps active QR separate from terminal payment-state cards", () => {
@@ -56,16 +57,21 @@ describe("active POS QR checkout layout", () => {
   it("keeps the waiting indicator compact and the QR large enough to scan", () => {
     expect(activeQr).toContain("h-8 w-8")
     expect(activeQr).toContain("<Clock3 size={17}")
-    expect(activeQr).toContain("width={216}")
-    expect(activeQr).toContain("height={216}")
+    expect(activeQr).toContain("size={216}")
+    expect(sharedQr).toContain("width={size}")
+    expect(sharedQr).toContain("height={size}")
     expect(activeQr).toContain("max-w-[216px]")
   })
 
-  it("uses one compact checkout flow with one QR section and one totals section", () => {
+  it("uses one compact checkout flow without a large tinted QR-section wrapper", () => {
     expect(countOccurrences(activeQr, 'data-active-qr-checkout-flow="true"')).toBe(1)
-    expect(countOccurrences(activeQr, 'data-active-qr-section="true"')).toBe(2)
+    expect(activeQr).not.toContain('data-active-qr-section="true"')
+    expect(activeQr).toContain("<PaymentQrCode")
+    expect(sharedQr).toContain('data-payment-qr-code-backing="true"')
     expect(countOccurrences(activeQr, 'data-active-qr-totals-section="true"')).toBe(1)
-    expect(activeQr).toContain("rounded-2xl border border-[#DDEBFF] bg-[#F7FAFF] px-4 py-4")
+    expect(activeQr).not.toContain("border border-[#DDEBFF] bg-[#F7FAFF]")
+    expect(activeQr).not.toMatch(/#DDEBFF|#F7FAFF|ring-blue|shadow-\[[^\]]*0,82,255/)
+    expect(sharedQr).toContain("flex w-fit rounded-xl bg-white p-2")
     expect(activeQr).toContain("rounded-xl border border-gray-100 bg-white px-4 py-3")
     expect(activeQr).not.toMatch(/bg-gradient|radial-gradient|linear-gradient|backdrop-blur/)
   })
@@ -82,6 +88,16 @@ describe("active POS QR checkout layout", () => {
     expect(activeQr).toContain("fmtUsd(breakdown.serviceFee)")
     expect(activeQr).toContain("fmtUsd(breakdown.totalAmount)")
     expect(activeQr).toContain('<Button variant="danger" fullWidth disabled={canceling} onClick={onCancel}>')
+  })
+
+  it("standardizes QR image backing across duplicate QR renderers", () => {
+    const legacyQr = read("components/pos/QRDisplay.tsx")
+    const lightning = read("components/payment/LightningPayment.tsx")
+
+    for (const source of [activeQr, legacyQr, lightning]) {
+      expect(source).toContain("PaymentQrCode")
+    }
+    expect(sharedQr).not.toMatch(/#DDEBFF|#F7FAFF|border-blue|bg-blue-[0-9]+|ring-blue|bg-gradient|radial-gradient|linear-gradient/)
   })
 
   it("keeps POS terminal results on the shared TransactionResult component", () => {

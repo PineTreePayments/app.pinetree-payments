@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Button from "@/components/ui/Button"
+import PaymentQrCode from "@/components/payment/PaymentQrCode"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
 import WalletPickerModal, { type WalletPickerSection } from "@/components/payment/WalletPickerModal"
 import { acquireLightningStatusPoller, isTerminalLightningPollStatus } from "@/lib/lightning/lightningStatusPoller"
@@ -526,11 +527,13 @@ export default function LightningPayment({
 
       {/* QR code - desktop only. Hidden on mobile because the QR is on the same device that needs to scan it. */}
       {payment?.qrCodeUrl ? (
-        <div className="hidden justify-center rounded-xl border border-gray-200 bg-white p-3 md:flex">
-          <img
+        <div className="hidden justify-center md:flex">
+          <PaymentQrCode
             src={payment.qrCodeUrl}
             alt="Bitcoin Lightning invoice QR code"
-            className="h-56 w-56"
+            size={224}
+            className="rounded-xl border border-gray-200 bg-white p-3"
+            imageClassName="h-56 w-56"
           />
         </div>
       ) : null}

@@ -1,7 +1,7 @@
 "use client"
 
-import Image from "next/image"
 import { Clock3 } from "lucide-react"
+import PaymentQrCode from "@/components/payment/PaymentQrCode"
 import Button from "@/components/ui/Button"
 
 type Breakdown = {
@@ -33,21 +33,18 @@ export default function ActiveQrCheckout({
   onCancel,
 }: Props) {
   return (
-    <div className="w-full space-y-3" data-active-qr-checkout-flow="true">
+    <div className="w-full space-y-3 text-center" data-active-qr-checkout-flow="true">
       {qrCodeUrl ? (
-        <div
-          className="flex flex-col items-center rounded-2xl border border-[#DDEBFF] bg-[#F7FAFF] px-4 py-4 text-center"
-          data-active-qr-section="true"
-        >
+        <>
           <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#0052FF]">
             SCAN TO PAY
           </p>
-          <Image
+          <PaymentQrCode
             src={qrCodeUrl}
-            width={216}
-            height={216}
             alt="QR code"
-            className="h-auto w-full max-w-[216px] rounded-xl"
+            size={216}
+            className="mx-auto"
+            imageClassName="max-w-[216px]"
           />
           <div
             className="mt-3 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-600"
@@ -59,12 +56,9 @@ export default function ActiveQrCheckout({
           <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-600">
             WAITING
           </p>
-        </div>
+        </>
       ) : (
-        <div
-          className="rounded-2xl border border-[#DDEBFF] bg-[#F7FAFF] px-4 py-6 text-center"
-          data-active-qr-section="true"
-        >
+        <div className="py-3 text-center" data-active-qr-preparing="true">
           <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-[#0052FF] border-t-transparent" />
           <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
             Preparing payment…
