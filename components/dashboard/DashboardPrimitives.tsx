@@ -195,7 +195,7 @@ export function InlineMetric({
   value: ReactNode
   detail?: ReactNode
   className?: string
-  size?: "default" | "compact"
+  size?: "default" | "compact" | "reduced"
 }) {
   return (
     <div className={cx("min-w-0", className)}>
@@ -207,7 +207,9 @@ export function InlineMetric({
           "min-w-0",
           size === "compact"
             ? "mt-0.5 text-base font-semibold leading-tight text-gray-950 sm:text-lg"
-            : cx("mt-1", dashboardMetricValueClass)
+            : size === "reduced"
+              ? "mt-1 truncate text-lg font-semibold leading-tight text-gray-950 sm:text-xl"
+              : cx("mt-1", dashboardMetricValueClass)
         )}
       >
         {value}

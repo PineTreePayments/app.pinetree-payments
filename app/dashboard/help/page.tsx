@@ -1213,7 +1213,7 @@ export default function HelpCenterPage() {
       </DashboardSection>
       </div>
 
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid items-start gap-4 min-[1180px]:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <div id="support-ticket" className={HELP_SECTION_ANCHOR_CLASS}>
         <DashboardSection title="Support" titleTone="blue">
             {/* Open a Ticket form */}
@@ -1291,8 +1291,6 @@ export default function HelpCenterPage() {
 
           </DashboardSection>
         </div>
-
-      </div>
 
       <div id="recent-tickets" className={HELP_SECTION_ANCHOR_CLASS}>
       <DashboardSection title="Recent Tickets" titleTone="blue">
@@ -1385,6 +1383,7 @@ export default function HelpCenterPage() {
           )}
         </div>
       </DashboardSection>
+      </div>
       </div>
 
       <DashboardSection title="Feedback" titleTone="blue">

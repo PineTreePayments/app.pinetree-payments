@@ -408,17 +408,17 @@ export default function ReportsPage() {
             <div className="grid gap-3 lg:grid-cols-2">
               <GroupedMetricSurface dense titleTone="blue" title="Volume Summary">
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 lg:grid-cols-4">
-                  <InlineMetric size="compact" label="Average confirmed transaction" value={currency(summary.avgTransaction)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
-                  <InlineMetric size="compact" label="Card volume" value={currency(summary.cardVolume)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
-                  <InlineMetric size="compact" label="Crypto volume" value={currency(summary.cryptoVolume)} />
-                  <InlineMetric size="compact" label="Cash volume" value={currency(summary.cashVolume)} />
+                  <InlineMetric size="compact" label="Avg. confirmed" value={currency(summary.avgTransaction)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
+                  <InlineMetric size="compact" label="Card" value={currency(summary.cardVolume)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
+                  <InlineMetric size="compact" label="Crypto" value={currency(summary.cryptoVolume)} />
+                  <InlineMetric size="compact" label="Cash" value={currency(summary.cashVolume)} />
                 </div>
               </GroupedMetricSurface>
               <GroupedMetricSurface dense titleTone="blue" title="Payment Activity">
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 lg:grid-cols-4">
-                  <InlineMetric size="compact" label="Tax collected" value={currency(summary.taxesCollected)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
+                  <InlineMetric size="compact" label="Tax" value={currency(summary.taxesCollected)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
                   <InlineMetric size="compact" label="Refunds" value={`${summary.refundedCount} · ${currency(summary.refundedAmount)}`} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
-                  <InlineMetric size="compact" label="Pending / processing" value={`${summary.waitingCount} / ${summary.processingCount}`} />
+                  <InlineMetric size="compact" label="Active" value={`${summary.waitingCount} / ${summary.processingCount}`} />
                   <InlineMetric size="compact" label="Failed / incomplete" value={`${summary.failedCount} / ${summary.incompleteCount}`} />
                 </div>
               </GroupedMetricSurface>

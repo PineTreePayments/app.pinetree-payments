@@ -413,10 +413,10 @@ export default function TransactionsPage() {
 
         <GroupedMetricSurface title="Activity Breakdown" titleTone="blue">
           <div className="grid grid-cols-2 gap-x-4 gap-y-0">
-            <InlineMetric label="Peak Hour" value={peakHour} className="border-b border-gray-100 pb-3" />
-            <InlineMetric label="Peak Day" value={peakDay} className="border-b border-gray-100 pb-3" />
-            <InlineMetric label="Top Provider" value={topProvider} className="pt-3" />
-            <InlineMetric label="Top Network" value={topNetwork} className="pt-3" />
+            <InlineMetric size="reduced" label="Peak Hour" value={peakHour} className="border-b border-gray-100 pb-3" />
+            <InlineMetric size="reduced" label="Peak Day" value={peakDay} className="border-b border-gray-100 pb-3" />
+            <InlineMetric size="reduced" label="Top Provider" value={topProvider} className="pt-3" />
+            <InlineMetric size="reduced" label="Top Network" value={topNetwork} className="pt-3" />
           </div>
         </GroupedMetricSurface>
 
