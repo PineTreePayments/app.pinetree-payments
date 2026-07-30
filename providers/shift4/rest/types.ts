@@ -181,9 +181,15 @@ export type Shift4TokenCard = {
   token: { value: string }
   expirationDate?: number
   present?: "Y" | "N"
+  /**
+   * Only the INDICATOR is expressible. The spec also defines
+   * `securityCode.value`, but PineTree never possesses a CSC: the customer types
+   * it directly into Shift4's i4Go iframe, which returns a token. Omitting the
+   * field from this type makes it structurally impossible for PineTree code to
+   * place cardholder verification data in a request.
+   */
   securityCode?: {
     indicator: Shift4SecurityCodeIndicator
-    value: string
   }
 }
 

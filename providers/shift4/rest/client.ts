@@ -130,12 +130,36 @@ export type Shift4RestRequestOptions = {
   config?: Shift4RestConfig
   fetchImpl?: typeof fetch
   timeoutMs?: number
+  /**
+   * The ONLY sanctioned access to an unredacted Shift4 response body.
+   *
+   * It exists for exactly one reason: the access-token exchange must read
+   * `result[0].credential.accessToken`, which redaction blanks by design. The
+   * hook receives the parsed body synchronously and the client never returns,
+   * stores, or logs that body, so the unredacted value cannot escape the
+   * caller's own scope. Do not use this hook for diagnostics or logging.
+   */
+  onParsedBody?: (body: unknown) => void
 }
 
 export type Shift4RestRequestResult = {
   result: Shift4NormalizedOperationResult
   /** Present only when Shift4 returned a structured error object. */
   error: Shift4ErrorObject | null
+}
+
+/**
+ * True when a value contains a character that cannot safely appear in an HTTP
+ * header: any control character (which includes CR and LF, the header-splitting
+ * pair) or DEL. Printable characters such as spaces and hyphens are legitimate
+ * and stay allowed.
+ */
+function hasUnsafeHeaderCharacter(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0
+    if (codePoint < 0x20 || codePoint === 0x7f) return true
+  }
+  return false
 }
 
 /**
@@ -191,7 +215,17 @@ export function buildShift4Headers(input: {
 
   for (const [name, value] of Object.entries(input.headerParameters || {})) {
     if (value === undefined || value === null || String(value).trim() === "") continue
-    headers[name] = String(value)
+    const headerValue = String(value)
+    // Optional header parameters (ApiOptions, Token, ReversalReason) can carry
+    // caller-supplied text. Reject anything that could split or forge a header
+    // rather than relying on the HTTP stack to notice.
+    if (hasUnsafeHeaderCharacter(headerValue)) {
+      throw new Shift4RestApiError(
+        `Shift4 header parameter ${name} contains characters that are not allowed in a header value.`,
+        { diagnostics: { operation: input.operation } }
+      )
+    }
+    headers[name] = headerValue
   }
 
   return headers
@@ -332,6 +366,12 @@ export async function shift4RestRequest(
         responseSummary: summary,
       }
     )
+  }
+
+  // Hand the parsed body to the credential extractor before normalization, and
+  // hold no further reference to it beyond the redaction performed downstream.
+  if (options.onParsedBody) {
+    options.onParsedBody(parsed)
   }
 
   const error = firstErrorObject(parsed)

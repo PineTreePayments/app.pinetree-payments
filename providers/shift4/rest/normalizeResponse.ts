@@ -15,10 +15,7 @@
 
 import { createHash } from "node:crypto"
 
-import {
-  looksLikeInvoiceNotFound,
-  type Shift4ErrorDiagnostics,
-} from "./errors"
+import { looksLikeInvoiceNotFound } from "./errors"
 import { redactShift4Payload } from "./redact"
 import type {
   Shift4AvsResult,
@@ -119,9 +116,8 @@ export type Shift4NormalizedOperationResult = {
   cardType: string | null
   cardPresent: boolean | null
 
-  /** Amounts Shift4 confirmed. Authoritative for partial approvals. */
+  /** Amount Shift4 confirmed. Authoritative for a partial approval. */
   approvedAmount: number | null
-  currencyCode: string | null
 
   /** Timestamps. */
   providerDateTime: string | null
@@ -253,6 +249,19 @@ export function isShift4Envelope(body: unknown): boolean {
   )
 }
 
+/**
+ * Operations whose success is NOT reported through `transaction.responseCode`.
+ *
+ * Every other approved operation carries an explicit host response code. For
+ * those, the absence of a code is an unknown outcome - never an approval - so
+ * that an HTTP 200 can never by itself be read as money having moved.
+ */
+const OPERATIONS_WITHOUT_RESPONSE_CODE: readonly Shift4Operation[] = ["access_token_exchange"]
+
+function isSuccessfulHttpStatus(status: number | null): boolean {
+  return status !== null && status >= 200 && status < 300
+}
+
 export function normalizeShift4Response(
   input: NormalizeShift4ResponseInput
 ): Shift4NormalizedOperationResult {
@@ -286,12 +295,18 @@ export function normalizeShift4Response(
       outcome = "provider_error"
     } else if (!isShift4Envelope(input.body)) {
       outcome = "unknown"
+    } else if (OPERATIONS_WITHOUT_RESPONSE_CODE.includes(input.operation)) {
+      // Only the access-token exchange reports success without a
+      // transaction.responseCode. Its real proof is the presence of
+      // credential.accessToken, which exchangeAccessToken validates separately;
+      // here a 2xx envelope with no error is simply not an error.
+      outcome = isSuccessfulHttpStatus(input.httpStatus) ? "approved" : "unknown"
     } else {
-      // Documented envelope, no responseCode and no error. Operations such as
-      // Void report success through the HTTP status and the absence of `error`.
-      outcome = input.httpStatus !== null && input.httpStatus >= 200 && input.httpStatus < 300
-        ? "approved"
-        : "unknown"
+      // A money-moving or invoice operation returned the documented envelope but
+      // no responseCode and no error. Shift4 documents a blank response code as
+      // "Status is unknown", and an HTTP 200 alone never proves an approval, so
+      // this must be resolved by an Invoice Information lookup.
+      outcome = "unknown"
     }
   }
 
@@ -342,7 +357,6 @@ export function normalizeShift4Response(
     cardPresent,
 
     approvedAmount: readNumber(result?.amount?.total),
-    currencyCode: null,
 
     providerDateTime: readText(result?.dateTime),
     requestStartedAt: input.requestStartedAt.toISOString(),
@@ -394,22 +408,5 @@ export function shift4ResultForLog(
     elapsedMs: result.elapsedMs,
     serverName: result.serverName,
     rawResponseRef: result.rawResponseRef,
-  }
-}
-
-/** Diagnostics shape shared with the error taxonomy. */
-export function shift4ResultDiagnostics(
-  result: Shift4NormalizedOperationResult
-): Shift4ErrorDiagnostics {
-  return {
-    operation: result.operation,
-    invoice: result.invoice,
-    correlationId: result.correlationId,
-    merchantProviderConnectionId: result.merchantProviderConnectionId,
-    pineTreePaymentId: result.pineTreePaymentId,
-    pineTreePaymentAttemptId: result.pineTreePaymentAttemptId,
-    httpStatus: result.httpStatus,
-    elapsedMs: result.elapsedMs,
-    serverName: result.serverName,
   }
 }

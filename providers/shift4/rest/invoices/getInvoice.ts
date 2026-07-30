@@ -44,20 +44,26 @@ export type Shift4InvoiceLookup =
   | {
       /** Shift4 holds a transaction for this invoice. */
       found: true
+      condition: "invoice_present"
       result: Shift4NormalizedOperationResult
     }
   | {
       /**
-       * Shift4 reports "Invoice Not Found". Per the timeout guide this is the
-       * ONLY condition under which the original transaction may be resent, and
-       * then only with the same invoice number.
+       * Shift4 answered "Invoice Not Found".
        *
-       * Note the documented ambiguity: a voided or already batched-and-settled
-       * invoice also returns "Invoice Not Found". Resending is therefore safe
-       * only for an invoice PineTree has never seen succeed.
+       * This reports only what Shift4 OBSERVED. It deliberately does not
+       * authorize a resend, because the documented meaning is ambiguous: Shift4
+       * returns "Invoice Not Found" for an invoice that never arrived AND for
+       * one that was voided or already batched and settled. Treating this as
+       * "safe to resend" would double-charge a customer whose sale actually
+       * succeeded and settled.
+       *
+       * A resend is an Engine decision that additionally requires PineTree's own
+       * records to show the invoice never succeeded. The provider client never
+       * resends the original operation itself.
        */
       found: false
-      resendPermitted: true
+      condition: "invoice_not_found"
       result: null
     }
 
@@ -83,7 +89,7 @@ export async function getInvoice(input: GetShift4InvoiceInput): Promise<Shift4In
       : await shift4LookupWithSingleRetry(request)
   } catch (error) {
     if (error instanceof Shift4RestApiError && error.invoiceNotFound) {
-      return { found: false, resendPermitted: true, result: null }
+      return { found: false, condition: "invoice_not_found", result: null }
     }
     throw error
   }
@@ -91,8 +97,8 @@ export async function getInvoice(input: GetShift4InvoiceInput): Promise<Shift4In
   // Shift4 can also report absence through the normalized outcome rather than
   // by throwing, so both paths are handled.
   if (response.result.outcome === "not_found") {
-    return { found: false, resendPermitted: true, result: null }
+    return { found: false, condition: "invoice_not_found", result: null }
   }
 
-  return { found: true, result: response.result }
+  return { found: true, condition: "invoice_present", result: response.result }
 }

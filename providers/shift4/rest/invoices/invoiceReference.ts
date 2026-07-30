@@ -37,13 +37,37 @@
 
 import { createHmac } from "node:crypto"
 
-import { SHIFT4_FIELD_LIMITS } from "../config"
-import { Shift4ConfigError } from "../config"
+import { SHIFT4_FIELD_LIMITS, Shift4ConfigError } from "../config"
 
 /**
  * The invoice length PineTree emits. Shift4 permits up to 10 characters and the
  * documented examples are numeric, so all 10 digits are used for the widest
  * possible key space.
+ *
+ * ── Collision assumption (stated explicitly) ────────────────────────────────
+ * 10 digits gives 10^10 = 10,000,000,000 possible invoices, and the derivation
+ * distributes uniformly across them.
+ *
+ * The uniqueness Shift4 actually requires is **per merchant, per batch** - a
+ * batch being one merchant's transactions between settlements, typically a
+ * single day. By the birthday bound, the probability that any two invoices in
+ * one batch collide is about n^2 / (2 * 10^10):
+ *
+ *   1,000 transactions/day  ->  ~1 in 20,000,000
+ *   10,000 transactions/day ->  ~1 in 200,000
+ *   100,000 transactions/day->  ~1 in 2,000
+ *
+ * PineTree's expected per-merchant volume is far below the first row, so the
+ * risk is negligible at current scale. The assumption to revisit is therefore
+ * "no single merchant settles anywhere near 10,000 card transactions in one
+ * batch"; a merchant sustaining that volume would justify a persisted
+ * uniqueness index. No migration is added for this now - a database constraint
+ * for a theoretical collision would be speculative schema.
+ *
+ * Note the failure mode is bounded and detectable rather than silent: a
+ * collision would make two attempts share an invoice, which Shift4 would treat
+ * as the same transaction, and `invoiceMatchesReference` plus the recorded
+ * `derivationKey` make the condition identifiable during reconciliation.
  */
 export const SHIFT4_INVOICE_LENGTH = SHIFT4_FIELD_LIMITS.invoice
 
@@ -122,17 +146,19 @@ function requireIdentifier(value: string | undefined, label: string): string {
 /**
  * Map an HMAC digest to a fixed-width decimal string.
  *
- * The digest is read as a big-endian unsigned integer and reduced modulo
- * 10^length, then zero-padded. Using the full digest rather than a few bytes
- * keeps the distribution uniform across the whole key space.
+ * The digest is folded byte by byte into a running value modulo 10^length, which
+ * is equivalent to reducing the whole big-endian digest and keeps the result
+ * uniform across the key space. The intermediate `value * 256 + byte` stays
+ * below 2.56e12, well inside the exact-integer range, so no BigInt is needed and
+ * no precision is lost.
  */
 function digestToDigits(digest: Buffer, length: number): string {
-  let value = 0n
+  const modulus = 10 ** length
+  let value = 0
   for (const byte of digest) {
-    value = (value << 8n) | BigInt(byte)
+    value = (value * 256 + byte) % modulus
   }
-  const modulus = 10n ** BigInt(length)
-  return (value % modulus).toString().padStart(length, "0")
+  return String(value).padStart(length, "0")
 }
 
 /**

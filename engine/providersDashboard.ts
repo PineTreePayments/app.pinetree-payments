@@ -3,6 +3,7 @@ import { refreshWalletBalancesEngine } from "./walletOverview"
 import { loadProviders } from "./loadProviders"
 import { getProviderMetadata } from "@/providers/registry"
 import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
+import { SHIFT4_REST_PROVIDER_NAME } from "@/database/merchantShift4RestConnections"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import {
@@ -324,7 +325,11 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
       (row) =>
         row.provider !== "lightning" &&
         row.provider !== "lightning_nwc" &&
-        row.provider !== SPEED_PROVIDER_NAME
+        row.provider !== SPEED_PROVIDER_NAME &&
+        // The Shift4 REST connection row carries the encrypted access-token
+        // envelope in its credentials JSONB. It has no merchant-facing card yet,
+        // and its credentials must never reach the browser.
+        row.provider !== SHIFT4_REST_PROVIDER_NAME
     )
     .map((row) => {
       if (row.provider === "stripe") {

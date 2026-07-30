@@ -142,6 +142,20 @@ const groups = [
     ],
   },
   {
+    name: "Shift4 Payment Platform REST",
+    entries: [
+      // All optional until the Shift4 integration is enabled for a deployment.
+      // The conditional block below promotes them to required together, so a
+      // half-configured Shift4 environment cannot reach a live gateway.
+      ["SHIFT4_REST_ENVIRONMENT", false, "shift4env"],
+      ["SHIFT4_CLIENT_GUID", false, "secret16"],
+      ["SHIFT4_INTERFACE_NAME", false, "text"],
+      ["SHIFT4_INTERFACE_VERSION", false, "text"],
+      ["SHIFT4_COMPANY_NAME", false, "text"],
+      ["SHIFT4_CREDENTIAL_ENCRYPTION_KEY", false, "hex64"],
+    ],
+  },
+  {
     name: "Speed Custom Connect credentials",
     entries: [
       // The active provisioning path resolves one server-only password from
@@ -183,6 +197,9 @@ function validation(name, kind) {
   if (kind === "hex64") return /^[a-f0-9]{64}$/i.test(value)
     ? { ok: true }
     : { ok: false, detail: "must be 64 hexadecimal characters" }
+  if (kind === "shift4env") return ["test", "production"].includes(value.toLowerCase())
+    ? { ok: true }
+    : { ok: false, detail: "expected test or production" }
   if (kind === "ptkey") return /^pt_(live|test)_[A-Za-z0-9_-]+$/.test(value)
     ? { ok: true }
     : { ok: false, detail: "expected pt_live_* or pt_test_*" }
@@ -285,6 +302,34 @@ if (speedConnectEnabled && !speedPasswordValidation.ok) {
     "SPEED_CONNECT_ENABLED=true requires a valid server-only SPEED_CONNECTED_ACCOUNT_PASSWORD " +
       `(${speedPasswordValidation.detail}). New provisioning never stores this value in Supabase.`
   )
+}
+
+// Shift4 REST is all-or-nothing: a partially configured integration would fail
+// at the first request, and a missing environment must never silently resolve.
+const shift4Vars = [
+  "SHIFT4_REST_ENVIRONMENT",
+  "SHIFT4_CLIENT_GUID",
+  "SHIFT4_INTERFACE_NAME",
+  "SHIFT4_INTERFACE_VERSION",
+  "SHIFT4_COMPANY_NAME",
+  "SHIFT4_CREDENTIAL_ENCRYPTION_KEY",
+]
+const shift4Present = shift4Vars.filter((name) => present(name))
+if (shift4Present.length > 0 && shift4Present.length < shift4Vars.length) {
+  requiredFailures += 1
+  warnings.push(
+    `Shift4 REST is partially configured. Missing: ${
+      shift4Vars.filter((name) => !present(name)).join(", ")
+    }.`
+  )
+}
+if (present("SHIFT4_REST_ENVIRONMENT")) {
+  const shift4Environment = String(env.SHIFT4_REST_ENVIRONMENT).trim().toLowerCase()
+  if (nodeEnv !== "production" && shift4Environment === "production") {
+    warnings.push(
+      `SHIFT4_REST_ENVIRONMENT=production targets the live Shift4 gateway while NODE_ENV is ${nodeEnv}.`
+    )
+  }
 }
 
 const stripeSecretKey = String(env.STRIPE_SECRET_KEY ?? "").trim()

@@ -102,20 +102,6 @@ export function redactShift4Headers(headers: Record<string, string> | Headers | 
 }
 
 /**
- * Names of the headers that were present, with no values at all. This is the
- * preferred form for routine operational logging.
- */
-export function shift4HeaderPresence(
-  headers: Record<string, string> | undefined
-): Record<string, boolean> {
-  const output: Record<string, boolean> = {}
-  for (const [name, value] of Object.entries(headers || {})) {
-    output[name] = Boolean(String(value || "").trim())
-  }
-  return output
-}
-
-/**
  * Recursively redact a Shift4 request or response payload.
  *
  * Depth and breadth are bounded so a hostile or malformed payload cannot turn
