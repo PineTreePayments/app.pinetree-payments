@@ -244,8 +244,11 @@ const PRIORITY_FILTERS = ["urgent", "high", "normal", "low"]
 const ADMIN_RECENT_CARD_CLASS =
   "flex h-[20rem] flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
 
+// Every row carries its own bottom divider — including the last one — so the
+// remaining card space reads as empty list space instead of blending into the
+// final row and making one ticket look card-height tall.
 const ADMIN_RECENT_SCROLL_CLASS =
-  "min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto overscroll-contain"
+  "min-h-0 flex-1 overflow-y-auto overscroll-contain [&>*]:border-b [&>*]:border-gray-100"
 
 const SUPPORT_STAT_CONFIG = [
   { key: "open" as const, tone: "blue" as const },
@@ -839,23 +842,6 @@ export default function AdminPage() {
         title={ADMIN_TAB_TITLES[activeTab].title}
         description={ADMIN_TAB_TITLES[activeTab].description}
         lastUpdated={overview?.generatedAt ? fmtDateTime(overview.generatedAt) : null}
-        action={
-          <button
-            type="button"
-            onClick={() => {
-              if (!token) return
-              void fetchOverview(token)
-              if (activeTab === "support") void fetchTickets(token)
-              if (activeTab === "feedback") void fetchFeedback(token)
-              if (activeTab === "providers") void fetchProviderOnboarding(token)
-            }}
-            disabled={loadingOverview}
-            aria-label="Refresh admin data"
-            className={adminHeaderIconButtonClass}
-          >
-            <RefreshCw size={14} aria-hidden="true" className={loadingOverview ? "animate-spin" : ""} />
-          </button>
-        }
         metrics={
           activeTab === "overview"
             ? [
@@ -866,8 +852,10 @@ export default function AdminPage() {
         }
       />
 
-      {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-1.5">
+      {/* ── Tab bar ──────────────────────────────────────────────────────────────
+          Refresh lives here rather than inside the hero card, on every
+          breakpoint. */}
+      <div className="flex flex-wrap items-center gap-1.5">
         {(
           [
             { key: "overview" as AdminTab, label: "Overview" },
@@ -899,6 +887,22 @@ export default function AdminPage() {
             )}
           </button>
         ))}
+
+        <button
+          type="button"
+          onClick={() => {
+            if (!token) return
+            void fetchOverview(token)
+            if (activeTab === "support") void fetchTickets(token)
+            if (activeTab === "feedback") void fetchFeedback(token)
+            if (activeTab === "providers") void fetchProviderOnboarding(token)
+          }}
+          disabled={loadingOverview}
+          aria-label="Refresh admin data"
+          className={`ml-auto ${adminHeaderIconButtonClass}`}
+        >
+          <RefreshCw size={14} aria-hidden="true" className={loadingOverview ? "animate-spin" : ""} />
+        </button>
       </div>
 
       {/* ════════════════════════════════════════════════════════════════════════

@@ -167,7 +167,34 @@ describe("overview recent activity cards", () => {
     // Fixed, equal height — the card cannot grow with its content.
     expect(overview).toMatch(/ADMIN_RECENT_CARD_CLASS =\s*\n\s*"flex h-\[20rem\] flex-col overflow-hidden/)
     // The list inside is the scrolling region.
-    expect(overview).toMatch(/ADMIN_RECENT_SCROLL_CLASS =\s*\n\s*"min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto/)
+    expect(overview).toMatch(/ADMIN_RECENT_SCROLL_CLASS =\s*\n\s*"min-h-0 flex-1 overflow-y-auto/)
+  })
+
+  it("draws a divider under every row, including the last", () => {
+    // divide-y skips the final child, which let the leftover card space blend
+    // into the last ticket and read as one card-height row.
+    expect(overview).toContain("[&>*]:border-b [&>*]:border-gray-100")
+    expect(overview).not.toMatch(/ADMIN_RECENT_SCROLL_CLASS =[\s\S]{0,120}divide-y/)
+  })
+
+  it("keeps the refresh control out of the hero card on every breakpoint", () => {
+    const headerCall = overview.slice(
+      overview.indexOf("<AdminPageHeader"),
+      overview.indexOf("{/* ── Tab bar")
+    )
+    expect(headerCall).not.toContain("adminHeaderIconButtonClass")
+    expect(headerCall).not.toContain("action=")
+    expect(headerCall).not.toContain("RefreshCw")
+
+    // It moved to the tab row, so manual refresh is still available.
+    const tabRow = overview.slice(
+      overview.indexOf("{/* ── Tab bar"),
+      overview.indexOf("OVERVIEW TAB")
+    )
+    expect(tabRow).toContain('aria-label="Refresh admin data"')
+    expect(tabRow).toContain("ml-auto")
+    // No breakpoint gating — same placement on mobile and desktop.
+    expect(tabRow).not.toMatch(/(sm|md|lg):hidden/)
   })
 
   it("applies the shared shell to both cards so heights match", () => {

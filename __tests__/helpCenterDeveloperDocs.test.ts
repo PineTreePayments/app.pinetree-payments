@@ -49,9 +49,17 @@ describe("Help Center Developer documentation", () => {
   })
 
   it("keeps Help Center Developer content current and merchant-facing", () => {
-    expect(helpPage).toContain('title: "Developer Tools"')
-    expect(helpPage).toContain('"inventory-catalog-syncing"')
-    expect(helpPage).toContain('"merchant-onboarding-kyb"')
+    // The Help Center's "Support Paths" card row was removed as duplicate
+    // navigation, so these articles are surfaced through Documentation. Assert
+    // the content still exists and is reachable rather than asserting a
+    // hard-coded article-id list in the page.
+    const articleIds = new Set(helpArticles.map((article) => article.id))
+    expect(articleIds.has("inventory-catalog-syncing")).toBe(true)
+    expect(articleIds.has("merchant-onboarding-kyb")).toBe(true)
+    expect(helpArticles.some((article) => article.category === "Developer/API")).toBe(true)
+    // Documentation renders every article, filtered by category.
+    expect(helpPage).toContain("categorySummaries")
+    expect(helpPage).toContain("visibleArticles.map")
     expect(visibleHelpCopy).not.toMatch(
       /publication pending|Foundation|Private Beta|Preview|backend checklist|internal checklist/i
     )

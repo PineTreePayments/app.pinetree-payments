@@ -6,17 +6,12 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
-  Code2,
   Clock,
-  CreditCard,
-  FileText,
   LifeBuoy,
   MessageSquare,
-  MonitorSmartphone,
   Search,
   Send,
   Sparkles,
-  WalletCards,
   X
 } from "lucide-react"
 import { toast } from "sonner"
@@ -29,6 +24,7 @@ import {
   supportTicketPriorities
 } from "@/lib/help/supportOptions"
 import {
+  DashboardHeroCard,
   DashboardSection,
   ProviderStatusPill,
   dashboardPageTitleClass
@@ -109,51 +105,6 @@ const suggestedQuestions = [
   "What information should I include in a support ticket?"
 ]
 
-const supportHubSections = [
-  {
-    title: "Getting Started",
-    description: "Create your merchant account, complete the business profile, connect one rail, and run a test payment.",
-    icon: CheckCircle2,
-    articleIds: ["first-setup-checklist", "merchants-providers-wallets", "what-to-test-before-real-payments"]
-  },
-  {
-    title: "Accept Payments",
-    description: "Use PineTree POS, card readers, manual entry, hosted checkout, payment links, cash, and supported wallet or provider paths.",
-    icon: CreditCard,
-    articleIds: ["how-pos-works", "pos-card-reader-setup", "pos-manual-card-and-fallback", "cash-transactions", "hosted-checkout-works", "online-checkout-links"]
-  },
-  {
-    title: "Transactions & Statuses",
-    description: "Understand CREATED, PENDING, PROCESSING, CONFIRMED, FAILED, EXPIRED, CANCELED, and INCOMPLETE in merchant language.",
-    icon: FileText,
-    articleIds: ["status-pending", "status-processing", "status-expired", "status-canceled", "status-incomplete"]
-  },
-  {
-    title: "Wallets & Providers",
-    description: "Manage Stripe, Shift4, Fluid Pay, Solana Pay, Base Pay, Bitcoin Lightning, and PineTree Wallet readiness.",
-    icon: WalletCards,
-    articleIds: ["providers-page-overview", "stripe-provider-status", "shift4-provider-status", "fluidpay-provider-status", "lightning-managed-provider-status", "withdrawals-support-status"]
-  },
-  {
-    title: "Dashboard & Reports",
-    description: "Review overview metrics, transaction rows, wallet balances, exports, fees, and report windows.",
-    icon: MonitorSmartphone,
-    articleIds: ["dashboard-overview", "transactions-page", "reports-page"]
-  },
-  {
-    title: "Developer Tools",
-    description: "Set up API keys, webhooks, SDKs, WooCommerce, Shopify, inventory, and onboarding from the Developer dashboard.",
-    icon: Code2,
-    articleIds: ["api-keys", "webhooks", "sdks", "woocommerce", "shopify", "inventory-catalog-syncing", "merchant-onboarding-kyb"]
-  },
-  {
-    title: "Contact Support",
-    description: "Troubleshoot payment, provider, wallet, POS, webhook, withdrawal, and inventory issues before opening a ticket.",
-    icon: LifeBuoy,
-    articleIds: ["payment-stuck-pending", "payment-stuck-processing", "provider-disabled", "reader-or-terminal-unavailable", "wallet-wrong-network-or-rejected", "withdrawal-submitted-not-confirmed", "webhook-delivery-failed", "inventory-connector-disconnected", "open-support-ticket", "support-escalation-boundaries"]
-  }
-]
-
 const emptyTicketForm: TicketForm = {
   category: "Payment Issue",
   subject: "",
@@ -183,6 +134,14 @@ const HELP_NAV_ITEMS = [
 ]
 
 const HELP_SECTION_ANCHOR_CLASS = "scroll-mt-24 md:scroll-mt-28"
+
+// Support and Recent Tickets are identical fixed-height panels so the pair
+// always lines up regardless of ticket count. Only the inside of each panel
+// scrolls — the page never jumps as tickets accumulate.
+const SUPPORT_PANEL_CLASS =
+  "flex h-[34rem] flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5"
+
+const SUPPORT_PANEL_SCROLL_CLASS = "min-h-0 flex-1 overflow-y-auto overscroll-contain"
 
 const TICKET_STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   open: { label: "Open", cls: "bg-blue-50 text-[#0052FF] border-blue-200" },
@@ -235,6 +194,11 @@ function normalizeSupportErrorMessage(error: unknown, fallback: string) {
   }
 
   return message
+}
+
+/** "High" → "High Priority". Reads as a label rather than a bare enum value. */
+function formatTicketPriorityLabel(priority: string) {
+  return `${formatSupportPriority(priority)} Priority`
 }
 
 function matchesTicketFilter(ticket: TicketRecord, filter: TicketFilter): boolean {
@@ -295,15 +259,6 @@ export default function HelpCenterPage() {
       category,
       count: helpArticles.filter((article) => article.category === category).length,
       sample: helpArticles.find((article) => article.category === category)?.description || "Browse PineTree help docs."
-    }))
-  }, [])
-
-  const supportHubCards = useMemo(() => {
-    return supportHubSections.map((section) => ({
-      ...section,
-      articles: section.articleIds
-        .map((id) => helpArticles.find((article) => article.id === id))
-        .filter((article): article is HelpArticle => Boolean(article))
     }))
   }, [])
 
@@ -639,6 +594,13 @@ export default function HelpCenterPage() {
       <div>
         <h1 className={dashboardPageTitleClass}>Help Center</h1>
       </div>
+
+      {/* Shared dashboard hero card (same component the Inventory and Wallet
+          pages use), so Help Center matches the rest of the dashboard. */}
+      <DashboardHeroCard
+        eyebrow="HELP CENTER"
+        title="Documentation, AI assistance, support resources, troubleshooting guides, and merchant help tools."
+      />
 
       <div className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap">
         {HELP_NAV_ITEMS.map(({ id, label }) => (
@@ -1048,7 +1010,7 @@ export default function HelpCenterPage() {
                         {ticket.subject}
                       </p>
                       <p className="mt-0.5 text-xs text-gray-500">
-                        {formatSupportCategory(ticket.category)} · {formatSupportPriority(ticket.priority)}
+                        {formatTicketPriorityLabel(ticket.priority)}
                       </p>
                     </button>
                   )
@@ -1119,45 +1081,9 @@ export default function HelpCenterPage() {
       </DashboardSection>
       </div>
 
-      <DashboardSection title="Support Paths" titleTone="blue">
-        <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-color:#e2e8f0_transparent] [scrollbar-width:thin]">
-          {supportHubCards.map((section) => {
-            const Icon = section.icon
-            return (
-              <div
-                key={section.title}
-                className="w-[320px] min-w-[320px] shrink-0 snap-start rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-[#0052FF]">
-                    <Icon size={17} />
-                  </div>
-                  <div className="min-w-0">
-                    <h2 className="text-sm font-semibold text-gray-950">{section.title}</h2>
-                    <p className="mt-0.5 text-xs leading-5 text-gray-500">{section.description}</p>
-                  </div>
-                </div>
-                <div className="mt-3 space-y-1.5">
-                  {section.articles.map((article) => (
-                    <button
-                      key={article.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedCategory(article.category)
-                        setSelectedArticle(article)
-                      }}
-                      className="flex w-full items-center justify-between gap-2 rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-2 text-left text-xs font-semibold text-gray-700 transition hover:border-blue-200 hover:bg-blue-50/70"
-                    >
-                      <span className="min-w-0 truncate">{article.title}</span>
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#0052FF]" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </DashboardSection>
+      {/* The duplicate support-path card row was removed: every article it
+          linked is reachable from Documentation below, so the row only made the
+          page repeat itself. */}
 
       <div id="help-docs" className={HELP_SECTION_ANCHOR_CLASS}>
       <DashboardSection title="Documentation" titleTone="blue">
@@ -1264,12 +1190,12 @@ export default function HelpCenterPage() {
       </DashboardSection>
       </div>
 
-      <div className="grid items-start gap-4 min-[1180px]:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+      <div className="grid gap-4 min-[1180px]:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <div id="support-ticket" className={HELP_SECTION_ANCHOR_CLASS}>
         <DashboardSection title="Support" titleTone="blue">
             {/* Open a Ticket form */}
-            <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-              <div className="flex items-start justify-between gap-4">
+            <div className={SUPPORT_PANEL_CLASS}>
+              <div className="flex flex-none items-start justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-950">Open a Ticket</h2>
                   <p className="mt-1 text-sm leading-6 text-gray-600">
@@ -1279,7 +1205,7 @@ export default function HelpCenterPage() {
                 <LifeBuoy className="h-6 w-6 shrink-0 text-[#0052FF]" />
               </div>
 
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
+              <div className={`mt-5 grid gap-3 md:grid-cols-2 ${SUPPORT_PANEL_SCROLL_CLASS}`}>
                 <Field label="Category">
                   <select
                     value={ticketForm.category}
@@ -1327,7 +1253,7 @@ export default function HelpCenterPage() {
                 </Field>
               </div>
 
-              <div className="mt-4 flex justify-end">
+              <div className="mt-4 flex flex-none justify-end">
                 <button
                   type="button"
                   onClick={() => void submitTicket()}
@@ -1345,8 +1271,8 @@ export default function HelpCenterPage() {
 
       <div id="recent-tickets" className={HELP_SECTION_ANCHOR_CLASS}>
       <DashboardSection title="Recent Tickets" titleTone="blue">
-        <div className="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
-          <div className="mb-3 flex items-center justify-between gap-3">
+        <div className={SUPPORT_PANEL_CLASS}>
+          <div className="mb-3 flex flex-none items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-gray-950">Recent Tickets</h2>
             <button
               type="button"
@@ -1359,12 +1285,13 @@ export default function HelpCenterPage() {
 
           <SegmentedButtons
             ariaLabel="Ticket status filter"
-            className="mb-3 flex gap-1.5 overflow-x-auto pb-1"
+            className="mb-3 flex flex-none gap-1.5 overflow-x-auto pb-1"
             value={ticketFilter}
             onChange={setTicketFilter}
             options={TICKET_FILTERS.map((filter) => ({ value: filter, label: filter }))}
           />
 
+          <div className={SUPPORT_PANEL_SCROLL_CLASS}>
           {ticketsLoading && (
             <div className="space-y-2">
               <div className="h-[72px] animate-pulse rounded-xl bg-gray-100" />
@@ -1414,15 +1341,13 @@ export default function HelpCenterPage() {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
+                      {/* Status, priority and date only — the support category
+                          does not help a merchant identify their own ticket. */}
                       <div className="flex flex-wrap items-center gap-1.5">
                         <TicketStatusPill status={ticket.status} />
                         <NotificationBadge count={unreadCount} label="unread support replies" />
                         <span className="text-xs text-gray-500">
-                          {formatSupportCategory(ticket.category)}
-                        </span>
-                        <span className="text-gray-300" aria-hidden>·</span>
-                        <span className="text-xs text-gray-500">
-                          {formatSupportPriority(ticket.priority)}
+                          {formatTicketPriorityLabel(ticket.priority)}
                         </span>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
@@ -1457,6 +1382,7 @@ export default function HelpCenterPage() {
               })}
             </div>
           )}
+          </div>
         </div>
       </DashboardSection>
       </div>
