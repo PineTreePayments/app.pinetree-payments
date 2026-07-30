@@ -15,6 +15,15 @@ import {
   supportStatusPillClass,
 } from "@/lib/support/supportDisplay"
 
+// Admin support ticket detail — a right-side slide-over panel that matches the
+// Platform Transaction Detail panel's visual language (full-height white panel,
+// flex-none header, section labels, shadow-2xl, backdrop at z-40).
+//
+// Layout contract: the panel is a fixed-height flex column whose ONLY flexible
+// child is the conversation. Header, ticket-details disclosure, status row and
+// composer are all flex-none, so the message history absorbs every remaining
+// pixel and scrolls on its own while the reply box stays pinned near the bottom.
+
 export type AdminSupportTicket = {
   id: string
   merchant_id: string
@@ -63,13 +72,13 @@ function Pill({ className, children }: { className: string; children: React.Reac
 function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">{label}</p>
-      <p className={`mt-0.5 break-words text-xs text-gray-700 ${mono ? "font-mono" : ""}`}>{value}</p>
+      <p className="text-gray-400">{label}</p>
+      <p className={`mt-0.5 break-words text-gray-700 ${mono ? "font-mono" : ""}`}>{value}</p>
     </div>
   )
 }
 
-export default function AdminSupportTicketModal({
+export default function AdminSupportTicketPanel({
   ticket,
   messages,
   loading,
@@ -92,14 +101,14 @@ export default function AdminSupportTicketModal({
   onUpdateStatus: (status: string) => void
   onSendReply: (message: string) => Promise<void>
 }) {
-  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const conversationRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const autoScrollRef = useRef(true)
 
-  // Ticket Details starts collapsed at every breakpoint — the conversation is
-  // the point of the modal; metadata is one tap away.
+  // Ticket details start collapsed at every breakpoint — the conversation is the
+  // point of the panel; merchant metadata is one tap away.
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
@@ -115,7 +124,7 @@ export default function AdminSupportTicketModal({
     autoScrollRef.current = true
   }, [ticketId])
 
-  // Capture the element that opened the modal (the ticket row) and return focus
+  // Capture the element that opened the panel (the ticket row) and return focus
   // to it on close.
   useEffect(() => {
     returnFocusRef.current =
@@ -125,7 +134,7 @@ export default function AdminSupportTicketModal({
     }
   }, [])
 
-  // Escape closes; Tab is trapped inside the dialog.
+  // Escape closes; Tab is trapped inside the panel.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -135,7 +144,7 @@ export default function AdminSupportTicketModal({
       }
 
       if (event.key !== "Tab") return
-      const container = dialogRef.current
+      const container = panelRef.current
       if (!container) return
 
       const focusable = Array.from(
@@ -160,26 +169,27 @@ export default function AdminSupportTicketModal({
     return () => document.removeEventListener("keydown", handleKeyDown)
   }, [onClose])
 
-  // Move focus into the dialog when it opens.
+  // Move focus into the panel when it opens.
   useEffect(() => {
-    const container = dialogRef.current
+    const container = panelRef.current
     if (!container) return
     const target = container.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
     target?.focus()
   }, [ticketId])
 
+  // The original ticket leads the conversation so the whole exchange reads top
+  // to bottom inside one scroll container.
   const conversation = useMemo(() => {
     if (!ticket) return []
-    const opening = {
-      id: `ticket-${ticket.id}-description`,
-      sender_type: "merchant" as const,
-      sender_name: null,
-      message: ticket.description,
-      created_at: ticket.created_at,
-      isOpeningMessage: true,
-    }
     return [
-      opening,
+      {
+        id: `ticket-${ticket.id}-description`,
+        sender_type: "merchant" as const,
+        sender_name: null,
+        message: ticket.description,
+        created_at: ticket.created_at,
+        isOpeningMessage: true,
+      },
       ...messages.map((message) => ({
         id: message.id,
         sender_type: message.sender_type,
@@ -238,33 +248,34 @@ export default function AdminSupportTicketModal({
   }
 
   return (
-    <div
-      data-pinetree-overlay="true"
-      className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-    >
+    <>
       <div
-        ref={dialogRef}
+        data-pinetree-overlay="true"
+        className="pinetree-modal-backdrop fixed inset-0 z-40"
+        onClick={onClose}
+      />
+      <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-ticket-title"
-        onMouseDown={(event) => event.stopPropagation()}
-        className="flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-t-[1.35rem] border border-white/70 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.30)] sm:h-[min(88dvh,900px)] sm:max-w-3xl sm:rounded-[1.35rem]"
+        className="fixed inset-y-0 right-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full flex-col bg-white shadow-2xl sm:w-[600px] lg:w-[680px]"
       >
-        {/* ── Compact sticky header ─────────────────────────────────────────── */}
-        <div className="shrink-0 border-b border-gray-100 bg-white px-4 py-3 sm:px-6 sm:py-4">
+        {/* ── Ticket header + status pills ──────────────────────────────────── */}
+        <div className="flex-none border-b border-gray-100 px-5 py-4 sm:px-6">
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+                Support Ticket
+              </p>
               <h2
                 id="admin-ticket-title"
-                className="truncate text-base font-semibold leading-snug text-gray-950 sm:text-lg"
+                className="mt-1 text-base font-semibold leading-snug text-gray-900"
               >
-                {ticket ? ticket.subject : "Support Ticket"}
+                {ticket ? ticket.subject : "Loading ticket…"}
               </h2>
               {ticket && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   <Pill className={supportStatusPillClass(ticket.status)}>
                     {formatSupportStatus(ticket.status)}
                   </Pill>
@@ -280,7 +291,7 @@ export default function AdminSupportTicketModal({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close ticket"
+              aria-label="Close ticket detail"
               className={modalCloseButtonClass}
             >
               <X size={18} aria-hidden="true" />
@@ -288,86 +299,83 @@ export default function AdminSupportTicketModal({
           </div>
         </div>
 
-        {/* ── Ticket details disclosure (collapsed by default) ──────────────── */}
+        {/* ── Merchant information / ticket details disclosure ──────────────── */}
         {ticket && (
-        <div className="shrink-0 border-b border-gray-100 bg-gray-50/60">
-          <button
-            type="button"
-            onClick={() => setDetailsOpen((open) => !open)}
-            aria-expanded={detailsOpen}
-            aria-controls="admin-ticket-details"
-            className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500 transition hover:text-[#0052FF] focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 sm:px-6"
-          >
-            View Ticket Details
-            <ChevronDown
-              size={14}
-              aria-hidden="true"
-              className={`shrink-0 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
-            />
-          </button>
-          {detailsOpen && (
-            <div
-              id="admin-ticket-details"
-              className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-100 bg-white px-4 py-3 sm:grid-cols-3 sm:px-6"
+          <div className="flex-none border-b border-gray-100 bg-gray-50/60">
+            <button
+              type="button"
+              onClick={() => setDetailsOpen((open) => !open)}
+              aria-expanded={detailsOpen}
+              aria-controls="admin-ticket-details"
+              className="flex w-full items-center justify-between gap-2 px-5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500 transition hover:text-[#0052FF] focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 sm:px-6"
             >
-              <DetailRow label="Ticket ID" value={ticket.id} mono />
-              <DetailRow label="Merchant Email" value={ticket.merchant_email || "—"} />
-              <DetailRow
-                label="Business Name"
-                value={ticket.merchant_business_name || "—"}
+              View Ticket Details
+              <ChevronDown
+                size={14}
+                aria-hidden="true"
+                className={`shrink-0 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
               />
-              <DetailRow label="Merchant ID" value={ticket.merchant_id} mono />
-              <DetailRow label="Created" value={formatDate(ticket.created_at)} />
-              <DetailRow
-                label="Last Response"
-                value={ticket.last_response_at ? formatDate(ticket.last_response_at) : "—"}
-              />
-              <DetailRow
-                label="Resolved"
-                value={ticket.resolved_at ? formatDate(ticket.resolved_at) : "—"}
-              />
-              <DetailRow
-                label="Archived"
-                value={ticket.archived_at ? formatDate(ticket.archived_at) : "—"}
-              />
-              <DetailRow
-                label="Related Payment"
-                value={ticket.related_payment_id || "—"}
-                mono
-              />
-            </div>
-          )}
-        </div>
-        )}
-
-        {/* ── Status controls (the only status control in this modal) ───────── */}
-        {ticket && (
-        <div className="shrink-0 border-b border-gray-100 px-4 py-2.5 sm:px-6">
-          <div
-            role="group"
-            aria-label="Set ticket status"
-            className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            {SUPPORT_TICKET_STATUSES.map((status) => {
-              const active = ticket.status === status
-              return (
-                <button
-                  key={status}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => onUpdateStatus(status)}
-                  disabled={updatingStatus || active}
-                  className={`${segmentedButtonClass(active, "compact")} disabled:cursor-not-allowed disabled:opacity-60`}
-                >
-                  {formatSupportStatus(status)}
-                </button>
-              )
-            })}
+            </button>
+            {detailsOpen && (
+              <div
+                id="admin-ticket-details"
+                className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-100 bg-white px-5 py-3.5 text-xs sm:px-6"
+              >
+                <DetailRow label="Merchant Email" value={ticket.merchant_email || "—"} />
+                <DetailRow label="Business Name" value={ticket.merchant_business_name || "—"} />
+                <DetailRow label="Ticket ID" value={ticket.id} mono />
+                <DetailRow label="Merchant ID" value={ticket.merchant_id} mono />
+                <DetailRow label="Created" value={formatDate(ticket.created_at)} />
+                <DetailRow
+                  label="Last Response"
+                  value={ticket.last_response_at ? formatDate(ticket.last_response_at) : "—"}
+                />
+                <DetailRow
+                  label="Resolved"
+                  value={ticket.resolved_at ? formatDate(ticket.resolved_at) : "—"}
+                />
+                <DetailRow
+                  label="Archived"
+                  value={ticket.archived_at ? formatDate(ticket.archived_at) : "—"}
+                />
+                <DetailRow
+                  label="Related Payment"
+                  value={ticket.related_payment_id || "—"}
+                  mono
+                />
+              </div>
+            )}
           </div>
-        </div>
         )}
 
-        {/* ── Conversation (dominant, independently scrolling region) ───────── */}
+        {/* ── Status workflow (the only status control in this panel) ───────── */}
+        {ticket && (
+          <div className="flex-none border-b border-gray-100 px-5 py-2.5 sm:px-6">
+            <div
+              role="group"
+              aria-label="Set ticket status"
+              className="flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              {SUPPORT_TICKET_STATUSES.map((status) => {
+                const active = ticket.status === status
+                return (
+                  <button
+                    key={status}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => onUpdateStatus(status)}
+                    disabled={updatingStatus || active}
+                    className={`${segmentedButtonClass(active, "compact")} disabled:cursor-not-allowed disabled:opacity-60`}
+                  >
+                    {formatSupportStatus(status)}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Original ticket + conversation history (scrolls on its own) ───── */}
         <div
           ref={conversationRef}
           onScroll={handleConversationScroll}
@@ -375,7 +383,7 @@ export default function AdminSupportTicketModal({
           role="log"
           aria-label="Ticket conversation"
           aria-busy={loading}
-          className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 focus:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-blue-100 sm:px-6"
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-4 focus:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-blue-100 sm:px-6"
         >
           {loading && (
             <div className="space-y-3">
@@ -395,6 +403,28 @@ export default function AdminSupportTicketModal({
             conversation.map((entry) => {
               const isSupport = entry.sender_type === "pinetree"
               const isSystem = entry.sender_type === "system"
+
+              // The opening ticket renders as a labelled block rather than a
+              // chat bubble, matching the panel's section-label language.
+              if (entry.isOpeningMessage) {
+                return (
+                  <div
+                    key={entry.id}
+                    className="rounded-xl border border-gray-100 bg-gray-50 p-4"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">
+                        Original Ticket
+                      </span>
+                      <span className="shrink-0 text-xs text-gray-400">
+                        {formatDateTime(entry.created_at)}
+                      </span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm text-gray-700">{entry.message}</p>
+                  </div>
+                )
+              }
+
               return (
                 <div
                   key={entry.id}
@@ -416,7 +446,6 @@ export default function AdminSupportTicketModal({
                         }`}
                       >
                         {formatSupportSenderLabel(entry.sender_type, entry.sender_name)}
-                        {entry.isOpeningMessage && " · Original Message"}
                       </p>
                     )}
                     <p className="whitespace-pre-wrap text-sm">{entry.message}</p>
@@ -442,52 +471,52 @@ export default function AdminSupportTicketModal({
           )}
         </div>
 
-        {/* ── Composer ─────────────────────────────────────────────────────── */}
+        {/* ── Reply box ────────────────────────────────────────────────────── */}
         {ticket && (
-        <div className="shrink-0 border-t border-gray-200 bg-gray-50 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-6 sm:pb-3">
-          <label
-            htmlFor="admin-ticket-reply"
-            className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400"
-          >
-            Reply as PineTree Support
-          </label>
-          <textarea
-            id="admin-ticket-reply"
-            ref={composerRef}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault()
-                void handleSend()
-              }
-            }}
-            placeholder="Write your reply to the merchant…"
-            className="min-h-[104px] w-full resize-none rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50"
-          />
-          {sendError && (
-            <p role="alert" className="mt-2 text-xs font-medium text-red-600">
-              {sendError} — your reply was kept below.
-            </p>
-          )}
-          <div className="mt-2.5 flex items-center justify-between gap-3">
-            <p className="hidden text-xs text-gray-400 sm:block">
-              Replying moves the ticket to Waiting on Merchant unless you set another status.
-            </p>
-            <button
-              type="button"
-              onClick={() => void handleSend()}
-              disabled={sending || !draft.trim()}
-              aria-label="Send reply"
-              className={`${primaryActionButtonClass} w-full sm:w-auto`}
+          <div className="flex-none border-t border-gray-200 bg-gray-50 px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-6 sm:pb-3">
+            <label
+              htmlFor="admin-ticket-reply"
+              className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400"
             >
-              <Send size={14} aria-hidden="true" />
-              {sending ? "Sending…" : "Send Reply"}
-            </button>
+              Reply as PineTree Support
+            </label>
+            <textarea
+              id="admin-ticket-reply"
+              ref={composerRef}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault()
+                  void handleSend()
+                }
+              }}
+              placeholder="Write your reply to the merchant…"
+              className="min-h-[104px] w-full resize-none rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-gray-900 shadow-sm transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-50"
+            />
+            {sendError && (
+              <p role="alert" className="mt-2 text-xs font-medium text-red-600">
+                {sendError} — your reply was kept below.
+              </p>
+            )}
+            <div className="mt-2.5 flex items-center justify-between gap-3">
+              <p className="hidden text-xs text-gray-400 sm:block">
+                Sending moves the ticket to Waiting on Merchant unless you set another status.
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleSend()}
+                disabled={sending || !draft.trim()}
+                aria-label="Send reply"
+                className={`${primaryActionButtonClass} w-full sm:w-auto`}
+              >
+                <Send size={14} aria-hidden="true" />
+                {sending ? "Sending…" : "Send Reply"}
+              </button>
+            </div>
           </div>
-        </div>
         )}
       </div>
-    </div>
+    </>
   )
 }

@@ -28,10 +28,10 @@ import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/Segmente
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import AdminPageHeader, { adminHeaderIconButtonClass } from "@/components/admin/AdminPageHeader"
-import AdminSupportTicketModal, {
+import AdminSupportTicketPanel, {
   type AdminSupportMessage,
   type AdminSupportTicket,
-} from "@/components/admin/AdminSupportTicketModal"
+} from "@/components/admin/AdminSupportTicketPanel"
 import {
   filterIconButtonClass,
   filterSearchIconClass,
@@ -204,19 +204,23 @@ type AdminTab = "overview" | "providers" | "support" | "feedback"
 const ADMIN_TAB_TITLES: Record<AdminTab, { title: string; description: string }> = {
   overview: {
     title: "Overview",
-    description: "Platform payments, support operations, and merchant feedback",
+    description:
+      "Platform payments, support operations, merchant activity, and platform health.",
   },
   providers: {
     title: "Provider Operations",
-    description: "Card and crypto provider onboarding across all merchants",
+    description:
+      "Card and crypto provider onboarding, configuration, merchant connectivity, approval status.",
   },
   support: {
     title: "Support",
-    description: "Merchant support queue, replies, and ticket status",
+    description:
+      "Merchant support, ticket management, conversation history, status tracking, and reply workflow.",
   },
   feedback: {
     title: "Merchant Feedback",
-    description: "Product, documentation, and experience feedback from merchants",
+    description:
+      "Merchant product feedback, feature requests, experience reports, and improvement suggestions.",
   },
 }
 
@@ -234,6 +238,14 @@ const STATUS_FILTERS = [
 // Priorities are stored lowercase (engine/support/createSupportTicket.ts), so
 // filter values must be the canonical stored values, not display labels.
 const PRIORITY_FILTERS = ["urgent", "high", "normal", "low"]
+
+// Overview "Recent …" cards: equal, fixed height with the list scrolling inside
+// the card. The card itself never grows with its content.
+const ADMIN_RECENT_CARD_CLASS =
+  "flex h-[20rem] flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+
+const ADMIN_RECENT_SCROLL_CLASS =
+  "min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto overscroll-contain"
 
 const SUPPORT_STAT_CONFIG = [
   { key: "open" as const, tone: "blue" as const },
@@ -711,8 +723,8 @@ export default function AdminPage() {
       throw new Error(data?.error || "Failed to send reply")
     }
 
+    // Support replies are in-app only — there is no email warning to surface.
     toast.success("Reply sent")
-    if (data?.warning) toast.warning(data.warning)
 
     setDetail((prev) => {
       if (!prev || prev.ticket.id !== selectedTicketId) return prev
@@ -1130,27 +1142,30 @@ export default function AdminPage() {
                 </div>
               </DashboardSection>
 
-              {/* Recent Tickets + Feedback */}
+              {/* Recent Tickets + Feedback.
+                  Both cards are fixed-height with their own internal scroll
+                  container, so neither list can stretch the dashboard as
+                  activity grows — only the inside of each card scrolls. */}
               <div className="grid gap-6 lg:grid-cols-2">
                 <DashboardSection
                   title="Recent Tickets"
                   titleTone="blue"
                   action={
                     <button
-                      onClick={() => { setActiveTab("support"); setSelectedTicketId(null) }}
+                      onClick={() => { setActiveTab("support"); closeTicket() }}
                       className="text-xs font-medium text-[#0052FF] hover:underline"
                     >
                       View all
                     </button>
                   }
                 >
-                  <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                  <div className={ADMIN_RECENT_CARD_CLASS}>
                     {!overview?.recentTickets.length ? (
                       <p className="px-5 py-10 text-center text-sm text-gray-400">
                         No tickets yet.
                       </p>
                     ) : (
-                      <div className="divide-y divide-gray-100">
+                      <div className={ADMIN_RECENT_SCROLL_CLASS}>
                         {overview.recentTickets.map((t) => (
                           <button
                             key={t.id}
@@ -1189,13 +1204,13 @@ export default function AdminPage() {
                     </button>
                   }
                 >
-                  <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                  <div className={ADMIN_RECENT_CARD_CLASS}>
                     {!overview?.recentFeedback.length ? (
                       <p className="px-5 py-10 text-center text-sm text-gray-400">
                         No feedback yet.
                       </p>
                     ) : (
-                      <div className="divide-y divide-gray-100">
+                      <div className={ADMIN_RECENT_SCROLL_CLASS}>
                         {overview.recentFeedback.map((fb) => (
                           <div key={fb.id} className="px-5 py-3.5">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -1656,7 +1671,7 @@ export default function AdminPage() {
       )}
 
       {selectedTicketId && (
-        <AdminSupportTicketModal
+        <AdminSupportTicketPanel
           ticket={detail?.ticket ?? null}
           messages={detail?.messages ?? []}
           loading={loadingDetail}

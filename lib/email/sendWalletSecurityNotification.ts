@@ -33,8 +33,7 @@ const TITLES: Record<WalletSecurityNotificationKind, string> = {
 
 /**
  * Best-effort security notification for wallet-affecting actions (address
- * book changes, withdrawal submissions). Mirrors
- * lib/email/sendAdminReplyNotification.ts's pattern exactly: direct Resend
+ * book changes, withdrawal submissions). Pattern: direct Resend
  * instantiation, inline HTML, graceful no-op (never throws) if email isn't
  * configured or the merchant has no email on file - this is a notification,
  * not a step-up authentication mechanism (this repo has no real 2FA/reauth

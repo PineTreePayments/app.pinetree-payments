@@ -30,6 +30,49 @@ function getSupportEmailConfig() {
   }
 }
 
+/**
+ * Deterministic thread identity for one support ticket.
+ *
+ * Outbound support email is deliberately minimal: PineTree gets ONE notification
+ * when a ticket is created, and any later merchant follow-up is appended to that
+ * same mail thread instead of starting a new one. Because the id is derived from
+ * the ticket id, no thread state has to be stored anywhere.
+ *
+ * Threading uses two independent mechanisms so it survives a provider that
+ * rewrites Message-ID:
+ *   1. RFC 5322 headers — Message-ID on the first mail, In-Reply-To/References
+ *      pointing back at it on every follow-up.
+ *   2. An identical base subject ("Re: " + the original), which is what Gmail and
+ *      Outlook fall back to when header threading is unavailable.
+ *
+ * PineTree Support's own replies never send mail at all — the conversation lives
+ * in the dashboard.
+ */
+export function supportTicketThreadMessageId(ticketId: string) {
+  return `<pinetree-ticket-${String(ticketId).trim()}@pinetree-payments.com>`
+}
+
+export function supportTicketThreadSubject(ticket: Pick<SupportTicketRecord, "subject">) {
+  return `New PineTree Support Ticket: ${ticket.subject}`
+}
+
+function threadHeaders(
+  ticketId: string,
+  position: "opening" | "follow_up"
+): Record<string, string> {
+  const messageId = supportTicketThreadMessageId(ticketId)
+
+  // Gmail groups on X-Entity-Ref-ID even when Message-ID is replaced upstream.
+  const shared: Record<string, string> = {
+    References: messageId,
+    "X-Entity-Ref-ID": ticketId,
+  }
+
+  return position === "opening"
+    ? { ...shared, "Message-ID": messageId }
+    : { ...shared, "In-Reply-To": messageId }
+}
+
 function escapeHtml(value: string | number | null | undefined) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -102,7 +145,7 @@ export async function sendSupportTicketNotification(
     return { sent: false, warning: config.warning }
   }
 
-  const subject = `New PineTree Support Ticket: ${ticket.subject}`
+  const subject = supportTicketThreadSubject(ticket)
   const rows = [
     field("Ticket ID", ticket.id),
     field("Merchant ID", ticket.merchant_id),
@@ -116,9 +159,10 @@ export async function sendSupportTicketNotification(
   ].join("")
 
   const replyNote =
-    "Reply-to is set to the merchant email for human follow-up only. " +
-    "Replying to this email does not automatically update the ticket thread. " +
-    "Ticket-thread replies require the admin dashboard or an inbound email webhook."
+    "This is the only email PineTree sends when a ticket opens. Merchant follow-ups " +
+    "are appended to this same thread; PineTree Support replies stay in the admin " +
+    "dashboard and never generate email. Reply-to is the merchant email for human " +
+    "follow-up only — replying here does not update the ticket thread."
 
   const html = buildShell(subject, rows, "Description", ticket.description, replyNote)
 
@@ -128,7 +172,67 @@ export async function sendSupportTicketNotification(
     from: config.from,
     to: config.to,
     subject,
-    html
+    html,
+    headers: threadHeaders(ticket.id, "opening")
+  }
+
+  if (ticket.merchant_email) {
+    sendOptions.replyTo = ticket.merchant_email
+  }
+
+  const { data, error } = await resend.emails.send(sendOptions)
+
+  if (error) {
+    throw new Error(`Email notification failed: ${error.message}`)
+  }
+
+  return { sent: true, emailId: data?.id ?? "" }
+}
+
+/**
+ * Appends a merchant follow-up to the ticket's existing mail thread.
+ *
+ * One thread per ticket — never a fresh email per reply. Called on merchant
+ * replies only; PineTree Support's own replies send nothing.
+ */
+export async function sendMerchantReplyThreadNotification(
+  ticket: SupportTicketRecord,
+  replyMessage: string
+): Promise<SupportNotificationResult> {
+  const config = getSupportEmailConfig()
+
+  if (!config.configured) {
+    return { sent: false, warning: config.warning }
+  }
+
+  // "Re: " + the original subject keeps the mail client's subject-based
+  // threading working alongside the In-Reply-To/References headers.
+  const subject = `Re: ${supportTicketThreadSubject(ticket)}`
+  const rows = [
+    field("Ticket ID", ticket.id),
+    field("Business Name", ticket.merchant_business_name),
+    field("Merchant Email", ticket.merchant_email),
+    field("Status", ticket.status),
+    field("Priority", ticket.priority)
+  ].join("")
+
+  const html = buildShell(
+    subject,
+    rows,
+    "Merchant Reply",
+    replyMessage,
+    "Merchant follow-up on an existing ticket. Reply from the PineTree admin dashboard — " +
+      "dashboard replies do not send email."
+  )
+
+  const resend = new Resend(config.apiKey)
+
+  const sendOptions: Parameters<typeof resend.emails.send>[0] = {
+    from: config.from,
+    to: config.to,
+    subject,
+    html,
+    headers: threadHeaders(ticket.id, "follow_up")
   }
 
   if (ticket.merchant_email) {

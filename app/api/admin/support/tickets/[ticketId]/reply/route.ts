@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAdminFromRequest, getRouteErrorStatus } from "@/lib/api/adminAuth"
 import { createAdminTicketReply } from "@/engine/support/adminSupport"
-import { sendAdminReplyNotification } from "@/lib/email/sendAdminReplyNotification"
+
+/**
+ * PineTree Support replies are in-app only.
+ *
+ * No outbound email is sent here — not Resend, not SMTP. The reply is persisted,
+ * the ticket timestamps advance, and the merchant learns about it through the
+ * Help Center unread badge (GET /api/support/unread). Outbound support email is
+ * limited to one notification when a ticket is first created, plus merchant
+ * follow-ups appended to that same thread.
+ */
 
 type RouteContext = { params: Promise<{ ticketId: string }> }
 
@@ -28,19 +37,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       adminActorId
     )
 
-    let warning: string | undefined
-    try {
-      const emailResult = await sendAdminReplyNotification(result.ticket, body.message)
-      if (!emailResult.sent) warning = emailResult.warning
-    } catch (emailError) {
-      console.error("[admin:reply] email notification failed", {
-        ticketId,
-        error: emailError instanceof Error ? emailError.message : String(emailError),
-      })
-      warning = "Reply saved but email notification failed."
-    }
-
-    return NextResponse.json({ ...result, warning }, { status: 201 })
+    return NextResponse.json(result, { status: 201 })
   } catch (error: unknown) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to send reply" },

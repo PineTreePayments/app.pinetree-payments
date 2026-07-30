@@ -6,33 +6,39 @@ function read(relativePath: string) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8")
 }
 
-const adminModal = read("components/admin/AdminSupportTicketModal.tsx")
+const adminPanel = read("components/admin/AdminSupportTicketPanel.tsx")
 const help = read("app/dashboard/help/page.tsx")
 const layout = read("app/dashboard/layout.tsx")
 
 describe("support surfaces stay responsive", () => {
   it("uses 100dvh sheets rather than an unreliable fixed 100vh", () => {
-    for (const [name, source] of [["admin modal", adminModal], ["help center", help]] as const) {
+    for (const [name, source] of [["admin panel", adminPanel], ["help center", help]] as const) {
       expect(source, name).toContain("100dvh")
       expect(source, name).not.toContain("h-[100vh]")
     }
   })
 
-  it("keeps the admin modal header and composer outside the scrolling region", () => {
-    const dialog = adminModal.slice(adminModal.indexOf('role="dialog"'))
+  it("keeps the admin panel header and reply box outside the scrolling region", () => {
+    const dialog = adminPanel.slice(adminPanel.indexOf('role="dialog"'))
     // Exactly one flexible child: the conversation.
     const flexibleChildren = dialog.match(/min-h-0 flex-1/g) ?? []
     expect(flexibleChildren).toHaveLength(1)
     expect(dialog).toContain("flex h-[100dvh]")
-    expect(dialog).toContain("overflow-hidden")
-    // Composer clears the mobile safe area so it is not hidden behind system UI.
+    // Reply box clears the mobile safe area so it is not hidden behind system UI.
     expect(dialog).toContain("pb-[calc(0.75rem+env(safe-area-inset-bottom))]")
   })
 
+  it("is full width on mobile and a fixed-width drawer from sm up", () => {
+    const dialog = adminPanel.slice(adminPanel.indexOf('role="dialog"'))
+    expect(dialog).toContain("w-full")
+    expect(dialog).toContain("sm:w-[600px]")
+    expect(dialog).toContain("lg:w-[680px]")
+  })
+
   it("scrolls the status row horizontally on very narrow screens instead of wrapping tall", () => {
-    const statusRow = adminModal.slice(
-      adminModal.indexOf('aria-label="Set ticket status"'),
-      adminModal.indexOf("ref={conversationRef}")
+    const statusRow = adminPanel.slice(
+      adminPanel.indexOf('aria-label="Set ticket status"'),
+      adminPanel.indexOf("ref={conversationRef}")
     )
     expect(statusRow).toContain("overflow-x-auto")
     expect(statusRow).toContain("[&::-webkit-scrollbar]:hidden")

@@ -19,29 +19,48 @@ const ADMIN_PAGES: Array<[string, string]> = [
 ]
 
 describe("shared admin page header", () => {
-  it("carries the command-center eyebrow above the page title, not inside a card", () => {
-    expect(header).toContain('eyebrow = "Internal Admin Command Center"')
-    expect(header).toContain("dashboardSectionLabelClass")
-    expect(header).toContain("dashboardPageTitleClass")
-    // The title is a plain page header like the merchant dashboard pages, not a
-    // full-bleed hero card.
-    const titleBlock = header.slice(header.indexOf("<header"), header.indexOf("{metrics &&"))
-    expect(titleBlock).not.toContain("shadow-[0_18px_60px")
-    expect(titleBlock).not.toContain("rounded-[1.35rem]")
+  it("orders the surface as page title, then hero card", () => {
+    const titleIndex = header.indexOf("dashboardPageTitleClass}>{title}")
+    const heroIndex = header.indexOf("{/* Hero card")
+    expect(titleIndex).toBeGreaterThan(-1)
+    expect(heroIndex).toBeGreaterThan(titleIndex)
   })
 
-  it("aligns Last Updated with the title row and stacks it on mobile", () => {
+  it("carries the command-center eyebrow inside the hero card", () => {
+    expect(header).toContain('eyebrow = "Internal Admin Command Center"')
+    const hero = header.slice(header.indexOf("{/* Hero card"))
+    expect(hero).toContain("dashboardSectionLabelClass}>{eyebrow}")
+    // The eyebrow no longer floats above the card.
+    const aboveHero = header.slice(header.indexOf("<header"), header.indexOf("{/* Hero card"))
+    expect(aboveHero).not.toContain("{eyebrow}")
+  })
+
+  it("reuses the Platform Reports hero styling verbatim", () => {
+    const hero = header.slice(header.indexOf("{/* Hero card"))
+    // Same gradient, radius, border, padding, shadow and top hairline the
+    // Reports hero used at its last committed revision.
+    expect(hero).toContain("rounded-[1.35rem]")
+    expect(hero).toContain("border border-blue-200/80")
+    expect(hero).toContain(
+      "bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)]"
+    )
+    expect(hero).toContain("p-5 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-6")
+    expect(hero).toContain("absolute inset-x-6 top-0 h-px bg-gradient-to-r")
+  })
+
+  it("keeps Last Updated in the hero card's upper right and stacks it on mobile", () => {
     expect(header).toContain('lastUpdatedLabel = "Last Updated"')
-    expect(header).toContain("flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between")
+    expect(header).toContain("flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between")
     expect(header).toContain("sm:text-right")
     expect(header).toContain("truncate")
   })
 
-  it("keeps the white/glass floating treatment for the optional hero metrics only", () => {
-    const metricsBlock = header.slice(header.indexOf("{metrics &&"))
-    expect(metricsBlock).toContain("border-blue-200/80")
-    expect(metricsBlock).toContain("rounded-2xl")
-    expect(metricsBlock).toContain("sm:grid-cols-2")
+  it("renders optional hero metrics inside the same hero card", () => {
+    const hero = header.slice(header.indexOf("{/* Hero card"))
+    const metricsBlock = hero.slice(hero.indexOf("{metrics &&"))
+    expect(metricsBlock).toContain("flex flex-wrap gap-x-10")
+    // No second nested card for the metrics.
+    expect(metricsBlock).not.toContain("rounded-[1.35rem]")
   })
 
   it("is used by every admin page instead of a per-page hero", () => {
@@ -62,6 +81,30 @@ describe("shared admin page header", () => {
     expect(overview).toContain('title: "Merchant Feedback"')
     expect(transactions).toContain('title="Transaction Explorer"')
     expect(reports).toContain('title="Network Reporting"')
+  })
+
+  it("gives each admin tab its own hero-card subtitle", () => {
+    expect(overview).toContain(
+      "Platform payments, support operations, merchant activity, and platform health."
+    )
+    expect(overview).toContain(
+      "Card and crypto provider onboarding, configuration, merchant connectivity, approval status."
+    )
+    expect(overview).toContain(
+      "Merchant support, ticket management, conversation history, status tracking, and reply workflow."
+    )
+    expect(overview).toContain(
+      "Merchant product feedback, feature requests, experience reports, and improvement suggestions."
+    )
+  })
+
+  it("keeps the hero card above the existing tab bar and page content", () => {
+    const headerIndex = overview.indexOf("<AdminPageHeader")
+    const tabsIndex = overview.indexOf("{/* ── Tab bar")
+    const contentIndex = overview.indexOf("OVERVIEW TAB")
+    expect(headerIndex).toBeGreaterThan(-1)
+    expect(tabsIndex).toBeGreaterThan(headerIndex)
+    expect(contentIndex).toBeGreaterThan(tabsIndex)
   })
 
   it("uses one shared refresh control across admin headers", () => {
@@ -114,6 +157,28 @@ describe("admin overview metric condensation", () => {
     expect(read("components/dashboard/DashboardPrimitives.tsx")).toContain(
       'rose: "from-rose-50/70 to-white"'
     )
+  })
+})
+
+describe("overview recent activity cards", () => {
+  it("gives Recent Tickets and Recent Feedback one shared fixed-height card shell", () => {
+    expect(overview).toContain("const ADMIN_RECENT_CARD_CLASS")
+    expect(overview).toContain("const ADMIN_RECENT_SCROLL_CLASS")
+    // Fixed, equal height — the card cannot grow with its content.
+    expect(overview).toMatch(/ADMIN_RECENT_CARD_CLASS =\s*\n\s*"flex h-\[20rem\] flex-col overflow-hidden/)
+    // The list inside is the scrolling region.
+    expect(overview).toMatch(/ADMIN_RECENT_SCROLL_CLASS =\s*\n\s*"min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto/)
+  })
+
+  it("applies the shared shell to both cards so heights match", () => {
+    const recentSection = overview.slice(
+      overview.indexOf("{/* Recent Tickets + Feedback"),
+      overview.indexOf("SUPPORT TAB")
+    )
+    expect(recentSection.match(/ADMIN_RECENT_CARD_CLASS/g)).toHaveLength(2)
+    expect(recentSection.match(/ADMIN_RECENT_SCROLL_CLASS/g)).toHaveLength(2)
+    // No leftover unbounded card wrapper in this section.
+    expect(recentSection).not.toContain("overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-")
   })
 })
 
