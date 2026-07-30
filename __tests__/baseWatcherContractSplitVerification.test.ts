@@ -621,6 +621,36 @@ describe("watchPaymentOnce — real production transaction (incident 6fd3c713)",
     expect(mockProcessPaymentEvent).not.toHaveBeenCalled()
   })
 
+  it("fails a recovery-replayed candidate whose decoded payment reference mismatches", async () => {
+    global.fetch = jsonRpcResponder({
+      eth_blockNumber: () => "0x2ec5ab1",
+      eth_getTransactionReceipt: () => ({
+        status: "0x1",
+        logs: [realMatchingLog({ paymentRef: "some-other-payment-id" })]
+      })
+    }) as unknown as typeof fetch
+
+    const detected = await watchPaymentOnce({
+      ...realWatchInput,
+      txHash: REAL_TX_HASH,
+      rejectMismatchedEvidence: true,
+    })
+
+    expect(detected).toBe(true)
+    expect(mockProcessPaymentEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: "payment.failed",
+      paymentId: REAL_PAYMENT_ID,
+      txHash: REAL_TX_HASH,
+      failureCode: "provider_evidence_mismatch",
+      rejectedEvidence: true,
+      failureDetails: expect.objectContaining({
+        rejectionReason: "payment_reference_mismatch",
+        decodedPaymentRef: "some-other-payment-id",
+        expectedPaymentRef: REAL_PAYMENT_ID,
+      }),
+    }))
+  })
+
   it("rejects when the PaymentSplit log comes from a different contract address (wrong recipient / wrong deployment)", async () => {
     global.fetch = jsonRpcResponder({
       eth_blockNumber: () => "0x2ec5ab1",

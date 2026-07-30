@@ -411,7 +411,7 @@ components:
 
     CheckoutSessionStatus:
       type: string
-      enum: [open, processing, paid, failed, incomplete, expired, canceled, unknown]
+      enum: [open, processing, paid, failed, incomplete, expired, canceled]
       description: |
         - open: Session created, waiting for payment
         - processing: Payment broadcast; awaiting confirmation
@@ -420,7 +420,6 @@ components:
         - incomplete: Payment attempt ended without a more specific outcome
         - expired: Session expired without payment
         - canceled: Explicitly canceled
-        - unknown: Provider or network outcome requires investigation; recovery continues
 
     CheckoutSession:
       type: object
@@ -557,7 +556,7 @@ components:
           enum: [payment]
         status:
           type: string
-          enum: [open, processing, paid, failed, incomplete, expired, canceled, unknown]
+          enum: [open, processing, paid, failed, incomplete, expired, canceled]
         amount:
           type: number
           example: 49.99
@@ -600,7 +599,6 @@ components:
         - payment.expired
         - payment.canceled
         - payment.incomplete
-        - payment.unknown
         - payment.refunded
         - checkout.session.created
         - checkout.session.processing

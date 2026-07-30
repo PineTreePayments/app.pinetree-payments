@@ -8,14 +8,12 @@ import { runPaymentWatcher } from "./checkPaymentOnce"
 import { advancePaymentToTargetStatus } from "./eventProcessor"
 import { reconcileSpeedLightningPayment } from "./lightningSpeedReconciliation"
 import { normalizeToStrictPaymentStatus, type PaymentStatus } from "./paymentStateMachine"
-import { updatePaymentStatus } from "./updatePaymentStatus"
 import { SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { isPaymentRecoverySchemaReady } from "@/database/paymentMaintenance"
 import { getLatestEvmWatcherTransactionHash } from "@/database/paymentEvents"
 
 const DEFAULT_MAX_LOOKUP_FAILURES = 5
 const DEFAULT_MAX_PROCESSING_AGE_MS = 24 * 60 * 60_000
-const PRIOR_WATCHER_EVIDENCE_GRACE_MS = 5 * 60_000
 const SPEED_PROVIDER_ALIASES = new Set([SPEED_PROVIDER_NAME, "speed", "tryspeed"])
 const NWC_PROVIDER_ALIASES = new Set(["lightning_nwc", "nwc", "lightning"])
 
@@ -49,7 +47,6 @@ export type PaymentRecoveryResult = {
     | "provider_recheck"
     | "watcher_recheck"
     | "transitioned"
-    | "marked_unknown"
     | "skipped"
   reason: string
   providerStatus?: string
@@ -143,7 +140,7 @@ async function recordRecoveryMetadata(
   return next
 }
 
-async function markRecoveryUnknown(input: {
+async function retainRecoveryState(input: {
   payment: Payment
   reason: string
   error?: string
@@ -151,50 +148,25 @@ async function markRecoveryUnknown(input: {
   now: number
   consecutiveLookupFailures?: number
   attemptAlreadyRecorded?: boolean
+  checked?: boolean
+  source?: "watcher" | "provider"
+  investigationRequired?: boolean
 }): Promise<PaymentRecoveryResult> {
   const current = normalizeToStrictPaymentStatus(input.payment.status)
   await recordRecoveryMetadata(input.payment, {
-    lastOutcome: "investigation_required",
+    lastOutcome: input.checked ? "inconclusive_authority_result" : "retry_scheduled",
     lastReason: input.reason,
     lastProviderStatus: input.providerStatus || null,
     lastError: input.error || null,
-    investigationRequired: true,
+    investigationRequired: input.investigationRequired ?? true,
     ...(typeof input.consecutiveLookupFailures === "number"
       ? { consecutiveLookupFailures: input.consecutiveLookupFailures }
       : {}),
   }, input.now, !input.attemptAlreadyRecorded)
 
-  if (current !== "UNKNOWN") {
-    try {
-      await updatePaymentStatus(input.payment.id, "UNKNOWN", {
-        providerEvent: `payment_recovery.${input.reason}`,
-        rawPayload: {
-          recoveryException: true,
-          reason: input.reason,
-          providerStatus: input.providerStatus || null,
-          error: input.error || null,
-          consecutiveLookupFailures: input.consecutiveLookupFailures ?? null,
-        },
-      })
-    } catch (error) {
-      recoveryLog("error", {
-        event: "payment_recovery_skipped",
-        action: "transition_rejected",
-        reason: "unknown_transition_rejected",
-        paymentId: input.payment.id,
-        provider: input.payment.provider,
-        network: input.payment.network || null,
-        previousStatus: current,
-        targetStatus: "UNKNOWN",
-        error: safeError(error),
-      })
-      throw error
-    }
-  }
-
   recoveryLog("warn", {
-    event: "payment_recovery_exception",
-    action: current === "UNKNOWN" ? "unknown_retained" : "marked_unknown",
+    event: "payment_recovery_deferred",
+    action: "retry_scheduled",
     reason: input.reason,
     paymentId: input.payment.id,
     provider: input.payment.provider,
@@ -207,10 +179,12 @@ async function markRecoveryUnknown(input: {
 
   return {
     paymentId: input.payment.id,
-    checked: false,
+    checked: input.checked ?? false,
     previousStatus: current,
-    status: "UNKNOWN",
-    action: "marked_unknown",
+    status: current,
+    action: input.checked
+      ? input.source === "watcher" ? "watcher_recheck" : "provider_recheck"
+      : "skipped",
     reason: input.reason,
     providerStatus: input.providerStatus,
     consecutiveLookupFailures: input.consecutiveLookupFailures,
@@ -221,10 +195,9 @@ async function resolveAuthorityStatus(
   payment: Payment,
   options: PaymentRecoveryOptions
 ): Promise<{
-  status: ProviderPaymentStatus
+  status: ProviderPaymentStatus | null
   detected?: boolean
   source: "watcher" | "provider"
-  exceptionReason?: string
 }> {
   const provider = String(payment.provider || "").trim().toLowerCase()
 
@@ -237,7 +210,9 @@ async function resolveAuthorityStatus(
     }
     const refreshed = await getPaymentById(payment.id)
     return {
-      status: String(refreshed?.status || result.status || "UNKNOWN").toUpperCase() as ProviderPaymentStatus,
+      status: refreshed?.status
+        ? String(refreshed.status).toUpperCase() as ProviderPaymentStatus
+        : result.status ? String(result.status).toUpperCase() as ProviderPaymentStatus : null,
       detected: result.detected,
       source: "provider",
     }
@@ -278,33 +253,12 @@ async function resolveAuthorityStatus(
           txHash: authoritativeTxHash,
           maxAttempts: options.maxAttempts ?? 1,
           sessionAttemptId: options.sessionAttemptId,
+          rejectMismatchedEvidence: priorWatcherEvidenceFound,
         }
       : undefined
     const detected = await runPaymentWatcher(payment.id, watcherOptions)
     const refreshed = await getPaymentById(payment.id)
     const refreshedStatus = String(refreshed?.status || payment.status).toUpperCase() as ProviderPaymentStatus
-    if (
-      priorWatcherEvidenceFound &&
-      !detected &&
-      !CANONICAL_TERMINAL_STATUSES.has(refreshedStatus as PaymentStatus) &&
-      paymentAgeMs(payment, options.now ?? Date.now()) >= PRIOR_WATCHER_EVIDENCE_GRACE_MS
-    ) {
-      recoveryLog("warn", {
-        event: "payment_recovery_exception",
-        action: "investigation_required",
-        reason: "prior_watcher_evidence_rejected",
-        paymentId: payment.id,
-        provider: payment.provider,
-        network: payment.network || null,
-        previousStatus: payment.status,
-      })
-      return {
-        status: "UNKNOWN",
-        detected,
-        source: "watcher",
-        exceptionReason: "prior_watcher_evidence_rejected",
-      }
-    }
     return {
       status: refreshedStatus,
       detected,
@@ -320,7 +274,9 @@ async function resolveAuthorityStatus(
   if (!adapter.getPaymentStatus) throw new Error("provider_status_lookup_not_implemented")
   const result = await adapter.getPaymentStatus(providerReference, payment.merchant_id)
   return {
-    status: String(result.status || "UNKNOWN").toUpperCase() as ProviderPaymentStatus,
+    status: result.status
+      ? String(result.status).toUpperCase() as ProviderPaymentStatus
+      : null,
     source: "provider",
   }
 }
@@ -428,7 +384,12 @@ export async function recoverPayment(
       !NWC_PROVIDER_ALIASES.has(normalizedProvider)) ||
     (NWC_PROVIDER_ALIASES.has(normalizedProvider) && !nwcReferencePresent)
   ) {
-    return markRecoveryUnknown({ payment, reason: "missing_provider_reference", now })
+    return retainRecoveryState({
+      payment,
+      reason: "missing_provider_reference",
+      now,
+      investigationRequired: true,
+    })
   }
 
   let authority: Awaited<ReturnType<typeof resolveAuthorityStatus>>
@@ -453,22 +414,14 @@ export async function recoverPayment(
       error: message,
     })
 
-    if (failureCount >= maxLookupFailures) {
-      return markRecoveryUnknown({
-        payment,
-        reason: "lookup_retry_limit_reached",
-        error: message,
-        now,
-        consecutiveLookupFailures: failureCount,
-      })
-    }
-
     await recordRecoveryMetadata(payment, {
       consecutiveLookupFailures: failureCount,
       lastOutcome: "lookup_failure",
-      lastReason: "provider_lookup_failed",
+      lastReason: failureCount >= maxLookupFailures
+        ? "lookup_retry_limit_reached"
+        : "provider_lookup_failed",
       lastError: message,
-      investigationRequired: false,
+      investigationRequired: failureCount >= maxLookupFailures,
     }, now)
 
     return {
@@ -477,27 +430,35 @@ export async function recoverPayment(
       previousStatus,
       status: previousStatus,
       action: "skipped",
-      reason: "provider_lookup_failed",
+      reason: failureCount >= maxLookupFailures
+        ? "lookup_retry_limit_reached"
+        : "provider_lookup_failed",
       consecutiveLookupFailures: failureCount,
     }
   }
 
-  const providerStatus = String(authority.status || "UNKNOWN").toUpperCase()
-  if (providerStatus === "UNKNOWN") {
-    return markRecoveryUnknown({
+  const providerStatus = authority.status
+    ? String(authority.status).toUpperCase()
+    : ""
+  if (!providerStatus) {
+    return retainRecoveryState({
       payment,
-      reason: authority.exceptionReason || "provider_returned_unknown",
-      providerStatus,
+      reason: "provider_response_inconclusive",
       now,
+      checked: true,
+      source: authority.source,
+      investigationRequired: false,
     })
   }
 
   if (providerStatus === "REFUNDED") {
-    return markRecoveryUnknown({
+    return retainRecoveryState({
       payment,
       reason: "provider_status_requires_investigation",
       providerStatus,
       now,
+      checked: true,
+      source: authority.source,
     })
   }
 
@@ -507,11 +468,14 @@ export async function recoverPayment(
     paymentAgeMs(payment, now) >= maxProcessingAgeMs
 
   if (overProcessingLimit) {
-    return markRecoveryUnknown({
+    return retainRecoveryState({
       payment,
       reason: "processing_age_limit_reached",
       providerStatus,
       now,
+      checked: true,
+      source: authority.source,
+      investigationRequired: true,
     })
   }
 
@@ -521,33 +485,10 @@ export async function recoverPayment(
     lastReason: "provider_or_network_status_received",
     lastProviderStatus: providerStatus,
     lastError: null,
-    investigationRequired: previousStatus === "UNKNOWN",
+    investigationRequired: false,
   }, now)
 
   const target = providerStatus as PaymentStatus
-  if (previousStatus === "UNKNOWN" && !CANONICAL_TERMINAL_STATUSES.has(target)) {
-    recoveryLog("info", {
-      event: "payment_recovery_checked",
-      action: "unknown_retained",
-      reason: "authority_still_non_terminal",
-      paymentId: payment.id,
-      provider: payment.provider,
-      network: payment.network || null,
-      previousStatus,
-      providerStatus,
-    })
-    return {
-      paymentId: payment.id,
-      checked: true,
-      previousStatus,
-      status: previousStatus,
-      action: authority.source === "watcher" ? "watcher_recheck" : "provider_recheck",
-      reason: "authority_still_non_terminal",
-      providerStatus,
-      detected: authority.detected,
-    }
-  }
-
   if (target === previousStatus || (previousStatus === "PROCESSING" && (target === "PENDING" || target === "CREATED"))) {
     recoveryLog("info", {
       event: "payment_recovery_checked",
@@ -597,13 +538,16 @@ export async function recoverPayment(
       providerStatus,
       error: message,
     })
-    return markRecoveryUnknown({
+    return retainRecoveryState({
       payment,
       reason: "engine_transition_rejected",
       error: message,
       providerStatus,
       now,
       attemptAlreadyRecorded: true,
+      checked: true,
+      source: authority.source,
+      investigationRequired: true,
     })
   }
 

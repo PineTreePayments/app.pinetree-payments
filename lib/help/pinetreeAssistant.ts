@@ -277,7 +277,7 @@ function findMentionedPayment(question: string, context: PineTreeAssistantContex
 
 function latestRelevantPayment(context: PineTreeAssistantContext) {
   return context.recentPayments.find((payment) =>
-    ["PENDING", "PROCESSING", "UNKNOWN", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE", "CREATED"].includes(String(payment.status))
+    ["PENDING", "PROCESSING", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE", "CREATED"].includes(String(payment.status))
   ) || context.recentPayments[0]
 }
 
@@ -548,8 +548,6 @@ function withContextAnswer(
             ? "the payment request exists, but PineTree has not detected a transaction yet."
             : status === "PROCESSING"
               ? "a transaction or provider signal was detected and PineTree is waiting for final confirmation."
-              : status === "UNKNOWN"
-                ? "PineTree could not determine a canonical outcome and is continuing provider or network recovery checks; support investigation may be required."
               : status === "CONFIRMED"
                 ? "PineTree completed the payment successfully."
                 : status === "FAILED"
@@ -565,7 +563,7 @@ function withContextAnswer(
         `Gross amount visible to PineTree: ${amount}.`,
         "If this does not match what the customer or wallet shows, open a support ticket with the payment ID, rail, network, time, and transaction hash/signature."
       ],
-      escalation: ["PROCESSING", "UNKNOWN", "PENDING", "FAILED"].includes(status)
+      escalation: ["PROCESSING", "PENDING", "FAILED"].includes(status)
         ? "If funds were sent or confirmed externally, this needs PineTree support review. PineTree AI cannot manually mark payments confirmed or failed."
         : undefined
     }

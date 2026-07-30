@@ -82,11 +82,11 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
    * Get payment status from provider
    */
   async getPaymentStatus(providerReference: string): Promise<{
-    status: PaymentStatus
+    status: PaymentStatus | null
   }> {
     void providerReference
     console.warn(`[${this.providerId}] provider status polling is not implemented`)
-    return { status: "UNKNOWN" }
+    return { status: null }
   }
 
   /**

@@ -11,7 +11,6 @@ export const SUPPORTED_WEBHOOK_EVENTS = [
   "payment.expired",
   "payment.canceled",
   "payment.incomplete",
-  "payment.unknown",
   "payment.refunded",
   "checkout.session.created",
   "checkout.session.processing",

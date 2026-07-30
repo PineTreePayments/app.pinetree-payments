@@ -94,7 +94,6 @@ dispute processing exists today.
 | Canceled | The payment was explicitly canceled before completion. | Gray | X circle |
 | Refunded | Settled funds were returned after confirmation. | Orange | Refund arrow |
 | Disputed | Reserved presentation for future dispute architecture. | Amber | Warning triangle |
-| Unknown | A value is not recognized. Defensive fallback only. | Neutral gray | Minus circle |
 
 Rules:
 
@@ -114,10 +113,11 @@ Rules:
 - Legacy aliases such as `CANCELLED`, `payment.cancelled`, `PAID`, `COMPLETED`,
   provider `ERROR`, and provider `REJECTED` may be accepted at boundaries but are
   never emitted as merchant labels.
-- Unknown provider values log diagnostics and normalize to Unknown. They must not
-  masquerade as Waiting and must not advance canonical payment state.
+- Unrecognized provider values log diagnostics, retain the current canonical
+  payment state, and are retried by recovery. They must not masquerade as
+  Waiting and must not advance canonical payment state.
 - Refunded remains distinct in transaction history, filtering, summaries, reports,
-  and exports. It must not fall through to Unknown or display as Confirmed.
+  and exports. It must not display as Confirmed.
 - Provider adapters translate external values. They do not own merchant labels,
   mutate database rows, or bypass PineTree Engine reconciliation.
 - The canonical public cancellation event is `payment.canceled`. The British

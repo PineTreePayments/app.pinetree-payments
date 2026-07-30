@@ -11,7 +11,6 @@ export type PaymentEventType =
   | "payment.cancelled"
   | "payment.incomplete"
   | "payment.expired"
-  | "payment.unknown"
   | "payment.refunded"
   | "payment.reconciled"
 

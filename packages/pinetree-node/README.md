@@ -338,7 +338,6 @@ type CheckoutSessionStatus =
   | "incomplete"  // payment attempt ended without completion
   | "expired"     // session timed out
   | "canceled"    // merchant canceled
-  | "unknown"     // provider/network status requires investigation
 ```
 
 ---

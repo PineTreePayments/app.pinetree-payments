@@ -192,10 +192,6 @@ export async function advancePaymentToTargetStatus(
       await updatePaymentStatus(paymentId, "PROCESSING", resolvedMetadata)
       return
     }
-    if (currentStatus === "UNKNOWN") {
-      await updatePaymentStatus(paymentId, "PROCESSING", resolvedMetadata)
-      return
-    }
     // currentStatus === "PROCESSING" is caught by the early-return above — no-op.
     return
   }
@@ -532,6 +528,9 @@ export type WatcherEvent = {
    */
   failureCode?: string
   failureReason?: string
+  /** A mined candidate was decoded and proven to belong to another payment. */
+  rejectedEvidence?: boolean
+  failureDetails?: Record<string, unknown>
   /**
    * Self-healing reconciliation only. When true and the payment is currently
    * INCOMPLETE, allows this verified on-chain match to repair it back to
@@ -750,7 +749,7 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
   }
 
   const transaction = await getTransactionByPaymentId(paymentId)
-  if (transaction && txHash && !transaction.provider_transaction_id) {
+  if (transaction && txHash && !event.rejectedEvidence && !transaction.provider_transaction_id) {
     try {
       await updateTransactionProviderReference(transaction.id, txHash)
     } catch (error) {
@@ -770,6 +769,8 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
             failureEvidence: true,
             ...(event.failureCode ? { failureCode: event.failureCode } : {}),
             ...(event.failureReason ? { failureReason: event.failureReason } : {}),
+            ...(event.rejectedEvidence ? { rejectedEvidence: true } : {}),
+            ...(event.failureDetails ? { failureDetails: event.failureDetails } : {}),
           }
         : {})
     }

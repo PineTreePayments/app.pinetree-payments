@@ -16,7 +16,7 @@ export type Shift4CreatePaymentInput = {
 export type Shift4NormalizedPayment = {
   provider: "shift4"
   providerReference: string
-  status: PaymentStatus
+  status: PaymentStatus | null
   amount: number
   currency: string
   paymentUrl?: string
@@ -31,7 +31,7 @@ export type Shift4NormalizedPayment = {
 export type Shift4PaymentStatus = {
   provider: "shift4"
   providerReference: string
-  status: PaymentStatus
+  status: PaymentStatus | null
   raw: unknown
 }
 

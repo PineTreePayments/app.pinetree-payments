@@ -10,10 +10,14 @@ describe("public checkout session status mapping", () => {
     ["FAILED", "failed"],
     ["EXPIRED", "expired"],
     ["INCOMPLETE", "incomplete"],
-    ["UNKNOWN", "unknown"],
-    ["unexpected_provider_value", "unknown"],
     ["disabled", "canceled"],
   ])("maps %s to %s", (internal, expected) => {
     expect(mapInternalCheckoutSessionStatus(internal)).toBe(expected)
+  })
+
+  it("rejects non-canonical payment statuses instead of exposing a synthetic state", () => {
+    expect(() => mapInternalCheckoutSessionStatus("unexpected_provider_value")).toThrow(
+      "Invalid checkout payment status"
+    )
   })
 })

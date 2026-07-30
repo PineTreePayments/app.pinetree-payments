@@ -157,9 +157,8 @@ export async function reconcileSpeedLightningPayment(
 
   const speedPaymentId = String(payment.provider_reference || "").trim()
   if (!speedPaymentId) {
-    // Persist the exception for diagnosis. The shared recovery queue will
-    // transition it to UNKNOWN and keep retrying it; it must never be evicted
-    // while the canonical payment remains unresolved.
+    // Persist the exception for diagnosis. The shared recovery queue keeps the
+    // current canonical status eligible and retries it on later maintenance ticks.
     await recordUnresolvableSpeedReference({
       paymentId,
       speedPaymentId: "",
@@ -171,7 +170,7 @@ export async function reconcileSpeedLightningPayment(
   // A legacy payment created before Speed connected-account header scoping can
   // be invisible to the merchant-scoped GET while still existing under the
   // PineTree platform account. Existing stale flags select that broader scope,
-  // but are never treated as a permanent skip: UNKNOWN rows remain recheckable.
+  // but are never treated as a permanent skip while the payment is non-terminal.
   const fullPayment = await getPaymentById(paymentId)
   const existingMetadata = readMetadataRecord(fullPayment?.metadata)
   const knownLegacyPlatformScope = existingMetadata.speedRetrieveScope === "legacy_platform"

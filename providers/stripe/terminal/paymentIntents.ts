@@ -32,7 +32,7 @@ export type StripeCardCaptureMethod =
 export type StripeCardPaymentIntentResult = {
   id: string
   clientSecret: string | null
-  status: PaymentStatus
+  status: PaymentStatus | null
   providerStatus: string
   amount: number
   currency: string

@@ -24,7 +24,6 @@ export type AdminTransactionSummary = {
   totalCount: number
   confirmedCount: number
   processingCount: number
-  unknownCount: number       // UNKNOWN (provider/network investigation)
   pendingCount: number      // CREATED + PENDING (awaiting customer action)
   failedCount: number       // FAILED only (hard provider failure)
   incompleteCount: number   // INCOMPLETE (customer abandoned)
@@ -52,7 +51,6 @@ export const ADMIN_TX_SUMMARY_DEFAULT: AdminTransactionSummary = {
   totalCount: 0,
   confirmedCount: 0,
   processingCount: 0,
-  unknownCount: 0,
   pendingCount: 0,
   failedCount: 0,
   incompleteCount: 0,
@@ -163,7 +161,6 @@ export async function getAdminTransactionSummary(
 
     let confirmedCount = 0
     let processingCount = 0
-    let unknownCount = 0
     let pendingCount = 0
     let failedCount = 0
     let incompleteCount = 0
@@ -185,9 +182,6 @@ export async function getAdminTransactionSummary(
         case "PROCESSING":
           processingCount++
           break
-        case "UNKNOWN":
-          unknownCount++
-          break
         case "CREATED":
         case "PENDING":
           pendingCount++
@@ -208,7 +202,6 @@ export async function getAdminTransactionSummary(
       totalCount: rows.length,
       confirmedCount,
       processingCount,
-      unknownCount,
       pendingCount,
       failedCount,
       incompleteCount,

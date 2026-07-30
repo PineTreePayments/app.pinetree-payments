@@ -28,7 +28,7 @@ import { getTransactionByPaymentId } from "@/database/transactions"
  */
 export function buildBaseWatchInput(
   payment: Pick<Payment, "id" | "network" | "merchant_amount" | "pinetree_fee" | "metadata">,
-  options?: { txHash?: string }
+  options?: { txHash?: string; rejectMismatchedEvidence?: boolean }
 ): WatchOnceInput {
   const split = ((payment.metadata ?? null) as StoredPaymentSplitMetadata | null)?.split
 
@@ -46,7 +46,8 @@ export function buildBaseWatchInput(
     feeCaptureMethod: split?.feeCaptureMethod,
     splitContract: split?.splitContract,
     asset: split?.asset,
-    txHash: options?.txHash
+    txHash: options?.txHash,
+    rejectMismatchedEvidence: options?.rejectMismatchedEvidence
   }
 }
 
@@ -80,7 +81,12 @@ export function resetNoHashEvmScanCooldownForTests(): void {
 
 export async function runPaymentWatcher(
   paymentId: string,
-  options?: { txHash?: string; maxAttempts?: number; sessionAttemptId?: string }
+  options?: {
+    txHash?: string
+    maxAttempts?: number
+    sessionAttemptId?: string
+    rejectMismatchedEvidence?: boolean
+  }
 ): Promise<boolean> {
   if (!options?.txHash) {
     const existing = inFlightLogScanWatchers.get(paymentId)
@@ -105,7 +111,12 @@ export async function runPaymentWatcher(
 
 async function runPaymentWatcherInternal(
   paymentId: string,
-  options?: { txHash?: string; maxAttempts?: number; sessionAttemptId?: string }
+  options?: {
+    txHash?: string
+    maxAttempts?: number
+    sessionAttemptId?: string
+    rejectMismatchedEvidence?: boolean
+  }
 ): Promise<boolean> {
   let payment: Awaited<ReturnType<typeof getPaymentById>>
 
@@ -250,7 +261,10 @@ async function runPaymentWatcherInternal(
     })
   }
 
-  const watchInput = buildBaseWatchInput(payment, { txHash: effectiveTxHash })
+  const watchInput = buildBaseWatchInput(payment, {
+    txHash: effectiveTxHash,
+    rejectMismatchedEvidence: options?.rejectMismatchedEvidence,
+  })
 
   // For EVM payments where we have a txHash, the receipt may not be available
   // immediately after the tx is submitted. Retry up to 5 times with a short delay

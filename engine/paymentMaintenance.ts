@@ -376,8 +376,8 @@ export async function runPaymentMaintenanceTick(options?: {
 
     for (const payment of candidates) {
       // Speed has its own identity-scoped queue above and must not be checked
-      // twice in the same tick. Every other unresolved state is periodically
-      // rechecked, including CREATED/PENDING without local evidence and UNKNOWN.
+      // twice in the same tick. Every other unresolved canonical state is
+      // periodically rechecked, including CREATED/PENDING without local evidence.
       if (
         ["lightning_speed", "speed", "tryspeed"].includes(String(payment.provider || "").toLowerCase()) ||
         lightningCandidateIds.has(payment.id)

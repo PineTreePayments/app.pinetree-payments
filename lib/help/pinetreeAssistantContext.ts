@@ -181,7 +181,6 @@ export type AssistantDiagnostics = {
       confirmedCount: number
       pendingCount: number
       processingCount: number
-      unknownCount: number
       failedCount: number
       incompleteCount: number
       recentProviders: string[]
@@ -449,7 +448,7 @@ function buildSetupSummary(
   const hasActiveCheckoutLink = input.checkoutLinks.activeCount > 0
   const hasConfirmedPayment = input.recentPayments.some((payment) => payment.status === "CONFIRMED")
   const openProblemPayments = input.recentPayments.filter((payment) =>
-    ["CREATED", "PENDING", "PROCESSING", "UNKNOWN", "FAILED"].includes(String(payment.status))
+    ["CREATED", "PENDING", "PROCESSING", "FAILED"].includes(String(payment.status))
   )
   const openTickets = input.recentTickets.filter((ticket) =>
     ["open", "in_review", "waiting_on_merchant"].includes(ticket.status)
@@ -693,7 +692,6 @@ export async function getPineTreeAssistantContext(merchantId: string): Promise<P
         confirmedCount: payments.filter((p) => String(p.status) === "CONFIRMED").length,
         pendingCount: payments.filter((p) => String(p.status) === "PENDING").length,
         processingCount: payments.filter((p) => String(p.status) === "PROCESSING").length,
-        unknownCount: payments.filter((p) => String(p.status) === "UNKNOWN").length,
         failedCount: payments.filter((p) => String(p.status) === "FAILED").length,
         incompleteCount: payments.filter((p) => String(p.status) === "INCOMPLETE").length,
         recentProviders: [...new Set(payments.map((p) => p.provider).filter(Boolean) as string[])],

@@ -91,7 +91,7 @@ describe("Shift4 provider adapter", () => {
     ["expired", "EXPIRED"],
     ["cancelled", "CANCELED"],
     ["refunded", "REFUNDED"],
-    ["mystery_state", "UNKNOWN"],
+    ["mystery_state", null],
   ] as const)("normalizes status %s to %s", async (providerStatus, expectedStatus) => {
     vi.stubEnv("SHIFT4_SECRET_KEY", "sk_test_123")
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({

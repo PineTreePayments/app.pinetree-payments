@@ -137,7 +137,7 @@ function canonicalPaymentId(tx: DashboardTransactionRow) {
 }
 
 function canonicalStatus(tx: DashboardTransactionRow) {
-  return String(tx.canonicalStatus || tx.status || "UNKNOWN").trim().toUpperCase()
+  return String(tx.canonicalStatus || tx.status || "").trim().toUpperCase()
 }
 
 function canonicalTimestamp(tx: DashboardTransactionRow, payment?: DashboardPaymentSummary | null) {

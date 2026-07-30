@@ -62,8 +62,8 @@ describe("shared payment-state visual contract", () => {
     expect(terminal).not.toContain("PineTree Checkout")
     expect(processing).not.toContain("PineTree Checkout")
     expect(checkout).toContain(">PineTree Checkout</p>")
-    expect(checkout).toContain('normalizedPaymentStatus === "UNKNOWN"')
-    expect(checkout).toContain('<TransactionResult state="UNKNOWN"')
+    expect(checkout).not.toContain('normalizedPaymentStatus === "UNKNOWN"')
+    expect(checkout).not.toContain('<TransactionResult state="UNKNOWN"')
   })
 
   it("keeps POS to one visible card for canonical result states", () => {
@@ -110,7 +110,6 @@ describe("shared payment-state visual contract", () => {
     ["EXPIRED", "rose"],
     ["CANCELED", "gray"],
     ["INCOMPLETE", "amber"],
-    ["UNKNOWN", "gray"],
   ])("maps %s to its architecture-approved color", (status, color) => {
     const display = getPaymentDisplayStatus(status)
     expect(`${display.classes} ${display.iconClassName} ${display.iconBgClassName}`).toContain(color)

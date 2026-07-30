@@ -83,7 +83,7 @@ export function normalizeSpeedStatus(status: string) {
   if (normalized === "expired") return "EXPIRED" as const
   if (normalized === "cancelled" || normalized === "canceled") return "CANCELED" as const
   console.warn("[speed] unknown payment status", { providerStatus: normalized || null })
-  return "UNKNOWN" as const
+  return null
 }
 
 async function resolveMerchantSpeedAccount(merchantId: string): Promise<string> {

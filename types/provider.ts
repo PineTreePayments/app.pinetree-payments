@@ -10,7 +10,6 @@ export type PaymentStatus =
   | "EXPIRED"
   | "CANCELED"
   | "REFUNDED"
-  | "UNKNOWN"
 
 export type FeeCaptureMethod =
   | "atomic_split"
@@ -73,7 +72,6 @@ export type LightningInvoiceStatus =
   | "INCOMPLETE"
   | "EXPIRED"
   | "CANCELED"
-  | "UNKNOWN"
 
 export type StandardPaymentEvent = {
   paymentId: string
@@ -86,7 +84,6 @@ export type StandardPaymentEvent = {
     | "payment.expired"
     | "payment.canceled"
     | "payment.incomplete"
-    | "payment.unknown"
 }
 
 export interface ProviderAdapterMetadata {
@@ -142,7 +139,7 @@ export interface ProviderAdapter {
   -------------------------------- */
 
   getPaymentStatus?(providerReference: string, merchantId?: string): Promise<{
-    status: PaymentStatus
+    status: PaymentStatus | null
   }>
 
   /* --------------------------------
@@ -152,7 +149,7 @@ export interface ProviderAdapter {
   createLightningInvoice?(input: LightningInvoiceRequest): Promise<LightningInvoice>
 
   getLightningInvoiceStatus?(providerReference: string, merchantId?: string): Promise<{
-    status: LightningInvoiceStatus
+    status: LightningInvoiceStatus | null
   }>
 
   /* --------------------------------

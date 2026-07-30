@@ -268,7 +268,7 @@ function coinbaseStatusToPineTree(status: CoinbaseStatus) {
       return { status: "CANCELED" as const }
     default:
       console.warn("[coinbase] unknown payment status", { providerStatus: status || null })
-      return { status: "UNKNOWN" as const }
+      return { status: null }
   }
 }
 

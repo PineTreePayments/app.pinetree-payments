@@ -73,9 +73,6 @@ function resolveAggregateStatus(link: CheckoutLink, payments: PaymentRow[]) {
   if (payments.some((payment) => mapInternalCheckoutSessionStatus(payment.status) === "processing")) {
     return "processing" as const
   }
-  if (payments.some((payment) => mapInternalCheckoutSessionStatus(payment.status) === "unknown")) {
-    return "unknown" as const
-  }
   const lifecycle = getCheckoutSessionLifecycle(link.link_metadata)
   if (lifecycle) {
     return lifecycle
@@ -94,7 +91,7 @@ function resolveAggregateStatus(link: CheckoutLink, payments: PaymentRow[]) {
 }
 
 function selectPaymentId(payments: PaymentRow[]) {
-  const priority: PublicCheckoutSessionStatus[] = ["paid", "processing", "unknown", "open", "failed", "incomplete", "expired", "canceled"]
+  const priority: PublicCheckoutSessionStatus[] = ["paid", "processing", "open", "failed", "incomplete", "expired", "canceled"]
   for (const status of priority) {
     const payment = payments.find(
       (candidate) => mapInternalCheckoutSessionStatus(candidate.status) === status

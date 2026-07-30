@@ -113,9 +113,9 @@ const supportHubSections = [
   },
   {
     title: "Transactions & Statuses",
-    description: "Understand CREATED, PENDING, PROCESSING, UNKNOWN, CONFIRMED, FAILED, EXPIRED, CANCELED, and INCOMPLETE in merchant language.",
+    description: "Understand CREATED, PENDING, PROCESSING, CONFIRMED, FAILED, EXPIRED, CANCELED, and INCOMPLETE in merchant language.",
     icon: FileText,
-    articleIds: ["status-pending", "status-processing", "status-unknown", "status-expired", "status-canceled", "status-incomplete"]
+    articleIds: ["status-pending", "status-processing", "status-expired", "status-canceled", "status-incomplete"]
   },
   {
     title: "Wallets & Providers",

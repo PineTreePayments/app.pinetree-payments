@@ -66,11 +66,11 @@ class ProviderNameAdapter extends BaseProviderAdapter {
   /**
    * Get payment status from provider
    */
-  async getPaymentStatus(providerReference: string): Promise<{ status: PaymentStatus }> {
+  async getPaymentStatus(providerReference: string): Promise<{ status: PaymentStatus | null }> {
     void providerReference
     // Implement status check
     return {
-      status: "UNKNOWN" as PaymentStatus
+      status: null
     }
   }
 

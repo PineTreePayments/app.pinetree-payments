@@ -60,5 +60,6 @@ export function resolveLifecycleDisplayStatus(
   void events
   const status = String(paymentStatus || "").trim().toUpperCase()
   if (status === "CANCELLED") return "CANCELED"
-  return status || "UNKNOWN"
+  if (!status) throw new Error("Payment lifecycle status is required")
+  return status
 }

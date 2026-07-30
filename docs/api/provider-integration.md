@@ -13,7 +13,7 @@ Each adapter must implement:
 ```typescript
 abstract class BaseProviderAdapter {
   abstract createPayment(input: CreatePaymentInput): Promise<CreatePaymentResult>
-  abstract getPaymentStatus(paymentId: string): Promise<PaymentStatus>
+  abstract getPaymentStatus(paymentId: string): Promise<PaymentStatus | null>
   abstract verifyWebhook(rawBody: Buffer, headers: Record<string, string>): boolean
   abstract translateEvent(event: unknown): NormalizedEvent
   abstract healthCheck(): Promise<HealthCheckResult>
@@ -165,8 +165,9 @@ Your `translateEvent()` method must map provider-specific events to these normal
 | Payment canceled | `payment.canceled` |
 | Abandoned with no more specific evidence | `payment.incomplete` |
 
-Adapters must return `Unknown` status evidence or `null` for unrecognized
-provider values. They must never guess `payment.pending` for an unknown value.
+Adapters must return `null` for unrecognized provider values and retain the
+payment's current canonical state for a later recovery attempt. They must never
+guess `payment.pending` for an unrecognized value.
 Merchant-facing labels and colors are owned by the
 [Merchant Status Architecture](../architecture.md#merchant-status-architecture-authoritative).
 

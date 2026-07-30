@@ -127,9 +127,6 @@ function computeStaleEligibility(
   ageMinutes: number,
   hasProcessingEvidence: boolean
 ): { eligibility: StaleEligibility; staleReason: StaleReasonCode } {
-  if (status === "UNKNOWN") {
-    return { eligibility: "review_required", staleReason: "processing_stuck_requires_review" }
-  }
   if (hasProcessingEvidence) {
     return { eligibility: "review_required", staleReason: "payment_evidence_requires_review" }
   }
@@ -293,7 +290,7 @@ export async function getPlatformReport(
 // ─── Stale payment diagnostic ──────────────────────────────────────────────────
 
 /**
- * Returns all CREATED/PENDING/PROCESSING/UNKNOWN payments with age classification,
+ * Returns all CREATED/PENDING/PROCESSING payments with age classification,
  * eligibility for safe cleanup, and latest event data.
  * Read-only — does NOT mutate any rows.
  *
@@ -324,7 +321,7 @@ export async function getAdminStaleDiagnostic(): Promise<{
     const { data, error } = await db
       .from("payments")
       .select("id, status, network, merchant_id, provider_reference, metadata, created_at, gross_amount")
-      .in("status", ["CREATED", "PENDING", "PROCESSING", "UNKNOWN"])
+      .in("status", ["CREATED", "PENDING", "PROCESSING"])
       .order("created_at", { ascending: true })
 
     if (error) {

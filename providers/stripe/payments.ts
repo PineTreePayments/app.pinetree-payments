@@ -14,7 +14,7 @@ export function stripeAmountToMinorUnits(amount: number): number {
   return Math.round(value * 100)
 }
 
-export function normalizeStripePaymentStatus(status?: string): PaymentStatus {
+export function normalizeStripePaymentStatus(status?: string): PaymentStatus | null {
   switch (String(status || "").toLowerCase().trim()) {
     case "requires_payment_method":
     case "requires_confirmation":
@@ -29,7 +29,7 @@ export function normalizeStripePaymentStatus(status?: string): PaymentStatus {
       return "CANCELED"
     default:
       console.warn("[stripe] unknown payment status", { providerStatus: status || null })
-      return "UNKNOWN"
+      return null
   }
 }
 

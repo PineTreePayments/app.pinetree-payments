@@ -13,7 +13,6 @@ export type TransactionResultState =
   | "expired"
   | "cancelled"
   | "refunded"
-  | "unknown"
 
 type TransactionResultAction = {
   label: string
@@ -42,12 +41,11 @@ function normalizeTransactionResultState(state: TransactionResultState | string)
     tone === "failed" ||
     tone === "incomplete" ||
     tone === "expired" ||
-    tone === "refunded" ||
-    tone === "unknown"
+    tone === "refunded"
   ) {
     return tone
   }
-  return "unknown"
+  throw new Error(`Invalid transaction result state: ${tone || "(empty)"}`)
 }
 
 export function TransactionResult({

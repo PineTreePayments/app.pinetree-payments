@@ -198,7 +198,7 @@ export async function POST(req: NextRequest) {
 type CheckoutSession = {
   id: string
   object: "checkout.session"
-  status: "open" | "processing" | "paid" | "failed" | "incomplete" | "expired" | "canceled" | "unknown"
+  status: "open" | "processing" | "paid" | "failed" | "incomplete" | "expired" | "canceled"
   amount: number                  // major currency units
   currency: string                // ISO-4217 uppercase ("USD")
   reference: string | null        // your order reference

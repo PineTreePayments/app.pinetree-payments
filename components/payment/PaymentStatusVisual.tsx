@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { AlertTriangle, CheckCircle, CircleMinus, Clock3, LoaderCircle, RotateCcw, XCircle } from "lucide-react"
+import { AlertTriangle, CheckCircle, Clock3, LoaderCircle, RotateCcw, XCircle } from "lucide-react"
 import {
   getPaymentDisplayStatus,
   type PaymentStatusIcon,
@@ -20,7 +20,6 @@ type Props = {
 
 const STATUS_ICONS = {
   "check-circle": CheckCircle,
-  "minus": CircleMinus,
   "clock": Clock3,
   "spinner": LoaderCircle,
   "x-circle": XCircle,

@@ -61,7 +61,7 @@ export type StripeNormalizedPayment = {
   clientSecret?: string
   amount: number
   currency: string
-  status: PaymentStatus
+  status: PaymentStatus | null
   feeCaptureMethod: FeeCaptureMethod
   raw: StripePaymentIntent
 }

@@ -143,7 +143,7 @@ describe("Stripe provider adapter", () => {
     ["requires_capture", "PROCESSING"],
     ["succeeded", "CONFIRMED"],
     ["canceled", "CANCELED"],
-    ["unknown", "UNKNOWN"]
+    ["unknown", null]
   ] as const)("normalizes %s to %s", (providerStatus, expectedStatus) => {
     expect(normalizeStripePaymentStatus(providerStatus)).toBe(expectedStatus)
   })

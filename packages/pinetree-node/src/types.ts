@@ -6,7 +6,6 @@ export type CheckoutSessionStatus =
   | "incomplete"
   | "expired"
   | "canceled"
-  | "unknown"
 
 export type CheckoutSessionRail =
   | "solana"

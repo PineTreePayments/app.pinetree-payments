@@ -6,7 +6,6 @@ export type PublicCheckoutSessionStatus =
   | "incomplete"
   | "expired"
   | "canceled"
-  | "unknown"
 
 export function mapInternalCheckoutSessionStatus(status: unknown): PublicCheckoutSessionStatus {
   const normalized = String(status || "").trim().toUpperCase()
@@ -18,5 +17,5 @@ export function mapInternalCheckoutSessionStatus(status: unknown): PublicCheckou
   if (normalized === "INCOMPLETE") return "incomplete"
   if (["DISABLED", "CANCELED", "CANCELLED"].includes(normalized)) return "canceled"
   if (["OPEN", "ACTIVE", "CREATED", "PENDING"].includes(normalized)) return "open"
-  return "unknown"
+  throw new Error(`Invalid checkout payment status: ${normalized || "(empty)"}`)
 }

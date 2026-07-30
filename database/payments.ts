@@ -10,7 +10,6 @@ export type PaymentStatus =
   | "EXPIRED"
   | "CANCELED"
   | "INCOMPLETE"
-  | "UNKNOWN"
 
 export type Payment = {
   id: string
@@ -246,7 +245,7 @@ export async function getActivePaymentsByNetwork(
   const { data, error } = await supabase
     .from("payments")
     .select("*")
-    .in("status", ["CREATED", "PENDING", "PROCESSING", "UNKNOWN"])
+    .in("status", ["CREATED", "PENDING", "PROCESSING"])
     .eq("network", normalized)
     .limit(limit)
     .order("created_at", { ascending: false })
@@ -296,8 +295,7 @@ export async function getMerchantPaymentStats(merchantId: string) {
     } else if (
       payment.status === "CREATED" ||
       payment.status === "PENDING" ||
-      payment.status === "PROCESSING" ||
-      payment.status === "UNKNOWN"
+      payment.status === "PROCESSING"
     ) {
       stats.pendingTransactions++
     }

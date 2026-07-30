@@ -225,7 +225,6 @@ export type PaymentStatus =
   | "EXPIRED"
   | "CANCELED"
   | "REFUNDED"
-  | "UNKNOWN"
 
 export type BaseUsdcStrategy = "v7_eip3009_relayer"
 

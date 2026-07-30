@@ -31,7 +31,6 @@ import {
 import { toPublicCheckoutSessionMetadata } from "./checkoutSessionMetadata"
 import { deliverV1CheckoutSessionWebhook } from "./webhookDelivery"
 import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
-import { isPaymentRecoverySchemaReady } from "@/database/paymentMaintenance"
 
 const STATUS_TO_WEBHOOK_EVENT: Partial<Record<PaymentStatus, WebhookEvent>> = {
   CONFIRMED: "payment.confirmed",
@@ -39,7 +38,6 @@ const STATUS_TO_WEBHOOK_EVENT: Partial<Record<PaymentStatus, WebhookEvent>> = {
   EXPIRED: "payment.expired",
   CANCELED: "payment.canceled",
   INCOMPLETE: "payment.incomplete",
-  UNKNOWN: "payment.unknown",
 }
 
 /**
@@ -53,13 +51,6 @@ export async function updatePaymentStatus(
     rawPayload?: unknown
   }
 ) {
-  // Central write barrier: even a future caller that bypasses paymentRecovery
-  // cannot persist UNKNOWN until the migration's transaction (constraint plus
-  // readiness RPC) is committed and visible to this application instance.
-  if (nextStatus === "UNKNOWN" && !await isPaymentRecoverySchemaReady()) {
-    throw new Error("Payment recovery schema is not ready for UNKNOWN")
-  }
-
   // Get current payment to validate transition
   const payment = await getPaymentById(paymentId)
 
@@ -166,7 +157,7 @@ export async function updatePaymentStatus(
   }
 
   // Create a payment event for audit trail
-  const eventType = statusToEventType(nextStatus, metadata)
+  const eventType = statusToEventType(nextStatus)
   const eventId = crypto.randomUUID()
 
   await createPaymentEvent({
@@ -265,10 +256,7 @@ export async function updatePaymentStatus(
   return updatedPayment
 }
 
-function statusToEventType(
-  status: PaymentStatus,
-  metadata?: { providerEvent?: string; rawPayload?: unknown }
-): PaymentEventType {
+function statusToEventType(status: PaymentStatus): PaymentEventType {
   const mapping: Record<PaymentStatus, PaymentEventType> = {
     CREATED: "payment.created",
     PENDING: "payment.pending",
@@ -277,8 +265,7 @@ function statusToEventType(
     FAILED: "payment.failed",
     EXPIRED: "payment.expired",
     CANCELED: "payment.canceled",
-    INCOMPLETE: "payment.incomplete",
-    UNKNOWN: "payment.unknown"
+    INCOMPLETE: "payment.incomplete"
   }
 
   return mapping[status]

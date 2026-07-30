@@ -253,7 +253,7 @@ Content-Type: application/json</code></pre>
     <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
     <tbody>
       <tr><td><code>limit</code></td><td>integer</td><td>1–100. Defaults to 10.</td></tr>
-      <tr><td><code>status</code></td><td>string</td><td>One of <code>open</code>, <code>processing</code>, <code>paid</code>, <code>failed</code>, <code>incomplete</code>, <code>expired</code>, <code>canceled</code>, <code>unknown</code>.</td></tr>
+      <tr><td><code>status</code></td><td>string</td><td>One of <code>open</code>, <code>processing</code>, <code>paid</code>, <code>failed</code>, <code>incomplete</code>, <code>expired</code>, <code>canceled</code>.</td></tr>
       <tr><td><code>cursor</code></td><td>string</td><td>Pagination cursor from a previous response's <code>nextCursor</code>. Also accepted as <code>starting_after</code>.</td></tr>
       <tr><td><code>reference</code></td><td>string</td><td>Filter by merchant reference.</td></tr>
       <tr><td><code>created_after</code></td><td>ISO 8601</td><td>Include sessions created after this date.</td></tr>
@@ -404,7 +404,6 @@ Content-Type: application/json</code></pre>
       <tr><td><code>incomplete</code></td><td>Payment attempt ended without a more specific outcome.</td><td>Yes</td></tr>
       <tr><td><code>expired</code></td><td>Session expired after 24 hours without confirmed payment.</td><td>Yes</td></tr>
       <tr><td><code>canceled</code></td><td>Session canceled by merchant via API or dashboard.</td><td>Yes</td></tr>
-      <tr><td><code>unknown</code></td><td>Provider or network outcome requires investigation; recovery continues.</td><td>No</td></tr>
     </tbody>
   </table>
 </section>
@@ -492,7 +491,6 @@ Content-Type: application/json</code></pre>
       <tr><td><strong class="pt-red">Failed</strong></td><td>Provider, network, or payment attempt failed</td><td>Yes</td><td>Red</td></tr>
       <tr><td><strong class="pt-red">Expired</strong></td><td>Payment window timed out</td><td>Yes</td><td>Muted red</td></tr>
       <tr><td><strong class="pt-amber">Incomplete</strong></td><td>Customer abandoned or backed out or no funds were sent</td><td>Yes</td><td>Amber</td></tr>
-      <tr><td><strong class="pt-gray">Unknown</strong></td><td>Provider or network outcome requires investigation; recovery continues</td><td>No</td><td>Neutral gray</td></tr>
     </tbody>
   </table>
   <p>
@@ -619,7 +617,6 @@ const event = pinetree.webhooks.constructEvent(
       <tr><td><code>payment.expired</code></td><td>payment</td><td>Payment timed out.</td></tr>
       <tr><td><code>payment.canceled</code></td><td>payment</td><td>Payment canceled.</td></tr>
       <tr><td><code>payment.incomplete</code></td><td>payment</td><td>Customer abandoned or no funds were sent.</td></tr>
-      <tr><td><code>payment.unknown</code></td><td>payment</td><td>Provider or network outcome requires investigation; recovery continues.</td></tr>
       <tr><td><code>payment.refunded</code></td><td>payment</td><td>Payment refunded.</td></tr>
       <tr><td><code>checkout.session.created</code></td><td>checkout.session</td><td>Checkout Session created.</td></tr>
       <tr><td><code>checkout.session.processing</code></td><td>checkout.session</td><td>Checkout Session payment in progress.</td></tr>

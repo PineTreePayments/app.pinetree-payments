@@ -339,15 +339,6 @@ export const helpArticles: HelpArticle[] = [
     keywords: ["successful", "complete", "ledger"]
   },
   {
-    id: "status-unknown",
-    title: "What Unknown means",
-    category: "Transaction Statuses",
-    description: "Unknown means PineTree needs provider or network investigation before it can assign a canonical outcome.",
-    body: "Unknown is an explicit non-terminal exception state. PineTree continues its scheduled provider or network checks and will move the payment to Confirmed, Failed, Expired, Canceled, or Incomplete when authoritative evidence becomes available.\n\nWhat this means: Do not fulfill or automatically retry an Unknown payment. A retry could duplicate a payment whose provider or network outcome has not yet been resolved.\n\nWhat to check: Payment ID, provider reference, transaction hash or signature, recovery reason, elapsed time, and the provider or network result. Open a support ticket if the state remains Unknown.",
-    tags: ["unknown", "status", "recovery", "investigation"],
-    keywords: ["payment unknown", "recovery exception", "investigation required"]
-  },
-  {
     id: "status-failed",
     title: "What Failed means",
     category: "Transaction Statuses",
@@ -397,9 +388,9 @@ export const helpArticles: HelpArticle[] = [
     title: "What to do for stuck payments",
     category: "Transaction Statuses",
     description: "Use status, time, provider reference, and transaction evidence to decide whether to wait, retry, or open a ticket.",
-    body: "If a payment is stuck Pending, confirm the customer actually opened and approved the payment. If it is Processing, check whether a transaction or provider reference exists and allow time for confirmation. Unknown means scheduled recovery could not yet determine a canonical outcome and provider or network investigation is required. If a terminal state never arrives, open a support ticket.\n\nWhat this means: Pending usually means no strong completion signal yet. Processing means PineTree saw activity and may still be validating it. Unknown remains under recovery and must not be fulfilled or blindly retried.\n\nWhat to check: Payment ID, status, elapsed time, provider/network, wallet transaction, recovery reason, customer screenshot if available, and whether the customer retried.",
-    tags: ["stuck", "pending", "processing", "unknown", "support"],
-    keywords: ["stuck pending", "stuck processing", "unknown payment"]
+    body: "If a payment is stuck Pending, confirm the customer actually opened and approved the payment. If it is Processing, check whether a transaction or provider reference exists and allow time for confirmation. Scheduled recovery keeps canonical non-terminal payments eligible while recording retry reasons in metadata. If a terminal state never arrives, open a support ticket.\n\nWhat this means: Pending usually means no strong completion signal yet. Processing means PineTree saw activity and may still be validating it. Do not fulfill or blindly retry without authoritative evidence.\n\nWhat to check: Payment ID, status, elapsed time, provider/network, wallet transaction, recovery reason, customer screenshot if available, and whether the customer retried.",
+    tags: ["stuck", "pending", "processing", "support"],
+    keywords: ["stuck pending", "stuck processing", "payment recovery"]
   },
   {
     id: "overview-metrics",
@@ -523,7 +514,7 @@ export const helpArticles: HelpArticle[] = [
     title: "Event model",
     category: "Developer/API",
     description: "Use PineTree payment events and statuses to keep your integration in sync.",
-    body: "PineTree reports events such as payment.pending, payment.processing, payment.unknown, payment.confirmed, and payment.failed as a payment moves through checkout or recovery.\n\nWhat this means: Treat PineTree payment status as the source of truth instead of assuming a customer browser action confirmed the payment. An Unknown event is not fulfillment evidence; recovery continues until a canonical outcome is available.\n\nWhat to check: Payment status, provider reference, webhook delivery, duplicate-event handling, and the matching transaction row.",
+    body: "PineTree reports events such as payment.pending, payment.processing, payment.confirmed, and payment.failed as a payment moves through checkout or recovery.\n\nWhat this means: Treat PineTree payment status as the source of truth instead of assuming a customer browser action confirmed the payment. Temporary recovery failures retain the current canonical status and are recorded as diagnostics rather than webhook lifecycle events.\n\nWhat to check: Payment status, provider reference, webhook delivery, duplicate-event handling, and the matching transaction row.",
     tags: ["events", "status", "developer", "webhooks"],
     keywords: ["event processor", "payment event", "source of truth"]
   },

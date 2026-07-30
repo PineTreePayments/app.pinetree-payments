@@ -71,8 +71,8 @@ describe("canonical transaction lifecycle projection", () => {
     })
   })
 
-  it("returns UNKNOWN with diagnostics instead of adopting a provider status", () => {
-    const row = projectCanonicalTransaction(payment({
+  it("rejects an invalid stored status instead of exposing a synthetic lifecycle state", () => {
+    expect(() => projectCanonicalTransaction(payment({
       status: "provider_succeeded",
       transactions: [{
         id: "attempt_confirmed",
@@ -85,13 +85,7 @@ describe("canonical transaction lifecycle projection", () => {
         event_type: "payment.confirmed",
         created_at: "2026-07-28T10:03:00.000Z",
       }],
-    }))
-
-    expect(row.canonicalStatus).toBe("UNKNOWN")
-    expect(row.displayStatus).toBe("Unknown")
-    expect(row.diagnostics).toEqual([
-      expect.objectContaining({ code: "UNKNOWN_PAYMENT_STATUS", rawValue: "PROVIDER_SUCCEEDED" }),
-    ])
+    }))).toThrow("Invalid payment status")
   })
 
   it("never lets late canceled/expired events or transaction status regress payments.status", () => {

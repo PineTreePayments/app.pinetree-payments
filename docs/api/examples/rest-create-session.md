@@ -164,7 +164,7 @@ curl "https://app.pinetree-payments.com/api/v1/checkout/sessions?reference=order
 
 | Parameter | Type | Description |
 |---|---|---|
-| `status` | string | Filter by status: `open`, `processing`, `paid`, `failed`, `incomplete`, `expired`, `canceled`, `unknown` |
+| `status` | string | Filter by status: `open`, `processing`, `paid`, `failed`, `incomplete`, `expired`, `canceled` |
 | `reference` | string | Filter by your order reference |
 | `limit` | integer | Max results per page (default 20, max 100) |
 | `cursor` | string | Pagination cursor from `nextCursor` in the previous response |

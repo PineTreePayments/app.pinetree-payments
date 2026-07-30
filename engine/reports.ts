@@ -89,7 +89,6 @@ export type ReportSummary = {
   expiredCount: number
   canceledCount: number
   refundedCount: number
-  unknownCount: number
   refundedAmount: number
   statusCounts: Record<string, number>
   successRate: number
@@ -291,7 +290,6 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
   let canceledCount = 0
   let incompleteCount = 0
   let refundedCount = 0
-  let unknownCount = 0
   let refundedAmountMinor = 0
   const statusCounts: Record<string, number> = {}
 
@@ -327,7 +325,7 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
     } else if (row.status === "Canceled") {
       canceledCount++
     } else {
-      unknownCount++
+      throw new Error(`Invalid canonical report status: ${row.status}`)
     }
   }
 
@@ -377,7 +375,6 @@ export async function generateReportEngine(input: ReportInput): Promise<ReportSu
     expiredCount,
     canceledCount,
     refundedCount,
-    unknownCount,
     refundedAmount: fromMinorUnits(refundedAmountMinor),
     statusCounts,
     successRate,

@@ -83,7 +83,7 @@ export async function getPaymentMaintenanceCandidates(limit: number): Promise<Pa
   const { data, error } = await db
     .from("payments")
     .select("*")
-    .in("status", ["CREATED", "PENDING", "PROCESSING", "UNKNOWN"])
+    .in("status", ["CREATED", "PENDING", "PROCESSING"])
     .order("updated_at", { ascending: true })
     .limit(boundedLimit)
 
@@ -162,7 +162,7 @@ export async function getLightningReconciliationCandidates(input: {
   const directQuery = db
     .from("payments")
     .select("*")
-    .in("status", ["CREATED", "PENDING", "PROCESSING", "UNKNOWN"])
+    .in("status", ["CREATED", "PENDING", "PROCESSING"])
     .or(`network.in.(${LIGHTNING_NETWORK_FILTER}),provider.in.(${SPEED_PROVIDER_FILTER})`)
     .lt("updated_at", input.cutoff)
     .order("updated_at", { ascending: true })
@@ -175,7 +175,7 @@ export async function getLightningReconciliationCandidates(input: {
   const relatedAttemptQuery = db
     .from("payments")
     .select("*,transactions!inner(provider,network)")
-    .in("status", ["CREATED", "PENDING", "PROCESSING", "UNKNOWN"])
+    .in("status", ["CREATED", "PENDING", "PROCESSING"])
     .or("network.is.null,provider.is.null")
     .or(
       `network.in.(${LIGHTNING_NETWORK_FILTER}),provider.in.(${SPEED_PROVIDER_FILTER})`,

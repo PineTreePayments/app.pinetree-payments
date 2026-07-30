@@ -197,10 +197,11 @@ describe("missed-webhook payment recovery", () => {
       txHash,
       maxAttempts: 1,
       sessionAttemptId: undefined,
+      rejectMismatchedEvidence: true,
     })
   })
 
-  it("marks rejected prior Base watcher evidence UNKNOWN instead of leaving PROCESSING", async () => {
+  it("fails PROCESSING when replayed Base evidence is authoritatively mismatched", async () => {
     const candidate = payment({
       id: "base-rejected-evidence",
       provider: "base",
@@ -210,40 +211,37 @@ describe("missed-webhook payment recovery", () => {
     const txHash = `0x${"c".repeat(64)}`
     mocks.payments.set(candidate.id, candidate)
     mocks.getLatestEvmWatcherTransactionHash.mockResolvedValueOnce(txHash)
-    mocks.runPaymentWatcher.mockResolvedValueOnce(false)
+    mocks.runPaymentWatcher.mockImplementationOnce(async (id: string, options) => {
+      expect(options).toMatchObject({ txHash, rejectMismatchedEvidence: true })
+      const current = mocks.payments.get(id)!
+      mocks.payments.set(id, { ...current, status: "FAILED" })
+      return true
+    })
 
     const result = await recoverPayment(candidate, {
       now: Date.parse("2026-07-29T16:06:00.000Z"),
     })
 
     expect(result).toMatchObject({
-      status: "UNKNOWN",
-      reason: "prior_watcher_evidence_rejected",
+      status: "FAILED",
+      reason: "provider_or_network_evidence_applied",
     })
-    expect(mocks.updatePaymentStatus).toHaveBeenCalledWith(
-      candidate.id,
-      "UNKNOWN",
-      expect.objectContaining({
-        providerEvent: "payment_recovery.prior_watcher_evidence_rejected",
-      })
-    )
+    expect(mocks.payments.get(candidate.id)?.status).toBe("FAILED")
+    expect(mocks.updatePaymentStatus).not.toHaveBeenCalled()
   })
 
-  it("moves a missing-reference PROCESSING payment to explicit UNKNOWN immediately", async () => {
+  it("keeps missing-reference PROCESSING retryable with diagnostics", async () => {
     const candidate = payment({ id: "stripe-missing", provider: "stripe", network: "stripe" })
     mocks.payments.set(candidate.id, candidate)
 
     const result = await recoverPayment(candidate)
 
-    expect(result).toMatchObject({ status: "UNKNOWN", reason: "missing_provider_reference" })
-    expect(mocks.updatePaymentStatus).toHaveBeenCalledWith(
-      candidate.id,
-      "UNKNOWN",
-      expect.objectContaining({ providerEvent: "payment_recovery.missing_provider_reference" })
-    )
+    expect(result).toMatchObject({ status: "PROCESSING", reason: "missing_provider_reference" })
+    expect(mocks.payments.get(candidate.id)?.status).toBe("PROCESSING")
+    expect(mocks.updatePaymentStatus).not.toHaveBeenCalled()
   })
 
-  it("does not attempt UNKNOWN before the recovery migration is committed", async () => {
+  it("does not run recovery before the recovery infrastructure is committed", async () => {
     const candidate = payment({ id: "stripe-pre-migration", provider: "stripe", network: "stripe" })
     mocks.payments.set(candidate.id, candidate)
     vi.mocked(isPaymentRecoverySchemaReady).mockResolvedValueOnce(false)
@@ -255,7 +253,7 @@ describe("missed-webhook payment recovery", () => {
     expect(mocks.getProvider).not.toHaveBeenCalled()
   })
 
-  it("retries lookup failures, marks the retry limit UNKNOWN, and later recovers it", async () => {
+  it("keeps lookup failures retryable after the limit and later recovers", async () => {
     const candidate = payment({
       id: "stripe-retry",
       provider: "stripe",
@@ -269,7 +267,8 @@ describe("missed-webhook payment recovery", () => {
     const second = await recoverPayment(mocks.payments.get(candidate.id)!, { maxLookupFailures: 2 })
 
     expect(first).toMatchObject({ status: "PROCESSING", reason: "provider_lookup_failed" })
-    expect(second).toMatchObject({ status: "UNKNOWN", reason: "lookup_retry_limit_reached" })
+    expect(second).toMatchObject({ status: "PROCESSING", reason: "lookup_retry_limit_reached" })
+    expect(mocks.payments.get(candidate.id)?.status).toBe("PROCESSING")
 
     mocks.providerFailures.delete("stripe")
     mocks.providerStatuses.set("stripe", "CONFIRMED")
@@ -279,7 +278,7 @@ describe("missed-webhook payment recovery", () => {
     expect(mocks.payments.get(candidate.id)?.status).toBe("CONFIRMED")
   })
 
-  it("moves a payment whose provider remains PROCESSING past the age limit to UNKNOWN", async () => {
+  it("keeps over-age PROCESSING canonical and records investigation metadata", async () => {
     const candidate = payment({
       id: "stripe-too-old",
       provider: "stripe",
@@ -296,14 +295,14 @@ describe("missed-webhook payment recovery", () => {
     })
 
     expect(result).toMatchObject({
-      status: "UNKNOWN",
+      status: "PROCESSING",
       reason: "processing_age_limit_reached",
       providerStatus: "PROCESSING",
     })
-    expect(mocks.payments.get(candidate.id)?.status).toBe("UNKNOWN")
+    expect(mocks.payments.get(candidate.id)?.status).toBe("PROCESSING")
   })
 
-  it("records rejected Engine transitions as UNKNOWN instead of leaving PROCESSING stuck", async () => {
+  it("records rejected Engine transitions without inventing a payment status", async () => {
     const candidate = payment({
       id: "shift4-transition-rejected",
       provider: "shift4",
@@ -318,16 +317,21 @@ describe("missed-webhook payment recovery", () => {
 
     const result = await recoverPayment(candidate)
 
-    expect(result).toMatchObject({ status: "UNKNOWN", reason: "engine_transition_rejected" })
-    expect(mocks.payments.get(candidate.id)?.status).toBe("UNKNOWN")
+    expect(result).toMatchObject({ status: "PROCESSING", reason: "engine_transition_rejected" })
+    expect(mocks.payments.get(candidate.id)?.status).toBe("PROCESSING")
   })
 
-  it("supports provider-evidenced terminal outcomes after PROCESSING and recovery from UNKNOWN", () => {
-    expect(canTransition("PROCESSING", "EXPIRED")).toBe(true)
-    expect(canTransition("PROCESSING", "CANCELED")).toBe(true)
-    expect(canTransition("PROCESSING", "INCOMPLETE")).toBe(true)
-    expect(canTransition("PROCESSING", "UNKNOWN")).toBe(true)
-    expect(canTransition("UNKNOWN", "CONFIRMED")).toBe(true)
-    expect(canTransition("UNKNOWN", "FAILED")).toBe(true)
+  it("enforces the canonical payment transition graph", () => {
+    expect(canTransition("CREATED", "PENDING")).toBe(true)
+    expect(canTransition("CREATED", "CANCELED")).toBe(true)
+    expect(canTransition("PENDING", "PROCESSING")).toBe(true)
+    expect(canTransition("PENDING", "EXPIRED")).toBe(true)
+    expect(canTransition("PENDING", "CANCELED")).toBe(true)
+    expect(canTransition("PENDING", "INCOMPLETE")).toBe(true)
+    expect(canTransition("PROCESSING", "CONFIRMED")).toBe(true)
+    expect(canTransition("PROCESSING", "FAILED")).toBe(true)
+    expect(canTransition("PROCESSING", "EXPIRED")).toBe(false)
+    expect(canTransition("PROCESSING", "CANCELED")).toBe(false)
+    expect(canTransition("PROCESSING", "INCOMPLETE")).toBe(false)
   })
 })

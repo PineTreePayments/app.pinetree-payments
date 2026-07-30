@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // This is the sole production one-minute scheduler target. Run the entire
-    // recovery pipeline here so PROCESSING/UNKNOWN rows cannot depend on live
+    // recovery pipeline here so PROCESSING rows cannot depend on live
     // checkout traffic or a separate, unscheduled cron endpoint.
     const summary = await runPaymentMaintenanceTick({
       throttleMs: 1_000,

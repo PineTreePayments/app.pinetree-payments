@@ -403,7 +403,7 @@ function detailReference(payment: AdminTxDetail): string | null {
 }
 
 function timelineEventType(event: TxEvent): string {
-  return event.type || event.event_type || "payment.unknown"
+  return event.type || event.event_type || "payment.created"
 }
 
 function timelineProviderEvent(event: TxEvent): string | null {

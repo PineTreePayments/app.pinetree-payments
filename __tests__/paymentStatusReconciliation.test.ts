@@ -463,13 +463,17 @@ describe("normalizeStoredPaymentStatus — canonical lifecycle normalisation", (
     ["CANCELED",   "CANCELED"],
     ["CANCELLED",  "CANCELED"],
     ["REFUNDED",   "REFUNDED"],
-    ["",           "UNKNOWN"],
-    [null,         "UNKNOWN"],
-    [undefined,    "UNKNOWN"],
   ] as const)(
     "normalizeStoredPaymentStatus('%s') → '%s'",
     (input, expected) => {
       expect(normalizeStoredPaymentStatus(input as string)).toBe(expected)
+    }
+  )
+
+  it.each(["", null, undefined, "UNKNOWN"])(
+    "rejects invalid persisted payment status %s",
+    (input) => {
+      expect(() => normalizeStoredPaymentStatus(input as string)).toThrow("Invalid payment status")
     }
   )
 })

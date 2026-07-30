@@ -66,7 +66,7 @@ export function buildShift4CreatePaymentRequest(input: Shift4CreatePaymentInput)
   }
 }
 
-export function normalizeShift4PaymentStatus(status: unknown): PaymentStatus {
+export function normalizeShift4PaymentStatus(status: unknown): PaymentStatus | null {
   const normalized = String(status || "").toLowerCase().trim()
 
   if (normalized === "created" || normalized === "new") return "CREATED"
@@ -103,7 +103,7 @@ export function normalizeShift4PaymentStatus(status: unknown): PaymentStatus {
 
   // Unknown provider statuses must never confirm a payment.
   console.warn("[shift4] unknown payment status", { providerStatus: normalized || null })
-  return "UNKNOWN"
+  return null
 }
 
 function readString(value: unknown, path: string[]): string {

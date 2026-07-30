@@ -96,7 +96,11 @@ export const solanaAdapter: ProviderAdapter = {
     ])
     await runPaymentWatcher(paymentId)
     const payment = await getPaymentById(paymentId)
-    return { status: String(payment?.status || "UNKNOWN").toUpperCase() as import("@/types/provider").PaymentStatus }
+    return {
+      status: payment?.status
+        ? String(payment.status).toUpperCase() as import("@/types/provider").PaymentStatus
+        : null,
+    }
   },
 
   /* --------------------------------

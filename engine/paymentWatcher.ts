@@ -90,6 +90,13 @@ export type WatchOnceInput = {
   asset?: string
   txHash?: string
   /**
+   * Recovery-only. When a previously recorded candidate hash has a mined
+   * receipt whose decoded payment evidence contradicts this payment, record
+   * that candidate as rejected audit evidence and transition PROCESSING to
+   * FAILED. Normal customer-supplied hashes must never enable this flag.
+   */
+  rejectMismatchedEvidence?: boolean
+  /**
    * When true, a detected match is allowed to repair a payment that is
    * already in the terminal INCOMPLETE state (self-healing reconciliation).
    * Normal watcher/webhook callers must never set this — only the explicit
@@ -240,9 +247,39 @@ function getLookbackWindow(network: string): number {
  * The block-range iteration in step 3 is bounded and finite — it walks over
  * blocks that are already on chain. It does NOT poll for future blocks.
  *
- * @returns true  if a matching transaction was detected during this check.
+ * @returns true  if a matching transaction or authoritative terminal failure
+ *                was detected during this check.
  * @returns false if no matching transaction was found in the lookback window.
  */
+async function failRejectedCandidateEvidence(
+  input: WatchOnceInput,
+  reason: string,
+  details: Record<string, unknown>
+): Promise<boolean> {
+  if (!input.txHash || !input.rejectMismatchedEvidence) return false
+
+  const failureDetails = {
+    candidateTxHash: input.txHash,
+    rejectionReason: reason,
+    ...details,
+  }
+  console.warn("[watcher:evm] authoritative candidate evidence rejected", {
+    paymentId: input.paymentId,
+    ...failureDetails,
+  })
+  await processPaymentEvent({
+    type: "payment.failed",
+    paymentId: input.paymentId,
+    txHash: input.txHash,
+    feeCaptureValidated: false,
+    failureCode: "provider_evidence_mismatch",
+    failureReason: reason,
+    rejectedEvidence: true,
+    failureDetails,
+  })
+  return true
+}
+
 export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> {
   const normalizedNetwork = String(input.network || "").trim().toLowerCase()
   // Lightning is provider-reconciled through Speed webhooks and the bounded
@@ -564,7 +601,11 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
             reason: decision.reason,
             transactionRole: decision.evidence.transactionRole
           })
-          return false
+          return failRejectedCandidateEvidence(input, "provider_evidence_mismatch", {
+            decisionKind: decision.kind,
+            decisionReason: decision.reason,
+            transactionRole: decision.evidence.transactionRole,
+          })
         }
 
         if (decision.kind === "failed_transaction") {
@@ -687,11 +728,18 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
             logAddresses: receipt.logs.map((l) => l.address.toLowerCase())
           })
         }
-        return false
+        return failRejectedCandidateEvidence(input, "wrong_split_contract_or_event", {
+          expectedSplitContract: splitContractEvm,
+          receiptLogAddresses: receipt.logs.map((log) => log.address.toLowerCase()),
+        })
       }
 
       const decoded = decodePaymentSplitLog(matchingLog.data)
-      if (!decoded) return false
+      if (!decoded) {
+        return failRejectedCandidateEvidence(input, "payment_split_decode_failed", {
+          expectedSplitContract: splitContractEvm,
+        })
+      }
 
       if (isBaseNetwork) {
         console.info("[PineTreeBaseTrace] watcher:evm PaymentSplit decoded", {
@@ -720,7 +768,10 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
             isBaseUsdc
           })
         }
-        return false
+        return failRejectedCandidateEvidence(input, "wrong_asset", {
+          decodedToken: decoded.token,
+          expectedAsset: input.asset || null,
+        })
       }
 
       if (decoded.paymentRef !== input.paymentId) {
@@ -737,7 +788,12 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
             txHash: input.txHash
           })
         }
-        return false
+        return failRejectedCandidateEvidence(input, "payment_reference_mismatch", {
+          decodedPaymentRef: decoded.paymentRef,
+          expectedPaymentRef: input.paymentId,
+          decodedMerchantAmount: decoded.merchantAmount.toString(),
+          decodedFeeAmount: decoded.feeAmount.toString(),
+        })
       }
 
       const merchantAmountNum = Number(decoded.merchantAmount)
@@ -769,7 +825,14 @@ export async function watchPaymentOnce(input: WatchOnceInput): Promise<boolean> 
             feeThreshold
           })
         }
-        return false
+        return failRejectedCandidateEvidence(input, "payment_amount_mismatch", {
+          decodedMerchantAmount: merchantAmountNum,
+          expectedMerchantAmount: expectedMerchantNum,
+          merchantThreshold,
+          decodedFeeAmount: feeAmountNum,
+          expectedFeeAmount: expectedFeeNum,
+          feeThreshold,
+        })
       }
 
       const payerTopic = String(matchingLog.topics[3] || "")

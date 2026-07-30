@@ -1508,17 +1508,6 @@ export default function PayClient() {
     )
   }
 
-  // UNKNOWN is explicitly non-terminal: present the shared investigation
-  // state while the polling/realtime effects above keep checking for later
-  // authoritative provider or network evidence.
-  if (isIntentMode && normalizedPaymentStatus === "UNKNOWN") {
-    return (
-      <PageContainer>
-        <TransactionResult state="UNKNOWN" />
-      </PageContainer>
-    )
-  }
-
   if (
     isIntentMode &&
     intentPayload?.selectedNetwork !== "solana" &&

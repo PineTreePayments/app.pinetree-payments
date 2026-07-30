@@ -114,8 +114,8 @@ export function resolveTransactionsTimeFilter(
 }
 
 export function normalizeTransactionEvent(event: TransactionLifecycleEvent): NormalizedTransactionEvent {
-  const type = String(event.event_type || "payment.unknown").trim().toLowerCase()
-  const suffix = type.split(".").pop()?.toUpperCase() || "UNKNOWN"
+  const type = String(event.event_type || "payment.created").trim().toLowerCase()
+  const suffix = type.split(".").pop()?.toUpperCase() || "CREATED"
   const status = suffix === "CANCELLED" ? "CANCELED" : suffix
   const messages: Record<string, string> = {
     CREATED: "Payment request created.",

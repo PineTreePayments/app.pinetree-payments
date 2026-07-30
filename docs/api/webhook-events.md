@@ -16,7 +16,6 @@ Use `eventId` for idempotency. Fulfill orders from `payment.confirmed` or `check
 | `payment.expired` | Payment expired | `payment` | Provider or payment window expired |
 | `payment.canceled` | Payment was canceled | `payment` | Canceled state emitted by engine or test delivery |
 | `payment.incomplete` | Payment was abandoned or could not be completed | `payment` | Stale/abandoned payment marked incomplete |
-| `payment.unknown` | Payment outcome requires investigation | `payment` | Recovery cannot yet determine a canonical provider/network outcome |
 | `payment.refunded` | Payment was refunded | `payment` | Refunded state emitted by engine or test delivery |
 | `checkout.session.created` | Checkout session was created | `checkout.session` | Session creation succeeds |
 | `checkout.session.processing` | Checkout session has a processing payment | `checkout.session` | Session aggregate state becomes processing |
@@ -141,10 +140,6 @@ Fires when a payment is canceled. Object type: `payment`. Retryable: yes. Mercha
 ### payment.incomplete
 
 Fires when a customer abandons, backs out, or no funds are sent before PineTree marks the canonical attempt incomplete. Object type: `payment`. Retryable: yes. Merchant status: `Canceled` unless explicit expiry evidence resolves it to `Expired`.
-
-### payment.unknown
-
-Fires when scheduled recovery cannot yet determine a canonical provider or network outcome. Object type: `payment`. Retryable: yes. This is non-terminal and must not trigger fulfillment or an automatic duplicate payment attempt.
 
 ### payment.refunded
 

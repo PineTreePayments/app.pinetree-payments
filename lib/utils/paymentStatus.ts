@@ -16,13 +16,12 @@ export type PaymentStatusTone =
   | "canceled"
   | "refunded"
   | "disputed"
-  | "unknown"
 
-export type PaymentStatusIcon = "clock" | "spinner" | "check-circle" | "x-circle" | "refund" | "alert-triangle" | "minus"
+export type PaymentStatusIcon = "clock" | "spinner" | "check-circle" | "x-circle" | "refund" | "alert-triangle"
 
 export type PaymentDisplayStatus = {
   status: string
-  label: "Waiting" | "Processing" | "Confirmed" | "Failed" | "Incomplete" | "Action required" | "Expired" | "Canceled" | "Refunded" | "Disputed" | "Unknown"
+  label: "Waiting" | "Processing" | "Confirmed" | "Failed" | "Incomplete" | "Action required" | "Expired" | "Canceled" | "Refunded" | "Disputed"
   title: string
   message: string
   tone: PaymentStatusTone
@@ -125,16 +124,6 @@ const STATUS_DISPLAY: Record<PaymentStatusTone, Omit<PaymentDisplayStatus, "stat
     iconClassName: "text-amber-700",
     iconBgClassName: "bg-amber-50",
   },
-  unknown: {
-    label: "Unknown",
-    title: "Checking payment status",
-    message: "We are verifying the current payment status.",
-    tone: "unknown",
-    icon: "minus",
-    classes: "border border-gray-300 bg-gray-100 text-gray-800",
-    iconClassName: "text-gray-600",
-    iconBgClassName: "bg-gray-50",
-  },
 }
 
 function displayToneForStatus(normalizedStatus: string): PaymentStatusTone {
@@ -165,11 +154,11 @@ function displayToneForStatus(normalizedStatus: string): PaymentStatusTone {
   }
   if (["REFUNDED", "REFUND_COMPLETE", "REFUND_COMPLETED"].includes(normalizedStatus)) return "refunded"
   if (["DISPUTED", "CHARGEBACK"].includes(normalizedStatus)) return "disputed"
-  return "unknown"
+  throw new Error(`Invalid payment display status: ${normalizedStatus || "(empty)"}`)
 }
 
 export function getPaymentDisplayStatus(status: string | null | undefined): PaymentDisplayStatus {
-  const normalizedStatus = String(status || "UNKNOWN").trim().toUpperCase().replace(/[\s-]+/g, "_")
+  const normalizedStatus = String(status || "").trim().toUpperCase().replace(/[\s-]+/g, "_")
   const config = STATUS_DISPLAY[displayToneForStatus(normalizedStatus)]
   if (normalizedStatus === "REQUIRES_ACTION" || normalizedStatus === "ACTION_REQUIRED") {
     return {

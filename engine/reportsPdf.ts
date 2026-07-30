@@ -263,7 +263,6 @@ export async function generateReportPdfFromSummary(report: ReportSummary) {
     { label: "Expired",         value: String(report.expiredCount),     accent: "orange" },
     { label: "Canceled",        value: String(report.canceledCount),    accent: "neutral" },
     { label: "Refunded",        value: String(report.refundedCount),    accent: "orange" },
-    { label: "Unknown",         value: String(report.unknownCount),     accent: "neutral" },
     { label: "Success Rate",    value: `${report.successRate}%`,        accent: "green" },
     { label: "Avg Transaction", value: currency(report.avgTransaction), accent: "blue" },
   ])

@@ -82,11 +82,11 @@ describe("Merchant Status Architecture contract", () => {
       json: async () => ({ data: { timeline: [{ status: "MYSTERY" }] } }),
     }))
 
-    await expect(coinbaseAdapter.getPaymentStatus!("charge-1")).resolves.toEqual({ status: "UNKNOWN" })
+    await expect(coinbaseAdapter.getPaymentStatus!("charge-1")).resolves.toEqual({ status: null })
     expect(coinbaseAdapter.translateEvent!({ event: { type: "charge:mystery", data: {} } })).toBeNull()
-    await expect(basePayAdapter.getPaymentStatus!("pay-1")).resolves.toEqual({ status: "UNKNOWN" })
-    await expect(solanaAdapter.getPaymentStatus!("pay-1")).resolves.toEqual({ status: "UNKNOWN" })
-    expect(normalizeSpeedStatus("MYSTERY")).toBe("UNKNOWN")
+    await expect(basePayAdapter.getPaymentStatus!("pay-1")).resolves.toEqual({ status: null })
+    await expect(solanaAdapter.getPaymentStatus!("pay-1")).resolves.toEqual({ status: null })
+    expect(normalizeSpeedStatus("MYSTERY")).toBeNull()
   })
 
   it("keeps Coinbase canceled and expired outcomes distinct from incomplete", async () => {
@@ -108,7 +108,7 @@ describe("Merchant Status Architecture contract", () => {
     expect(getPaymentDisplayStatus("INCOMPLETE")).toMatchObject({ label: "Incomplete", tone: "incomplete", icon: "alert-triangle" })
     expect(getPaymentDisplayStatus("REFUNDED")).toMatchObject({ label: "Refunded", tone: "refunded", icon: "refund" })
     expect(getPaymentDisplayStatus("DISPUTED")).toMatchObject({ label: "Disputed", tone: "disputed", icon: "alert-triangle" })
-    expect(getPaymentDisplayStatus("provider_mystery")).toMatchObject({ label: "Unknown", tone: "unknown", icon: "minus" })
+    expect(() => getPaymentDisplayStatus("provider_mystery")).toThrow("Invalid payment display status")
   })
 
   it("reports refunds as accounting adjustments without rewriting payment lifecycle", async () => {

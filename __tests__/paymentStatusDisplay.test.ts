@@ -20,7 +20,6 @@ describe("shared payment status display", () => {
     ["CANCELED",   "Canceled",   "canceled",   "x-circle"],
     ["REFUNDED",   "Refunded",   "refunded",   "refund"],
     ["DISPUTED",   "Disputed",   "disputed",   "alert-triangle"],
-    ["UNKNOWN",    "Unknown",    "unknown",    "minus"],
   ])("%s displays as %s", (status, label, tone, icon) => {
     const display = getPaymentDisplayStatus(status)
 
@@ -48,8 +47,8 @@ describe("shared payment status display", () => {
     expect(display.status).toBe(status.toUpperCase().replace(/[\s-]+/g, "_"))
   })
 
-  it("does not leak unknown provider wording", () => {
-    expect(getPaymentStatusLabel("SOME_FUTURE_PROVIDER_STATE")).toBe("Unknown")
+  it("rejects unmapped provider wording", () => {
+    expect(() => getPaymentStatusLabel("SOME_FUTURE_PROVIDER_STATE")).toThrow("Invalid payment display status")
   })
 
   it("keeps display normalization independent of record age", () => {
@@ -134,6 +133,10 @@ describe("shared payment status display", () => {
     expect(getPaymentStatusLabel("EXPIRED")).toBe("Expired")
   })
 
+  it("rejects a non-canonical payment display status", () => {
+    expect(() => getPaymentDisplayStatus("UNKNOWN")).toThrow("Invalid payment display status")
+  })
+
   it.each([
     ["PENDING", "Waiting for payment", "Complete the payment using your selected method."],
     ["PROCESSING", "Payment processing", "We are confirming your payment."],
@@ -142,7 +145,6 @@ describe("shared payment status display", () => {
     ["FAILED", "Payment failed", "The payment could not be completed."],
     ["EXPIRED", "Payment expired", "This payment request has expired."],
     ["CANCELED", "Payment canceled", "This payment was canceled."],
-    ["UNKNOWN", "Checking payment status", "We are verifying the current payment status."],
   ])("%s has one canonical title and message", (status, title, message) => {
     expect(getPaymentDisplayStatus(status)).toMatchObject({ title, message })
   })

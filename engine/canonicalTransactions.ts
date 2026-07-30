@@ -22,7 +22,6 @@ export type CanonicalPaymentLifecycleStatus =
   | "EXPIRED"
   | "CANCELED"
   | "INCOMPLETE"
-  | "UNKNOWN"
 
 export type CanonicalTransactionAdjustmentStatus = "REFUNDED" | "DISPUTED" | null
 
@@ -37,7 +36,7 @@ export type CanonicalTransactionRail =
   | "Other"
 
 export type CanonicalTransactionDiagnostic = {
-  code: "UNKNOWN_PAYMENT_STATUS"
+  code: "INVALID_PAYMENT_STATUS"
   message: string
   paymentId: string
   rawValue: string | null
@@ -134,7 +133,6 @@ const KNOWN_LIFECYCLE_STATUSES = new Set<CanonicalPaymentLifecycleStatus>([
   "EXPIRED",
   "CANCELED",
   "INCOMPLETE",
-  "UNKNOWN",
 ])
 
 const CARD_PROVIDERS = new Set(["stripe", "shift4", "fluidpay"])
@@ -218,25 +216,11 @@ export function normalizeCanonicalPaymentStatus(
 } {
   const raw = upperStatus(rawStatus)
   const normalized = normalizeStoredPaymentStatus(raw)
-  if (
-    normalized &&
-    KNOWN_LIFECYCLE_STATUSES.has(normalized as CanonicalPaymentLifecycleStatus) &&
-    (normalized !== "UNKNOWN" || raw === "UNKNOWN")
-  ) {
+  if (KNOWN_LIFECYCLE_STATUSES.has(normalized as CanonicalPaymentLifecycleStatus)) {
     const canonicalStatus = normalized as CanonicalPaymentLifecycleStatus
     return { canonicalStatus, displayStatus: getPaymentStatusLabel(canonicalStatus), diagnostics: [] }
   }
-
-  return {
-    canonicalStatus: "UNKNOWN",
-    displayStatus: getPaymentStatusLabel("UNKNOWN"),
-    diagnostics: [{
-      code: "UNKNOWN_PAYMENT_STATUS",
-      message: `Payment ${paymentId || "(unknown)"} has unmapped lifecycle status ${raw || "(empty)"}`,
-      paymentId,
-      rawValue: raw,
-    }],
-  }
+  throw new Error(`Payment ${paymentId || "(missing id)"} has invalid lifecycle status ${raw || "(empty)"}`)
 }
 
 function decimalMoneyToMinor(value: number | string | null | undefined): number | null {
@@ -315,7 +299,7 @@ function resolveAsset(
   // Native-asset legacy payments predate selectedAsset metadata.
   if (rail === "Base" || rail === "Ethereum") return "ETH"
   if (rail === "Solana") return "SOL"
-  return normalizeAssetCandidate(currency) || "UNKNOWN"
+  return normalizeAssetCandidate(currency) || "UNSPECIFIED"
 }
 
 function resolveCurrency(rail: CanonicalTransactionRail, rawCurrency: unknown): string {
@@ -340,7 +324,7 @@ function formatDisplayAmount(amountMinor: number, currency: string): string {
 }
 
 function normalizeEventStatus(type: string): string {
-  const suffix = type.split(".").pop()?.trim().toUpperCase() || "UNKNOWN"
+  const suffix = type.split(".").pop()?.trim().toUpperCase() || "CREATED"
   return suffix === "CANCELLED" ? "CANCELED" : suffix
 }
 
@@ -350,7 +334,7 @@ function projectLifecycleEvents(
   const ordered = Array.isArray(events) ? [...events].sort(compareEventsOldestFirst) : []
   const providerEvents = new Set<string>()
   return ordered.map((event) => {
-    const type = String(event.event_type || "payment.unknown").trim().toLowerCase()
+    const type = String(event.event_type || "payment.created").trim().toLowerCase()
     const providerEvent = text(event.provider_event)
     const duplicateKey = providerEvent ? providerEvent.toLowerCase() : ""
     const isDuplicate = Boolean(duplicateKey && providerEvents.has(duplicateKey))

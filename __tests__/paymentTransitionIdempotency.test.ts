@@ -41,10 +41,16 @@ import {
 } from "@/database"
 import { processPaymentEvent } from "@/engine/eventProcessor"
 import { updatePaymentStatus } from "@/engine/updatePaymentStatus"
+import {
+  getTransactionByPaymentId,
+  updateTransactionProviderReference,
+} from "@/database/transactions"
 
 const mockGetPayment = vi.mocked(getPaymentById)
 const mockDbUpdate = vi.mocked(updatePaymentStatusInDb)
 const mockCreateEvent = vi.mocked(createPaymentEvent)
+const mockGetTransaction = vi.mocked(getTransactionByPaymentId)
+const mockUpdateTransactionReference = vi.mocked(updateTransactionProviderReference)
 
 const pendingPayment = {
   id: "pay-1",
@@ -111,6 +117,36 @@ describe("overlapping payment transition idempotency", () => {
       payment_id: "pay-1",
       event_type: "payment.canceled",
       provider_event: "terminal_cancel"
+    }))
+  })
+
+  it("does not promote a rejected candidate hash to the canonical transaction reference", async () => {
+    const processingPayment = { ...pendingPayment, status: "PROCESSING" as const }
+    mockGetPayment.mockResolvedValue(processingPayment)
+    mockGetTransaction.mockResolvedValue({
+      id: "tx-1",
+      payment_id: "pay-1",
+      provider_transaction_id: null,
+    } as never)
+    mockDbUpdate.mockResolvedValueOnce({ ...processingPayment, status: "FAILED" })
+
+    await processPaymentEvent({
+      type: "payment.failed",
+      paymentId: "pay-1",
+      txHash: "0xrejected",
+      rejectedEvidence: true,
+      failureCode: "provider_evidence_mismatch",
+      failureReason: "payment_reference_mismatch",
+      failureDetails: { decodedPaymentRef: "another-payment" },
+    })
+
+    expect(mockUpdateTransactionReference).not.toHaveBeenCalled()
+    expect(mockCreateEvent).toHaveBeenCalledWith(expect.objectContaining({
+      event_type: "payment.failed",
+      raw_payload: expect.objectContaining({
+        rejectedEvidence: true,
+        failureDetails: { decodedPaymentRef: "another-payment" },
+      }),
     }))
   })
 

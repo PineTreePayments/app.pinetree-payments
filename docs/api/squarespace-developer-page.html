@@ -467,7 +467,7 @@ PINETREE_WEBHOOK_SECRET=your_webhook_signing_secret</code></pre><button class="p
     <thead><tr><th>Query parameter</th><th>Type</th><th>Description</th></tr></thead>
     <tbody>
       <tr><td><code>limit</code></td><td>integer</td><td>1–100. Defaults to 10.</td></tr>
-      <tr><td><code>status</code></td><td>string</td><td>One of <code>open</code>, <code>processing</code>, <code>paid</code>, <code>failed</code>, <code>incomplete</code>, <code>expired</code>, <code>canceled</code>, <code>unknown</code>.</td></tr>
+      <tr><td><code>status</code></td><td>string</td><td>One of <code>open</code>, <code>processing</code>, <code>paid</code>, <code>failed</code>, <code>incomplete</code>, <code>expired</code>, <code>canceled</code>.</td></tr>
       <tr><td><code>cursor</code></td><td>string</td><td>Pagination cursor from a previous response's <code>nextCursor</code>. Also accepted as <code>starting_after</code>.</td></tr>
       <tr><td><code>reference</code></td><td>string</td><td>Filter by merchant reference.</td></tr>
       <tr><td><code>created_after</code></td><td>ISO 8601</td><td>Include sessions created after this date.</td></tr>
@@ -678,7 +678,6 @@ function CheckoutPage() {
       <tr><td>Failed</td><td><code>failed</code></td><td><code>payment.failed</code></td><td class="ptd-yes">Yes</td></tr>
       <tr><td>Expired</td><td><code>expired</code></td><td><code>payment.expired</code></td><td class="ptd-yes">Yes</td></tr>
       <tr><td>Incomplete</td><td><code>incomplete</code></td><td><code>payment.incomplete</code></td><td class="ptd-yes">Yes</td></tr>
-      <tr><td>Unknown</td><td><code>unknown</code></td><td><code>payment.unknown</code></td><td class="ptd-no">No</td></tr>
     </tbody>
   </table></div>
 </section>
@@ -791,12 +790,11 @@ function CheckoutPage() {
       <tr><td><span class="ptd-pill ptd-pill-red">Failed</span></td><td><code>failed</code></td><td><code>payment.failed</code></td><td class="ptd-yes">Yes</td><td class="ptd-no">No</td></tr>
       <tr><td><span class="ptd-pill ptd-pill-amber">Expired</span></td><td><code>expired</code></td><td><code>payment.expired</code></td><td class="ptd-yes">Yes</td><td class="ptd-no">No</td></tr>
       <tr><td><span class="ptd-pill ptd-pill-amber">Incomplete</span></td><td><code>incomplete</code></td><td><code>payment.incomplete</code></td><td class="ptd-yes">Yes</td><td class="ptd-no">No</td></tr>
-      <tr><td><span class="ptd-pill ptd-pill-gray">Unknown</span></td><td><code>unknown</code></td><td><code>payment.unknown</code></td><td class="ptd-no">No</td><td class="ptd-no">No</td></tr>
     </tbody>
   </table></div>
 
   <div class="ptd-callout ptd-callout-amber">
-    Only fulfill orders after <code>payment.confirmed</code> (API <code>status: "paid"</code>). Never fulfill on the customer redirect alone, or while a payment is Processing, Unknown, Failed, Expired, or Incomplete. The visible state <strong>Confirmed</strong> maps to <code>status: "paid"</code> in the API Payment object — do not check <code>status === "confirmed"</code>, it will not match.
+    Only fulfill orders after <code>payment.confirmed</code> (API <code>status: "paid"</code>). Never fulfill on the customer redirect alone, or while a payment is Processing, Failed, Expired, or Incomplete. The visible state <strong>Confirmed</strong> maps to <code>status: "paid"</code> in the API Payment object — do not check <code>status === "confirmed"</code>, it will not match.
   </div>
 
   <h2 class="ptd-h2">State Lifecycle</h2>
@@ -995,7 +993,6 @@ app.post(
       <tr><td><code>payment.expired</code></td><td>Payment timed out.</td><td class="ptd-no">No</td></tr>
       <tr><td><code>payment.canceled</code></td><td>Payment was canceled.</td><td class="ptd-no">No</td></tr>
       <tr><td><code>payment.incomplete</code></td><td>Customer abandoned or no funds were sent.</td><td class="ptd-no">No</td></tr>
-      <tr><td><code>payment.unknown</code></td><td>Provider or network outcome requires investigation; recovery continues.</td><td class="ptd-no">No</td></tr>
       <tr><td><code>payment.refunded</code></td><td>Payment was refunded.</td><td class="ptd-no">No</td></tr>
     </tbody>
   </table></div>
@@ -1396,7 +1393,7 @@ NEXT_PUBLIC_PINETREE_PUBLIC_KEY=pk_live_...  # browser usage</code></pre><button
   <ul class="ptd-checklist">
     <li>Orders are fulfilled only after <code>payment.confirmed</code>.</li>
     <li>Customer redirect to <code>successUrl</code> does <strong>not</strong> trigger fulfillment alone.</li>
-    <li><code>payment.failed</code>, <code>payment.expired</code>, <code>payment.incomplete</code>, and <code>payment.unknown</code> never trigger fulfillment.</li>
+    <li><code>payment.failed</code>, <code>payment.expired</code>, and <code>payment.incomplete</code> never trigger fulfillment.</li>
     <li>Happy path tested end-to-end with a small live transaction.</li>
     <li>Failed and expired flows tested.</li>
     <li>Duplicate event handling verified.</li>

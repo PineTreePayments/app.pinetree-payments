@@ -10,7 +10,7 @@ A checkout session represents a single customer payment intent. Creating a sessi
 {
   id: string                    // "cs_01abc..."
   object: "checkout.session"
-  status: CheckoutSessionStatus // "open" | "processing" | "paid" | "failed" | "incomplete" | "expired" | "canceled" | "unknown"
+  status: CheckoutSessionStatus // "open" | "processing" | "paid" | "failed" | "incomplete" | "expired" | "canceled"
   amount: number                // amount in major currency units (49.99 = $49.99 USD)
   currency: string              // "USD"
   reference: string | null      // your order/reference ID

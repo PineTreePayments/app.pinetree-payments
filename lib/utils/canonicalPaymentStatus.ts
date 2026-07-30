@@ -32,7 +32,6 @@ export type CanonicalPaymentStatus =
   | "EXPIRED"
   | "CANCELED"
   | "INCOMPLETE"
-  | "UNKNOWN"
 
 export type NormalizedStoredPaymentStatus = CanonicalPaymentStatus | "REFUNDED"
 export type TransactionDisplayStatus = NormalizedStoredPaymentStatus
@@ -43,7 +42,7 @@ export type TransactionDisplayStatus = NormalizedStoredPaymentStatus
  *
  *   CANCELLED       → CANCELED (legacy spelling only)
  *   REFUNDED        → REFUNDED (post-settlement adjustment)
- *   unknown / null  → UNKNOWN
+ *   invalid / null  → throws; persisted payment statuses must be canonical
  */
 export function normalizeStoredPaymentStatus(
   raw: string | null | undefined
@@ -62,10 +61,9 @@ export function normalizeStoredPaymentStatus(
     case "EXPIRED":
     case "CANCELED":
     case "INCOMPLETE":
-    case "UNKNOWN":
       return s as CanonicalPaymentStatus
     default:
-      return "UNKNOWN"
+      throw new Error(`Invalid payment status: ${s || "(empty)"}`)
   }
 }
 
@@ -120,6 +118,8 @@ export function resolveTransactionDisplayStatus(
 ): TransactionDisplayStatus {
   void txStatus
   const pmtNorm = normalizeStoredPaymentStatus(paymentStatus)
-  if (pmtNorm !== "UNKNOWN" && pmtNorm !== "REFUNDED") return pmtNorm
-  return "UNKNOWN"
+  if (pmtNorm === "REFUNDED") {
+    throw new Error("REFUNDED is an adjustment and cannot replace the payment lifecycle status")
+  }
+  return pmtNorm
 }
