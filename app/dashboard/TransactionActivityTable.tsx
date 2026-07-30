@@ -1,10 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { X } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabaseClient"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import StatusBadge from "@/components/ui/StatusBadge"
+import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import { showMoreTransactionsButtonClass } from "@/components/ui/PaginationControls"
 import {
   formatProviderReference,
@@ -555,9 +557,10 @@ export default function TransactionActivityTable({
               <button
                 type="button"
                 onClick={closeDetail}
-                className="rounded-full border border-gray-200 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50"
+                aria-label="Close transaction details"
+                className={modalCloseButtonClass}
               >
-                Close
+                <X size={18} aria-hidden="true" />
               </button>
             </div>
 
@@ -571,22 +574,6 @@ export default function TransactionActivityTable({
                 />
               ))}
             </div>
-            {selectedTx.lifecycle_events?.length ? (
-              <div className="mt-4 rounded-xl border border-gray-100 bg-white p-4">
-                <h4 className="text-xs font-semibold uppercase tracking-widest text-gray-500">Payment events</h4>
-                <ol className="mt-3 space-y-3">
-                  {selectedTx.lifecycle_events.map((event, index) => (
-                    <li key={`${event.type}-${event.occurredAt || index}`} className="border-l-2 border-blue-200 pl-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-sm font-semibold text-gray-900">{event.message}</span>
-                        <span className="text-xs text-gray-500">{formatTransactionDateTime(event.occurredAt, timeZone)}</span>
-                      </div>
-                      <p className="mt-0.5 text-xs text-gray-500">{event.status}</p>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            ) : null}
             {canonicalPaymentId(selectedTx) && canonicalStatus(selectedTx) === "CONFIRMED" && (
               <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                 <button

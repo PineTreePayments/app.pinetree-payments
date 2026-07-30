@@ -303,12 +303,6 @@ const EVENT_LABELS: Record<string, string> = {
   "payment.refunded":   "Refunded",
 }
 
-function paymentModeFromMetadata(metadata: unknown): "live" | "test" {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return "live"
-  const m = (metadata as Record<string, unknown>).payment_mode
-  return m === "test" ? "test" : "live"
-}
-
 function recentPaymentId(payment: RecentTx): string {
   return payment.paymentId || payment.id || ""
 }
@@ -367,10 +361,6 @@ function detailAsset(payment: AdminTxDetail): string {
       },
     },
   })
-}
-
-function detailPaymentMode(payment: AdminTxDetail): "live" | "test" {
-  return payment.paymentMode === "test" ? "test" : paymentModeFromMetadata(payment.metadata)
 }
 
 function detailGrossAmount(payment: AdminTxDetail): number {
@@ -506,7 +496,6 @@ export default function AdminPage() {
   const [providerOnboarding, setProviderOnboarding] = useState<ProviderOnboarding[]>([])
   const [loadingProviderOnboarding, setLoadingProviderOnboarding] = useState(false)
   const [providerOnboardingLoaded, setProviderOnboardingLoaded] = useState(false)
-  const [updatingProviderOnboarding, setUpdatingProviderOnboarding] = useState<string | null>(null)
 
   // ── Support state ───────────────────────────────────────────────────────────
   const [tickets, setTickets] = useState<Ticket[]>([])
@@ -637,46 +626,6 @@ export default function AdminPage() {
       fetchProviderOnboarding(token)
     }
   }, [token, activeTab, providerOnboardingLoaded, fetchProviderOnboarding])
-
-  const updateProviderOnboarding = async (
-    item: ProviderOnboarding,
-    applicationStatus: "approved" | "denied"
-  ) => {
-    if (!token) return
-    const key = `${item.provider}:${item.merchantId}`
-    setUpdatingProviderOnboarding(key)
-    try {
-      const res = await fetch("/api/admin/provider-onboarding", {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          merchantId: item.merchantId,
-          provider: item.provider,
-          applicationStatus,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        toast.error(data.error || "Failed to update provider onboarding")
-        return
-      }
-      setProviderOnboarding((current) =>
-        current.map((row) =>
-          row.merchantId === item.merchantId && row.provider === item.provider
-            ? data.provider
-            : row
-        )
-      )
-      toast.success(`${item.provider === "stripe" ? "Stripe" : "Fluid Pay"} onboarding ${applicationStatus}`)
-    } catch {
-      toast.error("Failed to update provider onboarding")
-    } finally {
-      setUpdatingProviderOnboarding(null)
-    }
-  }
 
   const fetchFeedback = useCallback(async (tk: string) => {
     setLoadingFeedback(true)
@@ -876,11 +825,8 @@ export default function AdminPage() {
         <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <span className="inline-flex items-center rounded-full border border-blue-200/60 bg-blue-100/80 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.12em] text-blue-700">
-              PineTree Internal
-            </span>
-            <h1 className="mt-2.5 text-2xl font-semibold text-gray-950 sm:text-3xl">
-              Admin Command Center
+            <h1 className="text-2xl font-semibold text-gray-950 sm:text-3xl">
+              Internal Admin Command Center
             </h1>
             <p className="mt-1.5 text-sm text-gray-600">
               Platform overview, support operations, and merchant feedback
@@ -1295,7 +1241,6 @@ export default function AdminPage() {
                 <div className="divide-y divide-gray-100">
                   {providerOnboarding.map((item) => {
                     const key = `${item.provider}:${item.merchantId}`
-                    const busy = updatingProviderOnboarding === key
                     const providerLabel = item.provider === "stripe" ? "Stripe" : "Fluid Pay"
                     const statusLabel =
                       item.applicationStatus === "approved"
@@ -1332,24 +1277,6 @@ export default function AdminPage() {
                           </div>
                         </div>
 
-                        <div className="flex shrink-0 flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => updateProviderOnboarding(item, "approved")}
-                            disabled={busy || item.applicationStatus === "approved"}
-                            className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {busy ? "Updating..." : "Approve"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => updateProviderOnboarding(item, "denied")}
-                            disabled={busy || item.applicationStatus === "denied"}
-                            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {busy ? "Updating..." : "Deny"}
-                          </button>
-                        </div>
                       </div>
                     )
                   })}
@@ -1595,9 +1522,6 @@ export default function AdminPage() {
                 <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
                   <div className="flex items-center justify-between gap-3 mb-4">
                     <PaymentStatusBadge status={detailStatus(txDetail.payment)} />
-                    <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${detailPaymentMode(txDetail.payment) === "test" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
-                      {detailPaymentMode(txDetail.payment) === "test" ? "Test" : "Live"}
-                    </span>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
