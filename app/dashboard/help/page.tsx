@@ -35,6 +35,17 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/SegmentedButtons"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
+import NotificationBadge from "@/components/ui/NotificationBadge"
+import {
+  formatSupportCategory,
+  formatSupportPriority,
+  formatSupportStatus
+} from "@/lib/support/supportDisplay"
+import { useMerchantSupportUnread } from "@/hooks/useMerchantSupportUnread"
+import {
+  markSupportTicketRead,
+  refreshSupportUnread
+} from "@/lib/support/supportUnreadClient"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -266,6 +277,10 @@ export default function HelpCenterPage() {
   const [ticketDetailLoading, setTicketDetailLoading] = useState(false)
   const [ticketDetailError, setTicketDetailError] = useState<string | null>(null)
 
+  // Server-authorized unread support-reply state. Shared with the sidebar badge,
+  // so clearing a thread here updates the navigation in the same tick.
+  const supportUnread = useMerchantSupportUnread()
+
   const filteredArticles = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
     return helpArticles.filter((article) => {
@@ -329,6 +344,8 @@ export default function HelpCenterPage() {
       }
 
       setTickets(payload?.tickets || [])
+      // Keep the row indicators and the sidebar badge describing the same set.
+      void refreshSupportUnread()
     } catch (error) {
       setTickets([])
       setTicketError(normalizeSupportErrorMessage(error, "Failed to load support tickets."))
@@ -365,7 +382,23 @@ export default function HelpCenterPage() {
       if (payload?.ticket) {
         setSelectedTicket(payload.ticket)
       }
-      setTicketDetailMessages(payload?.messages || [])
+      const messages = payload?.messages || []
+      setTicketDetailMessages(messages)
+
+      // Mark read through the newest support message actually rendered here, not
+      // "now": a reply that arrives while the thread is open stays unread.
+      const newestSupportMessageId = messages
+        .filter((message) => message.sender_type === "pinetree")
+        .reduce<TicketMessage | null>((newest, message) => {
+          if (!newest) return message
+          return new Date(message.created_at).getTime() > new Date(newest.created_at).getTime()
+            ? message
+            : newest
+        }, null)?.id ?? null
+
+      if (newestSupportMessageId) {
+        void markSupportTicketRead(ticketId, newestSupportMessageId)
+      }
     } catch (error) {
       setTicketDetailError(normalizeSupportErrorMessage(error, "Failed to load ticket details."))
     } finally {
@@ -977,7 +1010,7 @@ export default function HelpCenterPage() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-gray-950">
-                    {ticketFilter === "All" ? "No support tickets yet" : `No ${ticketFilter.toLowerCase()} tickets`}
+                    {ticketFilter === "All" ? "No support tickets yet" : `No ${ticketFilter} tickets`}
                   </p>
                   <p className="mt-0.5 text-xs text-gray-500">
                     {ticketFilter === "All" ? "Open a ticket in the Support tab." : "Change the filter to see other tickets."}
@@ -987,21 +1020,39 @@ export default function HelpCenterPage() {
             )}
             {!ticketsLoading && !ticketError && filteredTickets.length > 0 && (
               <div className="space-y-1.5">
-                {filteredTickets.map((ticket) => (
-                  <button
-                    key={ticket.id}
-                    type="button"
-                    onClick={() => openTicketDetail(ticket)}
-                    className="w-full rounded-xl border border-gray-100 bg-white p-3 text-left transition hover:border-blue-200 hover:bg-blue-50/30"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <TicketStatusPill status={ticket.status} />
-                      <span className="text-[11px] text-gray-400">{formatDate(ticket.created_at)}</span>
-                    </div>
-                    <p className="mt-1.5 truncate text-sm font-semibold text-gray-950">{ticket.subject}</p>
-                    <p className="mt-0.5 text-xs text-gray-500">{ticket.category} · {ticket.priority}</p>
-                  </button>
-                ))}
+                {filteredTickets.map((ticket) => {
+                  const unreadCount = supportUnread.byTicketId[ticket.id] ?? 0
+                  return (
+                    <button
+                      key={ticket.id}
+                      type="button"
+                      onClick={() => openTicketDetail(ticket)}
+                      className={`w-full rounded-xl border p-3 text-left transition hover:border-blue-200 hover:bg-blue-50/30 ${
+                        unreadCount > 0
+                          ? "border-blue-200 bg-blue-50/40"
+                          : "border-gray-100 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <TicketStatusPill status={ticket.status} />
+                          <NotificationBadge count={unreadCount} label="unread support replies" />
+                        </div>
+                        <span className="text-[11px] text-gray-400">{formatDate(ticket.created_at)}</span>
+                      </div>
+                      <p
+                        className={`mt-1.5 truncate text-sm text-gray-950 ${
+                          unreadCount > 0 ? "font-bold" : "font-semibold"
+                        }`}
+                      >
+                        {ticket.subject}
+                      </p>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        {formatSupportCategory(ticket.category)} · {formatSupportPriority(ticket.priority)}
+                      </p>
+                    </button>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -1334,7 +1385,7 @@ export default function HelpCenterPage() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-gray-950">
-                  {ticketFilter === "All" ? "No support tickets yet" : `No ${ticketFilter.toLowerCase()} tickets`}
+                  {ticketFilter === "All" ? "No support tickets yet" : `No ${ticketFilter} tickets`}
                 </p>
                 <p className="mt-1 text-xs text-gray-500">
                   {ticketFilter === "All"
@@ -1347,38 +1398,63 @@ export default function HelpCenterPage() {
 
           {!ticketsLoading && !ticketError && filteredTickets.length > 0 && (
             <div className="space-y-1.5">
-              {filteredTickets.map((ticket) => (
-                <button
-                  key={ticket.id}
-                  type="button"
-                  onClick={() => openTicketDetail(ticket)}
-                  className={`w-full rounded-xl border p-3 text-left outline-none transition hover:border-blue-200 hover:bg-blue-50/30 focus-visible:ring-4 focus-visible:ring-blue-100 ${
-                    ticket.status === "archived"
-                      ? "border-gray-100 bg-gray-50/60 opacity-80"
-                      : "border-gray-100 bg-white hover:shadow-[0_4px_14px_rgba(0,82,255,0.06)]"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <TicketStatusPill status={ticket.status} />
-                      <span className="text-xs text-gray-500">{ticket.category}</span>
-                      <span className="text-gray-300" aria-hidden>·</span>
-                      <span className="text-xs text-gray-500">{ticket.priority}</span>
+              {filteredTickets.map((ticket) => {
+                const unreadCount = supportUnread.byTicketId[ticket.id] ?? 0
+                return (
+                  <button
+                    key={ticket.id}
+                    type="button"
+                    onClick={() => openTicketDetail(ticket)}
+                    className={`w-full rounded-xl border p-3 text-left outline-none transition hover:border-blue-200 hover:bg-blue-50/30 focus-visible:ring-4 focus-visible:ring-blue-100 ${
+                      unreadCount > 0
+                        ? "border-blue-200 bg-blue-50/40 hover:shadow-[0_4px_14px_rgba(0,82,255,0.06)]"
+                        : ticket.status === "archived"
+                          ? "border-gray-100 bg-gray-50/60 opacity-80"
+                          : "border-gray-100 bg-white hover:shadow-[0_4px_14px_rgba(0,82,255,0.06)]"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <TicketStatusPill status={ticket.status} />
+                        <NotificationBadge count={unreadCount} label="unread support replies" />
+                        <span className="text-xs text-gray-500">
+                          {formatSupportCategory(ticket.category)}
+                        </span>
+                        <span className="text-gray-300" aria-hidden>·</span>
+                        <span className="text-xs text-gray-500">
+                          {formatSupportPriority(ticket.priority)}
+                        </span>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <span className="text-[11px] text-gray-400">{formatDate(ticket.created_at)}</span>
+                        <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
+                      </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <span className="text-[11px] text-gray-400">{formatDate(ticket.created_at)}</span>
-                      <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
+                    <div
+                      className={`mt-1.5 text-sm text-gray-950 ${
+                        unreadCount > 0 ? "font-bold" : "font-semibold"
+                      }`}
+                    >
+                      {ticket.subject}
                     </div>
-                  </div>
-                  <div className="mt-1.5 text-sm font-semibold text-gray-950">{ticket.subject}</div>
-                  {ticket.last_response_at && (
-                    <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-500">
-                      <Clock className="h-3 w-3 shrink-0" />
-                      Last response {formatDate(ticket.last_response_at)}
-                    </div>
-                  )}
-                </button>
-              ))}
+                    {unreadCount > 0 ? (
+                      <div className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-[#0052FF]">
+                        <MessageSquare className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        {unreadCount === 1
+                          ? "1 new reply from PineTree Support"
+                          : `${unreadCount} new replies from PineTree Support`}
+                      </div>
+                    ) : (
+                      ticket.last_response_at && (
+                        <div className="mt-1 flex items-center gap-1 text-[11px] text-gray-500">
+                          <Clock className="h-3 w-3 shrink-0" />
+                          Last response {formatDate(ticket.last_response_at)}
+                        </div>
+                      )
+                    )}
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
@@ -1582,7 +1658,7 @@ function AssistantMessageBubble({
 
 function TicketStatusPill({ status }: { status: string }) {
   const config = TICKET_STATUS_CONFIG[status] ?? {
-    label: status,
+    label: formatSupportStatus(status),
     cls: "bg-gray-100 text-gray-600 border-gray-200"
   }
   return (
@@ -1650,7 +1726,7 @@ function TicketDetailModal({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <TicketStatusPill status={ticket.status} />
-              <span className="text-xs text-gray-500">{ticket.category}</span>
+              <span className="text-xs text-gray-500">{formatSupportCategory(ticket.category)}</span>
             </div>
             <h2 id="ticket-detail-title" className="mt-2 text-lg font-semibold leading-snug text-gray-950 sm:text-xl">
               {ticket.subject}
@@ -1673,7 +1749,7 @@ function TicketDetailModal({
         <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
           {/* Meta cells */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <MetaCell label="Priority" value={ticket.priority} />
+            <MetaCell label="Priority" value={formatSupportPriority(ticket.priority)} />
             <MetaCell label="Created" value={formatDate(ticket.created_at)} />
             {ticket.last_response_at && (
               <MetaCell label="Last Response" value={formatDate(ticket.last_response_at)} />

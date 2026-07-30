@@ -5,10 +5,19 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
-import { ArrowLeft, ChevronLeft, ChevronRight, Copy, RefreshCw, Search, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, X } from "lucide-react"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import { PaginationControls } from "@/components/ui/PaginationControls"
+import AdminPageHeader, { adminHeaderIconButtonClass } from "@/components/admin/AdminPageHeader"
+import {
+  filterChipClass,
+  filterInputClass,
+  filterResetButtonClass,
+  filterSearchIconClass,
+  filterSearchInputClass,
+  filterSelectClass,
+} from "@/components/ui/FilterControls"
 import {
   CompactMetricTile,
   DashboardSection,
@@ -532,9 +541,6 @@ function UnauthorizedScreen() {
 
 // ─── Select style shared ───────────────────────────────────────────────────────
 
-const selectCls =
-  "h-9 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-700 shadow-sm focus:border-[#0052FF]/40 focus:outline-none focus:ring-2 focus:ring-[#0052FF]/10"
-
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
 export default function AdminTransactionsPage() {
@@ -721,51 +727,25 @@ export default function AdminTransactionsPage() {
   return (
     <div className="space-y-5 pb-10">
 
-      {/* ── Hero ─────────────────────────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] p-5 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-6">
-        <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
-        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <Link
-              href="/dashboard/admin"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800"
-            >
-              <ArrowLeft size={12} /> Admin Dashboard
-            </Link>
-            <div className="mt-2 flex items-center gap-2.5">
-              <span className="inline-flex items-center rounded-full border border-blue-200/60 bg-blue-100/80 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.12em] text-blue-700">
-                PineTree Internal
-              </span>
-            </div>
-            <h1 className="mt-2.5 text-2xl font-semibold text-gray-950 sm:text-3xl">
-              Transaction Explorer
-            </h1>
-            <p className="mt-1.5 text-sm text-gray-600">
-              Platform-wide payment activity — all merchants, all rails
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end">
-            {result?.generatedAt && (
-              <div className="sm:text-right">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
-                  Last Updated
-                </p>
-                <p className="mt-0.5 text-sm text-gray-600">
-                  {fmtDateTime(result.generatedAt)}
-                </p>
-              </div>
-            )}
-            <button
-              onClick={() => token && void fetchData(token, applied, offset)}
-              disabled={loading}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-              title="Refresh"
-            >
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-            </button>
-          </div>
-        </div>
-      </div>
+      {/* ── Shared admin page header ─────────────────────────────────────────── */}
+      <AdminPageHeader
+        title="Transaction Explorer"
+        description="Platform-wide payment activity — all merchants, all rails"
+        lastUpdated={result?.generatedAt ? fmtDateTime(result.generatedAt) : null}
+        backHref="/dashboard/admin"
+        backLabel="Admin"
+        action={
+          <button
+            type="button"
+            onClick={() => token && void fetchData(token, applied, offset)}
+            disabled={loading}
+            aria-label="Refresh transactions"
+            className={adminHeaderIconButtonClass}
+          >
+            <RefreshCw size={14} aria-hidden="true" className={loading ? "animate-spin" : ""} />
+          </button>
+        }
+      />
 
       {/* ── Summary tiles ────────────────────────────────────────────────────── */}
       <DashboardSection title="Summary" titleTone="blue">
@@ -842,66 +822,79 @@ export default function AdminTransactionsPage() {
           {/* Row 1: search + merchant */}
           <div className="flex flex-col gap-2 sm:flex-row">
             <div className="relative flex-1">
-              <Search
-                size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              />
+              <label htmlFor="admin-tx-search" className="sr-only">
+                Search payment ID or reference
+              </label>
+              <Search size={14} aria-hidden="true" className={filterSearchIconClass} />
               <input
+                id="admin-tx-search"
                 ref={searchRef}
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && applyFilters()}
                 placeholder="Search payment ID or reference…"
-                className="h-9 w-full rounded-xl border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm shadow-sm focus:border-[#0052FF]/40 focus:outline-none focus:ring-2 focus:ring-[#0052FF]/10"
+                className={filterSearchInputClass}
               />
             </div>
+            <label htmlFor="admin-tx-merchant" className="sr-only">
+              Merchant ID
+            </label>
             <input
+              id="admin-tx-merchant"
               type="text"
               value={merchantId}
               onChange={(e) => setMerchantId(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && applyFilters()}
               placeholder="Merchant ID (UUID)…"
-              className="h-9 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-sm shadow-sm focus:border-[#0052FF]/40 focus:outline-none focus:ring-2 focus:ring-[#0052FF]/10 sm:max-w-[220px]"
+              className={`${filterInputClass} flex-1 sm:max-w-[220px]`}
             />
           </div>
 
           {/* Row 2: dropdowns + buttons */}
           <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="admin-tx-status" className="sr-only">Status filter</label>
             <select
+              id="admin-tx-status"
               value={status}
               onChange={(e) => handleDropdownChange("status", e.target.value)}
-              className={selectCls}
+              className={filterSelectClass}
             >
               {STATUSES.map((s) => (
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>
 
+            <label htmlFor="admin-tx-network" className="sr-only">Network filter</label>
             <select
+              id="admin-tx-network"
               value={network}
               onChange={(e) => handleDropdownChange("network", e.target.value)}
-              className={selectCls}
+              className={filterSelectClass}
             >
               {NETWORKS.map((n) => (
                 <option key={n.value} value={n.value}>{n.label}</option>
               ))}
             </select>
 
+            <label htmlFor="admin-tx-provider" className="sr-only">Provider filter</label>
             <select
+              id="admin-tx-provider"
               value={provider}
               onChange={(e) => handleDropdownChange("provider", e.target.value)}
-              className={selectCls}
+              className={filterSelectClass}
             >
               {PROVIDERS.map((p) => (
                 <option key={p.value} value={p.value}>{p.label}</option>
               ))}
             </select>
 
+            <label htmlFor="admin-tx-time" className="sr-only">Time filter</label>
             <select
+              id="admin-tx-time"
               value={datePreset}
               onChange={(e) => handleDropdownChange("datePreset", e.target.value)}
-              className={selectCls}
+              className={filterSelectClass}
             >
               {DATE_PRESETS.map((d) => (
                 <option key={d.value} value={d.value}>{d.label}</option>
@@ -909,6 +902,7 @@ export default function AdminTransactionsPage() {
             </select>
 
             <button
+              type="button"
               onClick={applyFilters}
               className={primaryActionButtonClass}
             >
@@ -916,11 +910,8 @@ export default function AdminTransactionsPage() {
             </button>
 
             {hasActiveFilter && (
-              <button
-                onClick={resetFilters}
-                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-600 hover:bg-gray-50"
-              >
-                <X size={13} /> Reset
+              <button type="button" onClick={resetFilters} className={filterResetButtonClass}>
+                <X size={13} aria-hidden="true" /> Reset
               </button>
             )}
           </div>
@@ -929,32 +920,32 @@ export default function AdminTransactionsPage() {
           {hasActiveFilter && (
             <div className="flex flex-wrap gap-1.5">
               {applied.status && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                <span className={filterChipClass}>
                   Status: {applied.status}
                 </span>
               )}
               {applied.network && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                <span className={filterChipClass}>
                   Network: {labelNetwork(applied.network)}
                 </span>
               )}
               {applied.provider && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                <span className={filterChipClass}>
                   Provider: {labelProvider(applied.provider)}
                 </span>
               )}
               {applied.datePreset && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                <span className={filterChipClass}>
                   {DATE_PRESETS.find((d) => d.value === applied.datePreset)?.label}
                 </span>
               )}
               {applied.search && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                <span className={filterChipClass}>
                   Search: &ldquo;{applied.search}&rdquo;
                 </span>
               )}
               {applied.merchantId && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                <span className={filterChipClass}>
                   Merchant: {applied.merchantId.slice(0, 12)}…
                 </span>
               )}

@@ -7,7 +7,7 @@ type RouteContext = { params: Promise<{ ticketId: string }> }
 export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
     const { ticketId } = await context.params
-    await requireAdminFromRequest(req)
+    const adminActorId = await requireAdminFromRequest(req)
 
     const body = (await req.json()) as { status?: string }
 
@@ -15,7 +15,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "status is required" }, { status: 400 })
     }
 
-    const ticket = await updateSupportTicketStatusForAdmin(ticketId, body.status)
+    const ticket = await updateSupportTicketStatusForAdmin(ticketId, body.status, adminActorId)
     return NextResponse.json({ ticket })
   } catch (error: unknown) {
     return NextResponse.json(

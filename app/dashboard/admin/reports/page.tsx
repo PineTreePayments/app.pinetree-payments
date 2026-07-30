@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
-import { ArrowLeft, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 import {
   CompactMetricTile,
   DashboardSection,
@@ -14,6 +14,7 @@ import {
 import PaymentStatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
+import AdminPageHeader, { adminHeaderIconButtonClass } from "@/components/admin/AdminPageHeader"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -367,45 +368,25 @@ export default function AdminReportsPage() {
   return (
     <div className="space-y-5">
 
-      {/* ── Header ───────────────────────────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] p-5 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-6">
-        <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
-        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <Link
-                href="/dashboard/admin"
-                className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
-              >
-                <ArrowLeft size={12} />
-                Admin
-              </Link>
-            </div>
-            <span className="mt-2 inline-flex items-center rounded-full border border-blue-200/60 bg-blue-100/80 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.12em] text-blue-700">
-              Platform Reports
-            </span>
-            <h1 className="mt-2 text-2xl font-semibold text-gray-950 sm:text-3xl">
-              Network Reporting
-            </h1>
-            <p className="mt-1.5 text-sm text-gray-600">
-              Platform-wide payment data across all merchants. Not merchant-scoped.
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {r?.generatedAt && (
-              <p className="text-xs text-gray-500">{fmtDateTime(r.generatedAt)}</p>
-            )}
-            <button
-              onClick={() => token && fetchReport(token, period, mode)}
-              disabled={loading}
-              title="Refresh"
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 shadow-sm hover:bg-gray-50 disabled:opacity-50"
-            >
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-            </button>
-          </div>
-        </div>
-      </div>
+      {/* ── Shared admin page header ─────────────────────────────────────────── */}
+      <AdminPageHeader
+        title="Network Reporting"
+        description="Platform-wide payment data across all merchants. Not merchant-scoped."
+        lastUpdated={r?.generatedAt ? fmtDateTime(r.generatedAt) : null}
+        backHref="/dashboard/admin"
+        backLabel="Admin"
+        action={
+          <button
+            type="button"
+            onClick={() => token && fetchReport(token, period, mode)}
+            disabled={loading}
+            aria-label="Refresh report"
+            className={adminHeaderIconButtonClass}
+          >
+            <RefreshCw size={14} aria-hidden="true" className={loading ? "animate-spin" : ""} />
+          </button>
+        }
+      />
 
       {/* ── Period tabs ──────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

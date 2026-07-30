@@ -34,8 +34,20 @@ export type AddressBookAuditEventType =
 export type WalletOperationAuditEventType =
   | "destination_backfill.verified"
 
+/**
+ * Privileged admin actions on merchant support tickets.
+ *
+ * Recorded against the ticket's merchant (so the merchant's audit trail is
+ * complete) with the acting admin in `actor_id`. Reply and note bodies are never
+ * written here — only the message id.
+ */
+export type SupportAuditEventType =
+  | "support.admin_replied"
+  | "support.status_changed"
+
 export type MerchantAuditEventType =
   | "webhook.secret_regenerated"
+  | SupportAuditEventType
   | "lightning.speed_credential_revealed"
   | "lightning.sweep_retried"
   | "lightning.sweep_canceled"

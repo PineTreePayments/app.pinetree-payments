@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from "react"
 import { supabase } from "@/lib/supabaseClient"
 import { Toaster } from "sonner"
 import PineTreeDynamicProvider from "@/components/providers/PineTreeDynamicProvider"
+import NotificationBadge from "@/components/ui/NotificationBadge"
+import { useMerchantSupportUnread } from "@/hooks/useMerchantSupportUnread"
 
 export default function DashboardLayout({
   children,
@@ -21,6 +23,15 @@ export default function DashboardLayout({
   const [menuOpen, setMenuOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
+
+  /* -----------------------------
+  UNREAD SUPPORT REPLIES
+  Server-authorized count behind the Help Center nav badge. Signing in and
+  opening the mobile drawer never clear it - only viewing the relevant ticket
+  thread does (POST /api/support/tickets/:ticketId/read).
+  ----------------------------- */
+
+  const supportUnread = useMerchantSupportUnread()
 
   /* -----------------------------
   SESSION CHECK
@@ -137,7 +148,7 @@ export default function DashboardLayout({
   NAV
   ----------------------------- */
 
-  const nav = [
+  const nav: Array<{ name: string; href: string; unreadCount?: number }> = [
     { name: "Overview", href: "/dashboard" },
     { name: "POS", href: "/dashboard/pos" },
     { name: "Online Checkout", href: "/dashboard/checkout" },
@@ -146,7 +157,7 @@ export default function DashboardLayout({
     { name: "Wallet", href: "/dashboard/wallet-setup" },
     { name: "Inventory", href: "/dashboard/inventory" },
     { name: "Providers", href: "/dashboard/providers" },
-    { name: "Help Center", href: "/dashboard/help" },
+    { name: "Help Center", href: "/dashboard/help", unreadCount: supportUnread.totalUnread },
     { name: "Developer", href: "/dashboard/developer" },
     { name: "Settings", href: "/dashboard/settings" },
     ...(isAdmin ? [{ name: "Admin", href: "/dashboard/admin" }] : []),
@@ -202,13 +213,17 @@ export default function DashboardLayout({
                   key={item.href}
                   href={item.href}
                   onClick={() => setSidebarOpen(false)}
-                  className={`block min-w-0 max-w-full rounded-xl px-4 py-3 text-base font-medium outline-none transition focus-visible:ring-4 focus-visible:ring-blue-100 lg:text-sm ${
+                  className={`flex min-w-0 max-w-full items-center gap-2 rounded-xl px-4 py-3 text-base font-medium outline-none transition focus-visible:ring-4 focus-visible:ring-blue-100 lg:text-sm ${
                     active
                       ? "bg-blue-50 text-blue-600 shadow-[inset_0_0_0_1px_rgba(0,82,255,0.08)]"
                       : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus-visible:bg-blue-50/70 focus-visible:text-blue-700"
                   }`}
                 >
-                  <span className="block min-w-0 truncate">{item.name}</span>
+                  <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                  <NotificationBadge
+                    count={item.unreadCount ?? 0}
+                    label="unread support replies"
+                  />
                 </Link>
               )
             })}
@@ -222,8 +237,12 @@ export default function DashboardLayout({
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/95 shadow-sm ring-1 ring-white/40 transition hover:bg-white focus:outline-none focus-visible:ring-4 focus-visible:ring-white/30 lg:hidden"
-                aria-label="PineTree Payments"
+                className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/95 shadow-sm ring-1 ring-white/40 transition hover:bg-white focus:outline-none focus-visible:ring-4 focus-visible:ring-white/30 lg:hidden"
+                aria-label={
+                  supportUnread.totalUnread > 0
+                    ? `Open navigation — ${supportUnread.totalUnread} unread support replies`
+                    : "Open navigation"
+                }
               >
                 <Image
                   src="/favicon.ico"
@@ -233,6 +252,14 @@ export default function DashboardLayout({
                   width={28}
                   height={28}
                 />
+                {/* Unread support replies live behind the drawer on mobile, so
+                    the menu control carries a dot pointing at the badge. */}
+                {supportUnread.totalUnread > 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[#0052FF] ring-2 ring-white"
+                  />
+                )}
               </button>
             </div>
 

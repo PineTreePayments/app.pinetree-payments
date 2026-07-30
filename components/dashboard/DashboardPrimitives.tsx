@@ -1,6 +1,8 @@
 import type { ReactNode } from "react"
 
-type Tone = "default" | "blue" | "green" | "amber" | "red" | "slate"
+// "rose" is the muted-red projection reserved for Expired, which docs/architecture.md
+// keeps visually distinct from Failed's full red.
+type Tone = "default" | "blue" | "green" | "amber" | "red" | "rose" | "slate"
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
@@ -94,6 +96,7 @@ export function CompactMetricTile({
     green: "from-emerald-50/80 to-white",
     amber: "from-amber-50/80 to-white",
     red: "from-red-50/80 to-white",
+    rose: "from-rose-50/70 to-white",
     slate: "from-slate-50/80 to-white"
   }
 
@@ -139,14 +142,17 @@ export function MetricGrid({
   className = ""
 }: {
   children: ReactNode
-  columns?: "auto" | "two" | "three" | "four"
+  columns?: "auto" | "two" | "three" | "four" | "five"
   className?: string
 }) {
   const columnsClass = {
     auto: "grid-cols-2 sm:grid-cols-2 xl:grid-cols-4",
     two: "grid-cols-2",
     three: "grid-cols-2 sm:grid-cols-3",
-    four: "grid-cols-2 sm:grid-cols-4"
+    four: "grid-cols-2 sm:grid-cols-4",
+    // Five-status rows (support queue): never more than three per row until xl,
+    // so labels stay readable on tablet portrait.
+    five: "grid-cols-2 sm:grid-cols-3 xl:grid-cols-5"
   }[columns]
 
   return <div className={cx("grid gap-3 md:gap-4", columnsClass, className)}>{children}</div>
@@ -317,6 +323,7 @@ export function ProviderStatusPill({
     green: "border-emerald-200 bg-emerald-50 text-emerald-700",
     amber: "border-amber-200 bg-amber-50 text-amber-800",
     red: "border-red-200 bg-red-50 text-red-700",
+    rose: "border-rose-200 bg-rose-50 text-rose-800",
     slate: "border-slate-200 bg-slate-50 text-slate-700"
   }
 

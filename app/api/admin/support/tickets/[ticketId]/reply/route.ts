@@ -13,7 +13,7 @@ type ReplyBody = {
 export async function POST(req: NextRequest, context: RouteContext) {
   try {
     const { ticketId } = await context.params
-    await requireAdminFromRequest(req)
+    const adminActorId = await requireAdminFromRequest(req)
 
     const body = (await req.json()) as ReplyBody
 
@@ -24,7 +24,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
     const result = await createAdminTicketReply(
       ticketId,
       body.message,
-      body.status ?? "waiting_on_merchant"
+      body.status ?? "waiting_on_merchant",
+      adminActorId
     )
 
     let warning: string | undefined

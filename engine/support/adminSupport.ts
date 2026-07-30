@@ -6,6 +6,7 @@ import {
   createAdminTicketMessageRecord,
   getAllFeedback,
 } from "@/database/adminSupport"
+import { insertMerchantAuditEvent } from "@/database/merchantAuditEvents"
 import type { SupportTicketRecord, SupportTicketMessageRecord } from "@/database/supportTickets"
 import type { MerchantFeedbackRecord } from "@/database/feedback"
 
@@ -34,7 +35,8 @@ export async function getSupportTicketDetailForAdmin(ticketId: string): Promise<
 export async function createAdminTicketReply(
   ticketId: string,
   message: string,
-  newStatus: string
+  newStatus: string,
+  adminActorId?: string | null
 ): Promise<{
   ticket: SupportTicketRecord
   message: SupportTicketMessageRecord
@@ -64,12 +66,27 @@ export async function createAdminTicketReply(
     }),
   ])
 
+  // Audit evidence for a privileged action. Reply content is deliberately
+  // excluded — only the message id is retained.
+  await insertMerchantAuditEvent({
+    merchantId: ticket.merchant_id,
+    eventType: "support.admin_replied",
+    actorId: adminActorId ?? null,
+    metadata: {
+      ticket_id: ticketId,
+      message_id: replyMessage.id,
+      previous_status: ticket.status,
+      new_status: updatedTicket.status,
+    },
+  })
+
   return { ticket: updatedTicket, message: replyMessage }
 }
 
 export async function updateSupportTicketStatusForAdmin(
   ticketId: string,
-  status: string
+  status: string,
+  adminActorId?: string | null
 ): Promise<SupportTicketRecord> {
   if (!VALID_STATUSES.includes(status)) throw statusError(`Invalid status: ${status}`, 400)
 
@@ -81,7 +98,20 @@ export async function updateSupportTicketStatusForAdmin(
   if (status === "resolved" && !ticket.resolved_at) updates.resolved_at = now
   if (status === "archived" && !ticket.archived_at) updates.archived_at = now
 
-  return updateSupportTicketAdmin(ticketId, updates)
+  const updated = await updateSupportTicketAdmin(ticketId, updates)
+
+  await insertMerchantAuditEvent({
+    merchantId: ticket.merchant_id,
+    eventType: "support.status_changed",
+    actorId: adminActorId ?? null,
+    metadata: {
+      ticket_id: ticketId,
+      previous_status: ticket.status,
+      new_status: updated.status,
+    },
+  })
+
+  return updated
 }
 
 export async function getAllFeedbackForAdmin(): Promise<MerchantFeedbackRecord[]> {
