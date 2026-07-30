@@ -21,6 +21,7 @@ function operation(status = "CREATED") {
 
 describe("account-scoped withdrawal safeguards", () => {
   afterEach(() => {
+    delete process.env.SPEED_LIGHTNING_WITHDRAWAL_FEE_BUFFER_SATS
     vi.restoreAllMocks()
     vi.resetModules()
     vi.doUnmock("@/engine/wallet/walletProviderResolution")
@@ -54,15 +55,17 @@ describe("account-scoped withdrawal safeguards", () => {
     }))
     const createWalletOperation = vi.fn().mockResolvedValue({ operation: operation(), created: true })
     const updateWalletOperation = vi.fn().mockImplementation(async (_merchant, _id, patch) => operation(patch.status || "CREATED"))
+    const sumPendingWithdrawalOperationBaseUnits = vi.fn().mockResolvedValue(BigInt(0))
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
+      sumPendingWithdrawalOperationBaseUnits,
       getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       updateWalletOperation,
       getWalletOperationForMerchant: vi.fn(), listWalletOperations: vi.fn(),
       upsertWalletOperationFromProviderActivity: vi.fn(),
     }))
     vi.doMock("@/database/merchantWalletBalanceSnapshots", () => ({ listWalletBalanceSnapshots: vi.fn(), upsertWalletBalanceSnapshot: vi.fn() }))
-    return { adapter, createWithdrawal, createWalletOperation, updateWalletOperation }
+    return { adapter, createWithdrawal, createWalletOperation, updateWalletOperation, sumPendingWithdrawalOperationBaseUnits }
   }
 
   it("does not persist or dispatch when fresh balance is insufficient", async () => {
@@ -74,6 +77,22 @@ describe("account-scoped withdrawal safeguards", () => {
     expect(arranged.createWithdrawal).not.toHaveBeenCalled()
     expect(arranged.createWalletOperation).not.toHaveBeenCalled()
     expect(arranged.updateWalletOperation).not.toHaveBeenCalled()
+  })
+
+  it("rechecks pending debits with the canonical quote immediately before dispatch", async () => {
+    process.env.SPEED_LIGHTNING_WITHDRAWAL_FEE_BUFFER_SATS = "500"
+    const arranged = await arrange(BigInt(2_000))
+    arranged.sumPendingWithdrawalOperationBaseUnits
+      .mockResolvedValueOnce(BigInt(0))
+      .mockResolvedValueOnce(BigInt(600))
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+
+    await expect(createWalletWithdrawal("merchant-1", {
+      asset: "SATS", amountDecimal: "1000", destination: "lnbc1qqqqqqqqqqqqqqqqqqqq", idempotencyKey: "key-1",
+    })).rejects.toMatchObject({ code: "INSUFFICIENT_BALANCE" })
+    expect(arranged.createWalletOperation).toHaveBeenCalledTimes(1)
+    expect(arranged.createWithdrawal).not.toHaveBeenCalled()
+    expect(arranged.sumPendingWithdrawalOperationBaseUnits).toHaveBeenLastCalledWith("merchant-1", "SATS", "op-1")
   })
 
   it("does not persist an adapter validation failure before dispatch", async () => {

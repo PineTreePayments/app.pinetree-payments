@@ -14,7 +14,6 @@ import {
   SpeedWalletProviderError,
   type SpeedBalanceEntry,
 } from "@/providers/lightning/speedWalletManagement"
-import { getSpeedWithdrawalFeeReserveSats } from "@/engine/withdrawals/speedWithdrawalQuote"
 import { buildPineTreeRailReadiness } from "@/lib/pinetreeRailReadiness"
 import { PINETREE_INTERNAL_RAIL_PROVIDER, type PineTreeWalletRail } from "@/lib/pinetreeRailProviderMapping"
 import {
@@ -129,34 +128,6 @@ function decimalString(value: number | string | null | undefined): string | null
   if (value === null || value === undefined) return null
   if (typeof value === "string") return value
   return Number.isFinite(value) ? String(value) : null
-}
-
-function subtractDecimalStrings(value: string | null, subtract: string, decimals: number): string | null {
-  if (value === null) return null
-  const normalizedValue = value.trim()
-  const normalizedSubtract = subtract.trim()
-  if (!/^\d+(?:\.\d+)?$/.test(normalizedValue) || !/^\d+(?:\.\d+)?$/.test(normalizedSubtract)) return value
-  const toUnits = (raw: string) => {
-    const [whole, fraction = ""] = raw.split(".")
-    return BigInt(whole || "0") * (BigInt(10) ** BigInt(decimals)) + BigInt(fraction.padEnd(decimals, "0").slice(0, decimals) || "0")
-  }
-  const fromUnits = (units: bigint) => {
-    if (units <= BigInt(0)) return "0"
-    const divisor = BigInt(10) ** BigInt(decimals)
-    const whole = units / divisor
-    const fraction = (units % divisor).toString().padStart(decimals, "0").replace(/0+$/, "")
-    return fraction ? `${whole}.${fraction}` : whole.toString()
-  }
-  return fromUnits(toUnits(normalizedValue) - toUnits(normalizedSubtract))
-}
-
-function formatReserveDecimal(asset: string, baseUnits: bigint): string {
-  if (asset === "BTC") {
-    const whole = baseUnits / BigInt(100_000_000)
-    const fraction = (baseUnits % BigInt(100_000_000)).toString().padStart(8, "0").replace(/0+$/, "")
-    return fraction ? `${whole}.${fraction}` : whole.toString()
-  }
-  return "0"
 }
 
 function formatUsd(value: number | null): string | null {
@@ -561,9 +532,12 @@ export async function getPineTreeWalletBalanceSnapshot(
       status = "pending_sync"
     }
     const totalBalance = decimalString(balance)
-    const reservedFee = def.asset === "BTC" ? formatReserveDecimal("BTC", getSpeedWithdrawalFeeReserveSats("lightning")) : "0"
+    // A balance snapshot has no destination/method and therefore cannot quote
+    // the true withdrawal fee. Keep it gross; the canonical withdrawal quote
+    // supplies spendable/max once those inputs are known.
+    const reservedFee = "0"
     const availableToWithdraw = status === "synced" || status === "cached" || status === "stale"
-      ? subtractDecimalStrings(totalBalance, reservedFee, def.decimals)
+      ? totalBalance
       : null
     const source: PineTreeBalanceAsset["source"] =
       status === "synced"

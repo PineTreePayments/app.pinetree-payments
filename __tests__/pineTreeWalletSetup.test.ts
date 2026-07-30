@@ -1749,9 +1749,9 @@ describe("PineTree embedded wallet setup", () => {
   it("blocks review when amount exceeds known available balance or selected balance is zero", () => {
     expect(page).toContain("Amount exceeds available balance.")
     expect(page).toContain("No available balance for this asset.")
-    expect(page).toContain("amountNumber > availableBalance")
-    expect(page).toContain("BigInt(amountSats) > BigInt(availableSats)")
-    expect(page).toContain("BigInt(availableSats) <= BigInt(0)")
+    expect(page).toContain("amountBaseUnits > availableBaseUnits")
+    expect(page).toContain("BigInt(amountSats) > BigInt(maxSats)")
+    expect(page).toContain("withdrawalDecimalToBaseUnits(selectedAvailableToWithdraw, withdrawalAsset)")
   })
 
   it("allows unknown balances with a verification note", () => {

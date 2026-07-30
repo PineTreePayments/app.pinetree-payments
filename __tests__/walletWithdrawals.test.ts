@@ -250,6 +250,13 @@ describe("PineTree Wallet withdrawals", () => {
       expect(normalizeWithdrawalAmount("1e-2")).toBeNull()
       expect(normalizeWithdrawalAmount("1E10")).toBeNull()
     })
+
+    it("determines positivity without losing precision to JavaScript Number", () => {
+      expect(normalizeWithdrawalAmount("0.00000000000000000000000000000000000001"))
+        .toBe("0.00000000000000000000000000000000000001")
+      expect(normalizeWithdrawalAmount("99999999999999999999999999999999999999"))
+        .toBe("99999999999999999999999999999999999999")
+    })
   })
 
   it("blocks zero amount before review with 'Enter an amount greater than 0.'", () => {
@@ -1072,6 +1079,48 @@ describe("PineTree Wallet withdrawals", () => {
     }, makeSigner(true))).rejects.toBeInstanceOf(WithdrawalPreflightError)
 
     expect(mocks.createWalletWithdrawalRequest).not.toHaveBeenCalled()
+    expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
+  })
+
+  it("rechecks authoritative balance after review and blocks a stale prepared request before wallet authorization", async () => {
+    mocks.getWalletWithdrawalRequest.mockResolvedValueOnce(makeWithdrawal({
+      status: "pending",
+      rail: "solana",
+      asset: "USDC",
+      destination_address: "11111111111111111111111111111111",
+      amount_decimal: "0.54",
+      approval_method: "dynamic_browser",
+      provider: "dynamic",
+      unsigned_transaction_payload: {
+        kind: "solana_transaction",
+        sourceAddress: "11111111111111111111111111111111",
+      },
+    }))
+    mocks.preflightDynamicWithdrawal.mockResolvedValueOnce({
+      allowed: false,
+      code: "INSUFFICIENT_NETWORK_FEE_BALANCE",
+      title: "Insufficient network fee balance",
+      userMessage: "You have enough USDC, but not enough SOL to cover the Solana network fee.",
+      reason: "native_fee_balance",
+      rail: "solana",
+      asset: "USDC",
+      network: "Solana",
+      requestedAmount: "0.54",
+      availableBalance: "0.54",
+      spendableBalance: "0.54",
+      requiredFeeReserve: "0.0000065",
+      feeAsset: "SOL",
+      nativeAvailableBalance: "0.000001",
+      verifiedAt: "2026-07-30T00:00:00.000Z",
+    })
+
+    await expect(prepareDynamicWalletWithdrawal("merchant_1", "withdrawal_1"))
+      .rejects.toMatchObject({ code: "INSUFFICIENT_NETWORK_FEE_BALANCE" })
+    expect(mocks.preflightDynamicWithdrawal).toHaveBeenCalledWith(expect.objectContaining({
+      merchantId: "merchant_1",
+      withdrawalId: "withdrawal_1",
+      amountDecimal: "0.54",
+    }))
     expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
   })
 

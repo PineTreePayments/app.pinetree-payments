@@ -1,3 +1,5 @@
+import { calculateWithdrawalAccounting } from "@/engine/withdrawals/withdrawalAccounting"
+
 export type SpeedWithdrawalMethod = "lightning" | "onchain"
 
 function readNonNegativeIntegerEnv(name: string): bigint | null {
@@ -27,12 +29,17 @@ export function calculateSpeedMaximumSendableSats(input: {
   const totalAvailableSats = input.providerAvailableSats > BigInt(0) ? input.providerAvailableSats : BigInt(0)
   const pendingSats = input.pendingSats && input.pendingSats > BigInt(0) ? input.pendingSats : BigInt(0)
   const estimatedFeeSats = getSpeedWithdrawalFeeReserveSats(input.method ?? "lightning")
-  const maximumSendableSats = totalAvailableSats - pendingSats - estimatedFeeSats
+  const accounting = calculateWithdrawalAccounting({
+    assetAvailableBaseUnits: totalAvailableSats,
+    assetPendingBaseUnits: pendingSats,
+    estimatedNetworkFeeBaseUnits: estimatedFeeSats,
+    assetIsNative: true,
+  })
   return {
     totalAvailableSats,
     pendingSats,
     estimatedFeeSats,
-    maximumSendableSats: maximumSendableSats > BigInt(0) ? maximumSendableSats : BigInt(0),
+    maximumSendableSats: accounting.maximumWithdrawalBaseUnits,
   }
 }
 

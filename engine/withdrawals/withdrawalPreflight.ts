@@ -10,6 +10,7 @@ import {
   sumPendingWalletWithdrawalAmount,
 } from "@/database/walletWithdrawalRequests"
 import { toBaseUnits, clampNonNegative } from "@/engine/withdrawals/decimalUnits"
+import { isSupportedWithdrawalPair } from "@/engine/withdrawals/withdrawalAccounting"
 import {
   evaluateWithdrawalPreflight,
   unavailableWithdrawalPreflight,
@@ -47,11 +48,6 @@ const ERC20_ABI = [
     outputs: [{ name: "", type: "bool" }],
   },
 ] as const
-
-function readReserveBaseUnits(name: string, fallback: string, asset: "ETH" | "SOL") {
-  const configured = String(process.env[name] || "").trim()
-  return toBaseUnits(/^\d+(\.\d+)?$/.test(configured) ? configured : fallback, asset)
-}
 
 function feeSafetyRatio(): { numerator: bigint; denominator: bigint } {
   const raw = String(process.env.WITHDRAWAL_FEE_SAFETY_MULTIPLIER || "1.3").trim()
@@ -115,6 +111,7 @@ async function resolveBaseCapacity(input: {
   sourceAddress: string
   destinationAddress?: string
   requestedBaseUnits?: bigint
+  excludeWithdrawalId?: string | null
 }): Promise<WithdrawalCapacity> {
   const destination = input.destinationAddress || input.sourceAddress
   const amount = input.requestedBaseUnits && input.requestedBaseUnits > BigInt(0) ? input.requestedBaseUnits : BigInt(1)
@@ -133,25 +130,21 @@ async function resolveBaseCapacity(input: {
           },
           "latest",
         ]),
-    sumPendingWalletWithdrawalAmount(input.merchantId, "base", input.asset),
+    sumPendingWalletWithdrawalAmount(input.merchantId, "base", input.asset, input.excludeWithdrawalId),
     input.asset === "ETH"
       ? Promise.resolve("0")
-      : sumPendingWalletWithdrawalAmount(input.merchantId, "base", "ETH"),
+      : sumPendingWalletWithdrawalAmount(input.merchantId, "base", "ETH", input.excludeWithdrawalId),
   ])
   const ethBalance = BigInt(ethHex)
   const available = input.asset === "ETH" ? ethBalance : BigInt(assetHex)
   const pending = toBaseUnits(pendingDecimal, input.asset)
   const nativePending = toBaseUnits(nativePendingDecimal, "ETH")
-  const reserve = readReserveBaseUnits("BASE_ETH_MIN_RESERVE", "0.0003", "ETH")
   const assetAvailableAfterPending = clampNonNegative(available - pending)
-  const nativeAvailableAfterPending = clampNonNegative(ethBalance - nativePending)
-  // Prove obvious underfunding from authoritative balances before asking the
-  // RPC to estimate a transaction it already cannot afford.
-  const obviouslyUnderfunded = amount > assetAvailableAfterPending || (
-    input.asset === "ETH"
-      ? amount > clampNonNegative(assetAvailableAfterPending - reserve)
-      : nativeAvailableAfterPending < reserve
-  )
+  // A nominal transaction estimates network cost independently from the
+  // requested amount. Only skip estimation when the withdrawn asset itself
+  // is unavailable; insufficient native gas must still produce a real fee
+  // requirement and the dedicated native-gas error.
+  const obviouslyUnderfunded = amount > assetAvailableAfterPending
   let fee = BigInt(0)
   if (!obviouslyUnderfunded) {
     const transferData = encodeFunctionData({
@@ -162,7 +155,7 @@ async function resolveBaseCapacity(input: {
     const [gasPriceHex, gasEstimateHex] = await Promise.all([
       baseRpc<string>("eth_gasPrice", []),
       input.asset === "ETH"
-        ? baseRpc<string>("eth_estimateGas", [{ from: input.sourceAddress, to: destination, value: `0x${amount.toString(16)}` }])
+        ? baseRpc<string>("eth_estimateGas", [{ from: input.sourceAddress, to: destination, value: "0x1" }])
         : baseRpc<string>("eth_estimateGas", [{ from: input.sourceAddress, to: BASE_USDC_TOKEN_ADDRESS, data: transferData }]),
     ])
     fee = applyFeeSafety(BigInt(gasPriceHex) * BigInt(gasEstimateHex))
@@ -173,12 +166,7 @@ async function resolveBaseCapacity(input: {
     network: "Base",
     availableBaseUnits: available,
     pendingBaseUnits: pending,
-    spendableBaseUnits:
-      input.asset === "ETH"
-        ? clampNonNegative(available - pending - fee - reserve)
-        : clampNonNegative(available - pending),
     feeBaseUnits: fee,
-    reserveBaseUnits: reserve,
     feeAsset: "ETH",
     nativeAvailableBaseUnits: ethBalance,
     nativePendingBaseUnits: nativePending,
@@ -192,6 +180,7 @@ async function resolveSolanaCapacity(input: {
   sourceAddress: string
   destinationAddress?: string
   requestedBaseUnits?: bigint
+  excludeWithdrawalId?: string | null
 }): Promise<WithdrawalCapacity> {
   const connection = new Connection(solanaRpcUrl(), "confirmed")
   const source = new PublicKey(input.sourceAddress)
@@ -211,7 +200,7 @@ async function resolveSolanaCapacity(input: {
     const destinationAta = await getAssociatedTokenAddress(mint, destination)
     const [sourceInfo, destinationInfo] = await Promise.all([
       connection.getAccountInfo(sourceAta, "confirmed"),
-      input.destinationAddress ? connection.getAccountInfo(destinationAta, "confirmed") : Promise.resolve(null),
+      connection.getAccountInfo(destinationAta, "confirmed"),
     ])
     if (sourceInfo) {
       tokenBalance = BigInt((await connection.getTokenAccountBalance(sourceAta, "confirmed")).value.amount)
@@ -226,29 +215,23 @@ async function resolveSolanaCapacity(input: {
   const [solBalance, feeResult, pendingDecimal, nativePendingDecimal] = await Promise.all([
     getSolanaBalanceLamports(input.sourceAddress),
     connection.getFeeForMessage(transaction.compileMessage(), "confirmed"),
-    sumPendingWalletWithdrawalAmount(input.merchantId, "solana", input.asset),
+    sumPendingWalletWithdrawalAmount(input.merchantId, "solana", input.asset, input.excludeWithdrawalId),
     input.asset === "SOL"
       ? Promise.resolve("0")
-      : sumPendingWalletWithdrawalAmount(input.merchantId, "solana", "SOL"),
+      : sumPendingWalletWithdrawalAmount(input.merchantId, "solana", "SOL", input.excludeWithdrawalId),
   ])
   if (feeResult.value == null) throw new Error("Solana fee could not be verified")
   const available = input.asset === "SOL" ? solBalance : tokenBalance
   const pending = toBaseUnits(pendingDecimal, input.asset)
   const nativePending = toBaseUnits(nativePendingDecimal, "SOL")
   const fee = applyFeeSafety(BigInt(feeResult.value)) + destinationRent
-  const reserve = readReserveBaseUnits("SOLANA_SOL_MIN_RESERVE", "0.002", "SOL")
   return {
     rail: "solana",
     asset: input.asset,
     network: "Solana",
     availableBaseUnits: available,
     pendingBaseUnits: pending,
-    spendableBaseUnits:
-      input.asset === "SOL"
-        ? clampNonNegative(available - pending - fee - reserve)
-        : clampNonNegative(available - pending),
     feeBaseUnits: fee,
-    reserveBaseUnits: reserve,
     feeAsset: "SOL",
     nativeAvailableBaseUnits: solBalance,
     nativePendingBaseUnits: nativePending,
@@ -262,7 +245,11 @@ export async function resolveAuthoritativeWithdrawalCapacity(input: {
   asset: "ETH" | "USDC" | "SOL"
   destinationAddress?: string
   requestedAmount?: string
+  excludeWithdrawalId?: string | null
 }): Promise<WithdrawalCapacity> {
+  if (!isSupportedWithdrawalPair(input.rail, input.asset)) {
+    throw Object.assign(new Error("Unsupported rail/asset combination."), { status: 400 })
+  }
   const profile = await getPineTreeWalletProfile(input.merchantId)
   const sourceAddress = input.rail === "base" ? profile?.base_address : profile?.solana_address
   if (!sourceAddress) throw new Error("PineTree Wallet source address is unavailable")
@@ -274,6 +261,7 @@ export async function resolveAuthoritativeWithdrawalCapacity(input: {
       sourceAddress,
       destinationAddress: input.destinationAddress,
       requestedBaseUnits,
+      excludeWithdrawalId: input.excludeWithdrawalId,
     })
   }
   return resolveSolanaCapacity({
@@ -282,6 +270,7 @@ export async function resolveAuthoritativeWithdrawalCapacity(input: {
     sourceAddress,
     destinationAddress: input.destinationAddress,
     requestedBaseUnits,
+    excludeWithdrawalId: input.excludeWithdrawalId,
   })
 }
 
@@ -301,6 +290,7 @@ export async function preflightDynamicWithdrawal(input: {
       asset: input.asset,
       destinationAddress: input.destinationAddress,
       requestedAmount: input.amountDecimal,
+      excludeWithdrawalId: input.withdrawalId,
     })
     return evaluateWithdrawalPreflight({
       capacity,

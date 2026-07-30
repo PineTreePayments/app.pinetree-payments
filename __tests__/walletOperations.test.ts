@@ -157,6 +157,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
+      sumPendingWithdrawalOperationBaseUnits: vi.fn().mockResolvedValue(BigInt(0)),
       updateWalletOperation,
       getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
@@ -202,6 +203,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
       updateWalletOperation,
+      sumPendingWithdrawalOperationBaseUnits: vi.fn().mockResolvedValue(BigInt(0)),
       getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
       listWalletOperations: vi.fn(),
@@ -258,6 +260,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
+      sumPendingWithdrawalOperationBaseUnits: vi.fn().mockResolvedValue(BigInt(0)),
       updateWalletOperation: vi.fn().mockResolvedValue(operationRow({ status: "PROCESSING", network: "bitcoin_onchain" })),
       getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
@@ -310,6 +313,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
+      sumPendingWithdrawalOperationBaseUnits: vi.fn().mockResolvedValue(BigInt(0)),
       updateWalletOperation: vi.fn().mockResolvedValue(operationRow({ ...created, status: "PROCESSING" })),
       getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
@@ -358,6 +362,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation: vi.fn().mockResolvedValue({ operation: created, created: true }),
+      sumPendingWithdrawalOperationBaseUnits: vi.fn().mockResolvedValue(BigInt(0)),
       updateWalletOperation,
       getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),
@@ -420,6 +425,7 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
     vi.doMock("@/database/merchantWalletOperations", () => ({
       createWalletOperation,
+      sumPendingWithdrawalOperationBaseUnits: vi.fn().mockResolvedValue(BigInt(0)),
       updateWalletOperation,
       getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
       getWalletOperationForMerchant: vi.fn(),

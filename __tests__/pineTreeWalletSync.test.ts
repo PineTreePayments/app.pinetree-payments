@@ -516,8 +516,8 @@ describe("PineTree Wallet balance sync", () => {
       network: "bitcoin_lightning",
       provider: "speed",
       totalBalance: "0.02217713",
-      availableToWithdraw: "0.02217213",
-      reservedFee: "0.000005",
+      availableToWithdraw: "0.02217713",
+      reservedFee: "0",
       decimals: 8,
       source: "speed_balances",
       balance: "0.02217713",
@@ -526,7 +526,7 @@ describe("PineTree Wallet balance sync", () => {
     })
     expect(result.canonicalBalances.find((balance) => balance.key === "BTC")).toMatchObject({
       totalBalance: "0.02217713",
-      availableToWithdraw: "0.02217213",
+      availableToWithdraw: "0.02217713",
     })
     const bitcoinRail = result.rails.find((r) => r.rail === "bitcoin")
     expect(bitcoinRail?.balance).toMatchObject({ asset: "BTC", amount: "0.02217713", status: "synced" })

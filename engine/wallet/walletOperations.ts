@@ -34,6 +34,7 @@ import {
   listWalletOperations,
   upsertWalletOperationFromProviderActivity,
   updateWalletOperation,
+  sumPendingWithdrawalOperationBaseUnits,
   type MerchantWalletOperation,
   type WalletOperationStatus,
   type WalletOperationType,
@@ -828,12 +829,14 @@ async function createWalletWrite(
       canonicalWalletBalanceIdentity(balance.asset, balance.network).asset === requestedBalanceAsset
     )?.availableBaseUnits
     const speedQuote = resolution.provider === "speed" && input.asset === "SATS" && available != null
-      ? (() => {
+      ? await (async () => {
           const classified = classifyBitcoinWithdrawalDestination(input.destination)
           const method = classified.valid && classified.method === "onchain" ? "onchain" : "lightning"
+          const pendingSats = await sumPendingWithdrawalOperationBaseUnits(merchantId, "SATS", operation.id)
           return speedAmountFitsAvailable({
             amountSats: input.amountBaseUnits,
             providerAvailableSats: available,
+            pendingSats,
             method,
           })
         })()
@@ -1424,21 +1427,21 @@ export async function preflightProviderWalletWithdrawal(
   }
   const classified = classifyBitcoinWithdrawalDestination(input.destination)
   const method = classified.valid && classified.method === "onchain" ? "onchain" : "lightning"
+  const pendingSats = await sumPendingWithdrawalOperationBaseUnits(merchantId, "SATS")
   const quote = speedAmountFitsAvailable({
     amountSats: input.amountBaseUnits,
     providerAvailableSats: available,
+    pendingSats,
     method,
   })
   const preflight = evaluateWithdrawalPreflight({
     capacity: {
       rail: "bitcoin",
       asset: "BTC",
-      network: "Bitcoin / Lightning",
+      network: method === "onchain" ? "Bitcoin" : "Bitcoin Lightning",
       availableBaseUnits: quote.totalAvailableSats,
       pendingBaseUnits: quote.pendingSats,
-      spendableBaseUnits: quote.maximumSendableSats,
       feeBaseUnits: quote.estimatedFeeSats,
-      reserveBaseUnits: BigInt(0),
       feeAsset: "BTC",
       verifiedAt: new Date().toISOString(),
     },

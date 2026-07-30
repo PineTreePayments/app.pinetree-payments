@@ -16,9 +16,7 @@ function capacity(overrides: Partial<WithdrawalCapacity> = {}): WithdrawalCapaci
     network: "Solana",
     availableBaseUnits: BigInt(1_500_000),
     pendingBaseUnits: BigInt(0),
-    spendableBaseUnits: BigInt(1_400_000),
     feeBaseUnits: BigInt(5_000),
-    reserveBaseUnits: BigInt(95_000),
     feeAsset: "SOL",
     nativeAvailableBaseUnits: BigInt(1_500_000),
     nativePendingBaseUnits: BigInt(0),
@@ -36,13 +34,13 @@ describe("canonical withdrawal spendable-balance preflight", () => {
     expect(check({}, BigInt(1_500_001)).code).toBe("INSUFFICIENT_BALANCE")
   })
 
-  it("2. rejects SOL equal to gross balance when fees and reserve remain", () => {
-    expect(check({}, BigInt(1_500_000)).spendableBalance).toBe("0.0014")
+  it("2. rejects SOL equal to gross balance when the estimated fee remains", () => {
+    expect(check({}, BigInt(1_500_000)).spendableBalance).toBe("0.001495")
     expect(check({}, BigInt(1_500_000)).allowed).toBe(false)
   })
 
   it("3. allows SOL at spendable balance", () => {
-    expect(check({}, BigInt(1_400_000)).allowed).toBe(true)
+    expect(check({}, BigInt(1_495_000)).allowed).toBe(true)
   })
 
   it("4. maps Solana rent simulation text to safe insufficient-funds copy", () => {
@@ -52,15 +50,15 @@ describe("canonical withdrawal spendable-balance preflight", () => {
   })
 
   it("5. produces a blocking result before authorization", () => {
-    expect(check({}, BigInt(1_400_001))).toMatchObject({ allowed: false, title: "Insufficient balance" })
+    expect(check({}, BigInt(1_495_001))).toMatchObject({ allowed: false, title: "Insufficient balance" })
   })
 
   it("6. never includes authorization material in the preflight result", () => {
-    expect(check({}, BigInt(1_400_001))).not.toHaveProperty("payload")
+    expect(check({}, BigInt(1_495_001))).not.toHaveProperty("payload")
   })
 
   it("7. rejects USDC above its token balance", () => {
-    expect(check({ asset: "USDC", availableBaseUnits: BigInt(10_000_000), spendableBaseUnits: BigInt(10_000_000) }, BigInt(10_000_001)).code)
+    expect(check({ asset: "USDC", availableBaseUnits: BigInt(10_000_000) }, BigInt(10_000_001)).code)
       .toBe("INSUFFICIENT_BALANCE")
   })
 
@@ -68,29 +66,29 @@ describe("canonical withdrawal spendable-balance preflight", () => {
     expect(check({
       asset: "USDC",
       availableBaseUnits: BigInt(10_000_000),
-      spendableBaseUnits: BigInt(10_000_000),
-      nativeAvailableBaseUnits: BigInt(99_999),
-    }, BigInt(1_000_000))).toMatchObject({ code: "INSUFFICIENT_NETWORK_FEE_BALANCE", feeAsset: "SOL" })
+      nativeAvailableBaseUnits: BigInt(4_999),
+    }, BigInt(1_000_000))).toMatchObject({
+      code: "INSUFFICIENT_NETWORK_FEE_BALANCE",
+      feeAsset: "SOL",
+      userMessage: "You have enough USDC, but not enough SOL to cover the Solana network fee.",
+    })
   })
 
   it("9. counts destination token-account rent in the fee requirement", () => {
     const result = check({
       asset: "USDC",
       availableBaseUnits: BigInt(10_000_000),
-      spendableBaseUnits: BigInt(10_000_000),
       feeBaseUnits: BigInt(2_044_280),
-      reserveBaseUnits: BigInt(2_000_000),
-      nativeAvailableBaseUnits: BigInt(4_000_000),
+      nativeAvailableBaseUnits: BigInt(2_000_000),
     }, BigInt(1_000_000))
     expect(result.code).toBe("INSUFFICIENT_NETWORK_FEE_BALANCE")
-    expect(result.requiredFeeReserve).toBe("0.00404428")
+    expect(result.requiredFeeReserve).toBe("0.00204428")
   })
 
-  it("10. allows USDC when both token and SOL reserves are valid", () => {
+  it("10. allows USDC when both token and estimated SOL fee balances are valid", () => {
     expect(check({
       asset: "USDC",
       availableBaseUnits: BigInt(10_000_000),
-      spendableBaseUnits: BigInt(10_000_000),
       nativeAvailableBaseUnits: BigInt(5_000_000),
     }, BigInt(10_000_000)).allowed).toBe(true)
   })
@@ -108,28 +106,32 @@ describe("canonical withdrawal spendable-balance preflight", () => {
   })
 
   it("14. rejects Base USDC above its balance", () => {
-    expect(check({ rail: "base", network: "Base", asset: "USDC", feeAsset: "ETH", spendableBaseUnits: BigInt(5_000_000) }, BigInt(5_000_001)).code)
+    expect(check({ rail: "base", network: "Base", asset: "USDC", feeAsset: "ETH", availableBaseUnits: BigInt(5_000_000) }, BigInt(5_000_001)).code)
       .toBe("INSUFFICIENT_BALANCE")
   })
 
   it("15. distinguishes Base USDC with insufficient ETH gas", () => {
     expect(check({
       rail: "base", network: "Base", asset: "USDC", feeAsset: "ETH",
-      spendableBaseUnits: BigInt(5_000_000), nativeAvailableBaseUnits: BigInt(99_999),
-    }, BigInt(1_000_000)).code).toBe("INSUFFICIENT_NETWORK_FEE_BALANCE")
+      nativeAvailableBaseUnits: BigInt(4_999),
+    }, BigInt(1_000_000))).toMatchObject({
+      code: "INSUFFICIENT_NETWORK_FEE_BALANCE",
+      feeAsset: "ETH",
+      userMessage: "You have enough USDC, but not enough ETH to cover the Base network fee.",
+    })
   })
 
   it("16. allows Base USDC with sufficient token and ETH balances", () => {
     expect(check({
       rail: "base", network: "Base", asset: "USDC", feeAsset: "ETH",
-      spendableBaseUnits: BigInt(5_000_000), nativeAvailableBaseUnits: BigInt(1_000_000),
+      availableBaseUnits: BigInt(5_000_000), nativeAvailableBaseUnits: BigInt(1_000_000_000_000_000),
     }, BigInt(5_000_000)).allowed).toBe(true)
   })
 
   it("17. rejects Bitcoin above provider spendable balance", () => {
     expect(check({
       rail: "bitcoin", network: "Bitcoin / Lightning", asset: "BTC", feeAsset: "BTC",
-      availableBaseUnits: BigInt(100_000), spendableBaseUnits: BigInt(99_500), feeBaseUnits: BigInt(500), reserveBaseUnits: BigInt(0),
+      availableBaseUnits: BigInt(100_000), feeBaseUnits: BigInt(500),
     }, BigInt(99_501)).allowed).toBe(false)
   })
 
@@ -141,25 +143,25 @@ describe("canonical withdrawal spendable-balance preflight", () => {
   it("19. rejects Bitcoin when the fee makes requested amount unspendable", () => {
     expect(check({
       rail: "bitcoin", network: "Bitcoin / Lightning", asset: "BTC", feeAsset: "BTC",
-      availableBaseUnits: BigInt(3_000), spendableBaseUnits: BigInt(2_500), feeBaseUnits: BigInt(500), reserveBaseUnits: BigInt(0),
+      availableBaseUnits: BigInt(3_000), feeBaseUnits: BigInt(500),
     }, BigInt(2_501)).allowed).toBe(false)
   })
 
   it("20. allows a valid Bitcoin withdrawal", () => {
     expect(check({
       rail: "bitcoin", network: "Bitcoin / Lightning", asset: "BTC", feeAsset: "BTC",
-      availableBaseUnits: BigInt(3_000), spendableBaseUnits: BigInt(2_500), feeBaseUnits: BigInt(500), reserveBaseUnits: BigInt(0),
+      availableBaseUnits: BigInt(3_000), feeBaseUnits: BigInt(500),
     }, BigInt(2_500)).allowed).toBe(true)
   })
 
   it("21. exposes spendable rather than gross balance as Max", () => {
-    expect(check({}, BigInt(1)).spendableBalance).toBe("0.0014")
+    expect(check({}, BigInt(1)).spendableBalance).toBe("0.001495")
     expect(check({}, BigInt(1)).availableBalance).toBe("0.0015")
   })
 
   it("22. rejects exactly one base unit above spendable", () => {
-    expect(check({}, BigInt(1_400_001)).allowed).toBe(false)
-    expect(check({}, BigInt(1_400_000)).allowed).toBe(true)
+    expect(check({}, BigInt(1_495_001)).allowed).toBe(false)
+    expect(check({}, BigInt(1_495_000)).allowed).toBe(true)
   })
 
   it("23. returns a safe ambiguous result when live balance is unavailable", () => {
@@ -173,12 +175,61 @@ describe("canonical withdrawal spendable-balance preflight", () => {
   })
 
   it("25-30. returns only normalized, editable preflight metadata", () => {
-    const result = check({}, BigInt(1_400_001))
-    expect(result).toMatchObject({ code: "INSUFFICIENT_BALANCE", allowed: false, requestedAmount: "0.001400001" })
+    const result = check({}, BigInt(1_495_001))
+    expect(result).toMatchObject({ code: "INSUFFICIENT_BALANCE", allowed: false, requestedAmount: "0.001495001" })
     expect(result).not.toHaveProperty("txHash")
     expect(result).not.toHaveProperty("providerReference")
     expect(result).not.toHaveProperty("ledgerEntry")
     expect(result).not.toHaveProperty("reconciliation")
     expect(result).not.toHaveProperty("rawError")
+  })
+
+  it("31. identifies another pending token withdrawal as the reason availability fell", () => {
+    expect(check({
+      asset: "USDC",
+      availableBaseUnits: BigInt(540_000),
+      pendingBaseUnits: BigInt(100_000),
+      nativeAvailableBaseUnits: BigInt(6_767_866),
+    }, BigInt(540_000))).toMatchObject({
+      code: "INSUFFICIENT_BALANCE",
+      reason: "pending_balance",
+      spendableBalance: "0.44",
+      userMessage: "Pending USDC withdrawals reduce the spendable balance below this amount.",
+    })
+  })
+
+  it("32. keeps a true token shortage distinct from pending availability", () => {
+    expect(check({
+      asset: "USDC",
+      availableBaseUnits: BigInt(540_000),
+      pendingBaseUnits: BigInt(100_000),
+      nativeAvailableBaseUnits: BigInt(6_767_866),
+    }, BigInt(600_000))).toMatchObject({
+      code: "INSUFFICIENT_BALANCE",
+      reason: "asset_balance",
+      userMessage: "You do not have enough USDC for this withdrawal.",
+    })
+  })
+
+  it("33. rejects a stale native Max when the refreshed fee estimate rises", () => {
+    const maxAtQuoteTime = check({
+      rail: "bitcoin",
+      network: "Bitcoin",
+      asset: "BTC",
+      feeAsset: "BTC",
+      availableBaseUnits: BigInt(3_000),
+      feeBaseUnits: BigInt(500),
+    }, BigInt(2_500))
+    const refreshedBeforeDispatch = check({
+      rail: "bitcoin",
+      network: "Bitcoin",
+      asset: "BTC",
+      feeAsset: "BTC",
+      availableBaseUnits: BigInt(3_000),
+      feeBaseUnits: BigInt(501),
+    }, BigInt(2_500))
+
+    expect(maxAtQuoteTime.allowed).toBe(true)
+    expect(refreshedBeforeDispatch).toMatchObject({ allowed: false, spendableBalance: "0.00002499" })
   })
 })

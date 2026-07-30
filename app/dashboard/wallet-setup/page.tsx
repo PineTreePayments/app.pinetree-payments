@@ -114,9 +114,9 @@ type WithdrawalLifecycleState =
   | "FAILED"
   | "CANCELLED"
 
-type WithdrawalPreflightFailure = {
-  allowed: false
-  code: "INSUFFICIENT_BALANCE" | "INSUFFICIENT_NETWORK_FEE_BALANCE" | "BALANCE_VERIFICATION_UNAVAILABLE" | "MINIMUM_AMOUNT"
+type WithdrawalPreflightView = {
+  allowed: boolean
+  code: "INSUFFICIENT_BALANCE" | "INSUFFICIENT_NETWORK_FEE_BALANCE" | "BALANCE_VERIFICATION_UNAVAILABLE" | "MINIMUM_AMOUNT" | null
   title: string
   userMessage: string
   asset: WithdrawalAsset
@@ -126,6 +126,8 @@ type WithdrawalPreflightFailure = {
   requiredFeeReserve: string
   feeAsset: "ETH" | "SOL" | "BTC"
 }
+
+type WithdrawalPreflightFailure = WithdrawalPreflightView & { allowed: false }
 
 type WithdrawalReviewResponse = {
   request: {
@@ -149,6 +151,7 @@ type WithdrawalReviewResponse = {
     diagnostics?: WithdrawalDiagnostics
   }
   canSubmit: boolean
+  preflight?: WithdrawalPreflightView
 }
 
 type WithdrawalSubmitResponse = {
@@ -1462,10 +1465,16 @@ function formatCryptoAmount(value: number | string | null, asset: string) {
 }
 
 function btcDecimalToSats(value: string): string | null {
+  return withdrawalDecimalToBaseUnits(value, "BTC")?.toString() ?? null
+}
+
+function withdrawalDecimalToBaseUnits(value: string, asset: WithdrawalAsset): bigint | null {
   const normalized = value.trim()
-  if (!/^\d+(?:\.\d{1,8})?$/.test(normalized)) return null
+  const decimals = asset === "ETH" ? 18 : asset === "SOL" ? 9 : asset === "BTC" ? 8 : 6
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return null
   const [whole, fraction = ""] = normalized.split(".")
-  return (BigInt(whole) * BigInt(100_000_000) + BigInt(fraction.padEnd(8, "0"))).toString()
+  if (fraction.length > decimals) return null
+  return BigInt(whole) * (BigInt(10) ** BigInt(decimals)) + BigInt(fraction.padEnd(decimals, "0") || "0")
 }
 
 function railDisplayName(rail: WithdrawalRail) {
@@ -2892,13 +2901,13 @@ function WithdrawalFormShell({
   const amountTrimmed = amountDecimal.trim()
   const selectedBalanceAmount = selectedBalance?.availableToWithdraw ?? (selectedBalance?.balance != null ? String(selectedBalance.balance) : null)
   const selectedBalanceKnown = selectedBalanceAmount !== null && selectedBalance?.status === "synced"
-  const selectedBalanceNumeric = selectedBalanceAmount === null ? null : Number(selectedBalanceAmount)
-  const selectedBalanceZero = selectedBalanceKnown && selectedBalanceNumeric !== null && selectedBalanceNumeric <= 0
-  const amountValue = Number(amountTrimmed)
+  const selectedBalanceBaseUnits = selectedBalanceAmount === null ? null : withdrawalDecimalToBaseUnits(selectedBalanceAmount, asset)
+  const selectedBalanceZero = selectedBalanceKnown && selectedBalanceBaseUnits !== null && selectedBalanceBaseUnits <= BigInt(0)
+  const amountBaseUnits = withdrawalDecimalToBaseUnits(amountTrimmed, asset)
   const missingAmount = amountTrimmed.length === 0
-  const amountParseError = amountTrimmed.length > 0 && !Number.isFinite(amountValue)
-  const invalidAmount = amountTrimmed.length > 0 && Number.isFinite(amountValue) && !(amountValue > 0)
-  const amountExceedsBalance = selectedBalanceKnown && selectedBalanceNumeric !== null && amountValue > selectedBalanceNumeric
+  const amountParseError = amountTrimmed.length > 0 && amountBaseUnits === null
+  const invalidAmount = amountBaseUnits !== null && amountBaseUnits <= BigInt(0)
+  const amountExceedsBalance = selectedBalanceKnown && selectedBalanceBaseUnits !== null && amountBaseUnits !== null && amountBaseUnits > selectedBalanceBaseUnits
   const missingDestination = destinationAddress.trim().length === 0
   const noWithdrawableAssets = assetOptions.length === 0
   const bitcoinBalanceUnavailable = rail === "bitcoin" && !selectedBalanceKnown
@@ -2937,17 +2946,21 @@ function WithdrawalFormShell({
   }
 
   if (screen === "review" && review) {
+    const reviewNetwork = review.review.rail === "bitcoin"
+      ? bitcoinTransferType === "lightning" ? "Bitcoin Lightning" : "Bitcoin Network"
+      : railDisplayName(review.review.rail)
     return (
       <WithdrawalReviewCard
         amount={review.review.amountDecimal}
         asset={review.review.asset}
-        network={railDisplayName(review.review.rail)}
+        network={reviewNetwork}
         destination={review.review.destinationAddress}
         destinationLabel={selectedDestinationLabel}
         details={[
           { label: "Asset", value: review.review.asset },
-          { label: "Network", value: railDisplayName(review.review.rail) },
-          { label: "Estimated network fee", value: "Network fee may apply" },
+          { label: "Network", value: reviewNetwork },
+          { label: "Spendable", value: review.preflight ? `${review.preflight.spendableBalance} ${review.preflight.asset}` : "Verified at review" },
+          { label: "Estimated network fee", value: review.preflight ? `${review.preflight.requiredFeeReserve} ${review.preflight.feeAsset}` : "Verified at submission" },
           { label: "PineTree wallet/source", value: diagnostics.savedSourceAddress ? `…${diagnostics.savedSourceAddress.slice(-8)}` : "Provider account", wide: true, mono: true },
         ]}
         disabled={!review.canSubmit}
@@ -3157,7 +3170,7 @@ function WithdrawalFormShell({
         <div className="flex items-center justify-between gap-2 text-xs text-gray-500">
           <span>
             {selectedBalanceKnown
-              ? `Available: ${formattedAvailable} ${asset}`
+              ? `Balance: ${formattedAvailable} ${asset}`
               : "Balance indexing pending"}
             {selectedBalanceKnown && selectedBalance?.usdValue !== null && selectedBalance?.usdValue !== undefined
               ? ` - ~ ${formatUsd(selectedBalance.usdValue)}`
@@ -3177,7 +3190,7 @@ function WithdrawalFormShell({
                 ? "USDC transfers on Base require a small amount of ETH on Base for network fees."
                 : asset === "USDC" && rail === "solana"
                   ? "USDC transfers on Solana require a small amount of SOL for network fees."
-                  : "PineTree may reserve a small amount of the network's native asset to cover future transaction fees. Your maximum withdrawal may be slightly lower than your total balance."}
+                  : "Max subtracts the current estimated network fee from this native-asset balance."}
           </p>
         )}
       </div>
@@ -3196,13 +3209,17 @@ function WithdrawalFormShell({
               <dd className="text-right font-semibold tabular-nums">{preflightFailure.requestedAmount} {preflightFailure.asset}</dd>
               {preflightFailure.requiredFeeReserve ? (
                 <>
-                  <dt className="text-red-700">Fee and reserve</dt>
+                  <dt className="text-red-700">Estimated network fee</dt>
                   <dd className="text-right font-semibold tabular-nums">{preflightFailure.requiredFeeReserve} {preflightFailure.feeAsset}</dd>
                 </>
               ) : null}
             </dl>
           ) : null}
-          <p className="mt-2 text-xs font-medium text-red-800">Reduce the amount and try again.</p>
+          <p className="mt-2 text-xs font-medium text-red-800">
+            {preflightFailure.code === "INSUFFICIENT_NETWORK_FEE_BALANCE"
+              ? `Add ${preflightFailure.feeAsset} on ${railDisplayName(rail)} and try again.`
+              : "Reduce the amount and try again."}
+          </p>
         </div>
       ) : blockingMessage ? (
         <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs font-semibold leading-5 text-blue-800">
@@ -9855,9 +9872,9 @@ function PineTreeWalletRuntime() {
       setWithdrawalError("Enter an amount to review.")
       return
     }
-    const amountNumber = Number(amount)
+    const amountBaseUnits = withdrawalDecimalToBaseUnits(amount, withdrawalAsset)
     const amountSats = withdrawalRail === "bitcoin" ? btcDecimalToSats(amount) : null
-    if (withdrawalRail === "bitcoin" ? !amountSats || BigInt(amountSats) <= BigInt(0) : !(amountNumber > 0)) {
+    if (amountBaseUnits === null || amountBaseUnits <= BigInt(0)) {
       setWithdrawalError("Enter an amount greater than 0.")
       return
     }
@@ -9865,19 +9882,12 @@ function PineTreeWalletRuntime() {
       selectedWithdrawalBalance?.balance != null ? String(selectedWithdrawalBalance.balance) : null
     )
     if (selectedWithdrawalBalance?.status === "synced" && selectedAvailableToWithdraw !== null) {
-      const availableSats = withdrawalRail === "bitcoin"
-        ? btcDecimalToSats(selectedAvailableToWithdraw)
-        : null
-      const availableBalance = Number(selectedAvailableToWithdraw)
-      if (withdrawalRail === "bitcoin" ? !availableSats || BigInt(availableSats) <= BigInt(0) : availableBalance <= 0) {
+      const availableBaseUnits = withdrawalDecimalToBaseUnits(selectedAvailableToWithdraw, withdrawalAsset)
+      if (availableBaseUnits === null || availableBaseUnits <= BigInt(0)) {
         setWithdrawalError("No available balance for this asset.")
         return
       }
-      if (
-        withdrawalRail === "bitcoin"
-          ? Boolean(amountSats && availableSats && BigInt(amountSats) > BigInt(availableSats))
-          : amountNumber > availableBalance
-      ) {
+      if (amountBaseUnits > availableBaseUnits) {
         setWithdrawalError("Amount exceeds available balance.")
         return
       }
@@ -9895,11 +9905,16 @@ function PineTreeWalletRuntime() {
       return
     }
     if (withdrawalRail === "bitcoin") {
+      let verifiedEstimate: { maxDecimal: string; feeEstimateDecimal: string; feeAsset: "BTC" } | null = null
       try {
         const maxRes = await fetch("/api/wallets/pinetree-wallet/withdrawals/max-estimate", {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ rail: "bitcoin", asset: "BTC" }),
+          body: JSON.stringify({
+            rail: "bitcoin",
+            asset: "BTC",
+            bitcoin_method: withdrawalBitcoinTransferType,
+          }),
         })
         const maxJson = await maxRes.json()
         const maxDecimal = maxJson?.estimate?.maxDecimal != null ? String(maxJson.estimate.maxDecimal) : ""
@@ -9907,6 +9922,11 @@ function PineTreeWalletRuntime() {
         if (!maxRes.ok || maxSats === null) {
           setWithdrawalError("Available-to-withdraw could not be verified. Refresh before withdrawing.")
           return
+        }
+        verifiedEstimate = {
+          maxDecimal,
+          feeEstimateDecimal: String(maxJson.estimate.feeEstimateDecimal || "0"),
+          feeAsset: "BTC",
         }
         if (amountSats && BigInt(amountSats) > BigInt(maxSats)) {
           const warning = maxJson?.estimate?.warning || "This Max leaves room for Speed provider/network fees."
@@ -9946,6 +9966,20 @@ function PineTreeWalletRuntime() {
             : "Review this Lightning withdrawal.",
         },
         canSubmit: true,
+        ...(verifiedEstimate ? {
+          preflight: {
+            allowed: true,
+            code: null,
+            title: "Balance verified",
+            userMessage: "The wallet has enough spendable balance for this withdrawal.",
+            asset: "BTC",
+            requestedAmount: amount,
+            availableBalance: selectedAvailableToWithdraw || "",
+            spendableBalance: verifiedEstimate.maxDecimal,
+            requiredFeeReserve: verifiedEstimate.feeEstimateDecimal,
+            feeAsset: verifiedEstimate.feeAsset,
+          },
+        } : {}),
       })
       setWithdrawalError("")
       setWithdrawalScreen("review")
@@ -10033,7 +10067,9 @@ function PineTreeWalletRuntime() {
             reason: "server_rejected",
             httpStatus: res.status,
           })
-          if ("preflight" in json && json.preflight) setWithdrawalPreflightFailure(json.preflight)
+          if ("preflight" in json && json.preflight && !json.preflight.allowed) {
+            setWithdrawalPreflightFailure(json.preflight as WithdrawalPreflightFailure)
+          }
           setWithdrawalError(
             sanitizeWithdrawalErrorForMerchant(
               "error" in json ? json.error : undefined,
@@ -10102,7 +10138,7 @@ function PineTreeWalletRuntime() {
   /**
    * The true spendable amount, not just the displayed balance: accounts for
    * confirmed balance, pending outgoing amounts, provider/RPC-estimated
-   * network fees, and a configured native-gas reserve (see
+   * network fees, with no unrelated fixed native-gas reserve (see
    * engine/withdrawals/withdrawalFeeEstimate.ts). For token withdrawals
    * (USDC), never subtracts gas from the token balance itself - blocks with
    * a clear message instead if the native asset can't cover the fee.
@@ -10116,8 +10152,12 @@ function PineTreeWalletRuntime() {
       !token ||
       selectedWithdrawalBalance?.status !== "synced" ||
       selectedAvailableToWithdraw === null ||
-      Number(selectedAvailableToWithdraw) <= 0
+      (withdrawalDecimalToBaseUnits(selectedAvailableToWithdraw, withdrawalAsset) ?? BigInt(0)) <= BigInt(0)
     ) {
+      return
+    }
+    if (withdrawalRail === "solana" && withdrawalAsset === "USDC" && !withdrawalDestination.trim()) {
+      setMaxWarning("Enter the Solana destination before calculating Max so token-account rent can be included.")
       return
     }
     setMaxWarning("")
@@ -10126,7 +10166,12 @@ function PineTreeWalletRuntime() {
       const res = await fetch("/api/wallets/pinetree-wallet/withdrawals/max-estimate", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ rail: withdrawalRail, asset: withdrawalAsset }),
+        body: JSON.stringify({
+          rail: withdrawalRail,
+          asset: withdrawalAsset,
+          destination_address: withdrawalDestination.trim() || undefined,
+          bitcoin_method: withdrawalRail === "bitcoin" ? withdrawalBitcoinTransferType : undefined,
+        }),
       })
       const json = await res.json()
       if (!res.ok || !json?.estimate) {
@@ -10589,7 +10634,7 @@ function PineTreeWalletRuntime() {
         })
         if (!prepareRes.ok) {
           const preflight = "preflight" in prepared ? prepared.preflight : undefined
-          if (preflight && ["INSUFFICIENT_BALANCE", "INSUFFICIENT_NETWORK_FEE_BALANCE", "BALANCE_VERIFICATION_UNAVAILABLE"].includes(preflight.code)) {
+          if (preflight?.code && ["INSUFFICIENT_BALANCE", "INSUFFICIENT_NETWORK_FEE_BALANCE", "BALANCE_VERIFICATION_UNAVAILABLE"].includes(preflight.code)) {
             setWithdrawalReview(null)
             setWithdrawalPreflightFailure(preflight)
             setWithdrawalError(preflight.userMessage)

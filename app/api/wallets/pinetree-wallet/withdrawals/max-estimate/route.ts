@@ -4,6 +4,7 @@ import { normalizeWithdrawalRail, normalizeWithdrawalAsset } from "@/engine/with
 import { getRouteErrorStatus, requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import { presentWithdrawalError } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import type { WalletApiErrorCode } from "@/engine/wallet/walletErrors"
+import { isSupportedWithdrawalPair } from "@/engine/withdrawals/withdrawalAccounting"
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,11 +13,32 @@ export async function POST(req: NextRequest) {
     const rail = normalizeWithdrawalRail(String(body.rail || ""))
     const asset = normalizeWithdrawalAsset(String(body.asset || ""))
 
-    if (!rail || !asset) {
+    if (!rail || !asset || !isSupportedWithdrawalPair(rail, asset)) {
       return NextResponse.json({ error: "Unsupported rail or asset." }, { status: 400 })
     }
 
-    const estimate = await estimateMaxWithdrawalAmount(merchantId, rail, asset)
+    const destinationAddress = typeof body.destination_address === "string" ? body.destination_address.trim() : ""
+    if (rail === "solana" && asset === "USDC" && !destinationAddress) {
+      return NextResponse.json(
+        { error: "A Solana destination is required to estimate token-account rent." },
+        { status: 400 }
+      )
+    }
+    if (
+      rail === "bitcoin" &&
+      body.bitcoin_method !== undefined &&
+      body.bitcoin_method !== "onchain" &&
+      body.bitcoin_method !== "lightning"
+    ) {
+      return NextResponse.json({ error: "Unsupported Bitcoin withdrawal method." }, { status: 400 })
+    }
+    const bitcoinMethod = body.bitcoin_method === "onchain" || body.bitcoin_method === "lightning"
+      ? body.bitcoin_method
+      : undefined
+    const estimate = await estimateMaxWithdrawalAmount(merchantId, rail, asset, {
+      ...(destinationAddress ? { destinationAddress } : {}),
+      ...(bitcoinMethod ? { bitcoinMethod } : {}),
+    })
     return NextResponse.json({ estimate })
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error

@@ -1,8 +1,9 @@
 import type { WalletWithdrawalAsset, WalletWithdrawalRail } from "@/database/walletWithdrawalRequests"
-import { clampNonNegative, fromBaseUnits } from "@/engine/withdrawals/decimalUnits"
+import { fromBaseUnits } from "@/engine/withdrawals/decimalUnits"
+import { calculateWithdrawalAccounting } from "@/engine/withdrawals/withdrawalAccounting"
 import type { WalletApiErrorCode } from "@/engine/wallet/walletErrors"
 
-export type WithdrawalPreflightFailureReason = "asset_balance" | "native_fee_balance" | "balance_unavailable" | "minimum_amount"
+export type WithdrawalPreflightFailureReason = "asset_balance" | "pending_balance" | "native_fee_balance" | "balance_unavailable" | "minimum_amount"
 
 export type WithdrawalPreflightResult = {
   allowed: boolean
@@ -12,7 +13,7 @@ export type WithdrawalPreflightResult = {
   reason: WithdrawalPreflightFailureReason | null
   rail: WalletWithdrawalRail
   asset: WalletWithdrawalAsset
-  network: "Base" | "Solana" | "Bitcoin / Lightning"
+  network: "Base" | "Solana" | "Bitcoin" | "Bitcoin Lightning" | "Bitcoin / Lightning"
   requestedAmount: string
   availableBalance: string
   spendableBalance: string
@@ -28,9 +29,7 @@ export type WithdrawalCapacity = {
   network: WithdrawalPreflightResult["network"]
   availableBaseUnits: bigint
   pendingBaseUnits: bigint
-  spendableBaseUnits: bigint
   feeBaseUnits: bigint
-  reserveBaseUnits: bigint
   feeAsset: "ETH" | "SOL" | "BTC"
   nativeAvailableBaseUnits?: bigint
   nativePendingBaseUnits?: bigint
@@ -60,11 +59,14 @@ export function evaluateWithdrawalPreflight(input: {
   const { capacity } = input
   const requested = input.requestedBaseUnits
   const minimum = input.minimumBaseUnits ?? BigInt(1)
-  const requiredNative = capacity.feeBaseUnits + capacity.reserveBaseUnits
-  const nativeSpendable = clampNonNegative(
-    (capacity.nativeAvailableBaseUnits ?? capacity.availableBaseUnits) -
-      (capacity.nativePendingBaseUnits ?? BigInt(0))
-  )
+  const accounting = calculateWithdrawalAccounting({
+    assetAvailableBaseUnits: capacity.availableBaseUnits,
+    assetPendingBaseUnits: capacity.pendingBaseUnits,
+    nativeAvailableBaseUnits: capacity.nativeAvailableBaseUnits,
+    nativePendingBaseUnits: capacity.nativePendingBaseUnits,
+    estimatedNetworkFeeBaseUnits: capacity.feeBaseUnits,
+    assetIsNative: capacity.asset === capacity.feeAsset,
+  })
   let code: WalletApiErrorCode | null = null
   let reason: WithdrawalPreflightFailureReason | null = null
   let title = "Balance verified"
@@ -75,14 +77,20 @@ export function evaluateWithdrawalPreflight(input: {
     reason = "minimum_amount"
     title = "Amount is below the minimum"
     userMessage = `Enter at least ${fromBaseUnits(minimum, capacity.asset)} ${capacity.asset}.`
-  } else if (requested > capacity.spendableBaseUnits) {
+  } else if (requested > accounting.spendableBaseUnits) {
     code = "INSUFFICIENT_BALANCE"
-    reason = "asset_balance"
+    const pendingReducesRequestedAvailability =
+      capacity.pendingBaseUnits > BigInt(0) &&
+      requested <= capacity.availableBaseUnits &&
+      requested > accounting.assetAvailableAfterPendingBaseUnits
+    reason = pendingReducesRequestedAvailability ? "pending_balance" : "asset_balance"
     title = "Insufficient balance"
-    userMessage = capacity.asset === capacity.feeAsset
-      ? `You do not have enough ${capacity.asset} to withdraw this amount and cover the network fee.`
-      : `You do not have enough ${capacity.asset} for this withdrawal.`
-  } else if (capacity.asset !== capacity.feeAsset && nativeSpendable < requiredNative) {
+    userMessage = pendingReducesRequestedAvailability
+      ? `Pending ${capacity.asset} withdrawals reduce the spendable balance below this amount.`
+      : capacity.asset === capacity.feeAsset
+        ? `You do not have enough ${capacity.asset} to withdraw this amount and cover the network fee.`
+        : `You do not have enough ${capacity.asset} for this withdrawal.`
+  } else if (capacity.asset !== capacity.feeAsset && !accounting.hasSufficientNativeFeeBalance) {
     code = "INSUFFICIENT_NETWORK_FEE_BALANCE"
     reason = "native_fee_balance"
     title = "Insufficient network fee balance"
@@ -100,8 +108,8 @@ export function evaluateWithdrawalPreflight(input: {
     network: capacity.network,
     requestedAmount: fromBaseUnits(requested, capacity.asset),
     availableBalance: fromBaseUnits(capacity.availableBaseUnits, capacity.asset),
-    spendableBalance: fromBaseUnits(capacity.spendableBaseUnits, capacity.asset),
-    requiredFeeReserve: fromBaseUnits(requiredNative, capacity.feeAsset),
+    spendableBalance: fromBaseUnits(accounting.spendableBaseUnits, capacity.asset),
+    requiredFeeReserve: fromBaseUnits(accounting.requiredNativeBaseUnits, capacity.feeAsset),
     feeAsset: capacity.feeAsset,
     ...(capacity.nativeAvailableBaseUnits !== undefined
       ? { nativeAvailableBalance: fromBaseUnits(capacity.nativeAvailableBaseUnits, capacity.feeAsset) }

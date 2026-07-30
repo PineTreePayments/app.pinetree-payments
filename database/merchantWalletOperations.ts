@@ -435,21 +435,28 @@ export async function updateWalletOperationCanonicalFields(
 }
 
 /**
- * Sums amount_base_units for non-terminal WITHDRAWAL operations of a given
- * asset - used by the Max-withdrawal calculation so an in-flight Bitcoin
- * withdrawal's amount is never double-counted as still-spendable.
+ * Sums local WITHDRAWAL reservations not yet represented by a provider
+ * response. Speed's balance endpoint is already a real-time available
+ * balance, so accepted/PROCESSING operations must not be subtracted again.
+ * A CREATED operation remains reserved through the uncertain dispatch window
+ * until a provider response is observed.
  */
 export async function sumPendingWithdrawalOperationBaseUnits(
   merchantId: string,
-  asset: string
+  asset: string,
+  excludeOperationId?: string | null
 ): Promise<bigint> {
-  const { data, error } = await supabase
+  let query = supabase
     .from(TABLE)
     .select("amount_base_units")
     .eq("merchant_id", merchantId)
     .eq("asset", asset)
     .eq("operation_type", "WITHDRAWAL")
-    .in("status", ["CREATED", "PENDING", "PROCESSING"])
+    .eq("status", "CREATED")
+    .or("provider_response_received.is.null,provider_response_received.eq.false")
+
+  if (excludeOperationId) query = query.neq("id", excludeOperationId)
+  const { data, error } = await query
 
   if (error) throw new Error(`Failed to sum pending wallet operations: ${error.message}`)
   return (data || []).reduce((total, row) => total + BigInt(row.amount_base_units || "0"), BigInt(0))

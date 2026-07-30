@@ -367,7 +367,8 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(reviewScreen).toContain("asset={review.review.asset}")
     expect(reviewScreen).toContain("destination={review.review.destinationAddress}")
     expect(reviewScreen).toContain("Estimated network fee")
-    expect(reviewScreen).toContain("Network fee may apply")
+    expect(reviewScreen).toContain("review.preflight.requiredFeeReserve")
+    expect(reviewScreen).toContain("review.preflight.spendableBalance")
   })
 
   it("review screen has one shared Confirm withdrawal action and an edit action", () => {

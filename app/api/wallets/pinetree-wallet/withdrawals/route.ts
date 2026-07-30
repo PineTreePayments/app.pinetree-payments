@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
           request: canonical.request,
           review: canonical.review,
           canSubmit: canonical.canSubmit,
+          preflight: canonical.preflight,
         })
       }
     }

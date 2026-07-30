@@ -1,12 +1,13 @@
 /**
  * Authoritative, spendable Max calculation shared with withdrawal preflight.
  * All arithmetic stays in integer base units; displayed decimals are derived
- * only after fees, pending debits, and reserves have been subtracted.
+ * only after pending debits and the estimated network fee are subtracted.
  */
 
 import { sumPendingWithdrawalOperationBaseUnits } from "@/database/merchantWalletOperations"
 import type { WalletWithdrawalAsset, WalletWithdrawalRail } from "@/database/walletWithdrawalRequests"
-import { clampNonNegative, fromBaseUnits } from "@/engine/withdrawals/decimalUnits"
+import { fromBaseUnits } from "@/engine/withdrawals/decimalUnits"
+import { calculateWithdrawalAccounting } from "@/engine/withdrawals/withdrawalAccounting"
 import { calculateSpeedMaximumSendableSats } from "@/engine/withdrawals/speedWithdrawalQuote"
 import { resolveAuthoritativeWithdrawalCapacity } from "@/engine/withdrawals/withdrawalPreflight"
 import type { WithdrawalCapacity } from "@/engine/withdrawals/withdrawalPreflightResult"
@@ -23,7 +24,8 @@ export type MaxWithdrawalEstimate = {
 export async function estimateMaxWithdrawalAmount(
   merchantId: string,
   rail: WalletWithdrawalRail,
-  asset: WalletWithdrawalAsset
+  asset: WalletWithdrawalAsset,
+  options?: { destinationAddress?: string; bitcoinMethod?: "lightning" | "onchain" }
 ): Promise<MaxWithdrawalEstimate> {
   if (rail === "bitcoin") {
     const balances = await getAuthoritativeWalletBalances(merchantId)
@@ -40,7 +42,7 @@ export async function estimateMaxWithdrawalAmount(
     const quote = calculateSpeedMaximumSendableSats({
       providerAvailableSats,
       pendingSats,
-      method: "lightning",
+      method: options?.bitcoinMethod ?? "lightning",
     })
     console.info("[pinetree-withdrawals] SPEED_MAX_CALCULATED", {
       merchantId,
@@ -54,7 +56,7 @@ export async function estimateMaxWithdrawalAmount(
       maxDecimal: fromBaseUnits(quote.maximumSendableSats, "BTC"),
       feeEstimateDecimal: fromBaseUnits(quote.estimatedFeeSats, "BTC"),
       feeAsset: "BTC",
-      warning: "Bitcoin's exact network fee is set at send time - this Max leaves a small buffer as an estimate.",
+      warning: "Bitcoin's exact network fee is set at send time; Max uses the same fee estimate enforced at submission.",
     }
   }
 
@@ -64,6 +66,7 @@ export async function estimateMaxWithdrawalAmount(
       merchantId,
       rail,
       asset: asset as "ETH" | "USDC" | "SOL",
+      destinationAddress: options?.destinationAddress,
     })
   } catch {
     return {
@@ -75,23 +78,26 @@ export async function estimateMaxWithdrawalAmount(
     }
   }
 
-  const nativeAvailable = clampNonNegative(
-    (capacity.nativeAvailableBaseUnits ?? capacity.availableBaseUnits) -
-      (capacity.nativePendingBaseUnits ?? BigInt(0))
-  )
-  const requiredNative = capacity.feeBaseUnits + capacity.reserveBaseUnits
-  if (capacity.asset !== capacity.feeAsset && nativeAvailable < requiredNative) {
+  const accounting = calculateWithdrawalAccounting({
+    assetAvailableBaseUnits: capacity.availableBaseUnits,
+    assetPendingBaseUnits: capacity.pendingBaseUnits,
+    nativeAvailableBaseUnits: capacity.nativeAvailableBaseUnits,
+    nativePendingBaseUnits: capacity.nativePendingBaseUnits,
+    estimatedNetworkFeeBaseUnits: capacity.feeBaseUnits,
+    assetIsNative: capacity.asset === capacity.feeAsset,
+  })
+  if (capacity.asset !== capacity.feeAsset && !accounting.hasSufficientNativeFeeBalance) {
     return {
       maxDecimal: "0",
-      feeEstimateDecimal: fromBaseUnits(requiredNative, capacity.feeAsset),
+      feeEstimateDecimal: fromBaseUnits(accounting.requiredNativeBaseUnits, capacity.feeAsset),
       feeAsset: capacity.feeAsset,
       blocked: true,
       warning: `This wallet does not currently have enough ${capacity.feeAsset} on ${capacity.network} to cover the network fee for this ${asset} withdrawal.`,
     }
   }
   return {
-    maxDecimal: fromBaseUnits(capacity.spendableBaseUnits, capacity.asset),
-    feeEstimateDecimal: fromBaseUnits(requiredNative, capacity.feeAsset),
+    maxDecimal: fromBaseUnits(accounting.maximumWithdrawalBaseUnits, capacity.asset),
+    feeEstimateDecimal: fromBaseUnits(accounting.requiredNativeBaseUnits, capacity.feeAsset),
     feeAsset: capacity.feeAsset,
   }
 }

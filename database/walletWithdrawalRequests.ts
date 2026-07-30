@@ -555,9 +555,10 @@ export async function updateWalletWithdrawalRequestCanonicalFields(
 export async function sumPendingWalletWithdrawalAmount(
   merchantId: string,
   rail: WalletWithdrawalRail,
-  asset: WalletWithdrawalAsset
-): Promise<number> {
-  const { data, error } = await db
+  asset: WalletWithdrawalAsset,
+  excludeWithdrawalId?: string | null
+): Promise<string> {
+  let query = db
     .from(TABLE)
     .select("amount_decimal")
     .eq("merchant_id", merchantId)
@@ -565,8 +566,21 @@ export async function sumPendingWalletWithdrawalAmount(
     .eq("asset", asset)
     .in("status", ["pending", "processing"])
 
+  if (excludeWithdrawalId) query = query.neq("id", excludeWithdrawalId)
+  const { data, error } = await query
+
   if (error) throw new Error(`Failed to sum pending wallet withdrawals: ${error.message}`)
-  return (data || []).reduce((total, row) => total + (Number(row.amount_decimal) || 0), 0)
+  const decimals = asset === "ETH" ? 18 : asset === "SOL" ? 9 : asset === "BTC" ? 8 : 6
+  const scale = BigInt(10) ** BigInt(decimals)
+  const totalBaseUnits = (data || []).reduce((total, row) => {
+    const value = String(row.amount_decimal ?? "0").trim()
+    if (!/^\d+(?:\.\d+)?$/.test(value)) return total
+    const [whole, fraction = ""] = value.split(".")
+    return total + BigInt(whole) * scale + BigInt(fraction.slice(0, decimals).padEnd(decimals, "0") || "0")
+  }, BigInt(0))
+  const whole = totalBaseUnits / scale
+  const fraction = (totalBaseUnits % scale).toString().padStart(decimals, "0").replace(/0+$/, "")
+  return fraction ? `${whole}.${fraction}` : whole.toString()
 }
 
 export async function findWalletWithdrawalRequestByIdempotencyKey(

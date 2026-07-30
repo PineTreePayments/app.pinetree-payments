@@ -46,6 +46,7 @@ import {
   WithdrawalPreflightError,
   type WithdrawalPreflightResult,
 } from "@/engine/withdrawals/withdrawalPreflight"
+import { isSupportedWithdrawalPair } from "@/engine/withdrawals/withdrawalAccounting"
 
 export type CreateWalletWithdrawalReviewInput = {
   rail: string
@@ -165,12 +166,6 @@ function submitResultForRequest(
   }
 }
 
-const SUPPORTED_ASSETS: Record<WalletWithdrawalRail, WalletWithdrawalAsset[]> = {
-  base: ["ETH", "USDC"],
-  solana: ["SOL", "USDC"],
-  bitcoin: ["BTC"],
-}
-
 export const BASE_USDC_TOKEN_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 export const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 const BASE_CHAIN_ID = "8453"
@@ -236,8 +231,9 @@ export function normalizeWithdrawalAmount(value: string): string | null {
   const normalized = trimmed.startsWith(".") ? `0${trimmed}` : trimmed
   // Must be digits optionally followed by a decimal fraction
   if (!/^\d+(\.\d+)?$/.test(normalized)) return null
-  const n = Number(normalized)
-  if (!Number.isFinite(n) || n <= 0) return null
+  // Positivity is determined from decimal digits, never IEEE-754. This keeps
+  // arbitrarily precise valid inputs out of JavaScript floating-point logic.
+  if (!/[1-9]/.test(normalized)) return null
   return normalized
 }
 
@@ -252,7 +248,7 @@ export function validateWalletWithdrawalInput(input: CreateWalletWithdrawalRevie
   const rawDestination = input.destinationAddress.trim()
 
   if (!rail) throw Object.assign(new Error("Unsupported withdrawal rail."), { status: 400 })
-  if (!asset || !SUPPORTED_ASSETS[rail].includes(asset)) {
+  if (!asset || !isSupportedWithdrawalPair(rail, asset)) {
     throw Object.assign(new Error("Unsupported rail/asset combination."), { status: 400 })
   }
   if (!rawDestination) {
@@ -272,8 +268,8 @@ export function validateWalletWithdrawalInput(input: CreateWalletWithdrawalRevie
 
   const amountDecimal = normalizeWithdrawalAmount(input.amountDecimal)
   if (amountDecimal === null) {
-    const raw = Number(String(input.amountDecimal).trim())
-    if (Number.isFinite(raw) && raw <= 0) {
+    const raw = String(input.amountDecimal).trim()
+    if (raw.startsWith("-") || /^0+(?:\.0+)?$/.test(raw)) {
       throw Object.assign(new Error("Enter an amount greater than 0."), { status: 400 })
     }
     throw Object.assign(new Error("Enter a valid withdrawal amount."), { status: 400 })

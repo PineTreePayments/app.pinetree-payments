@@ -68,6 +68,7 @@ vi.mock("@solana/spl-token", () => ({
 }))
 
 import { estimateMaxWithdrawalAmount } from "@/engine/withdrawals/withdrawalFeeEstimate"
+import { preflightDynamicWithdrawal } from "@/engine/withdrawals/withdrawalPreflight"
 import { calculateSpeedMaximumSendableSats } from "@/engine/withdrawals/speedWithdrawalQuote"
 
 const BASE_ETH_GAS_PRICE_WEI = "0x3b9aca00" // 1 gwei
@@ -142,15 +143,15 @@ describe("estimateMaxWithdrawalAmount", () => {
     expect(quote.maximumSendableSats).toBe(BigInt(2469))
   })
 
-  it("Base ETH (native): subtracts pending, RPC fee estimate, and configured reserve", async () => {
+  it("Base ETH (native): subtracts pending and only the RPC fee estimate", async () => {
     mocks.getWalletBalance.mockResolvedValue({ balance: "1" })
     process.env.BASE_ETH_MIN_RESERVE = "0.0003"
     process.env.WITHDRAWAL_FEE_SAFETY_MULTIPLIER = "1"
 
     const estimate = await estimateMaxWithdrawalAmount("merchant_1", "base", "ETH")
 
-    // fee = 1 gwei * 21000 = 0.000021 ETH; reserve = 0.0003 ETH
-    expect(estimate.maxDecimal).toBe("0.999679")
+    // fee = 1 gwei * 21000 = 0.000021 ETH; no unrelated fixed reserve
+    expect(estimate.maxDecimal).toBe("0.999979")
     expect(estimate.feeAsset).toBe("ETH")
     expect(estimate.blocked).toBeUndefined()
   })
@@ -197,6 +198,91 @@ describe("estimateMaxWithdrawalAmount", () => {
     expect(estimate.blocked).toBe(true)
     expect(estimate.warning).toBe(
       "This wallet does not currently have enough SOL on Solana to cover the network fee for this USDC withdrawal."
+    )
+  })
+
+  it("Solana USDC: exact 0.54 balance remains fully spendable with sufficient SOL", async () => {
+    mocks.getWalletBalance.mockImplementation(async (_merchantId: string, key: string) => {
+      if (key === "SOLANA_USDC") return { balance: "0.54" }
+      if (key === "SOLANA_SOL") return { balance: "0.006767866" }
+      return null
+    })
+
+    const estimate = await estimateMaxWithdrawalAmount("merchant_1", "solana", "USDC", {
+      destinationAddress: "Destination111111111111111111111111111111",
+    })
+
+    expect(estimate.maxDecimal).toBe("0.54")
+    expect(estimate.blocked).toBeUndefined()
+    expect(estimate.feeAsset).toBe("SOL")
+  })
+
+  it("Solana USDC: a reusable pending review excludes itself from spendable balance", async () => {
+    mocks.getWalletBalance.mockImplementation(async (_merchantId: string, key: string) => {
+      if (key === "SOLANA_USDC") return { balance: "0.54" }
+      if (key === "SOLANA_SOL") return { balance: "0.006767866" }
+      return null
+    })
+    mocks.sumPendingWalletWithdrawalAmount.mockImplementation(async (
+      _merchantId: string,
+      _rail: string,
+      pendingAsset: string,
+      excludeWithdrawalId?: string
+    ) => pendingAsset === "USDC" && excludeWithdrawalId !== "withdrawal_1" ? 0.54 : 0)
+
+    const result = await preflightDynamicWithdrawal({
+      merchantId: "merchant_1",
+      rail: "solana",
+      asset: "USDC",
+      destinationAddress: "Destination111111111111111111111111111111",
+      amountDecimal: "0.54",
+      withdrawalId: "withdrawal_1",
+    })
+
+    expect(result.allowed).toBe(true)
+    expect(result.spendableBalance).toBe("0.54")
+  })
+
+  it("Solana USDC: excludes only the current same-amount request and retains a concurrent one", async () => {
+    mocks.getWalletBalance.mockImplementation(async (_merchantId: string, key: string) => {
+      if (key === "SOLANA_USDC") return { balance: "0.54" }
+      if (key === "SOLANA_SOL") return { balance: "0.006767866" }
+      return null
+    })
+    const pendingRows = [
+      { id: "withdrawal_1", amount: "0.54" },
+      { id: "withdrawal_2", amount: "0.54" },
+    ]
+    mocks.sumPendingWalletWithdrawalAmount.mockImplementation(async (
+      merchantId: string,
+      rail: string,
+      pendingAsset: string,
+      excludeWithdrawalId?: string
+    ) => {
+      if (merchantId !== "merchant_1" || rail !== "solana" || pendingAsset !== "USDC") return "0"
+      return pendingRows
+        .filter((row) => row.id !== excludeWithdrawalId)
+        .reduce((total, row) => total + Number(row.amount), 0)
+        .toString()
+    })
+
+    const result = await preflightDynamicWithdrawal({
+      merchantId: "merchant_1",
+      rail: "solana",
+      asset: "USDC",
+      destinationAddress: "Destination111111111111111111111111111111",
+      amountDecimal: "0.54",
+      withdrawalId: "withdrawal_1",
+    })
+
+    expect(result.allowed).toBe(false)
+    expect(result.reason).toBe("pending_balance")
+    expect(result.spendableBalance).toBe("0")
+    expect(mocks.sumPendingWalletWithdrawalAmount).toHaveBeenCalledWith(
+      "merchant_1",
+      "solana",
+      "USDC",
+      "withdrawal_1"
     )
   })
 

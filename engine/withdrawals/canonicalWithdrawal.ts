@@ -17,6 +17,7 @@ import {
   createWalletWithdrawalReview,
   type CreateWalletWithdrawalReviewResult,
 } from "@/engine/withdrawals/walletWithdrawals"
+import type { WithdrawalPreflightResult } from "@/engine/withdrawals/withdrawalPreflightResult"
 import { createWalletWithdrawal as createBitcoinWalletWithdrawal } from "@/engine/wallet/walletOperations"
 import type { WalletAdapterWriteDiagnostics } from "@/engine/wallet/walletProviderAdapter"
 import type { PineTreeWalletWriteResult } from "@/engine/wallet/walletTypes"
@@ -60,6 +61,7 @@ export type CanonicalWithdrawalReviewResult = {
   request: WalletWithdrawalRequestRecord
   review: CreateWalletWithdrawalReviewResult["review"]
   canSubmit: boolean
+  preflight?: WithdrawalPreflightResult
 }
 
 // Bitcoin: already submitted server-side via Speed by the time this returns.
@@ -182,6 +184,7 @@ export async function submitCanonicalWithdrawal(
       request: existing,
       review: existing.review_payload as unknown as CreateWalletWithdrawalReviewResult["review"],
       canSubmit: existing.status === "review_required" || existing.status === "pending",
+      preflight: (existing.review_payload as { preflight?: WithdrawalPreflightResult } | null)?.preflight,
     }
   }
 
@@ -208,5 +211,6 @@ export async function submitCanonicalWithdrawal(
     request,
     review: result.review,
     canSubmit: result.canSubmit,
+    preflight: result.preflight,
   }
 }
