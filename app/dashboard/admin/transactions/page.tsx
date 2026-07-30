@@ -9,7 +9,7 @@ import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, X } from "lucide-re
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import { PaginationControls } from "@/components/ui/PaginationControls"
-import AdminPageHeader, { adminHeaderIconButtonClass } from "@/components/admin/AdminPageHeader"
+import AdminPageHeader, { adminHeaderIconButtonDesktopClass } from "@/components/admin/AdminPageHeader"
 import {
   filterChipClass,
   filterInputClass,
@@ -740,7 +740,7 @@ export default function AdminTransactionsPage() {
             onClick={() => token && void fetchData(token, applied, offset)}
             disabled={loading}
             aria-label="Refresh transactions"
-            className={adminHeaderIconButtonClass}
+            className={adminHeaderIconButtonDesktopClass}
           >
             <RefreshCw size={14} aria-hidden="true" className={loading ? "animate-spin" : ""} />
           </button>

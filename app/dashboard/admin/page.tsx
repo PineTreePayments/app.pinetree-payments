@@ -27,7 +27,7 @@ import PaymentStatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/SegmentedButtons"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
-import AdminPageHeader, { adminHeaderIconButtonClass } from "@/components/admin/AdminPageHeader"
+import AdminPageHeader, { adminHeaderIconButtonDesktopClass } from "@/components/admin/AdminPageHeader"
 import AdminSupportTicketPanel, {
   type AdminSupportMessage,
   type AdminSupportTicket,
@@ -899,7 +899,7 @@ export default function AdminPage() {
           }}
           disabled={loadingOverview}
           aria-label="Refresh admin data"
-          className={`ml-auto ${adminHeaderIconButtonClass}`}
+          className={`ml-auto ${adminHeaderIconButtonDesktopClass}`}
         >
           <RefreshCw size={14} aria-hidden="true" className={loadingOverview ? "animate-spin" : ""} />
         </button>

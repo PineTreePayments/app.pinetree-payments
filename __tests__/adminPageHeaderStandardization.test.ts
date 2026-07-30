@@ -109,7 +109,7 @@ describe("shared admin page header", () => {
 
   it("uses one shared refresh control across admin headers", () => {
     for (const [name, source] of ADMIN_PAGES) {
-      expect(source, name).toContain("adminHeaderIconButtonClass")
+      expect(source, name).toContain("adminHeaderIconButtonDesktopClass")
     }
     expect(header).toMatch(/h-11 w-11[\s\S]*sm:h-10 sm:w-10/)
   })
@@ -177,24 +177,37 @@ describe("overview recent activity cards", () => {
     expect(overview).not.toMatch(/ADMIN_RECENT_SCROLL_CLASS =[\s\S]{0,120}divide-y/)
   })
 
-  it("keeps the refresh control out of the hero card on every breakpoint", () => {
+  it("keeps the refresh control out of the hero card", () => {
     const headerCall = overview.slice(
       overview.indexOf("<AdminPageHeader"),
       overview.indexOf("{/* ── Tab bar")
     )
-    expect(headerCall).not.toContain("adminHeaderIconButtonClass")
+    expect(headerCall).not.toContain("adminHeaderIconButton")
     expect(headerCall).not.toContain("action=")
     expect(headerCall).not.toContain("RefreshCw")
 
-    // It moved to the tab row, so manual refresh is still available.
+    // It lives on the tab row instead, so desktop keeps manual refresh.
     const tabRow = overview.slice(
       overview.indexOf("{/* ── Tab bar"),
       overview.indexOf("OVERVIEW TAB")
     )
     expect(tabRow).toContain('aria-label="Refresh admin data"')
     expect(tabRow).toContain("ml-auto")
-    // No breakpoint gating — same placement on mobile and desktop.
-    expect(tabRow).not.toMatch(/(sm|md|lg):hidden/)
+  })
+
+  it("hides Last Updated and Refresh on mobile across internal admin", () => {
+    // Neither fits beside a title on a phone.
+    expect(header).toContain("hidden min-w-0 sm:block sm:text-right")
+    expect(header).toContain("export const adminHeaderIconButtonDesktopClass")
+    expect(header).toContain("hidden sm:inline-flex")
+    // Display is declared once per variant so `hidden` never competes with
+    // `inline-flex` in a single class list.
+    expect(header).toMatch(/const adminHeaderIconButtonBase =\s*\n\s*"h-11 w-11/)
+
+    for (const [name, source] of ADMIN_PAGES) {
+      expect(source, name).toContain("adminHeaderIconButtonDesktopClass")
+      expect(source, name).not.toMatch(/adminHeaderIconButtonClass[^D]/)
+    }
   })
 
   it("applies the shared shell to both cards so heights match", () => {

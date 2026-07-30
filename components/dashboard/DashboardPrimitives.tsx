@@ -225,6 +225,19 @@ export function InlineMetric({
   )
 }
 
+/**
+ * One page-level metric shown on the right of a hero card (desktop) and stacked
+ * beneath the description on mobile.
+ *
+ * Each page picks the single metric that represents its purpose — connected
+ * providers, connected networks, open tickets. Hero cards deliberately do NOT
+ * carry the same metrics as one another; only the visual component is shared.
+ */
+export type DashboardHeroMetric = {
+  label: string
+  value: ReactNode
+}
+
 export function DashboardHeroCard({
   eyebrow,
   title,
@@ -232,6 +245,7 @@ export function DashboardHeroCard({
   detail,
   action,
   secondary,
+  metric,
   valueClassName
 }: {
   eyebrow: string
@@ -240,14 +254,18 @@ export function DashboardHeroCard({
   detail?: ReactNode
   action?: ReactNode
   secondary?: ReactNode
+  metric?: DashboardHeroMetric
   valueClassName?: string
 }) {
   const hasValue = value !== undefined && value !== null
+  // A hero with either an inline value or a right-side metric splits into
+  // left (title + description) and right (the metric) once there is room.
+  const split = hasValue || Boolean(metric)
 
   return (
     <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] p-4 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-5 md:p-6">
       <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
-      <div className={cx("relative flex gap-4", hasValue ? "flex-col sm:flex-row sm:items-end sm:justify-between" : "flex-col")}>
+      <div className={cx("relative flex gap-4", split ? "flex-col sm:flex-row sm:items-end sm:justify-between" : "flex-col")}>
         <div className="min-w-0">
           <p className={dashboardSectionLabelClass}>
             {eyebrow}
@@ -260,7 +278,15 @@ export function DashboardHeroCard({
           )}
           {detail && <div className={cx("mt-2", dashboardSupportingTextClass)}>{detail}</div>}
         </div>
-        <div className={cx("flex flex-col gap-3", hasValue ? "sm:items-end" : "w-full")}>
+        <div className={cx("flex flex-col gap-3", split ? "sm:items-end" : "w-full")}>
+          {metric && (
+            <div className="min-w-0 sm:text-right">
+              <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">
+                {metric.label}
+              </p>
+              <div className={cx("mt-0.5", dashboardHeroValueClass)}>{metric.value}</div>
+            </div>
+          )}
           {secondary}
           {action}
         </div>

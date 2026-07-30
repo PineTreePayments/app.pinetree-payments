@@ -1090,11 +1090,15 @@ export default function ProvidersPage() {
         </div>
       ) : null}
 
+      {/* Connected Providers sits on the right of the card rather than stacked
+          under the description, so the desktop card is balanced. */}
       <DashboardHeroCard
         eyebrow="PAYMENT INFRASTRUCTURE"
         title="View connected payment providers and manage your payment infrastructure."
-        value={connectedAndEnabledProvidersCount}
-        detail="Connected Providers"
+        metric={{
+          label: "Connected Providers",
+          value: connectedAndEnabledProvidersCount
+        }}
       />
 
       <div className="space-y-2">

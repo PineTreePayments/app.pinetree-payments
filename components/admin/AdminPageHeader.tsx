@@ -86,8 +86,10 @@ export default function AdminPageHeader({
           </div>
 
           <div className="flex shrink-0 flex-wrap items-center gap-3 sm:flex-col sm:items-end">
+            {/* Desktop only: there is no room for a timestamp beside the title on
+                a phone, and it is the least useful thing in the card there. */}
             {lastUpdated && (
-              <div className="min-w-0 sm:text-right">
+              <div className="hidden min-w-0 sm:block sm:text-right">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
                   {lastUpdatedLabel}
                 </p>
@@ -104,5 +106,13 @@ export default function AdminPageHeader({
 
 // Shared compact icon button for admin header actions (Refresh). Matches the
 // PineTree-blue pagination/filter interaction treatment.
-export const adminHeaderIconButtonClass =
-  "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50/60 text-gray-500 shadow-sm transition hover:border-blue-300 hover:bg-blue-100/80 hover:text-[#0052FF] focus:outline-none focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-400 disabled:hover:border-gray-200 disabled:hover:bg-gray-50 sm:h-10 sm:w-10"
+const adminHeaderIconButtonBase =
+  "h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50/60 text-gray-500 shadow-sm transition hover:border-blue-300 hover:bg-blue-100/80 hover:text-[#0052FF] focus:outline-none focus:ring-4 focus:ring-blue-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-400 disabled:hover:border-gray-200 disabled:hover:bg-gray-50 sm:h-10 sm:w-10"
+
+export const adminHeaderIconButtonClass = `inline-flex ${adminHeaderIconButtonBase}`
+
+// Internal admin refresh controls are desktop-only: on a phone they crowd the
+// header for a capability the browser's own reload already covers. Display is
+// declared once here so `hidden` never competes with `inline-flex` in one class
+// list.
+export const adminHeaderIconButtonDesktopClass = `hidden sm:inline-flex ${adminHeaderIconButtonBase}`

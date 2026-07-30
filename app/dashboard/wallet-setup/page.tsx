@@ -35,7 +35,6 @@ import {
 } from "@/lib/wallets/dynamicSignerLookup"
 import { raceDynamicSignatureEvidence } from "@/lib/wallets/dynamicSignatureRace"
 import {
-  InlineMetric,
   PineTreeInsightsCard,
   ProviderStatusPill,
   dashboardHeroValueClass,
@@ -3430,20 +3429,14 @@ function WalletOverviewSummary({
   const hasSyncedOnce = Boolean(sync?.lastSyncedAt)
   const walletInsights = hasSyncedOnce ? computeWalletInsights(rows, sync) : []
 
-  // Hero metrics are read from the same sync payload and rail rows the wallet
-  // summary below already renders — no new calculation, no new metric.
+  // The one hero metric for this page, read from the same rail rows the wallet
+  // summary below already renders — no new calculation.
   const connectedRailCount = rows.filter((row) => row.configured && row.enabled).length
-  const attentionRailCount = rows.filter((row) => Boolean(row.needsAttentionMessage)).length
-  const heldAssetCount = sync
-    ? [...sync.balances.base, ...sync.balances.solana, ...sync.balances.bitcoin].filter(
-        (asset) => Number(asset.balance ?? 0) > 0
-      ).length
-    : 0
 
   return (
     <div className="space-y-5">
       <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_90%_8%,rgba(0,82,255,0.20),transparent_34%),linear-gradient(135deg,rgba(239,246,255,0.98),rgba(255,255,255,0.96))] px-5 py-5 shadow-[0_22px_50px_rgba(37,99,235,0.13)] sm:px-6 sm:py-6">
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between lg:gap-8">
+        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between sm:gap-8">
           <div className="min-w-0">
             <p className={dashboardSectionLabelClass}>TOTAL BALANCE</p>
             <p className={`mt-2 ${dashboardHeroValueClass}`}>
@@ -3454,27 +3447,15 @@ function WalletOverviewSummary({
             </p>
           </div>
 
-          {/* Fills the empty right half of the card on desktop; stacks below the
+          {/* One metric on the right of the card on desktop; stacks below the
               balance on smaller screens. */}
-          <div className="grid grid-cols-3 gap-x-0 gap-y-4 border-t border-blue-200/80 pt-4 lg:min-w-[24rem] lg:border-t-0 lg:pt-0 lg:divide-x lg:divide-blue-200/80">
-            <InlineMetric
-              label="Connected networks"
-              value={`${connectedRailCount}/${rows.length}`}
-              size="compact"
-              className="pr-4 lg:px-5 lg:first:pl-0"
-            />
-            <InlineMetric
-              label="Assets held"
-              value={hasSyncedOnce ? heldAssetCount : "—"}
-              size="compact"
-              className="px-4 lg:px-5"
-            />
-            <InlineMetric
-              label="Needs attention"
-              value={attentionRailCount}
-              size="compact"
-              className="pl-4 lg:px-5 lg:last:pr-0"
-            />
+          <div className="border-t border-blue-200/80 pt-4 sm:border-t-0 sm:pt-0 sm:text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">
+              Connected Networks
+            </p>
+            <p className={`mt-0.5 ${dashboardHeroValueClass}`}>
+              {connectedRailCount} / {rows.length}
+            </p>
           </div>
         </div>
       </div>

@@ -271,6 +271,12 @@ export default function HelpCenterPage() {
     return tickets.filter((ticket) => matchesTicketFilter(ticket, ticketFilter))
   }, [tickets, ticketFilter])
 
+  // Same definition the "Open" ticket filter uses, so the hero number and the
+  // filtered list always agree.
+  const openTicketCount = useMemo(() => {
+    return tickets.filter((ticket) => matchesTicketFilter(ticket, "Open")).length
+  }, [tickets])
+
   const getAccessToken = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession()
     return session?.access_token || null
@@ -595,11 +601,16 @@ export default function HelpCenterPage() {
         <h1 className={dashboardPageTitleClass}>Help Center</h1>
       </div>
 
-      {/* Shared dashboard hero card (same component the Inventory and Wallet
-          pages use), so Help Center matches the rest of the dashboard. */}
+      {/* Shared dashboard hero card. The right-side metric is the one number
+          that matters on this page — open tickets — and matches what the "Open"
+          ticket filter below counts. */}
       <DashboardHeroCard
         eyebrow="HELP CENTER"
         title="Documentation, AI assistance, support resources, troubleshooting guides, and merchant help tools."
+        metric={{
+          label: "Open Tickets",
+          value: ticketsLoading || ticketError ? "—" : openTicketCount
+        }}
       />
 
       <div className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap">

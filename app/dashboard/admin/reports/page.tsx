@@ -14,7 +14,7 @@ import {
 import PaymentStatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
-import AdminPageHeader, { adminHeaderIconButtonClass } from "@/components/admin/AdminPageHeader"
+import AdminPageHeader, { adminHeaderIconButtonDesktopClass } from "@/components/admin/AdminPageHeader"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -381,7 +381,7 @@ export default function AdminReportsPage() {
             onClick={() => token && fetchReport(token, period, mode)}
             disabled={loading}
             aria-label="Refresh report"
-            className={adminHeaderIconButtonClass}
+            className={adminHeaderIconButtonDesktopClass}
           >
             <RefreshCw size={14} aria-hidden="true" className={loading ? "animate-spin" : ""} />
           </button>
