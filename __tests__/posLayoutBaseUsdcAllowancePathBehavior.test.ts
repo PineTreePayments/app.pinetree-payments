@@ -77,7 +77,7 @@ describe("executePosBaseAllowancePath", () => {
     expect(stageGuard.getStage()).toBe("idle")
   })
 
-  it("insufficient allowance: sends exactly one approval request, polls until sufficient, then sends exactly one final payment request", async () => {
+  it("insufficient allowance: sends one approval, waits for its successful receipt, then immediately sends one final payment", async () => {
     let allowanceCheckCalls = 0
     global.fetch = vi.fn(async (url: string) => {
       if (String(url).includes("build-allowance-payment")) {
@@ -98,11 +98,14 @@ describe("executePosBaseAllowancePath", () => {
     const requestCalls: string[] = []
     const provider = fakeProvider(async (args) => {
       requestCalls.push(args.method)
-      return requestCalls.length === 1 ? APPROVE_TX_HASH : PAYMENT_TX_HASH
+      if (args.method === "eth_getTransactionReceipt") return { status: "0x1" }
+      return requestCalls.filter((method) => method === "eth_sendTransaction").length === 1
+        ? APPROVE_TX_HASH
+        : PAYMENT_TX_HASH
     })
     const stageGuard = new PosBaseUsdcWalletRequestStageGuard()
 
-    const resultPromise = executePosBaseAllowancePath(
+    const result = await executePosBaseAllowancePath(
       PAYMENT_ID,
       "0xpayer",
       provider,
@@ -110,15 +113,70 @@ describe("executePosBaseAllowancePath", () => {
       OWNER,
       async () => true
     )
-    // Flush the allowance-poll's first (immediately-sufficient) check and the
-    // 1s settlement delay between the approve and payment transactions.
-    await vi.runAllTimersAsync()
-    const result = await resultPromise
 
     expect(result).toBe(PAYMENT_TX_HASH)
+    expect(provider.request).toHaveBeenCalledTimes(3)
+    expect(requestCalls).toEqual([
+      "eth_sendTransaction",
+      "eth_getTransactionReceipt",
+      "eth_sendTransaction",
+    ])
+    expect(allowanceCheckCalls).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(stageGuard.getStage()).toBe("idle")
+  })
+
+  it("an approval request failure prevents the PaymentSplit request", async () => {
+    global.fetch = vi.fn(async (url: string) => {
+      if (String(url).includes("build-allowance-payment")) {
+        return jsonResponse({
+          ok: true,
+          sufficient: false,
+          approveTx: { to: "0xUsdc", data: "0xapprove", value: "0" },
+          paymentTx: { to: "0xSplit", data: "0xpay", value: "0" },
+        })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+
+    const provider = fakeProvider(async () => {
+      throw { code: 4001, message: "User rejected the request." }
+    })
+    const stageGuard = new PosBaseUsdcWalletRequestStageGuard()
+
+    await expect(
+      executePosBaseAllowancePath(PAYMENT_ID, "0xpayer", provider, stageGuard, OWNER, async () => true)
+    ).rejects.toMatchObject({ code: 4001 })
+
+    expect(provider.request).toHaveBeenCalledTimes(1)
+    expect(stageGuard.getStage()).toBe("idle")
+  })
+
+  it("a reverted approval receipt prevents the PaymentSplit request", async () => {
+    global.fetch = vi.fn(async (url: string) => {
+      if (String(url).includes("build-allowance-payment")) {
+        return jsonResponse({
+          ok: true,
+          sufficient: false,
+          approveTx: { to: "0xUsdc", data: "0xapprove", value: "0" },
+          paymentTx: { to: "0xSplit", data: "0xpay", value: "0" },
+        })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+
+    const provider = fakeProvider(async (args) => {
+      if (args.method === "eth_sendTransaction") return APPROVE_TX_HASH
+      if (args.method === "eth_getTransactionReceipt") return { status: "0x0" }
+      throw new Error(`unexpected provider request: ${args.method}`)
+    })
+    const stageGuard = new PosBaseUsdcWalletRequestStageGuard()
+
+    await expect(
+      executePosBaseAllowancePath(PAYMENT_ID, "0xpayer", provider, stageGuard, OWNER, async () => true)
+    ).rejects.toThrow(/authorization failed/i)
+
     expect(provider.request).toHaveBeenCalledTimes(2)
-    expect(requestCalls).toEqual(["eth_sendTransaction", "eth_sendTransaction"])
-    expect(allowanceCheckCalls).toBeGreaterThanOrEqual(1)
     expect(stageGuard.getStage()).toBe("idle")
   })
 

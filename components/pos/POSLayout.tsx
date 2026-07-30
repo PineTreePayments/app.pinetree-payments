@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { supabase } from "@/lib/supabaseClient"
+import { waitForBaseTransactionReceipt } from "@/lib/basePay/approvalReceipt"
 import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
 import AmountDisplay from "./AmountDisplay"
 import Keypad from "./Keypad"
@@ -348,9 +349,10 @@ export async function executePosBaseAllowancePath(
       throw new Error("A wallet request is already in progress for this payment")
     }
     console.log("[POS Base USDC V7] allowance_approve_start", { paymentId })
+    let approvalTxHash: string
     try {
       // from is required by WalletConnect v2 to route to the correct account
-      await withPosWalletRequestTimeout(
+      approvalTxHash = await withPosWalletRequestTimeout(
         provider.request<string>({
           method: "eth_sendTransaction",
           params: [{
@@ -366,12 +368,27 @@ export async function executePosBaseAllowancePath(
     } finally {
       stageGuard.end(owner)
     }
+    if (!/^0x[a-fA-F0-9]{64}$/.test(approvalTxHash)) {
+      throw new Error("Wallet did not return a valid transaction hash for USDC authorization")
+    }
     console.log("[POS Base USDC V7] allowance_approve_submitted", { paymentId })
-    // Wait for V7 approval to be mined before sending payment tx (~2 s block time on Base)
-    await waitForAllowanceSufficient(paymentId, walletAddress)
-    console.log("[POS Base USDC V7] allowance_sufficient", { paymentId })
-    // Settlement delay: give the mobile WC request queue time to clear before next prompt
-    await new Promise<void>((resolve) => setTimeout(resolve, 1000))
+    const approvalReceiptStatus = await waitForBaseTransactionReceipt({
+      provider,
+      txHash: approvalTxHash,
+      timeoutMs: 60_000,
+    })
+    if (approvalReceiptStatus === "failed") {
+      throw new Error("USDC authorization failed on Base. Please try again.")
+    }
+    if (approvalReceiptStatus !== "confirmed") {
+      // Some wallets/RPC relays do not expose receipts reliably. A sufficient
+      // on-chain allowance is an equally authoritative fallback boundary.
+      await waitForAllowanceSufficient(paymentId, walletAddress)
+    }
+    console.log("[POS Base USDC V7] allowance_usable", {
+      paymentId,
+      evidence: approvalReceiptStatus === "confirmed" ? "approval_receipt" : "allowance_read",
+    })
   }
 
   if (!(await verifyStillOwned())) {

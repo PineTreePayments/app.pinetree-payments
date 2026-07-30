@@ -5,6 +5,7 @@ import type { Connector } from "wagmi"
 import { base } from "wagmi/chains"
 import Button from "@/components/ui/Button"
 import { PaymentStatusVisual } from "@/components/payment/PaymentStatusVisual"
+import { waitForBaseTransactionReceipt } from "@/lib/basePay/approvalReceipt"
 import { classifyWalletFamily, detectCapabilitiesFromProvider } from "@/lib/basePay/strategyOrchestrator"
 import { createSessionAttemptId, logPaymentSession } from "@/lib/payment/paymentSessionLog"
 import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
@@ -615,40 +616,6 @@ function normalizeHexTransactionHash(value: unknown): string {
 function maybeHexTransactionHash(value: unknown): string | null {
   const txHash = String(value || "").trim()
   return /^0x[a-fA-F0-9]{64}$/.test(txHash) ? txHash : null
-}
-function getReceiptStatusSucceeded(result: unknown): boolean | null {
-  if (!result || typeof result !== "object") return null
-  const status = (result as { status?: unknown }).status
-  if (typeof status === "string") {
-    const normalized = status.toLowerCase()
-    if (normalized === "0x1" || normalized === "1") return true
-    if (normalized === "0x0" || normalized === "0") return false
-  }
-  if (typeof status === "number") {
-    if (status === 1) return true
-    if (status === 0) return false
-  }
-  return null
-}
-async function waitForWalletConnectTransactionReceipt(input: {
-  provider: WalletConnectProvider
-  txHash: string
-  timeoutMs: number
-  pollIntervalMs?: number
-}): Promise<"confirmed" | "failed" | "pending"> {
-  const pollIntervalMs = input.pollIntervalMs ?? 2_000
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < input.timeoutMs) {
-    const receipt = await input.provider.request({
-      method: "eth_getTransactionReceipt",
-      params: [input.txHash],
-    })
-    const succeeded = getReceiptStatusSucceeded(receipt)
-    if (succeeded === true) return "confirmed"
-    if (succeeded === false) return "failed"
-    await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs))
-  }
-  return "pending"
 }
 function extractDirectFinalTxHashFromSendCallsResult(result: unknown): string | null {
   // Some wallets return the txHash as a plain string from wallet_sendCalls
@@ -1351,11 +1318,12 @@ export default function BaseWalletPayment({
     fromAddress: string
     source: string
     maxWaitMs?: number
+    approvalConfirmed?: boolean
   }): Promise<boolean> => {
     const maxWaitMs = input.maxWaitMs ?? 120_000
     const pollIntervalMs = 2_000
     const pollStartedAt = Date.now()
-    let allowanceSufficient = false
+    let allowanceSufficient = input.approvalConfirmed === true
 
     logBaseV6("usdc_allowance_recheck_start", {
       paymentId: input.paymentId,
@@ -1363,6 +1331,17 @@ export default function BaseWalletPayment({
       actionKind: "usdc_approve",
       hasAccount: Boolean(input.fromAddress),
     })
+
+    if (allowanceSufficient) {
+      logBaseV6("usdc_allowance_sufficient", {
+        paymentId: input.paymentId,
+        selectedAsset,
+        actionKind: "usdc_approve",
+        allowanceSufficient: true,
+        source: input.source,
+        reason: "approval-receipt-confirmed",
+      })
+    }
 
     while (!allowanceSufficient && Date.now() - pollStartedAt < maxWaitMs) {
       try {
@@ -1453,6 +1432,13 @@ export default function BaseWalletPayment({
       setBaseMobileStepRef.current("fallback_required")
       return false
     }
+    // Claim the entire continuation before the first await. Focus/visibility
+    // effects can fire while WalletConnect settlement or approval receipt
+    // polling is in progress; the ref prevents either path from submitting a
+    // duplicate approval or final PaymentSplit transaction.
+    pendingActionInFlightRef.current = true
+    setPendingWalletActionInFlight(true)
+    setPendingWalletActionReady(false)
     const settledSession = await waitForWalletConnectSettlement(`pending-action:${source}`)
     if (!settledSession || !/^0x[a-fA-F0-9]{40}$/.test(settledSession.address)) {
       await logBase("pending-wallet-action-blocked", {
@@ -1461,6 +1447,8 @@ export default function BaseWalletPayment({
         paymentId,
         reason: "connection-not-settled",
       })
+      pendingActionInFlightRef.current = false
+      setPendingWalletActionInFlight(false)
       setLocalError("Wallet disconnected. Reconnect to continue.")
       setPendingWalletActionReady(true)
       setBaseMobileStepRef.current("fallback_required")
@@ -1483,9 +1471,6 @@ export default function BaseWalletPayment({
       return false
     }
 
-    pendingActionInFlightRef.current = true
-    setPendingWalletActionInFlight(true)
-    setPendingWalletActionReady(false)
     setLocalError("")
     setIsOpeningWallet(true)
     setBaseMobileStepRef.current(kind === "usdc_approve" ? "usdc_authorization_dispatching" : "payment_dispatching")
@@ -1565,8 +1550,10 @@ export default function BaseWalletPayment({
       const txHash = await txPromise
       resolveWalletRequest()
       closeWalletConnectSelectionModal(provider)
-      pendingActionInFlightRef.current = false
-      setPendingWalletActionInFlight(false)
+      if (kind !== "usdc_approve") {
+        pendingActionInFlightRef.current = false
+        setPendingWalletActionInFlight(false)
+      }
       setPendingWalletActionReady(false)
       setIsOpeningWallet(false)
       await logBase("pending-wallet-action-submitted", {
@@ -1581,7 +1568,7 @@ export default function BaseWalletPayment({
         pendingUsdcApproveTxRef.current = null
         setBaseMobileStepRef.current("usdc_authorization_submitted")
         setBasePayStatus("Confirming USDC permission on Base.")
-        const approvalReceiptStatus = await waitForWalletConnectTransactionReceipt({
+        const approvalReceiptStatus = await waitForBaseTransactionReceipt({
           provider,
           txHash,
           timeoutMs: 60_000,
@@ -1607,14 +1594,13 @@ export default function BaseWalletPayment({
           fromAddress,
           source: "approval-resolved",
           maxWaitMs: approvalReceiptStatus === "confirmed" ? 30_000 : 90_000,
+          approvalConfirmed: approvalReceiptStatus === "confirmed",
         })
         if (!allowanceSufficient) {
           throw new Error("USDC authorization is not confirmed yet. Wait a moment, then tap Try Again to continue.")
         }
         await logBase("usdc-allowance-confirmed", { paymentId, via: "pending-wallet-action" })
-        window.setTimeout(() => {
-          void dispatchPendingWalletActionRef.current?.("auto-usdc-final-after-approval")
-        }, 0)
+        void dispatchPendingWalletActionRef.current?.("auto-usdc-final-after-approval")
         return true
       }
 
@@ -3185,9 +3171,7 @@ export default function BaseWalletPayment({
               }
               return
             }
-            window.setTimeout(() => {
-              void dispatchPendingWalletActionRef.current?.("auto-usdc-final-after-return")
-            }, 0)
+            void dispatchPendingWalletActionRef.current?.("auto-usdc-final-after-return")
           }).catch((error) => {
             logBaseV6("fallback_required", {
               paymentId: pendingPaymentId,
