@@ -6,6 +6,7 @@ import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
 import { Eye, EyeOff } from "lucide-react"
+import { logRecoveryDiagnostic } from "@/lib/auth/recovery"
 
 /* =============================
 TOGGLE GOOGLE LOGIN HERE
@@ -27,30 +28,70 @@ export default function LoginPage() {
   const [errorMsg, setErrorMsg] = useState("")
   const [infoMsg, setInfoMsg] = useState("")
   const [conditionalPasskeySupported, setConditionalPasskeySupported] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(true)
 
   /* -----------------------------
   AUTO REDIRECT IF LOGGED IN
   ----------------------------- */
 
   useEffect(() => {
+    let active = true
+
     async function checkSession() {
-      const { data } = await supabase.auth.getSession()
-      if (data.session) {
-        window.location.href = "/dashboard"
+      try {
+        const recoveryResponse = await fetch("/auth/recovery/status", {
+          cache: "no-store",
+          credentials: "same-origin",
+        })
+        if (!recoveryResponse.ok) throw new Error("Recovery status check failed")
+        const recoveryStatus = (await recoveryResponse.json()) as { recoveryActive?: boolean }
+
+        if (recoveryStatus.recoveryActive) {
+          logRecoveryDiagnostic("login.recovery_cleanup.started")
+          const { error: signOutError } = await supabase.auth.signOut({ scope: "local" })
+          if (signOutError) throw signOutError
+
+          const cleanupResponse = await fetch("/auth/recovery/complete", {
+            method: "POST",
+            cache: "no-store",
+            credentials: "same-origin",
+          })
+          if (!cleanupResponse.ok) throw new Error("Recovery cleanup failed")
+          logRecoveryDiagnostic("login.recovery_cleanup.completed", { hasSession: false })
+        }
+      } catch {
+        if (!active) return
+        setErrorMsg("We could not verify the previous auth session. Reload and try again.")
+        setCheckingSession(false)
+        return
       }
+
+      let sessionResult: Awaited<ReturnType<typeof supabase.auth.getSession>>
+      try {
+        sessionResult = await supabase.auth.getSession()
+      } catch {
+        if (!active) return
+        setErrorMsg("We could not verify your session. Reload and try again.")
+        setCheckingSession(false)
+        return
+      }
+      const { data, error } = sessionResult
+      if (!active) return
+      if (data.session) {
+        logRecoveryDiagnostic("login.redirect.existing_session", { hasSession: true })
+        window.location.replace("/dashboard")
+        return
+      }
+      if (error && process.env.NODE_ENV === "development") {
+        console.info("[auth-login]", { stage: "initial_session.failed", errorCode: error.code })
+      }
+      setCheckingSession(false)
     }
 
-    checkSession()
-
-    const {
-      data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        window.location.href = "/dashboard"
-      }
-    })
-
-    return () => subscription.unsubscribe()
+    void checkSession()
+    return () => {
+      active = false
+    }
   }, [])
 
   /* -----------------------------
@@ -73,24 +114,61 @@ export default function LoginPage() {
   ----------------------------- */
 
   async function handleLogin() {
+    if (loading || checkingSession) return
     setLoading(true)
     setErrorMsg("")
     setInfoMsg("")
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    })
+    let signInResult: Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>
+    try {
+      signInResult = await supabase.auth.signInWithPassword({
+        email,
+        password
+      })
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : "Sign-in failed."
+      setErrorMsg(message)
+      toast.error(message)
+      setLoading(false)
+      return
+    }
+    const { data, error } = signInResult
 
-    if (error) {
-      setErrorMsg("Invalid email or password")
-      toast.error("Invalid email or password")
+    if (error || !data.session || !data.user) {
+      const message = error?.message ?? "Sign-in did not return a valid session."
+      setErrorMsg(message)
+      toast.error(message)
+      setLoading(false)
+      return
+    }
+
+    let persistedResult: Awaited<ReturnType<typeof supabase.auth.getSession>>
+    try {
+      persistedResult = await supabase.auth.getSession()
+    } catch (caughtError) {
+      const message = caughtError instanceof Error
+        ? caughtError.message
+        : "Your session could not be established. Please try again."
+      setErrorMsg(message)
+      toast.error(message)
+      setLoading(false)
+      return
+    }
+    const {
+      data: { session: persistedSession },
+      error: sessionError,
+    } = persistedResult
+    if (sessionError || !persistedSession || persistedSession.user.id !== data.user.id) {
+      const message = sessionError?.message ?? "Your session could not be established. Please try again."
+      setErrorMsg(message)
+      toast.error(message)
       setLoading(false)
       return
     }
 
     toast.success("Welcome back")
-    window.location.href = "/dashboard"
+    logRecoveryDiagnostic("login.redirect.verified_sign_in", { hasSession: true })
+    window.location.replace("/dashboard")
   }
 
   /* -----------------------------
@@ -288,12 +366,14 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || checkingSession}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-md transition font-medium disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {loading
+            {loading || checkingSession
               ? mode === "login"
-                ? "Signing in..."
+                ? checkingSession
+                  ? "Checking session..."
+                  : "Signing in..."
                 : "Creating account..."
               : mode === "login"
                 ? "Sign in"

@@ -9,7 +9,7 @@ function getResetRedirectUrl() {
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL ||
     (typeof window !== "undefined" ? window.location.origin : "")
-  return `${appUrl.replace(/\/$/, "")}/reset-password`
+  return `${appUrl.replace(/\/$/, "")}/auth/callback`
 }
 
 function isValidEmail(value: string) {
@@ -24,6 +24,7 @@ export default function ForgotPasswordPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (loading) return
     setErrorMsg("")
     setSuccessMsg("")
 
@@ -38,9 +39,21 @@ export default function ForgotPasswordPage() {
     }
 
     setLoading(true)
-    const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
-      redirectTo: getResetRedirectUrl()
-    })
+    let resetResult: Awaited<ReturnType<typeof supabase.auth.resetPasswordForEmail>>
+    try {
+      resetResult = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+        redirectTo: getResetRedirectUrl()
+      })
+    } catch (caughtError) {
+      setLoading(false)
+      setErrorMsg(
+        process.env.NODE_ENV === "development" && caughtError instanceof Error
+          ? caughtError.message
+          : "We could not send a reset link right now. Please try again."
+      )
+      return
+    }
+    const { error } = resetResult
     setLoading(false)
 
     if (error) {

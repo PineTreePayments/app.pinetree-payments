@@ -15,6 +15,19 @@ Supabase Dashboard path:
 
 If custom SMTP is not configured yet, the platform may still use managed sender behavior until SMTP is configured.
 
+### Redirect URL configuration
+
+PineTree uses Supabase's PKCE recovery flow. Add each deployed callback URL to
+Authentication -> URL Configuration -> Redirect URLs:
+
+- `https://app.pinetree-payments.com/auth/callback`
+- The callback URL for every preview or staging host used to test recovery
+- `http://localhost:3000/auth/callback` for local testing
+
+`NEXT_PUBLIC_APP_URL` must be the public origin for the current deployment. The
+email template must keep using `{{ .ConfirmationURL }}` so Supabase can verify
+the one-time link and redirect its PKCE code to PineTree's callback.
+
 ### Subject
 
 ```text
