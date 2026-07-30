@@ -374,7 +374,7 @@ function validateWriteInput(input: CreateWalletWithdrawalOrPayoutInput): {
   return { asset, amountBaseUnits, destination }
 }
 
-function maskDestination(destination: string): string {
+export function maskDestination(destination: string): string {
   const trimmed = destination.trim()
   if (trimmed.length <= 10) return trimmed
   return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`
