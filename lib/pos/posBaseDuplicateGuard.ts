@@ -27,7 +27,7 @@ export type PosBaseFlowGateInput = {
 
 export type PosBaseFlowGateResult = { blocked: false } | { blocked: true; reason: string }
 
-const BLOCKED_PAYMENT_STATUSES = new Set(["PROCESSING", "CONFIRMED", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE"])
+const BLOCKED_PAYMENT_STATUSES = new Set(["PROCESSING", "CONFIRMED", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE", "UNKNOWN"])
 const BLOCKED_SESSION_STEPS = new Set(["payment_submitted", "confirming"])
 
 export class PosBaseDuplicateGuard {

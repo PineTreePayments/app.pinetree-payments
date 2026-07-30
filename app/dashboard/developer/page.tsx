@@ -438,7 +438,7 @@ function DocSectionOverview() {
       <DocH2>Core concepts</DocH2>
       {[
         ["Checkout Session", "A payment intent with a hosted checkout URL. Customers pick a network and pay. Sessions expire after 24 hours."],
-        ["Payment", "Tracks canonical payment status: waiting → processing → confirmed, failed, expired, canceled, or incomplete."],
+        ["Payment", "Tracks canonical payment status: waiting → processing → confirmed, failed, expired, canceled, incomplete, or explicit unknown recovery."],
         ["Webhook Event", "HMAC-signed HTTP POST when payment status changes. Use payment.confirmed to fulfill orders."],
       ].map(([title, desc]) => (
         <div key={title} className="mb-2.5 rounded-2xl border border-gray-200/80 bg-white p-3.5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
@@ -647,12 +647,14 @@ function DocSectionPayments() {
       <DocH2>Payment lifecycle</DocH2>
       <CodeBlock>{`CREATED → PENDING → PROCESSING → CONFIRMED (public status: "paid")
                              └→ FAILED    (public status: "failed")
+                             └→ UNKNOWN   (public status: "unknown"; recovery continues)
               ├→ EXPIRED                  (public status: "expired")
               ├→ CANCELED                 (public status: "canceled")
               └→ INCOMPLETE               (public status: "incomplete")`}</CodeBlock>
       <div className="mt-3 rounded-2xl border border-amber-200/80 bg-amber-50/70 p-3.5 text-xs leading-5 text-amber-800">
         <strong>Status naming:</strong> The API returns <code className="rounded bg-amber-100 px-1 text-xs">status: &quot;paid&quot;</code> when a payment is confirmed — not <code className="rounded bg-amber-100 px-1 text-xs">&quot;confirmed&quot;</code>.
         The visible merchant state is called <strong>Confirmed</strong>. For fulfillment use the <code className="rounded bg-amber-100 px-1 text-xs">payment.confirmed</code> webhook. For polling, check <code className="rounded bg-amber-100 px-1 text-xs">status === &quot;paid&quot;</code>.
+        The API can also return <code className="rounded bg-amber-100 px-1 text-xs">status: &quot;unknown&quot;</code> while recovery continues; do not fulfill or automatically retry until a canonical terminal result arrives.
       </div>
     </div>
   )
@@ -705,7 +707,7 @@ function DocSectionPaymentStates() {
           ["Canceled", "Customer abandoned/backed out/no funds sent", "Yes", "Gray"],
           ["Incomplete", "Attempt ended without a more specific terminal outcome", "Yes", "Amber"],
           ["Refunded", "Settled funds were returned", "Yes", "Orange"],
-          ["Unknown", "Status is not recognized", "No", "Neutral gray"],
+          ["Unknown", "Provider/network outcome needs investigation; recovery continues", "No", "Neutral gray"],
         ]}
       />
     </div>
@@ -746,6 +748,7 @@ const event = pinetree.webhooks.constructEvent(
           ["payment.canceled", "Payment was canceled"],
           ["payment.refunded", "Payment was refunded"],
           ["payment.incomplete", "Payment ended without more specific terminal evidence"],
+          ["payment.unknown", "Payment outcome requires provider or network investigation"],
           ["payment.processing", "Transaction broadcast; awaiting confirmation"],
           ["payment.pending", "Customer wallet action detected"],
           ["payment.created", "Payment object first created"],
@@ -781,6 +784,7 @@ function DocSectionWebhookEvents() {
           ["payment.expired", "payment"],
           ["payment.canceled", "payment"],
           ["payment.incomplete", "payment"],
+          ["payment.unknown", "payment"],
           ["payment.refunded", "payment"],
           ["checkout.session.created", "checkout.session"],
           ["checkout.session.processing", "checkout.session"],

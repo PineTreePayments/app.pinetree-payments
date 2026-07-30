@@ -113,4 +113,5 @@ describe("overlapping payment transition idempotency", () => {
       provider_event: "terminal_cancel"
     }))
   })
+
 })

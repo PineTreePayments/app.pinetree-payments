@@ -32,8 +32,9 @@ export type CanonicalPaymentStatus =
   | "EXPIRED"
   | "CANCELED"
   | "INCOMPLETE"
+  | "UNKNOWN"
 
-export type NormalizedStoredPaymentStatus = CanonicalPaymentStatus | "REFUNDED" | "UNKNOWN"
+export type NormalizedStoredPaymentStatus = CanonicalPaymentStatus | "REFUNDED"
 export type TransactionDisplayStatus = NormalizedStoredPaymentStatus
 
 /**
@@ -61,6 +62,7 @@ export function normalizeStoredPaymentStatus(
     case "EXPIRED":
     case "CANCELED":
     case "INCOMPLETE":
+    case "UNKNOWN":
       return s as CanonicalPaymentStatus
     default:
       return "UNKNOWN"

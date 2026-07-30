@@ -1,9 +1,9 @@
 import { StripeClient } from "./client"
 import { normalizeStripePaymentStatus } from "./payments"
 
-export async function getPaymentStatus(providerReference: string) {
+export async function getPaymentStatus(providerReference: string, connectedAccountId?: string) {
   const client = new StripeClient()
-  const response = await client.retrievePaymentIntent(providerReference)
+  const response = await client.retrievePaymentIntent(providerReference, connectedAccountId)
 
   return {
     provider: "stripe" as const,

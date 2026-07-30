@@ -46,6 +46,7 @@ function canonicalFilters(filters: AdminTransactionFilters): CanonicalTransactio
 function summarize(rows: readonly CanonicalTransaction[]) {
   let confirmedCount = 0
   let processingCount = 0
+  let unknownCount = 0
   let pendingCount = 0
   let failedCount = 0
   let incompleteCount = 0
@@ -62,6 +63,7 @@ function summarize(rows: readonly CanonicalTransaction[]) {
         totalFeesMinor += row.feeAmountMinor ?? 0
         break
       case "PROCESSING": processingCount += 1; break
+      case "UNKNOWN": unknownCount += 1; break
       case "CREATED":
       case "PENDING": pendingCount += 1; break
       case "FAILED": failedCount += 1; break
@@ -75,6 +77,7 @@ function summarize(rows: readonly CanonicalTransaction[]) {
     totalCount: rows.length,
     confirmedCount,
     processingCount,
+    unknownCount,
     pendingCount,
     failedCount,
     incompleteCount,

@@ -9,6 +9,7 @@ const SUPPORTED_STATUSES: PublicCheckoutSessionStatus[] = [
   "incomplete",
   "expired",
   "canceled",
+  "unknown",
 ]
 
 function parseDate(value: string | null, field: string) {

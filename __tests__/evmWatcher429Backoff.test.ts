@@ -23,7 +23,8 @@ const mocks = vi.hoisted(() => ({
   getLightningReconciliationCandidates: vi.fn(),
   getConfirmedLightningFeeSettlementCandidates: vi.fn(),
   getIncompleteBasePaymentReconciliationCandidates: vi.fn(),
-  runPaymentWatcher: vi.fn(),
+  claimPaymentMaintenanceRun: vi.fn(),
+  recoverPayment: vi.fn(),
   reconcileBasePaymentFromChain: vi.fn(),
   reconcileSpeedLightningPayment: vi.fn(),
   reconcileConfirmedLightningFeeSettlement: vi.fn(),
@@ -41,8 +42,17 @@ vi.mock("@/database/paymentMaintenance", () => ({
   getLightningReconciliationCandidates: mocks.getLightningReconciliationCandidates,
   getConfirmedLightningFeeSettlementCandidates: mocks.getConfirmedLightningFeeSettlementCandidates,
   getIncompleteBasePaymentReconciliationCandidates: mocks.getIncompleteBasePaymentReconciliationCandidates,
+  claimPaymentMaintenanceRun: mocks.claimPaymentMaintenanceRun,
 }))
-vi.mock("@/engine/checkPaymentOnce", () => ({ runPaymentWatcher: mocks.runPaymentWatcher }))
+vi.mock("@/engine/paymentRecovery", () => ({
+  recoverPayment: mocks.recoverPayment,
+  usesNativePaymentWatcher: (payment: { provider?: string; network?: string }) => {
+    const provider = String(payment.provider || "").toLowerCase()
+    const network = String(payment.network || "").toLowerCase()
+    return ((network === "base" || network === "ethereum") && (!provider || provider === "base" || provider === "base_pay")) ||
+      (network === "solana" && (!provider || provider === "solana"))
+  },
+}))
 vi.mock("@/engine/baseChainReconciliation", () => ({
   reconcileBasePaymentFromChain: mocks.reconcileBasePaymentFromChain,
 }))
@@ -97,6 +107,8 @@ describe("runPaymentMaintenanceTick — EVM 429 backoff and circuit breaker", ()
     mocks.getLightningReconciliationCandidates.mockResolvedValue([])
     mocks.getConfirmedLightningFeeSettlementCandidates.mockResolvedValue([])
     mocks.getIncompleteBasePaymentReconciliationCandidates.mockResolvedValue([])
+    mocks.claimPaymentMaintenanceRun.mockResolvedValue({ claimed: true, reason: "claimed" })
+    mocks.recoverPayment.mockResolvedValue({ checked: true, detected: false })
     mocks.sweepStalePayments.mockResolvedValue(emptySweep)
     resetPaymentMaintenanceLeaseForTests()
     resetRpc429CooldownForTests()
@@ -159,15 +171,31 @@ describe("runPaymentMaintenanceTick — EVM 429 backoff and circuit breaker", ()
     mocks.reconcileBasePaymentFromChain.mockRejectedValueOnce(
       new RpcTransportError("eth_getLogs RPC error: rate limited", 429)
     )
-    mocks.runPaymentWatcher.mockResolvedValue(false)
-
     await runPaymentMaintenanceTick({ now: 1_000, watcherLimit: 2, throttleMs: 0 })
 
     // The Solana candidate must always be checked — the EVM cooldown must
     // never suppress it. The Base candidate in the SAME tick may or may not
     // run depending on ordering, but Solana is never gated by it.
-    const solanaCalls = mocks.runPaymentWatcher.mock.calls.filter(([id]) => id === "sol-1")
+    const solanaCalls = mocks.recoverPayment.mock.calls.filter(([payment]) => payment.id === "sol-1")
     expect(solanaCalls).toHaveLength(1)
+  })
+
+  it("does not apply the native EVM cooldown to a provider-managed payment on Base", async () => {
+    mocks.getIncompleteBasePaymentReconciliationCandidates.mockResolvedValueOnce([evmCandidate("base-native")])
+    mocks.reconcileBasePaymentFromChain.mockRejectedValueOnce(
+      new RpcTransportError("eth_getLogs RPC error: rate limited", 429)
+    )
+    await runPaymentMaintenanceTick({ now: 1_000, throttleMs: 0 })
+
+    mocks.getPaymentMaintenanceCandidates.mockResolvedValueOnce([
+      evmCandidate("coinbase-base", { provider: "coinbase" }),
+    ])
+    mocks.getIncompleteBasePaymentReconciliationCandidates.mockResolvedValueOnce([])
+    await runPaymentMaintenanceTick({ now: 2_100, throttleMs: 0 })
+
+    expect(mocks.recoverPayment).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "coinbase-base", provider: "coinbase", network: "base" })
+    )
   })
 
   it("scheduling a 429 backoff logs the required structured line", async () => {
@@ -207,10 +235,11 @@ describe("runPaymentMaintenanceTick — EVM 429 backoff and circuit breaker", ()
       await runPaymentMaintenanceTick({ now: 2_100, throttleMs: 0 })
 
       const skippedLog = warnSpy.mock.calls.find(
-        (call) => call[0] === "[watcher:evm] scan skipped: rate-limit cooldown active"
+        (call) => call[0] === "[payment-recovery]" &&
+          (call[1] as { reason?: string } | undefined)?.reason === "rpc_rate_limit_cooldown"
       )
       expect(skippedLog).toBeDefined()
-      expect(skippedLog?.[1]).toMatchObject({ paymentId: "base-2" })
+      expect(skippedLog?.[1]).toMatchObject({ paymentId: "base-2", reason: "rpc_rate_limit_cooldown" })
     } finally {
       warnSpy.mockRestore()
     }

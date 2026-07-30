@@ -335,8 +335,10 @@ type CheckoutSessionStatus =
   | "processing"  // payment in progress on-chain
   | "paid"        // confirmed
   | "failed"      // payment failed
+  | "incomplete"  // payment attempt ended without completion
   | "expired"     // session timed out
   | "canceled"    // merchant canceled
+  | "unknown"     // provider/network status requires investigation
 ```
 
 ---

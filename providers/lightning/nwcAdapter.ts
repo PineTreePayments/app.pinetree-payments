@@ -120,11 +120,18 @@ export const nwcAdapter: ProviderAdapter = {
     )
   },
 
-  async getPaymentStatus(providerReference: string) {
-    void providerReference
-    throw new Error(
-      "NWC Lightning: use getLightningInvoiceStatus with payment_hash instead"
-    )
+  async getPaymentStatus(providerReference: string, merchantId?: string) {
+    const paymentHash = String(providerReference || "").trim()
+    if (!paymentHash) throw new Error("NWC payment reference is required")
+    if (!merchantId) throw new Error("Merchant ID is required for NWC invoice retrieval")
+    const [{ getMerchantNwcSetup }, { lookupNwcInvoice }] = await Promise.all([
+      import("@/database/merchantProviders"),
+      import("./nwcClient"),
+    ])
+    const setup = await getMerchantNwcSetup(merchantId)
+    if (!setup) throw new Error("Merchant NWC setup not found")
+    const invoice = await lookupNwcInvoice(setup.nwcUri, paymentHash)
+    return { status: invoice.settled ? "CONFIRMED" as const : "PENDING" as const }
   },
 
   verifyWebhook() {

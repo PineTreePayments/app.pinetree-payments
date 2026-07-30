@@ -67,7 +67,7 @@ See [Authentication](./authentication.md) for full details.
 A checkout session represents a single payment intent. When created, the session generates a `checkoutUrl` — a hosted page where the customer completes the payment using their preferred crypto wallet and network. Sessions expire after 24 hours by default.
 
 ### Payment
-Every checkout session that receives a payment attempt can produce a `payment` object. The payment object tracks status, network, rail, amount, currency, and metadata. Public payment statuses are `open`, `processing`, `paid`, `failed`, `expired`, and `canceled`; `paid` maps to PineTree's visible **Confirmed** state.
+Every checkout session that receives a payment attempt can produce a `payment` object. The payment object tracks status, network, rail, amount, currency, and metadata. Public payment statuses are `open`, `processing`, `paid`, `failed`, `incomplete`, `expired`, `canceled`, and `unknown`; `paid` maps to PineTree's visible **Confirmed** state, while `unknown` remains under recovery.
 
 ### Webhook Event
 When a payment changes state, PineTree delivers a signed webhook event to your configured endpoint. Events are signed using HMAC-SHA256 and include a timestamp for replay protection. The PineTree Node SDK includes a `webhooks.constructEvent()` helper for verification.

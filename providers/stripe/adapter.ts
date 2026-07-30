@@ -46,13 +46,17 @@ export const stripeAdapter: ProviderAdapter = {
     }
   },
 
-  async getPaymentStatus(providerReference: string) {
+  async getPaymentStatus(providerReference: string, merchantId?: string) {
     try {
-      const payment = await getStripePaymentStatus(providerReference)
+      if (!merchantId) throw new Error("Merchant ID is required for Stripe payment retrieval")
+      const { getMerchantStripeAccountId } = await import("@/engine/stripeConnect")
+      const connectedAccountId = await getMerchantStripeAccountId(merchantId)
+      if (!connectedAccountId) throw new Error("Stripe connected account not configured")
+      const payment = await getStripePaymentStatus(providerReference, connectedAccountId)
       return { status: payment.status }
     } catch (error) {
       console.error("Stripe adapter status check error:", error)
-      return { status: "UNKNOWN" as const }
+      throw error
     }
   },
 

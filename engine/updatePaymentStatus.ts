@@ -31,6 +31,7 @@ import {
 import { toPublicCheckoutSessionMetadata } from "./checkoutSessionMetadata"
 import { deliverV1CheckoutSessionWebhook } from "./webhookDelivery"
 import { logConfirmationTrace } from "@/lib/payment/confirmationTrace"
+import { isPaymentRecoverySchemaReady } from "@/database/paymentMaintenance"
 
 const STATUS_TO_WEBHOOK_EVENT: Partial<Record<PaymentStatus, WebhookEvent>> = {
   CONFIRMED: "payment.confirmed",
@@ -38,6 +39,7 @@ const STATUS_TO_WEBHOOK_EVENT: Partial<Record<PaymentStatus, WebhookEvent>> = {
   EXPIRED: "payment.expired",
   CANCELED: "payment.canceled",
   INCOMPLETE: "payment.incomplete",
+  UNKNOWN: "payment.unknown",
 }
 
 /**
@@ -51,6 +53,13 @@ export async function updatePaymentStatus(
     rawPayload?: unknown
   }
 ) {
+  // Central write barrier: even a future caller that bypasses paymentRecovery
+  // cannot persist UNKNOWN until the migration's transaction (constraint plus
+  // readiness RPC) is committed and visible to this application instance.
+  if (nextStatus === "UNKNOWN" && !await isPaymentRecoverySchemaReady()) {
+    throw new Error("Payment recovery schema is not ready for UNKNOWN")
+  }
+
   // Get current payment to validate transition
   const payment = await getPaymentById(paymentId)
 
@@ -60,6 +69,11 @@ export async function updatePaymentStatus(
 
   const currentStatus = normalizeToStrictPaymentStatus(payment.status)
 
+  const rawPayload = metadata?.rawPayload && typeof metadata.rawPayload === "object"
+    ? metadata.rawPayload as Record<string, unknown>
+    : null
+  const hasAuthoritativeTerminalEvidence = Boolean(rawPayload?.providerStatusEvidence)
+
   if (nextStatus === "INCOMPLETE" || nextStatus === "EXPIRED" || nextStatus === "CANCELED") {
     const [transaction, events] = await Promise.all([
       getTransactionByPaymentId(paymentId),
@@ -67,7 +81,8 @@ export async function updatePaymentStatus(
     ])
     if (
       paymentHasProcessingEvidence({ payment, transaction, events }) &&
-      !isExplicitUnpaidInvoiceExpiry(metadata)
+      !isExplicitUnpaidInvoiceExpiry(metadata) &&
+      !hasAuthoritativeTerminalEvidence
     ) {
       throw new Error(`Cannot mark payment ${nextStatus} after provider or transaction evidence exists`)
     }
@@ -135,9 +150,6 @@ export async function updatePaymentStatus(
   const updatedPayment = await updatePaymentStatusInDb(paymentId, nextStatus, currentStatus)
 
   if (nextStatus === "PROCESSING" || nextStatus === "CONFIRMED") {
-    const rawPayload = metadata?.rawPayload && typeof metadata.rawPayload === "object"
-      ? metadata.rawPayload as Record<string, unknown>
-      : null
     // This is the moment the row commits — the earliest point Postgres
     // replication can emit the realtime UPDATE event to subscribed clients.
     // There is no separate application-level hook for "realtime emitted";
@@ -265,7 +277,8 @@ function statusToEventType(
     FAILED: "payment.failed",
     EXPIRED: "payment.expired",
     CANCELED: "payment.canceled",
-    INCOMPLETE: "payment.incomplete"
+    INCOMPLETE: "payment.incomplete",
+    UNKNOWN: "payment.unknown"
   }
 
   return mapping[status]

@@ -160,13 +160,16 @@ export const coinbaseAdapter: ProviderAdapter = {
       )
 
       const data = await response.json()
+      if (response.ok === false) {
+        throw new Error(data?.errors?.[0]?.message || `Coinbase API status ${response.status}`)
+      }
       const status = data?.data?.timeline?.slice(-1)[0]?.status as CoinbaseStatus
 
       return coinbaseStatusToPineTree(status)
 
     } catch (error) {
       console.error("Coinbase adapter status check error:", error)
-      return { status: "UNKNOWN" as const }
+      throw error
     }
   },
 

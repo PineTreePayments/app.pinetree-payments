@@ -241,6 +241,7 @@ describe("v1 webhook headers and retry", () => {
       "payment.expired",
       "payment.canceled",
       "payment.incomplete",
+      "payment.unknown",
       "payment.refunded",
       "checkout.session.created",
       "checkout.session.processing",

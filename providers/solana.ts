@@ -87,12 +87,16 @@ export const solanaAdapter: ProviderAdapter = {
      Provider polling is unsupported; the watcher owns chain status.
   -------------------------------- */
 
-  async getPaymentStatus() {
-    // Solana payments are monitored via blockchain
-    console.warn("[solana] provider status polling is unavailable; use paymentWatcher")
-    return {
-      status: "UNKNOWN" as const
-    }
+  async getPaymentStatus(providerReference: string) {
+    const paymentId = String(providerReference || "").trim()
+    if (!paymentId) throw new Error("Solana payment reference is required")
+    const [{ runPaymentWatcher }, { getPaymentById }] = await Promise.all([
+      import("@/engine/checkPaymentOnce"),
+      import("@/database"),
+    ])
+    await runPaymentWatcher(paymentId)
+    const payment = await getPaymentById(paymentId)
+    return { status: String(payment?.status || "UNKNOWN").toUpperCase() as import("@/types/provider").PaymentStatus }
   },
 
   /* --------------------------------

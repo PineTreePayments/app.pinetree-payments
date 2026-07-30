@@ -1,5 +1,5 @@
 import { Shift4Client } from "./client"
-import { SHIFT4_CHARGES_PATH } from "./constants"
+import { SHIFT4_CHARGES_PATH, SHIFT4_CHECKOUT_SESSIONS_PATH } from "./constants"
 import { normalizeShift4PaymentStatus } from "./payments"
 import type { Shift4PaymentStatus } from "./types"
 
@@ -16,19 +16,15 @@ export async function getPaymentStatus(
 
   const client = options.client || new Shift4Client()
 
-  if (!reference.startsWith("char_")) {
-    return {
-      provider: "shift4",
-      providerReference: reference,
-      status: "UNKNOWN",
-      raw: {
-        providerReference: reference,
-        reason: "Shift4 public docs document charge retrieval, but not checkout session status retrieval."
-      }
-    }
-  }
+  const path = reference.startsWith("chse_")
+    ? `${SHIFT4_CHECKOUT_SESSIONS_PATH}/${encodeURIComponent(reference)}`
+    : reference.startsWith("char_")
+      ? `${SHIFT4_CHARGES_PATH}/${encodeURIComponent(reference)}`
+      : ""
 
-  const raw = await client.get<Record<string, unknown>>(`${SHIFT4_CHARGES_PATH}/${encodeURIComponent(reference)}`)
+  if (!path) throw new Error(`Unsupported Shift4 provider reference: ${reference}`)
+
+  const raw = await client.get<Record<string, unknown>>(path)
 
   return {
     provider: "shift4",

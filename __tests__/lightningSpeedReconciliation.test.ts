@@ -190,7 +190,7 @@ describe("reconcileSpeedLightningPayment", () => {
     expect(result).toMatchObject({ detected: false, speedStatus: "stale_reference" })
   })
 
-  it("does not repeatedly query a reference already checked in both scopes", async () => {
+  it("rechecks a stale reference so a non-terminal payment cannot be excluded forever", async () => {
     mocks.getPaymentById.mockResolvedValue(payment({
       status: "PENDING",
       metadata: {
@@ -198,12 +198,18 @@ describe("reconcileSpeedLightningPayment", () => {
         speedLegacyPlatformFallbackCheckedAt: "2026-07-28T00:00:00.000Z",
       },
     }))
+    mocks.retrieveMerchantSpeedPayment.mockRejectedValue(
+      new SpeedApiError("not found", 404, null, [])
+    )
+    mocks.retrieveSpeedPayment.mockRejectedValue(
+      new SpeedApiError("not found", 404, null, [])
+    )
 
     const result = await reconcileSpeedLightningPayment(payment())
 
     expect(mocks.retrieveMerchantSpeedPayment).not.toHaveBeenCalled()
-    expect(mocks.retrieveSpeedPayment).not.toHaveBeenCalled()
-    expect(result).toMatchObject({ checked: false, speedStatus: "stale_reference" })
+    expect(mocks.retrieveSpeedPayment).toHaveBeenCalledWith("speed_pay_123")
+    expect(result).toMatchObject({ checked: true, speedStatus: "stale_reference" })
   })
 
   it("never calls Speed for a payment that is already terminal locally (no downgrade risk)", async () => {

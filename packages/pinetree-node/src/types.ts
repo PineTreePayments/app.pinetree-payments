@@ -3,8 +3,10 @@ export type CheckoutSessionStatus =
   | "processing"
   | "paid"
   | "failed"
+  | "incomplete"
   | "expired"
   | "canceled"
+  | "unknown"
 
 export type CheckoutSessionRail =
   | "solana"

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { sweepStalePayments } from "@/engine/stalePaymentSweep"
+import { runPaymentMaintenanceTick } from "@/engine/paymentMaintenance"
 
 export const maxDuration = 60
 
@@ -27,7 +27,18 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const summary = await sweepStalePayments({ maxRows: 250, staleAfterMs: 5 * 60 * 1000 })
+    // This is the sole production one-minute scheduler target. Run the entire
+    // recovery pipeline here so PROCESSING/UNKNOWN rows cannot depend on live
+    // checkout traffic or a separate, unscheduled cron endpoint.
+    const summary = await runPaymentMaintenanceTick({
+      throttleMs: 1_000,
+      sweepLimit: 250,
+      watcherLimit: 25,
+      reconcileLimit: 25,
+      watcherTimeoutMs: 8_000,
+      lightningReconcileLimit: 25,
+      feeSettlementReconcileLimit: 25,
+    })
     console.info("[cron:sweep-stale-payments]", summary)
     return NextResponse.json(summary)
   } catch (error) {

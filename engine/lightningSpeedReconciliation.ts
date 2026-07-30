@@ -157,9 +157,9 @@ export async function reconcileSpeedLightningPayment(
 
   const speedPaymentId = String(payment.provider_reference || "").trim()
   if (!speedPaymentId) {
-    // A malformed legacy row must not occupy the oldest reconciliation slots
-    // forever. Persist the same exhausted marker used after both Speed lookup
-    // scopes fail so the candidate query evicts it on subsequent runs.
+    // Persist the exception for diagnosis. The shared recovery queue will
+    // transition it to UNKNOWN and keep retrying it; it must never be evicted
+    // while the canonical payment remains unresolved.
     await recordUnresolvableSpeedReference({
       paymentId,
       speedPaymentId: "",
@@ -170,25 +170,11 @@ export async function reconcileSpeedLightningPayment(
 
   // A legacy payment created before Speed connected-account header scoping can
   // be invisible to the merchant-scoped GET while still existing under the
-  // PineTree platform account. Existing stale flags created by the old lookup
-  // logic therefore get one bounded platform fallback attempt. A reference
-  // already checked in both scopes remains a cheap permanent skip.
+  // PineTree platform account. Existing stale flags select that broader scope,
+  // but are never treated as a permanent skip: UNKNOWN rows remain recheckable.
   const fullPayment = await getPaymentById(paymentId)
   const existingMetadata = readMetadataRecord(fullPayment?.metadata)
   const knownLegacyPlatformScope = existingMetadata.speedRetrieveScope === "legacy_platform"
-  if (
-    !verifiedEvidence &&
-    existingMetadata.speedRetrieveStale === true &&
-    Boolean(existingMetadata.speedLegacyPlatformFallbackCheckedAt)
-  ) {
-    console.info("[speed] payment_retrieve_stale_skip", {
-      canonicalTransactionId: paymentId,
-      speedPaymentId,
-      staleSince: existingMetadata.speedRetrieveStaleAt ?? null,
-    })
-    return { checked: false, detected: false, speedStatus: "stale_reference", status: currentStatus }
-  }
-
   let speedPayment: Awaited<ReturnType<typeof retrieveMerchantSpeedPayment>>
   let retrievalScope: SpeedRetrievalScope = "merchant_connected_account"
   if (verifiedEvidence) {

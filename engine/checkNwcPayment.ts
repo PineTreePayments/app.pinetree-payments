@@ -61,7 +61,9 @@ export async function checkNwcPaymentOnce(paymentId: string): Promise<boolean> {
     }
   } | null
 
-  const paymentHash = String(meta?.split?.lightningPaymentHash || "").trim()
+  const paymentHash = String(
+    meta?.split?.lightningPaymentHash || payment.provider_reference || ""
+  ).trim()
   if (!paymentHash) {
     console.warn("[nwc/check] No lightningPaymentHash in payment metadata — cannot check NWC invoice", { paymentId })
     return false

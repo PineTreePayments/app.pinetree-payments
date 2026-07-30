@@ -48,11 +48,16 @@ export const basePayAdapter: ProviderAdapter = {
     }
   },
 
-  async getPaymentStatus() {
-    console.warn("[base] provider status polling is unavailable; use paymentWatcher")
-    return {
-      status: "UNKNOWN" as const
-    }
+  async getPaymentStatus(providerReference: string) {
+    const paymentId = String(providerReference || "").trim()
+    if (!paymentId) throw new Error("Base payment reference is required")
+    const [{ runPaymentWatcher }, { getPaymentById }] = await Promise.all([
+      import("@/engine/checkPaymentOnce"),
+      import("@/database"),
+    ])
+    await runPaymentWatcher(paymentId)
+    const payment = await getPaymentById(paymentId)
+    return { status: String(payment?.status || "UNKNOWN").toUpperCase() as import("@/types/provider").PaymentStatus }
   },
 
   verifyWebhook() {

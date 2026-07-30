@@ -11,6 +11,7 @@ export type PaymentEventType =
   | "payment.cancelled"
   | "payment.incomplete"
   | "payment.expired"
+  | "payment.unknown"
   | "payment.refunded"
   | "payment.reconciled"
 
@@ -94,6 +95,38 @@ export async function getLatestPaymentEvent(paymentId: string) {
   }
 
   return data as PaymentEvent | null
+}
+
+/**
+ * Recover an EVM transaction hash previously captured by the native watcher.
+ *
+ * Older split-payment handling could append watcher.detected evidence and
+ * advance the payment to PROCESSING before it persisted the same hash on the
+ * transaction row. Recovery uses this audit evidence to take the authoritative
+ * receipt path instead of repeatedly scanning only the newest block window.
+ */
+export async function getLatestEvmWatcherTransactionHash(paymentId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("payment_events")
+    .select("raw_payload")
+    .eq("payment_id", paymentId)
+    .eq("provider_event", "watcher.detected")
+    .order("created_at", { ascending: false })
+    .limit(20)
+
+  if (error) {
+    throw new Error(`Failed to fetch watcher transaction evidence: ${error.message}`)
+  }
+
+  for (const row of data || []) {
+    const payload = row.raw_payload && typeof row.raw_payload === "object"
+      ? row.raw_payload as Record<string, unknown>
+      : {}
+    const candidate = String(payload.txHash || payload.transactionHash || "").trim()
+    if (/^0x[0-9a-f]{64}$/i.test(candidate)) return candidate
+  }
+
+  return null
 }
 
 export async function getPaymentEventByProviderEvent(providerEvent: string) {

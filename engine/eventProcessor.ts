@@ -192,6 +192,10 @@ export async function advancePaymentToTargetStatus(
       await updatePaymentStatus(paymentId, "PROCESSING", resolvedMetadata)
       return
     }
+    if (currentStatus === "UNKNOWN") {
+      await updatePaymentStatus(paymentId, "PROCESSING", resolvedMetadata)
+      return
+    }
     // currentStatus === "PROCESSING" is caught by the early-return above — no-op.
     return
   }
@@ -494,7 +498,11 @@ export async function processWebhook({
       message.includes("Invalid payment transition") ||
       message.includes("Concurrent payment transition skipped")
     ) {
-      console.warn("Ignoring invalid transition:", {
+      console.warn("[payment-recovery]", {
+        component: "payment_recovery",
+        event: "payment_recovery_skipped",
+        action: "transition_rejected",
+        reason: "webhook_transition_rejected",
         paymentId,
         message,
         targetStatus: status,
@@ -806,7 +814,17 @@ export async function processPaymentEvent(event: WatcherEvent): Promise<void> {
       message.includes("Invalid payment transition") ||
       message.includes("Concurrent payment transition skipped")
     ) {
-      console.warn("[eventProcessor] processPaymentEvent: invalid transition skipped", { paymentId, message })
+      console.warn("[payment-recovery]", {
+        component: "payment_recovery",
+        event: "payment_recovery_skipped",
+        action: "transition_rejected",
+        reason: message.includes("Concurrent payment transition skipped")
+          ? "concurrent_transition_rejected"
+          : "engine_transition_rejected",
+        paymentId,
+        targetStatus,
+        error: message,
+      })
     } else {
       throw error
     }

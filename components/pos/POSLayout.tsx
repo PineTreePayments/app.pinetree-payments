@@ -71,6 +71,7 @@ type Status =
   | "failed"
   | "expired"
   | "cancelled"
+  | "unknown"
 
 type AvailableMethods = {
   cash: boolean
@@ -104,6 +105,7 @@ function resolveUiStatus(dbStatus: string): Status | null {
   if (s === "INCOMPLETE") return "incomplete"
   if (s === "EXPIRED") return "expired"
   if (s === "CANCELED" || s === "CANCELLED") return "cancelled"
+  if (s === "UNKNOWN") return "unknown"
   return null
 }
 
@@ -771,7 +773,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         ? `intentId=${encodeURIComponent(iid)}`
         : ""
 
-    if (!pollParam || (status !== "waiting" && status !== "processing")) return
+    if (!pollParam || (status !== "waiting" && status !== "processing" && status !== "unknown")) return
 
     const interval = setInterval(async () => {
       try {
@@ -2007,7 +2009,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
 
   const showsStandalonePaymentStateCard =
     (paymentMode === "card" && ["waiting", "processing", "approved", "declined"].includes(cardView)) ||
-    (paymentMode !== "card" && ["confirmed", "incomplete", "failed", "expired", "cancelled"].includes(status))
+    ["confirmed", "incomplete", "failed", "expired", "cancelled", "unknown"].includes(status)
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col items-center justify-center overflow-hidden px-0">
@@ -2232,7 +2234,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         )}
 
         {/* -- WAITING / PROCESSING -- */}
-        {paymentMode === "card" && (
+        {paymentMode === "card" && status !== "unknown" && (
           <PosCardPaymentExperience
             amount={displayTotal}
             view={cardView}
@@ -2301,6 +2303,11 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
         {/* -- CANCELLED -- */}
         {paymentMode !== "card" && status === "cancelled" && (
           <TransactionResult state="CANCELED" compact actions={[{ label: "Back", onClick: resetSale, variant: "secondary" }]} />
+        )}
+
+        {/* -- UNKNOWN / INVESTIGATION REQUIRED -- */}
+        {status === "unknown" && (
+          <TransactionResult state="UNKNOWN" compact actions={[{ label: "Back", onClick: resetSale, variant: "secondary" }]} />
         )}
 
 

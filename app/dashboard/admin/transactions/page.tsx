@@ -56,6 +56,7 @@ type TxSummary = {
   totalCount: number
   confirmedCount: number
   processingCount: number
+  unknownCount: number
   pendingCount: number
   failedCount: number
   incompleteCount: number
@@ -699,6 +700,12 @@ export default function AdminTransactionsPage() {
       )
     }
 
+    if (s.unknownCount > 0) {
+      lines.push(
+        `${s.unknownCount} payment${s.unknownCount === 1 ? "" : "s"} require provider/network status investigation`
+      )
+    }
+
     if (s.expiredCount > 0) {
       lines.push(`${s.expiredCount} expired payment${s.expiredCount === 1 ? "" : "s"} (timed out before customer paid)`)
     }
@@ -800,6 +807,12 @@ export default function AdminTransactionsPage() {
             label="Waiting"
             value={s ? fmt(s.pendingCount) : "—"}
             detail="Waiting for customer action"
+          />
+          <CompactMetricTile
+            label="Unknown"
+            value={s ? fmt(s.unknownCount) : "—"}
+            tone="slate"
+            detail="Provider/network investigation"
           />
           <CompactMetricTile
             label="Failed"

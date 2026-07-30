@@ -16,7 +16,7 @@ The visible positive terminal label is **Confirmed**. Do not use **Success** as 
 | Expired | Payment window timed out | Yes | Muted red |
 | Canceled | Customer or merchant explicitly canceled the payment | Yes | Gray |
 | Refunded | Settled funds were returned | Yes | Orange |
-| Unknown | Status is not recognized | No | Neutral gray |
+| Unknown | Provider/network outcome needs investigation; recovery continues | No | Neutral gray |
 
 ## Strict engine lifecycle
 
@@ -26,6 +26,7 @@ The PineTree Engine owns canonical payment state and accepts these strict lifecy
 CREATED -> PENDING -> PROCESSING -> CONFIRMED
                  \-> INCOMPLETE
                          PROCESSING -> FAILED
+CREATED/PENDING/PROCESSING -> UNKNOWN -> PROCESSING or a canonical terminal state
 ```
 
 `CONFIRMED`, `FAILED`, `INCOMPLETE`, `EXPIRED`, and `CANCELED` are terminal
@@ -44,10 +45,11 @@ refund adjustments remain outside the payment state machine.
 | `EXPIRED` provider/display input | `expired` | Expired | `payment.expired` |
 | `INCOMPLETE` | `incomplete` | Incomplete | `payment.incomplete` |
 | `CANCELED` or `CANCELLED` provider/display input | `canceled` | Canceled | `payment.canceled` |
+| `UNKNOWN` | `unknown` | Unknown | `payment.unknown` |
 | `REFUNDED` transaction adjustment | refund-specific object/event | Refunded | `payment.refunded` |
 
 Public checkout sessions expose `open`, `processing`, `paid`, `failed`,
-`incomplete`, `expired`, and `canceled`. Payment objects use the same mapper in
+`incomplete`, `expired`, `canceled`, and `unknown`. Payment objects use the same mapper in
 code, so the positive public value is `paid` while the visible product label is
 **Confirmed**.
 

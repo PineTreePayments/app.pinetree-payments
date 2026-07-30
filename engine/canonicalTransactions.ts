@@ -134,6 +134,7 @@ const KNOWN_LIFECYCLE_STATUSES = new Set<CanonicalPaymentLifecycleStatus>([
   "EXPIRED",
   "CANCELED",
   "INCOMPLETE",
+  "UNKNOWN",
 ])
 
 const CARD_PROVIDERS = new Set(["stripe", "shift4", "fluidpay"])
@@ -217,7 +218,11 @@ export function normalizeCanonicalPaymentStatus(
 } {
   const raw = upperStatus(rawStatus)
   const normalized = normalizeStoredPaymentStatus(raw)
-  if (normalized && KNOWN_LIFECYCLE_STATUSES.has(normalized as CanonicalPaymentLifecycleStatus)) {
+  if (
+    normalized &&
+    KNOWN_LIFECYCLE_STATUSES.has(normalized as CanonicalPaymentLifecycleStatus) &&
+    (normalized !== "UNKNOWN" || raw === "UNKNOWN")
+  ) {
     const canonicalStatus = normalized as CanonicalPaymentLifecycleStatus
     return { canonicalStatus, displayStatus: getPaymentStatusLabel(canonicalStatus), diagnostics: [] }
   }

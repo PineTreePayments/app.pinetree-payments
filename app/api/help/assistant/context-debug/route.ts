@@ -117,6 +117,7 @@ export async function GET(req: NextRequest) {
             confirmedCount: diag?.sources.payments.confirmedCount,
             pendingCount: diag?.sources.payments.pendingCount,
             processingCount: diag?.sources.payments.processingCount,
+            unknownCount: diag?.sources.payments.unknownCount,
             failedCount: diag?.sources.payments.failedCount,
             incompleteCount: diag?.sources.payments.incompleteCount,
             recentProviders: diag?.sources.payments.recentProviders,

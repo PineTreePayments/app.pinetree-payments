@@ -20,6 +20,15 @@ describe("Shift4 provider adapter", () => {
     vi.unstubAllGlobals()
   })
 
+  it("keeps status retrieval merchant-key scoped", () => {
+    const adapterSource = fs.readFileSync(
+      path.join(process.cwd(), "providers", "shift4", "adapter.ts"),
+      "utf8"
+    )
+    expect(adapterSource).toContain('getMerchantCredential(merchantId, "shift4_api_key")')
+    expect(adapterSource).toContain("new Shift4Client({ secretKey: merchantApiKey })")
+  })
+
   it.each([
     ["payment.created", "payment.created"],
     ["payment.pending", "payment.pending"],
@@ -98,17 +107,28 @@ describe("Shift4 provider adapter", () => {
     })
   })
 
-  it("does not invent a checkout-session status lookup endpoint", async () => {
-    const fetchSpy = vi.fn()
+  it("retrieves a documented checkout session when its webhook is missed", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        id: "chse_shift4_123",
+        objectType: "checkoutSession",
+        status: "paid",
+        lastCharge: "char_shift4_123"
+      })
+    })
     vi.stubEnv("SHIFT4_SECRET_KEY", "sk_test_123")
     vi.stubGlobal("fetch", fetchSpy)
 
     await expect(getPaymentStatus("chse_shift4_123")).resolves.toMatchObject({
       provider: "shift4",
       providerReference: "chse_shift4_123",
-      status: "UNKNOWN"
+      status: "CONFIRMED"
     })
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(fetchSpy.mock.calls[0][0]).toBe(
+      "https://api.shift4.com/checkout-sessions/chse_shift4_123"
+    )
   })
 
   it("rejects unsigned webhooks in production when the webhook secret is missing", () => {

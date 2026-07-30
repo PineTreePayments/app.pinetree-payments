@@ -1,18 +1,24 @@
 import { getPaymentById } from "@/database"
+import type { Payment } from "@/database/payments"
 import {
   getPaymentMaintenanceCandidates,
   getTerminalPaymentMaintenanceCandidates,
   getLightningReconciliationCandidates,
   getConfirmedLightningFeeSettlementCandidates,
-  getIncompleteBasePaymentReconciliationCandidates
+  getIncompleteBasePaymentReconciliationCandidates,
+  claimPaymentMaintenanceRun
 } from "@/database/paymentMaintenance"
 import { getPaymentEvents } from "@/database/paymentEvents"
 import { getTransactionByPaymentId } from "@/database/transactions"
 import { CHECKOUT_TIMEOUT_MS } from "./config"
-import { runPaymentWatcher } from "./checkPaymentOnce"
+import {
+  recoverPayment,
+  usesNativePaymentWatcher,
+  type PaymentRecoveryResult
+} from "./paymentRecovery"
 import { reconcileBasePaymentFromChain } from "./baseChainReconciliation"
 import { isRpc429Error } from "./paymentWatcher"
-import { reconcileSpeedLightningPayment, reconcileConfirmedLightningFeeSettlement } from "./lightningSpeedReconciliation"
+import { reconcileConfirmedLightningFeeSettlement } from "./lightningSpeedReconciliation"
 import { paymentHasProcessingEvidence } from "./paymentEvidence"
 import { markPaymentIncomplete } from "./paymentStateActions"
 import {
@@ -123,7 +129,12 @@ export type PaymentMaintenanceSummary = {
   startedAt: string
   completedAt: string
   skipped: boolean
-  skipReason?: "already_running" | "recently_run"
+  skipReason?:
+    | "already_running"
+    | "recently_run"
+    | "distributed_lease_active"
+    | "recovery_schema_not_ready"
+    | "distributed_lease_claim_failed"
   sweep: StalePaymentSweepSummary | null
   candidatesScanned: number
   expired: number
@@ -167,12 +178,15 @@ function isOlderThan(value: string | null | undefined, ageMs: number): boolean {
   return Number.isFinite(timestamp) && Date.now() - timestamp >= ageMs
 }
 
-async function runWatcherWithTimeout(paymentId: string, timeoutMs: number): Promise<void> {
+async function runRecoveryWithTimeout(
+  payment: Payment,
+  timeoutMs: number
+): Promise<PaymentRecoveryResult> {
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
-    await Promise.race([
-      runPaymentWatcher(paymentId).then(() => undefined),
-      new Promise<void>((_, reject) => {
+    return await Promise.race([
+      recoverPayment(payment),
+      new Promise<PaymentRecoveryResult>((_, reject) => {
         timeout = setTimeout(
           () => reject(new Error("payment_maintenance_watcher_timeout")),
           timeoutMs
@@ -226,10 +240,11 @@ export async function ensurePaymentFresh(
     // browser for up to ~15s per call with no timeout guard. The client
     // already re-polls /detect on its own short interval, so a single bounded
     // check per call is sufficient and keeps this request fast.
-    const watcherOptions = options?.txHash
-      ? { txHash: options.txHash, maxAttempts: 1, sessionAttemptId: options.sessionAttemptId }
-      : undefined
-    const detected = await runPaymentWatcher(paymentId, watcherOptions)
+    const recovery = await recoverPayment(payment, {
+      txHash: options?.txHash,
+      maxAttempts: options?.txHash ? 1 : undefined,
+      sessionAttemptId: options?.sessionAttemptId,
+    })
     action = "watcher_recheck"
     const refreshed = await getPaymentById(paymentId)
     return {
@@ -237,7 +252,7 @@ export async function ensurePaymentFresh(
       previousStatus,
       status: String(refreshed?.status || payment.status || "").toUpperCase(),
       action,
-      detected
+      detected: recovery.detected
     }
   }
 
@@ -302,7 +317,31 @@ export async function runPaymentMaintenanceTick(options?: {
     return { skipped: true, skipReason: "recently_run", ...emptySummary }
   }
 
+  // Set the warm-instance guard before awaiting the database lease so a
+  // second request in this process cannot pass through the async gap.
   lease.running = true
+  try {
+    // The route has a 60-second hard runtime. Keep the database lease beyond
+    // that boundary so the next minute's invocation cannot overlap provider
+    // operations while the prior invocation is still being terminated.
+    const distributedLease = await claimPaymentMaintenanceRun(runId, 90)
+    if (!distributedLease.claimed) {
+      lease.running = false
+      return { skipped: true, skipReason: distributedLease.reason, ...emptySummary }
+    }
+  } catch (error) {
+    console.error("[payment-recovery]", {
+      component: "payment_recovery",
+      event: "payment_maintenance_skipped",
+      action: "retry_scheduled",
+      reason: "distributed_lease_claim_failed",
+      runId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    lease.running = false
+    return { skipped: true, skipReason: "distributed_lease_claim_failed", ...emptySummary }
+  }
+
   lease.lastStartedAt = now
 
   try {
@@ -311,7 +350,7 @@ export async function runPaymentMaintenanceTick(options?: {
     // can never be classified from local age alone.
     let lightningReconciled = 0
     let lightningErrors = 0
-    const lightningLimit = Math.max(1, Math.min(options?.lightningReconcileLimit ?? 5, 25))
+    const lightningLimit = Math.max(1, Math.min(options?.lightningReconcileLimit ?? 5, 50))
     const lightningCutoff = new Date(now - LIGHTNING_RECONCILE_MIN_AGE_MS).toISOString()
     const lightningCandidates = await getLightningReconciliationCandidates({
       limit: lightningLimit,
@@ -319,7 +358,7 @@ export async function runPaymentMaintenanceTick(options?: {
     })
     for (const payment of lightningCandidates) {
       try {
-        const result = await reconcileSpeedLightningPayment(payment)
+        const result = await recoverPayment(payment)
         if (result.checked) lightningReconciled += 1
       } catch (error) {
         lightningErrors += 1
@@ -330,28 +369,20 @@ export async function runPaymentMaintenanceTick(options?: {
       }
     }
 
-    const sweep = await sweepStalePayments({
-      maxRows: options?.sweepLimit ?? 10,
-      staleAfterMs: CHECKOUT_TIMEOUT_MS
-    })
-
-    const watcherLimit = Math.max(1, Math.min(options?.watcherLimit ?? 3, 10))
+    const watcherLimit = Math.max(1, Math.min(options?.watcherLimit ?? 3, 50))
     const candidates = await getPaymentMaintenanceCandidates(watcherLimit * 3)
-    const watchable: Array<{ id: string; network: string }> = []
+    const watchable: Array<{ payment: Payment; network: string }> = []
+    const lightningCandidateIds = new Set(lightningCandidates.map((payment) => payment.id))
 
     for (const payment of candidates) {
-      const status = String(payment.status || "").toUpperCase()
-      if (status === "PROCESSING") {
-        watchable.push({ id: payment.id, network: String(payment.network || "") })
-      } else if (status === "PENDING") {
-        const [transaction, events] = await Promise.all([
-          getTransactionByPaymentId(payment.id),
-          getPaymentEvents(payment.id).catch(() => [])
-        ])
-        if (paymentHasProcessingEvidence({ payment, transaction, events })) {
-          watchable.push({ id: payment.id, network: String(payment.network || "") })
-        }
-      }
+      // Speed has its own identity-scoped queue above and must not be checked
+      // twice in the same tick. Every other unresolved state is periodically
+      // rechecked, including CREATED/PENDING without local evidence and UNKNOWN.
+      if (
+        ["lightning_speed", "speed", "tryspeed"].includes(String(payment.provider || "").toLowerCase()) ||
+        lightningCandidateIds.has(payment.id)
+      ) continue
+      watchable.push({ payment, network: String(payment.network || "") })
       if (watchable.length >= watcherLimit) break
     }
 
@@ -361,27 +392,54 @@ export async function runPaymentMaintenanceTick(options?: {
       500,
       options?.watcherTimeoutMs ?? DEFAULT_WATCHER_TIMEOUT_MS
     )
-    await Promise.all(watchable.map(async ({ id: paymentId, network }) => {
+    await Promise.all(watchable.map(async ({ payment, network }) => {
+      const paymentId = payment.id
       // The 429 cooldown is specific to the EVM/Alchemy RPC endpoint — never
       // let it skip a Solana (or any other non-EVM) candidate's check.
-      const isEvm = network === "base" || network === "ethereum"
+      // Provider-managed payments can share an EVM network label (for example
+      // Coinbase on Base) without using PineTree's native RPC watcher. The RPC
+      // cooldown must never suppress those authoritative provider lookups.
+      const isEvm = usesNativePaymentWatcher(payment)
       if (isEvm && isRpc429CooldownActive()) {
-        console.warn("[watcher:evm] scan skipped: rate-limit cooldown active", { paymentId })
+        console.warn("[payment-recovery]", {
+          component: "payment_recovery",
+          event: "payment_recovery_skipped",
+          action: "retry_scheduled",
+          reason: "rpc_rate_limit_cooldown",
+          paymentId,
+          network
+        })
         return
       }
       try {
-        await runWatcherWithTimeout(paymentId, watcherTimeoutMs)
+        await runRecoveryWithTimeout(payment, watcherTimeoutMs)
         watcherChecks += 1
         if (isEvm) noteRpc429RecoveryOnSuccess()
       } catch (error) {
         watcherErrors += 1
         if (isEvm && isRpc429Error(error)) scheduleRpc429Backoff(error.retryAfterMs)
-        console.warn("[payment-maintenance] watcher recheck failed", {
+        console.warn("[payment-recovery]", {
+          component: "payment_recovery",
+          event: "payment_recovery_skipped",
+          action: "retry_scheduled",
+          reason: error instanceof Error && error.message === "payment_maintenance_watcher_timeout"
+            ? "recovery_timeout"
+            : "recovery_check_failed",
           paymentId,
+          provider: payment.provider,
+          network,
           error: error instanceof Error ? error.message : String(error)
         })
       }
     }))
+
+    // Provider/network authority gets the first chance to resolve every
+    // non-terminal candidate. Only then may the age-based sweep classify a
+    // still-unpaid CREATED/PENDING row as abandoned.
+    const sweep = await sweepStalePayments({
+      maxRows: options?.sweepLimit ?? 10,
+      staleAfterMs: CHECKOUT_TIMEOUT_MS
+    })
 
     let reconciled = 0
     let canceledReconciled = 0
@@ -444,8 +502,14 @@ export async function runPaymentMaintenanceTick(options?: {
     })
     for (const candidate of baseReconcileCandidates) {
       if (isRpc429CooldownActive()) {
-        console.warn("[watcher:evm] scan skipped: rate-limit cooldown active", {
-          paymentId: candidate.id
+        console.warn("[payment-recovery]", {
+          component: "payment_recovery",
+          event: "payment_recovery_skipped",
+          action: "retry_scheduled",
+          reason: "rpc_rate_limit_cooldown",
+          paymentId: candidate.id,
+          provider: "base",
+          network: "base",
         })
         continue
       }

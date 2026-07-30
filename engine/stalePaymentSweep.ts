@@ -74,6 +74,15 @@ export async function sweepStalePayments(options?: {
         } else {
           skippedConcurrent += 1
         }
+        console.info("[payment-recovery]", {
+          component: "payment_recovery",
+          event: "payment_recovery_skipped",
+          action: "stale_sweep_skip",
+          reason: eligibility.reason,
+          paymentId: row.id,
+          status: eligibility.status,
+          runId
+        })
         continue
       }
 
@@ -84,6 +93,14 @@ export async function sweepStalePayments(options?: {
       })
       if (!changed) {
         skippedConcurrent += 1
+        console.info("[payment-recovery]", {
+          component: "payment_recovery",
+          event: "payment_recovery_skipped",
+          action: "stale_sweep_skip",
+          reason: "concurrent_transition_or_revalidation_failed",
+          paymentId: row.id,
+          runId
+        })
         continue
       }
 

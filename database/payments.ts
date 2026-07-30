@@ -10,6 +10,7 @@ export type PaymentStatus =
   | "EXPIRED"
   | "CANCELED"
   | "INCOMPLETE"
+  | "UNKNOWN"
 
 export type Payment = {
   id: string
@@ -228,7 +229,7 @@ export async function getPaymentsByStatus(
 /**
  * Get active (watchable) payments for a specific network.
  *
- * Fetches only CREATED, PENDING, and PROCESSING payments whose network column
+ * Fetches every unresolved payment whose network column
  * matches the given value. This is used by network webhook processors so they
  * check only the payments that belong to the network that just fired — avoiding
  * the fan-out cost of fetching all active payments and filtering in memory.
@@ -245,7 +246,7 @@ export async function getActivePaymentsByNetwork(
   const { data, error } = await supabase
     .from("payments")
     .select("*")
-    .in("status", ["CREATED", "PENDING", "PROCESSING"])
+    .in("status", ["CREATED", "PENDING", "PROCESSING", "UNKNOWN"])
     .eq("network", normalized)
     .limit(limit)
     .order("created_at", { ascending: false })
@@ -295,7 +296,8 @@ export async function getMerchantPaymentStats(merchantId: string) {
     } else if (
       payment.status === "CREATED" ||
       payment.status === "PENDING" ||
-      payment.status === "PROCESSING"
+      payment.status === "PROCESSING" ||
+      payment.status === "UNKNOWN"
     ) {
       stats.pendingTransactions++
     }

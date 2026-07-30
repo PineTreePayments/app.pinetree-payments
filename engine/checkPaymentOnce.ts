@@ -221,6 +221,10 @@ async function runPaymentWatcherInternal(
     const lastStarted = lastNoHashEvmScanStartedAt.get(paymentId)
     if (typeof lastStarted === "number" && Date.now() - lastStarted < NO_HASH_EVM_SCAN_COOLDOWN_MS) {
       console.info("[watcher:evm] scan skipped: no-hash scan cooldown active", {
+        component: "payment_recovery",
+        event: "payment_recovery_skipped",
+        action: "retry_scheduled",
+        reason: "no_hash_scan_cooldown_active",
         paymentId,
         cooldownRemainingMs: NO_HASH_EVM_SCAN_COOLDOWN_MS - (Date.now() - lastStarted)
       })

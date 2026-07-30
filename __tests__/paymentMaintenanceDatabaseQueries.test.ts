@@ -94,7 +94,7 @@ describe("payment maintenance database candidate queries", () => {
     ]))
   })
 
-  it("merges null-root transaction-attempt evidence without letting exhausted rows back into the queue", async () => {
+  it("merges null-root transaction-attempt evidence without permanently excluding stale references", async () => {
     queryMock.state.resolve.mockImplementation((query) => {
       if (selectText(query).includes("transactions!inner")) {
         return {
@@ -136,14 +136,14 @@ describe("payment maintenance database candidate queries", () => {
       "network.in.(bitcoin_lightning,btc_lightning,lightning_btc,lightning)," +
         "provider.in.(lightning_speed,speed,tryspeed)"
     ])
-    expect(calls(directQuery, "or")).toContainEqual([exhaustedFilter])
+    expect(calls(directQuery, "or")).not.toContainEqual([exhaustedFilter])
     expect(calls(relatedQuery, "or")).toContainEqual(["network.is.null,provider.is.null"])
     expect(calls(relatedQuery, "or")).toContainEqual([
       "network.in.(bitcoin_lightning,btc_lightning,lightning_btc,lightning)," +
         "provider.in.(lightning_speed,speed,tryspeed)",
       { referencedTable: "transactions" },
     ])
-    expect(calls(relatedQuery, "or")).toContainEqual([exhaustedFilter])
+    expect(calls(relatedQuery, "or")).not.toContainEqual([exhaustedFilter])
   })
 
   it("selects EXPIRED and CANCELED transaction mismatches and orders every status globally", async () => {

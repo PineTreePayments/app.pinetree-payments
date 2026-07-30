@@ -723,7 +723,7 @@ describe("15/16. Speed Bitcoin withdrawals and connected-account routing remain 
   })
 })
 
-describe("a permanent payment.retrieve 404 is not retried indefinitely", () => {
+describe("an unresolved payment.retrieve 404 remains recoverable", () => {
   const mocks = vi.hoisted(() => ({
     getPaymentById: vi.fn(),
     updatePaymentMetadata: vi.fn(),
@@ -740,7 +740,7 @@ describe("a permanent payment.retrieve 404 is not retried indefinitely", () => {
     mocks.updatePaymentMetadata.mockResolvedValue({ id: "pay-404" })
   })
 
-  it("checks merchant and legacy platform scope once, then skips an unresolved 404 on later passes", async () => {
+  it("periodically rechecks both scopes instead of permanently excluding a non-terminal payment", async () => {
     vi.doMock("@/database", () => ({ getPaymentById: mocks.getPaymentById }))
     vi.doMock("@/database/payments", () => ({ updatePaymentMetadata: mocks.updatePaymentMetadata }))
     vi.doMock("@/engine/eventProcessor", () => ({
@@ -786,7 +786,8 @@ describe("a permanent payment.retrieve 404 is not retried indefinitely", () => {
     expect(mocks.retrieveMerchantSpeedPayment).toHaveBeenCalledTimes(1)
     expect(mocks.retrieveSpeedPayment).toHaveBeenCalledTimes(1)
 
-    // Second call: payment now has the stale flag persisted - must skip Speed entirely.
+    // A later maintenance pass must recheck the provider. A historical stale
+    // marker is diagnostic evidence, not a permanent queue exclusion.
     mocks.getPaymentById.mockResolvedValue({
       id: "pay-404",
       status: "PROCESSING",
@@ -799,10 +800,12 @@ describe("a permanent payment.retrieve 404 is not retried indefinitely", () => {
     const secondResult = await reconcileSpeedLightningPayment({
       id: "pay-404", status: "PROCESSING", provider_reference: "speed_pay_stale", merchant_id: "merchant-1",
     } as never)
-    expect(secondResult.checked).toBe(false)
-    // Still only ever called once total across both reconciliation attempts.
+    expect(secondResult.checked).toBe(true)
+    expect(secondResult.speedStatus).toBe("stale_reference")
+    // The persisted stale marker records that connected-account scope already
+    // returned 404; later checks use the legacy platform scope directly.
     expect(mocks.retrieveMerchantSpeedPayment).toHaveBeenCalledTimes(1)
-    expect(mocks.retrieveSpeedPayment).toHaveBeenCalledTimes(1)
+    expect(mocks.retrieveSpeedPayment).toHaveBeenCalledTimes(2)
 
     // The canonical payment record itself was never mutated in status - only
     // the stale-reference flag was recorded, preserving it for support review.

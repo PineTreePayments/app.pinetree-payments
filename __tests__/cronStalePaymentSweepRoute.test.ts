@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { NextRequest } from "next/server"
 
-vi.mock("@/engine/stalePaymentSweep", () => ({
-  sweepStalePayments: vi.fn()
+vi.mock("@/engine/paymentMaintenance", () => ({
+  runPaymentMaintenanceTick: vi.fn()
 }))
 
 import { POST } from "@/app/api/cron/sweep-stale-payments/route"
-import { sweepStalePayments } from "@/engine/stalePaymentSweep"
+import { runPaymentMaintenanceTick } from "@/engine/paymentMaintenance"
 
 function request(token?: string) {
   return new NextRequest("https://app.pinetree-payments.com/api/cron/sweep-stale-payments", {
@@ -32,7 +32,7 @@ describe("production stale-payment scheduler route", () => {
     const response = await POST(request())
 
     expect(response.status).toBe(401)
-    expect(sweepStalePayments).not.toHaveBeenCalled()
+    expect(runPaymentMaintenanceTick).not.toHaveBeenCalled()
   })
 
   it("rejects an invalid bearer token", async () => {
@@ -41,42 +41,41 @@ describe("production stale-payment scheduler route", () => {
     const response = await POST(request("wrong-secret"))
 
     expect(response.status).toBe(401)
-    expect(sweepStalePayments).not.toHaveBeenCalled()
+    expect(runPaymentMaintenanceTick).not.toHaveBeenCalled()
   })
 
   it("preserves the POST endpoint and returns aggregate run diagnostics", async () => {
     process.env.CRON_SECRET = "expected-secret"
-    vi.mocked(sweepStalePayments).mockResolvedValue({
+    vi.mocked(runPaymentMaintenanceTick).mockResolvedValue({
       runId: "run-1",
-      durationMs: 24,
-      scanned: 2,
-      markedIncomplete: 2,
-      expired: 2,
-      incomplete: 0,
-      expiredIntents: 2,
-      skipped: 0,
-      skippedSubmittedEvidence: 0,
-      skippedTerminal: 0,
-      skippedConcurrent: 0,
-      failures: 0,
-      cutoff: "2026-07-15T20:45:00.000Z"
-    })
+      startedAt: "2026-07-15T20:45:00.000Z",
+      completedAt: "2026-07-15T20:45:24.000Z",
+      skipped: false,
+      sweep: { scanned: 2, markedIncomplete: 2 },
+      watcherCandidates: 3,
+      watcherChecks: 3,
+      failures: 0
+    } as never)
 
     const response = await POST(request("expected-secret"))
     const body = await response.json()
 
     expect(response.status).toBe(200)
-    expect(sweepStalePayments).toHaveBeenCalledWith({
-      maxRows: 250,
-      staleAfterMs: 5 * 60 * 1000
+    expect(runPaymentMaintenanceTick).toHaveBeenCalledWith({
+      throttleMs: 1_000,
+      sweepLimit: 250,
+      watcherLimit: 25,
+      reconcileLimit: 25,
+      watcherTimeoutMs: 8_000,
+      lightningReconcileLimit: 25,
+      feeSettlementReconcileLimit: 25
     })
     expect(body).toMatchObject({
       runId: "run-1",
-      durationMs: 24,
-      scanned: 2,
-      markedIncomplete: 2,
-      expiredIntents: 2,
-      skipped: 0
+      skipped: false,
+      watcherCandidates: 3,
+      watcherChecks: 3,
+      failures: 0
     })
   })
 })

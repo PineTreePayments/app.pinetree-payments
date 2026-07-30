@@ -1,4 +1,5 @@
 import crypto from "crypto"
+import { readFileSync } from "node:fs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -20,6 +21,12 @@ function stripeSignature(rawBody: string, secret: string, timestamp = Math.floor
 }
 
 describe("Stripe provider adapter", () => {
+  it("requires merchant-scoped connected-account retrieval in the registered adapter", () => {
+    const source = readFileSync("providers/stripe/adapter.ts", "utf8")
+    expect(source).toContain("getMerchantStripeAccountId(merchantId)")
+    expect(source).toContain("getStripePaymentStatus(providerReference, connectedAccountId)")
+  })
+
   beforeEach(() => {
     vi.unstubAllEnvs()
     vi.unstubAllGlobals()

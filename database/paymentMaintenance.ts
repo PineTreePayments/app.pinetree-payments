@@ -6,11 +6,46 @@ const db = supabaseAdmin || supabaseAnon
 
 const LIGHTNING_NETWORK_FILTER = "bitcoin_lightning,btc_lightning,lightning_btc,lightning"
 const SPEED_PROVIDER_FILTER = "lightning_speed,speed,tryspeed"
-const ACTIVE_SPEED_RECONCILIATION_FILTER =
-  "metadata->>speedRetrieveStale.neq.true," +
-  "metadata->>speedRetrieveStale.is.null," +
-  "metadata->>speedLegacyPlatformFallbackCheckedAt.is.null"
+let recoverySchemaReady = false
 
+function isMissingRecoveryRpc(error: { code?: string; message?: string } | null): boolean {
+  const code = String(error?.code || "")
+  const message = String(error?.message || "").toLowerCase()
+  return code === "PGRST202" || code === "42883" || message.includes("could not find the function")
+}
+
+export async function isPaymentRecoverySchemaReady(): Promise<boolean> {
+  if (recoverySchemaReady) return true
+  const { data, error } = await db.rpc("payment_recovery_schema_ready")
+  if (error) {
+    if (isMissingRecoveryRpc(error)) return false
+    throw new Error(`Failed to verify payment recovery schema: ${error.message}`)
+  }
+  recoverySchemaReady = data === true
+  return recoverySchemaReady
+}
+
+export async function claimPaymentMaintenanceRun(
+  leaseToken: string,
+  leaseSeconds = 90
+): Promise<
+  | { claimed: true; reason: "claimed" }
+  | { claimed: false; reason: "distributed_lease_active" | "recovery_schema_not_ready" }
+> {
+  const { data, error } = await db.rpc("claim_payment_maintenance_run", {
+    p_lease_token: leaseToken,
+    p_lease_seconds: Math.max(5, Math.min(Math.floor(leaseSeconds), 300)),
+  })
+  if (error) {
+    if (isMissingRecoveryRpc(error)) {
+      return { claimed: false, reason: "recovery_schema_not_ready" }
+    }
+    throw new Error(`Failed to claim payment maintenance lease: ${error.message}`)
+  }
+  return data === true
+    ? { claimed: true, reason: "claimed" }
+    : { claimed: false, reason: "distributed_lease_active" }
+}
 export type StalePaymentMaintenanceCandidate = Pick<Payment, "id" | "updated_at">
 
 export async function getStalePaymentMaintenanceCandidates(input: {
@@ -44,11 +79,11 @@ export async function getStalePaymentMaintenanceCandidates(input: {
 }
 
 export async function getPaymentMaintenanceCandidates(limit: number): Promise<Payment[]> {
-  const boundedLimit = Math.max(1, Math.min(limit, 25))
+  const boundedLimit = Math.max(1, Math.min(limit, 100))
   const { data, error } = await db
     .from("payments")
     .select("*")
-    .in("status", ["PENDING", "PROCESSING"])
+    .in("status", ["CREATED", "PENDING", "PROCESSING", "UNKNOWN"])
     .order("updated_at", { ascending: true })
     .limit(boundedLimit)
 
@@ -123,13 +158,12 @@ export async function getLightningReconciliationCandidates(input: {
   limit: number
   cutoff: string
 }): Promise<Payment[]> {
-  const boundedLimit = Math.max(1, Math.min(input.limit, 25))
+  const boundedLimit = Math.max(1, Math.min(input.limit, 50))
   const directQuery = db
     .from("payments")
     .select("*")
-    .in("status", ["PENDING", "PROCESSING"])
+    .in("status", ["CREATED", "PENDING", "PROCESSING", "UNKNOWN"])
     .or(`network.in.(${LIGHTNING_NETWORK_FILTER}),provider.in.(${SPEED_PROVIDER_FILTER})`)
-    .or(ACTIVE_SPEED_RECONCILIATION_FILTER)
     .lt("updated_at", input.cutoff)
     .order("updated_at", { ascending: true })
     .limit(boundedLimit)
@@ -141,13 +175,12 @@ export async function getLightningReconciliationCandidates(input: {
   const relatedAttemptQuery = db
     .from("payments")
     .select("*,transactions!inner(provider,network)")
-    .in("status", ["PENDING", "PROCESSING"])
+    .in("status", ["CREATED", "PENDING", "PROCESSING", "UNKNOWN"])
     .or("network.is.null,provider.is.null")
     .or(
       `network.in.(${LIGHTNING_NETWORK_FILTER}),provider.in.(${SPEED_PROVIDER_FILTER})`,
       { referencedTable: "transactions" }
     )
-    .or(ACTIVE_SPEED_RECONCILIATION_FILTER)
     .lt("updated_at", input.cutoff)
     .order("updated_at", { ascending: true })
     .limit(boundedLimit)

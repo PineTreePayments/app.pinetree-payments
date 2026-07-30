@@ -130,6 +130,7 @@ const ALL_WEBHOOK_EVENTS = [
   { id: "payment.expired", label: "payment.expired", description: "Fires when a payment expires" },
   { id: "payment.canceled", label: "payment.canceled", description: "Fires when a payment is canceled" },
   { id: "payment.incomplete", label: "payment.incomplete", description: "Compatibility event for an abandoned payment without specific evidence" },
+  { id: "payment.unknown", label: "payment.unknown", description: "Fires when provider or network recovery requires investigation" },
   { id: "payment.refunded", label: "payment.refunded", description: "Fires when a payment is refunded" },
   { id: "checkout.session.created", label: "checkout.session.created", description: "Fires when a new checkout session is created" },
   { id: "checkout.session.processing", label: "checkout.session.processing", description: "Fires when session payment processing begins" },
@@ -2597,7 +2598,7 @@ function verifyPineTreeWebhook(rawBody, headers, secret) {
                 <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-3.5 py-2.5 text-[11px] leading-relaxed text-gray-500">
                   <span className="font-semibold text-gray-700">Check payment status from your server.</span>{" "}
                   The checkout session API returns{" "}
-                  <code className="font-mono text-[10px] text-gray-600">open | processing | paid | failed | expired | canceled</code>.
+                  <code className="font-mono text-[10px] text-gray-600">open | processing | paid | failed | incomplete | expired | canceled | unknown</code>.
                   Use this as a fallback if your webhook delivery fails.
                 </div>
               </div>

@@ -6,6 +6,7 @@ import {
   SHIFT4_PROVIDER_ID
 } from "./constants"
 import { getPaymentStatus as getShift4PaymentStatus } from "./paymentStatus"
+import { Shift4Client } from "./client"
 import { translateEvent as translateShift4Event } from "./translateEvent"
 import { verifyWebhook as verifyShift4Webhook } from "./verifyWebhook"
 
@@ -47,13 +48,19 @@ export const shift4Adapter: ProviderAdapter = {
     }
   },
 
-  async getPaymentStatus(providerReference: string) {
+  async getPaymentStatus(providerReference: string, merchantId?: string) {
     try {
-      const payment = await getShift4PaymentStatus(providerReference)
+      if (!merchantId) throw new Error("Merchant ID is required for Shift4 payment retrieval")
+      const { getMerchantCredential } = await import("@/database")
+      const merchantApiKey = await getMerchantCredential(merchantId, "shift4_api_key")
+      if (!merchantApiKey) throw new Error("Shift4 merchant API key not configured")
+      const payment = await getShift4PaymentStatus(providerReference, {
+        client: new Shift4Client({ secretKey: merchantApiKey }),
+      })
       return { status: payment.status }
     } catch (error) {
       console.error("Shift4 adapter status check error:", error)
-      return { status: "UNKNOWN" as const }
+      throw error
     }
   },
 

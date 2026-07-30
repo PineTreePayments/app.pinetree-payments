@@ -76,7 +76,7 @@ export async function GET(
         paidAt = confirmed.updated_at
       } else {
         const inProgress = (paymentRows ?? []).some((p) =>
-          ["CREATED", "PENDING", "PROCESSING"].includes(p.status)
+          ["CREATED", "PENDING", "PROCESSING", "UNKNOWN"].includes(p.status)
         )
         if (inProgress) {
           sessionStatus = "processing"

@@ -25,12 +25,10 @@ describe("v1 checkout session list filters", () => {
     ).toThrowError(expect.objectContaining({ code: "invalid_cursor" }))
   })
 
-  it("rejects unsupported statuses and invalid filters", () => {
-    expect(() =>
-      parseCheckoutSessionListQuery(
-        "https://example.test/api/v1/checkout/sessions?status=unknown"
-      )
-    ).toThrowError(expect.objectContaining({ code: "unsupported_status" }))
+  it("accepts UNKNOWN investigation filters and rejects invalid filters", () => {
+    expect(parseCheckoutSessionListQuery(
+      "https://example.test/api/v1/checkout/sessions?status=unknown"
+    )).toMatchObject({ status: "unknown" })
     expect(() =>
       parseCheckoutSessionListQuery(
         "https://example.test/api/v1/checkout/sessions?limit=500"

@@ -14,6 +14,7 @@ export type PaymentStatus =
   | "EXPIRED"
   | "CANCELED"
   | "INCOMPLETE"
+  | "UNKNOWN"
 
 export function normalizeToStrictPaymentStatus(status: unknown): PaymentStatus {
   const normalized = String(status || "").toUpperCase().trim()
@@ -27,7 +28,8 @@ export function normalizeToStrictPaymentStatus(status: unknown): PaymentStatus {
     normalized === "FAILED" ||
     normalized === "EXPIRED" ||
     normalized === "CANCELED" ||
-    normalized === "INCOMPLETE"
+    normalized === "INCOMPLETE" ||
+    normalized === "UNKNOWN"
   ) {
     return normalized
   }
@@ -44,13 +46,17 @@ export function normalizeToStrictPaymentStatus(status: unknown): PaymentStatus {
 const validTransitions: Record<PaymentStatus, PaymentStatus[]> = {
   // Strict lifecycle: CREATED -> PENDING -> PROCESSING -> CONFIRMED
   // New records must be presented before any terminal customer outcome.
-  CREATED: ["PENDING"],
+  CREATED: ["PENDING", "UNKNOWN"],
 
   // Waiting payments can start processing or end with one exact unpaid outcome.
-  PENDING: ["PROCESSING", "EXPIRED", "CANCELED", "INCOMPLETE"],
+  PENDING: ["PROCESSING", "EXPIRED", "CANCELED", "INCOMPLETE", "UNKNOWN"],
 
   // Allowed alternative path: PROCESSING -> FAILED
-  PROCESSING: ["CONFIRMED", "FAILED"],
+  PROCESSING: ["CONFIRMED", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE", "UNKNOWN"],
+
+  // Explicit investigation state. Recovery keeps polling UNKNOWN rows and may
+  // apply later authoritative evidence without returning them to PENDING.
+  UNKNOWN: ["PROCESSING", "CONFIRMED", "FAILED", "EXPIRED", "CANCELED", "INCOMPLETE"],
 
   // Terminal state
   CONFIRMED: [],

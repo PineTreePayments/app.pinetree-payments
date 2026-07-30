@@ -86,6 +86,7 @@ export type StandardPaymentEvent = {
     | "payment.expired"
     | "payment.canceled"
     | "payment.incomplete"
+    | "payment.unknown"
 }
 
 export interface ProviderAdapterMetadata {
