@@ -1,6 +1,6 @@
 import { cookies } from "next/headers"
 import ResetPasswordClient from "./ResetPasswordClient"
-import { RECOVERY_COOKIE_NAME } from "@/lib/auth/recovery"
+import { isRecoveryErrorCode, RECOVERY_COOKIE_NAME } from "@/lib/auth/recovery"
 
 export const dynamic = "force-dynamic"
 
@@ -15,5 +15,13 @@ export default async function ResetPasswordPage({ searchParams }: ResetPasswordP
   const recoveryAuthorized =
     recoveryParam.length > 0 && recoveryCookie.length > 0 && recoveryParam === recoveryCookie
 
-  return <ResetPasswordClient recoveryAuthorized={recoveryAuthorized} />
+  const rawError = params.recovery_error
+  const recoveryError = isRecoveryErrorCode(rawError) ? rawError : null
+
+  return (
+    <ResetPasswordClient
+      recoveryAuthorized={recoveryAuthorized}
+      recoveryError={recoveryError}
+    />
+  )
 }

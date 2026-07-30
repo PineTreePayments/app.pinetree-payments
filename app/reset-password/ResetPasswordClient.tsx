@@ -3,7 +3,12 @@
 import { FormEvent, useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { logRecoveryDiagnostic } from "@/lib/auth/recovery"
+import {
+  classifyRecoveryError,
+  logRecoveryDiagnostic,
+  recoveryErrorMessage,
+  type RecoveryErrorCode,
+} from "@/lib/auth/recovery"
 import { supabase } from "@/lib/supabaseClient"
 
 type RecoveryPhase =
@@ -16,25 +21,61 @@ type RecoveryPhase =
 
 type ResetPasswordClientProps = {
   recoveryAuthorized: boolean
+  recoveryError: RecoveryErrorCode | null
 }
 
 export default function ResetPasswordClient({
   recoveryAuthorized,
+  recoveryError,
 }: ResetPasswordClientProps) {
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [phase, setPhase] = useState<RecoveryPhase>("checking")
   const [errorMsg, setErrorMsg] = useState("")
+  const [failureCode, setFailureCode] = useState<RecoveryErrorCode | null>(recoveryError)
   const submittingRef = useRef(false)
   const recoverySessionClearedRef = useRef(false)
+
+  // Supabase reports some link failures in the URL fragment, which never
+  // reaches the server. The fragment survives our 303 redirect, so read the
+  // error metadata here to report an accurate reason. Only `error_code` is
+  // read — token material in a fragment is never touched or logged.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const hash = window.location.hash
+    if (!hash || hash.length < 2) return
+
+    const fragment = new URLSearchParams(hash.slice(1))
+    const fragmentErrorCode = fragment.get("error_code")
+    if (fragmentErrorCode) {
+      const classified = classifyRecoveryError({ code: fragmentErrorCode })
+      logRecoveryDiagnostic("form.fragment_error.observed", {
+        supabaseErrorCode: fragmentErrorCode,
+        outcome: classified,
+      })
+      setFailureCode(classified)
+    }
+
+    // Strip the fragment so nothing from the link lingers in the address bar.
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${window.location.search}`
+    )
+  }, [])
 
   useEffect(() => {
     let active = true
 
     async function validateRecoverySession() {
       if (!recoveryAuthorized) {
-        logRecoveryDiagnostic("form.authorization.missing")
-        if (active) setPhase("invalid")
+        logRecoveryDiagnostic("form.authorization.missing", {
+          outcome: recoveryError ?? "missing_link",
+        })
+        if (active) {
+          setFailureCode((current) => current ?? "missing_link")
+          setPhase("invalid")
+        }
         return
       }
 
@@ -42,8 +83,14 @@ export default function ResetPasswordClient({
       try {
         sessionResult = await supabase.auth.getSession()
       } catch {
-        logRecoveryDiagnostic("form.session.invalid", { errorCode: "request_failed" })
-        if (active) setPhase("invalid")
+        logRecoveryDiagnostic("form.session.invalid", {
+          supabaseErrorCode: "request_failed",
+          outcome: "verification_failed",
+        })
+        if (active) {
+          setFailureCode("verification_failed")
+          setPhase("invalid")
+        }
         return
       }
       const {
@@ -53,9 +100,13 @@ export default function ResetPasswordClient({
 
       if (!session || sessionError) {
         logRecoveryDiagnostic("form.session.invalid", {
-          errorCode: sessionError?.code ?? "missing_session",
+          supabaseErrorCode: sessionError?.code ?? "missing_session",
+          outcome: "verification_failed",
         })
-        if (active) setPhase("invalid")
+        if (active) {
+          setFailureCode("verification_failed")
+          setPhase("invalid")
+        }
         return
       }
 
@@ -63,28 +114,37 @@ export default function ResetPasswordClient({
       try {
         userResult = await supabase.auth.getUser()
       } catch {
-        logRecoveryDiagnostic("form.session.invalid", { errorCode: "user_request_failed" })
-        if (active) setPhase("invalid")
+        logRecoveryDiagnostic("form.session.invalid", {
+          supabaseErrorCode: "user_request_failed",
+          outcome: "verification_failed",
+        })
+        if (active) {
+          setFailureCode("verification_failed")
+          setPhase("invalid")
+        }
         return
       }
       const { data: userData, error: userError } = userResult
       const validUser = userData.user?.id === session.user.id
+      const verified = !userError && validUser
 
       logRecoveryDiagnostic("form.session.checked", {
         hasSession: true,
         validUser,
-        errorCode: userError?.code ?? null,
+        supabaseErrorCode: userError?.code ?? null,
+        outcome: verified ? "ready" : "verification_failed",
       })
 
       if (!active) return
-      setPhase(!userError && validUser ? "ready" : "invalid")
+      if (!verified) setFailureCode("verification_failed")
+      setPhase(verified ? "ready" : "invalid")
     }
 
     void validateRecoverySession()
     return () => {
       active = false
     }
-  }, [recoveryAuthorized])
+  }, [recoveryAuthorized, recoveryError])
 
   async function finalizeRecovery() {
     setPhase("cleaning")
@@ -96,7 +156,7 @@ export default function ResetPasswordClient({
         signOutResult = await supabase.auth.signOut({ scope: "local" })
       } catch (caughtError) {
         const message = caughtError instanceof Error ? caughtError.message : "Recovery sign-out failed."
-        logRecoveryDiagnostic("cleanup.signout.failed", { errorCode: "request_failed" })
+        logRecoveryDiagnostic("cleanup.signout.failed", { supabaseErrorCode: "request_failed" })
         setErrorMsg(`Your password was updated, but sign-out cleanup failed: ${message}`)
         setPhase("cleanup-error")
         return
@@ -104,7 +164,7 @@ export default function ResetPasswordClient({
       const { error: signOutError } = signOutResult
       if (signOutError) {
         logRecoveryDiagnostic("cleanup.signout.failed", {
-          errorCode: signOutError.code ?? "unknown",
+          supabaseErrorCode: signOutError.code ?? "unknown",
         })
         setErrorMsg(`Your password was updated, but sign-out cleanup failed: ${signOutError.message}`)
         setPhase("cleanup-error")
@@ -177,7 +237,7 @@ export default function ResetPasswordClient({
       updateResult = await supabase.auth.updateUser({ password })
     } catch (caughtError) {
       const message = caughtError instanceof Error ? caughtError.message : "Password update failed."
-      logRecoveryDiagnostic("password.update.failed", { errorCode: "request_failed" })
+      logRecoveryDiagnostic("password.update.failed", { supabaseErrorCode: "request_failed" })
       setErrorMsg(message)
       setPhase("ready")
       submittingRef.current = false
@@ -187,7 +247,7 @@ export default function ResetPasswordClient({
 
     if (error || !data.user) {
       logRecoveryDiagnostic("password.update.failed", {
-        errorCode: error?.code ?? "missing_user",
+        supabaseErrorCode: error?.code ?? "missing_user",
         status: error?.status ?? null,
       })
       setErrorMsg(error?.message ?? "Supabase did not return an updated user.")
@@ -201,7 +261,7 @@ export default function ResetPasswordClient({
       sessionResult = await supabase.auth.getSession()
     } catch {
       logRecoveryDiagnostic("password.update.session_check_failed", {
-        errorCode: "request_failed",
+        supabaseErrorCode: "request_failed",
       })
       setErrorMsg("The password was updated, but the recovery session could not be verified for cleanup.")
       setPhase("cleanup-error")
@@ -214,7 +274,7 @@ export default function ResetPasswordClient({
     } = sessionResult
     if (sessionError || !session || session.user.id !== data.user.id) {
       logRecoveryDiagnostic("password.update.session_check_failed", {
-        errorCode: sessionError?.code ?? "missing_session",
+        supabaseErrorCode: sessionError?.code ?? "missing_session",
       })
       setErrorMsg("The password was updated, but the recovery session could not be verified for cleanup.")
       setPhase("cleanup-error")
@@ -271,7 +331,7 @@ export default function ResetPasswordClient({
         ) : phase === "invalid" ? (
           <div className="space-y-4">
             <p className="rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
-              This reset link is invalid, expired, or has already been used. Request a new password reset link.
+              {recoveryErrorMessage(failureCode)}
             </p>
             <Link
               href="/forgot-password"

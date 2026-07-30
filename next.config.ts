@@ -26,6 +26,18 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        // Password recovery links carry a single-use credential in the query
+        // string. Send no referrer at all from these routes, and keep them out
+        // of caches and indexes. Declared here because platform-level headers
+        // override ones set inside a route handler.
+        source: "/auth/:path(confirm|callback)",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "no-store, private, max-age=0" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+        ],
+      },
     ]
   },
 };

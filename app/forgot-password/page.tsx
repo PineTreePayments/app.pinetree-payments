@@ -3,14 +3,6 @@
 import { FormEvent, useState } from "react"
 import Image from "next/image"
 import Link from "next/link"
-import { supabase } from "@/lib/supabaseClient"
-
-function getResetRedirectUrl() {
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    (typeof window !== "undefined" ? window.location.origin : "")
-  return `${appUrl.replace(/\/$/, "")}/auth/callback`
-}
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
@@ -39,29 +31,26 @@ export default function ForgotPasswordPage() {
     }
 
     setLoading(true)
-    let resetResult: Awaited<ReturnType<typeof supabase.auth.resetPasswordForEmail>>
+    // Sent through the server route so the recovery token carries no PKCE
+    // challenge. The emailed link is then verifiable server-side and works in
+    // whichever browser or mail app opens it.
+    let response: Response
     try {
-      resetResult = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
-        redirectTo: getResetRedirectUrl()
+      response = await fetch("/api/auth/password-reset", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmedEmail })
       })
-    } catch (caughtError) {
+    } catch {
       setLoading(false)
-      setErrorMsg(
-        process.env.NODE_ENV === "development" && caughtError instanceof Error
-          ? caughtError.message
-          : "We could not send a reset link right now. Please try again."
-      )
+      setErrorMsg("We could not send a reset link right now. Please try again.")
       return
     }
-    const { error } = resetResult
     setLoading(false)
 
-    if (error) {
-      setErrorMsg(
-        process.env.NODE_ENV === "development"
-          ? error.message
-          : "We could not send a reset link right now. Please try again."
-      )
+    if (!response.ok) {
+      setErrorMsg("We could not send a reset link right now. Please try again.")
       return
     }
 
