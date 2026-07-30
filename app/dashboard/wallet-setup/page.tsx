@@ -3980,17 +3980,22 @@ function ActivityTab({
     const rail: WithdrawalRail = network === "base" ? "base" : network === "solana" ? "solana" : "bitcoin"
     const amountBaseUnits = operation.amountBaseUnits != null ? String(operation.amountBaseUnits) : ""
     const feeBaseUnits = operation.feeBaseUnits != null ? String(operation.feeBaseUnits) : ""
+    const destinationAddress = operation.destinationAddress != null ? String(operation.destinationAddress) : ""
+    const destinationLabel = operation.destinationLabel != null ? String(operation.destinationLabel) : ""
     return {
       ...detailFromItem(item),
       status: String(operation.status || item.status),
       amount: item.amountLabel || (amountBaseUnits ? `${amountBaseUnits} base units` : activityAmountLabel(item)),
       fee: item.feeLabel || (feeBaseUnits ? `${feeBaseUnits} base units` : "Network fee may apply"),
-      destinationLabel: item.destinationLabel || (operation.destinationSummary != null ? String(operation.destinationSummary) : activityDestinationLabel(item)),
-      destinationAddress: item.destinationAddress || (operation.destinationSummary != null ? String(operation.destinationSummary) : null),
+      destinationLabel: destinationLabel || item.destinationLabel || (operation.destinationSummary != null ? String(operation.destinationSummary) : activityDestinationLabel(item)),
+      destinationAddress: destinationAddress || item.destinationAddress || null,
       provider: providerDisplayLabel(operation.provider != null ? String(operation.provider) : item.provider || "speed"),
       network: networkDisplayLabel(network, rail),
       rail,
-      submittedAt: item.submittedAt || (operation.createdAt != null ? String(operation.createdAt) : item.createdAt),
+      submittedAt:
+        operation.submittedAt != null
+          ? String(operation.submittedAt)
+          : item.submittedAt || (operation.createdAt != null ? String(operation.createdAt) : item.createdAt),
       completedAt: operation.completedAt != null ? String(operation.completedAt) : item.completedAt || null,
       txHash: operation.txHash != null ? String(operation.txHash) : item.txHash || null,
       explorerUrl: operation.explorerUrl != null ? String(operation.explorerUrl) : item.explorerUrl || null,
@@ -4372,6 +4377,7 @@ function PineTreeWalletRuntime() {
   const [withdrawalBitcoinTransferType, setWithdrawalBitcoinTransferType] = useState<BitcoinTransferType>("onchain")
   const [withdrawalDestination, setWithdrawalDestination] = useState("")
   const [withdrawalSelectedDestinationId, setWithdrawalSelectedDestinationId] = useState<string | null>(null)
+  const [withdrawalSelectedDestinationLabel, setWithdrawalSelectedDestinationLabel] = useState<string | null>(null)
   const [withdrawalAmount, setWithdrawalAmount] = useState("")
   const [withdrawalScreen, setWithdrawalScreen] = useState<WithdrawalScreen>("form")
   const [withdrawalReview, setWithdrawalReview] = useState<WithdrawalReviewResponse | null>(null)
@@ -9550,6 +9556,8 @@ function PineTreeWalletRuntime() {
   function handleWithdrawalAssetSelect(nextRail: WithdrawalRail, nextAsset: WithdrawalAsset) {
     setWithdrawalRail(nextRail)
     setWithdrawalAsset(nextAsset)
+    setWithdrawalSelectedDestinationId(null)
+    setWithdrawalSelectedDestinationLabel(null)
     setWithdrawalScreen("form")
     setWithdrawalReview(null)
     setWithdrawalSubmitResult(null)
@@ -9609,6 +9617,7 @@ function PineTreeWalletRuntime() {
   function resetWithdrawalDraft() {
     setWithdrawalDestination("")
     setWithdrawalSelectedDestinationId(null)
+    setWithdrawalSelectedDestinationLabel(null)
     setWithdrawalAmount("")
     setWithdrawalScreen("form")
     setWithdrawalReview(null)
@@ -9801,6 +9810,7 @@ function PineTreeWalletRuntime() {
     asset: "ETH" | "USDC" | "SOL" | "BTC"
     method: "onchain" | "lightning" | null
     destination_address: string
+    label?: string | null
   }) {
     resetWithdrawalDraft()
     setWithdrawalRail(destination.rail)
@@ -9810,6 +9820,7 @@ function PineTreeWalletRuntime() {
     }
     setWithdrawalDestination(destination.destination_address)
     setWithdrawalSelectedDestinationId(destination.id)
+    setWithdrawalSelectedDestinationLabel(destination.label || null)
     setActiveView("withdraw")
   }
 
@@ -10373,6 +10384,7 @@ function PineTreeWalletRuntime() {
             asset: "SATS",
             amount_decimal: amountSats,
             destination: review.review.destinationAddress,
+            destination_label: withdrawalSelectedDestinationLabel || undefined,
             destination_id: withdrawalSelectedDestinationId || undefined,
           }),
         })
@@ -11330,6 +11342,7 @@ function PineTreeWalletRuntime() {
                   // type is never compatible with the new one - clear both, but never
                   // touch Address Book (this only clears local form state).
                   setWithdrawalSelectedDestinationId(null)
+                  setWithdrawalSelectedDestinationLabel(null)
                   setWithdrawalScreen("form")
                   setWithdrawalReview(null)
                   setWithdrawalSubmitResult(null)
@@ -11362,6 +11375,7 @@ function PineTreeWalletRuntime() {
                   // considered "selected" - it must never delete or modify
                   // the saved destination itself.
                   setWithdrawalSelectedDestinationId(null)
+                  setWithdrawalSelectedDestinationLabel(null)
                   setWithdrawalScreen("form")
                   setWithdrawalReview(null)
                   setWithdrawalSubmitResult(null)
@@ -11372,10 +11386,12 @@ function PineTreeWalletRuntime() {
                 onSelectDestination={(destination) => {
                   if (!destination) {
                     setWithdrawalSelectedDestinationId(null)
+                    setWithdrawalSelectedDestinationLabel(null)
                     return
                   }
                   setWithdrawalDestination(destination.destination_address)
                   setWithdrawalSelectedDestinationId(destination.id)
+                  setWithdrawalSelectedDestinationLabel(destination.label || null)
                   if (withdrawalRail === "bitcoin" && destination.method) {
                     setWithdrawalBitcoinTransferType(destination.method)
                   }

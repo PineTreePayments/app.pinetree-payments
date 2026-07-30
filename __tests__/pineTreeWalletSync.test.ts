@@ -349,6 +349,14 @@ describe("PineTree Wallet balance sync", () => {
         merchant_id: "merchant_1",
         status: "COMPLETED",
         amount_base_units: "2217713",
+        fee_base_units: "300",
+        destination_summary: "bc1qso...ress",
+        destination_address: "bc1qsomeaddress",
+        destination_label: "Treasury BTC",
+        network: "bitcoin_onchain",
+        tx_hash: "btc-tx-1",
+        submitted_at: "2026-07-22T00:00:05Z",
+        completed_at: "2026-07-22T00:01:00Z",
         source: "manual",
         created_at: "2026-07-22T00:00:00Z",
       },
@@ -360,6 +368,12 @@ describe("PineTree Wallet balance sync", () => {
       id: "op-confirmed-1",
       rail: "bitcoin",
       status: "confirmed",
+      destinationAddress: "bc1qsomeaddress",
+      destinationLabel: "Treasury BTC",
+      network: "bitcoin_onchain",
+      txHash: "btc-tx-1",
+      submittedAt: "2026-07-22T00:00:05Z",
+      completedAt: "2026-07-22T00:01:00Z",
     })
   })
 

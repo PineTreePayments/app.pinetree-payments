@@ -15,6 +15,8 @@ function operationRow(overrides: Record<string, unknown> = {}) {
     amount_base_units: "1000",
     fee_base_units: null,
     destination_summary: "lnbc1...abcd",
+    destination_address: null,
+    destination_label: null,
     tx_hash: null,
     explorer_url: null,
     provider_reference: null,
@@ -271,7 +273,64 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     })
 
     expect(createWalletOperation).toHaveBeenCalledWith(
-      expect.objectContaining({ network: "bitcoin_onchain" })
+      expect.objectContaining({
+        network: "bitcoin_onchain",
+        destinationSummary: "bc1qar...5mdq",
+        destinationAddress: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+      })
+    )
+  })
+
+  it("persists the full merchant-entered Bitcoin destination separately from the masked summary", async () => {
+    const fullDestination = "lnbc1qqqqqqqqqqqqqqqqqqqq"
+    const createWithdrawal = vi.fn().mockResolvedValue({
+      providerReference: "fake_ref_1",
+      providerStatus: "processing",
+      status: "PROCESSING",
+    })
+    const adapter = fakeAdapter({
+      getCapabilities: vi.fn().mockResolvedValue({
+        balances: true,
+        withdrawals: true,
+        payouts: false,
+        swaps: false,
+        automaticPayouts: false,
+        automaticConversion: false,
+      }),
+      getBalances: vi.fn().mockResolvedValue([{ asset: "BTC", network: "bitcoin_lightning", availableBaseUnits: BigInt(5000), pendingBaseUnits: BigInt(0), totalBaseUnits: BigInt(5000) }]),
+      createWithdrawal,
+    })
+    const resolveMerchantWalletProvider = vi.fn().mockResolvedValue({ provider: "fake-provider", adapter, context: fakeContext })
+    const created = operationRow({
+      destination_summary: "lnbc1q...qqqq",
+      destination_address: fullDestination,
+      destination_label: "Ops wallet",
+    })
+    const createWalletOperation = vi.fn().mockResolvedValue({ operation: created, created: true })
+    vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
+    vi.doMock("@/database/merchantWalletOperations", () => ({
+      createWalletOperation,
+      updateWalletOperation: vi.fn().mockResolvedValue(operationRow({ ...created, status: "PROCESSING" })),
+      getWalletOperationByIdempotencyKey: vi.fn().mockResolvedValue(null),
+      getWalletOperationForMerchant: vi.fn(),
+      listWalletOperations: vi.fn(),
+    }))
+
+    const { createWalletWithdrawal } = await import("@/engine/wallet/walletOperations")
+    await createWalletWithdrawal("merchant-1", {
+      asset: "SATS",
+      amountDecimal: "1000",
+      destination: fullDestination,
+      destinationLabel: "Ops wallet",
+      idempotencyKey: "key-full-destination",
+    })
+
+    expect(createWalletOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destinationSummary: "lnbc1q...qqqq",
+        destinationAddress: fullDestination,
+        destinationLabel: "Ops wallet",
+      })
     )
   })
 
@@ -520,6 +579,9 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
       provider_reference: "fake_ref_secret",
       provider_status: "internal_status",
       raw_provider_status: { sensitive: "payload" },
+      destination_address: "lnbc1qqqqqqqqqqqqqqqqqqqq",
+      destination_label: "Ops wallet",
+      submitted_at: "2026-07-22T00:00:00.000Z",
     })
     vi.doMock("@/engine/wallet/walletProviderResolution", () => ({ resolveMerchantWalletProvider }))
     vi.doMock("@/database/merchantWalletOperations", () => ({
@@ -538,6 +600,9 @@ describe("engine/wallet/walletOperations - provider-agnostic dispatch", () => {
     expect(operation).not.toHaveProperty("rawProviderStatus")
     expect(JSON.stringify(operation)).not.toContain("fake_ref_secret")
     expect(JSON.stringify(operation)).not.toContain("sensitive")
+    expect(operation.destinationAddress).toBe("lnbc1qqqqqqqqqqqqqqqqqqqq")
+    expect(operation.destinationLabel).toBe("Ops wallet")
+    expect(operation.submittedAt).toBe("2026-07-22T00:00:00.000Z")
   })
 
   it("normalizes abandoned CREATED withdrawals to INCOMPLETE for the wallet activity API", async () => {

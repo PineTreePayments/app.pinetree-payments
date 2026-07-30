@@ -158,6 +158,9 @@ export async function POST(req: NextRequest) {
 
     substage = "destination_classification"
     const destination = String(body.destination || "")
+    const destinationLabel = body.destination_label != null || body.destinationLabel != null
+      ? String(body.destination_label || body.destinationLabel).trim()
+      : null
     const classifiedDestination = classifyBitcoinWithdrawalDestination(destination)
     console.info("[pinetree-withdrawals] SPEED_DESTINATION_CLASSIFIED", {
       correlationId,
@@ -172,6 +175,7 @@ export async function POST(req: NextRequest) {
       asset: String(body.asset || ""),
       amountDecimal: String(body.amount_decimal || body.amountDecimal || ""),
       destination,
+      destinationLabel,
       note: typeof body.note === "string" ? body.note : undefined,
       idempotencyKey,
       correlationId,
@@ -179,7 +183,11 @@ export async function POST(req: NextRequest) {
     })
 
     substage = "operation_persistence"
-    void updateWalletOperationCanonicalFields(merchantId, result.operation.id, { source: "manual" }).catch(() => {})
+    void updateWalletOperationCanonicalFields(merchantId, result.operation.id, {
+      source: "manual",
+      destinationAddress: destination,
+      destinationLabel,
+    }).catch(() => {})
 
     console.info("[pinetree-withdrawals] SPEED_SUBMIT_RETURNED", {
       correlationId,

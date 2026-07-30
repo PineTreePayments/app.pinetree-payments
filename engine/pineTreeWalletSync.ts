@@ -76,6 +76,21 @@ export type PineTreeWalletSyncResult = {
     status: string
     createdAt: string
     source?: "manual" | "saved_address" | "automatic_sweep"
+    amountLabel?: string | null
+    amountDecimal?: string | null
+    asset?: string | null
+    feeLabel?: string | null
+    destinationLabel?: string | null
+    destinationAddress?: string | null
+    provider?: string | null
+    network?: string | null
+    submittedAt?: string | null
+    completedAt?: string | null
+    txHash?: string | null
+    explorerUrl?: string | null
+    providerReference?: string | null
+    withdrawalId?: string | null
+    instantSendId?: string | null
   }>
 }
 
@@ -622,14 +637,33 @@ export async function getPineTreeWalletBalanceSnapshot(
     ? withKnownBalance.reduce((sum, item) => sum + Number(item.usdValue || 0), 0)
     : null
 
-  const withdrawalActivity = recentWithdrawals.map((wd) => ({
-    id: wd.id,
-    label: `${wd.source === "automatic_sweep" ? "Auto-swept" : "Sent"} ${wd.amount_decimal} ${wd.asset}`,
-    rail: wd.rail,
-    status: mapWalletWithdrawalRequestStatusToActivity(wd.status, Boolean(wd.tx_hash)),
-    createdAt: wd.created_at,
-    source: wd.source,
-  }))
+  const withdrawalActivity = recentWithdrawals.map((wd) => {
+    const snapshot = (wd.destination_snapshot || {}) as Record<string, unknown>
+    const feeAmount = wd.fee_amount_decimal != null ? String(wd.fee_amount_decimal) : ""
+    const feeAsset = wd.native_fee_asset != null ? String(wd.native_fee_asset) : wd.asset
+    return {
+      id: wd.id,
+      label: `${wd.source === "automatic_sweep" ? "Auto-swept" : "Sent"} ${wd.amount_decimal} ${wd.asset}`,
+      rail: wd.rail,
+      status: mapWalletWithdrawalRequestStatusToActivity(wd.status, Boolean(wd.tx_hash)),
+      createdAt: wd.created_at,
+      source: wd.source,
+      amountLabel: `${wd.amount_decimal} ${wd.asset}`,
+      amountDecimal: wd.amount_decimal,
+      asset: wd.asset,
+      feeLabel: feeAmount ? `${feeAmount} ${feeAsset}` : null,
+      destinationLabel: typeof snapshot.label === "string" ? snapshot.label : null,
+      destinationAddress: wd.destination_address || null,
+      provider: wd.provider,
+      network: wd.rail,
+      submittedAt: wd.submitted_at || null,
+      completedAt: wd.confirmed_at || null,
+      txHash: wd.tx_hash || null,
+      providerReference: wd.provider_reference || null,
+      withdrawalId: wd.id,
+      instantSendId: wd.provider_request_id || null,
+    }
+  })
 
   // Bitcoin/Speed withdrawals live in a separate ledger table
   // (merchant_wallet_operations) from Base/Solana's wallet_withdrawal_requests,
@@ -650,6 +684,19 @@ export async function getPineTreeWalletBalanceSnapshot(
     }),
     createdAt: op.created_at,
     source: op.source,
+    amountLabel: `${satsToBtcDecimal(op.amount_base_units) ?? "0"} BTC`,
+    amountDecimal: satsToBtcDecimal(op.amount_base_units),
+    asset: "BTC",
+    feeLabel: op.fee_base_units ? `${satsToBtcDecimal(op.fee_base_units) ?? op.fee_base_units} BTC` : null,
+    destinationLabel: op.destination_label || (typeof op.destination_snapshot?.label === "string" ? op.destination_snapshot.label : null) || op.destination_summary || null,
+    destinationAddress: op.destination_address || null,
+    provider: op.provider,
+    network: op.network || "bitcoin_lightning",
+    submittedAt: op.submitted_at || null,
+    completedAt: op.completed_at || op.confirmed_at || null,
+    txHash: op.tx_hash || null,
+    explorerUrl: op.explorer_url || null,
+    withdrawalId: op.id,
   }))
 
   const recentActivity = [...withdrawalActivity, ...operationActivity]

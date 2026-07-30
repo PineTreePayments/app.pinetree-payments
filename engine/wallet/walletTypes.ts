@@ -68,10 +68,13 @@ export type PineTreeWalletOperation = {
   amountBaseUnits: string
   feeBaseUnits: string | null
   destinationSummary: string | null
+  destinationAddress: string | null
+  destinationLabel: string | null
   txHash: string | null
   explorerUrl: string | null
   failureReason: string | null
   createdAt: string
+  submittedAt: string | null
   updatedAt: string
   completedAt: string | null
 }

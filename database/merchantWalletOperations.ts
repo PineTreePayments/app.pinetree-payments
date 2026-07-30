@@ -12,6 +12,7 @@ function isMissingOperationColumn(error: { code?: string; message?: string } | n
       || /provider_(account|transaction|secondary|created|request)/i.test(error.message || "")
       || /dispatch_(started|completed)/i.test(error.message || "")
       || /provider_(response|acceptance)|persistence_after_acceptance/i.test(error.message || "")
+      || /destination_(address|label)/i.test(error.message || "")
     )
   )
 }
@@ -86,6 +87,8 @@ export type MerchantWalletOperation = {
   amount_base_units: string
   fee_base_units: string | null
   destination_summary: string | null
+  destination_address?: string | null
+  destination_label?: string | null
   tx_hash: string | null
   explorer_url: string | null
   provider_reference: string | null
@@ -128,6 +131,8 @@ export type CreateWalletOperationInput = {
   amountBaseUnits: bigint
   feeBaseUnits?: bigint | null
   destinationSummary?: string | null
+  destinationAddress?: string | null
+  destinationLabel?: string | null
   idempotencyKey: string
   providerReference?: string | null
   providerTransactionId?: string | null
@@ -192,6 +197,8 @@ export async function createWalletOperation(
     amount_base_units: input.amountBaseUnits.toString(),
     fee_base_units: input.feeBaseUnits != null ? input.feeBaseUnits.toString() : null,
     destination_summary: input.destinationSummary ?? null,
+    destination_address: input.destinationAddress ?? null,
+    destination_label: input.destinationLabel ?? null,
     provider_reference: input.providerReference ?? null,
     provider_status: input.providerStatus ?? null,
     raw_provider_status: compatibilityStatus,
@@ -207,7 +214,10 @@ export async function createWalletOperation(
 
   let { data, error } = await supabase.from(TABLE).insert(record).select().single()
   if (isMissingOperationColumn(error)) {
-    ;({ data, error } = await supabase.from(TABLE).insert(baseRecord).select().single())
+    const fallbackRecord: Partial<typeof baseRecord> = { ...baseRecord }
+    delete fallbackRecord.destination_address
+    delete fallbackRecord.destination_label
+    ;({ data, error } = await supabase.from(TABLE).insert(fallbackRecord).select().single())
   }
   if (!error) return { operation: data as MerchantWalletOperation, created: true }
 
@@ -347,6 +357,8 @@ export async function updateWalletOperation(
     delete fallbackPatch.provider_acceptance_known
     delete fallbackPatch.provider_acceptance_unknown
     delete fallbackPatch.persistence_after_acceptance_failed
+    delete fallbackPatch.destination_address
+    delete fallbackPatch.destination_label
     const compatibility = compatibilityProviderStatus(input)
     if (compatibility) fallbackPatch.raw_provider_status = compatibility
     ;({ data, error } = await supabase
@@ -380,13 +392,17 @@ export async function updateWalletOperationCanonicalFields(
     source: WalletOperationSource
     destinationId?: string | null
     destinationSnapshot?: Record<string, unknown> | null
+    destinationAddress?: string | null
+    destinationLabel?: string | null
   }
 ): Promise<MerchantWalletOperation> {
   const patch: Record<string, unknown> = { source: input.source }
   if (input.destinationId !== undefined) patch.destination_id = input.destinationId
   if (input.destinationSnapshot !== undefined) patch.destination_snapshot = input.destinationSnapshot
+  if (input.destinationAddress !== undefined) patch.destination_address = input.destinationAddress
+  if (input.destinationLabel !== undefined) patch.destination_label = input.destinationLabel
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from(TABLE)
     .update(patch)
     .eq("merchant_id", merchantId)
@@ -395,9 +411,21 @@ export async function updateWalletOperationCanonicalFields(
     .single()
 
   if (isMissingOperationColumn(error)) {
-    const existing = await getWalletOperationForMerchant(merchantId, operationId)
-    if (!existing) throw new Error("Failed to stamp canonical wallet operation fields: not found")
-    return existing
+    const fallbackPatch = { ...patch }
+    delete fallbackPatch.destination_address
+    delete fallbackPatch.destination_label
+    ;({ data, error } = await supabase
+      .from(TABLE)
+      .update(fallbackPatch)
+      .eq("merchant_id", merchantId)
+      .eq("id", operationId)
+      .select()
+      .single())
+    if (isMissingOperationColumn(error)) {
+      const existing = await getWalletOperationForMerchant(merchantId, operationId)
+      if (!existing) throw new Error("Failed to stamp canonical wallet operation fields: not found")
+      return existing
+    }
   }
 
   if (error || !data) {

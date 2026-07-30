@@ -85,12 +85,18 @@ function toPineTreeWalletOperation(row: MerchantWalletOperation): PineTreeWallet
     amountBaseUnits: row.amount_base_units,
     feeBaseUnits: row.fee_base_units,
     destinationSummary: row.destination_summary,
+    destinationAddress: row.destination_address || null,
+    destinationLabel:
+      row.destination_label
+      || (typeof row.destination_snapshot?.label === "string" ? row.destination_snapshot.label : null)
+      || null,
     txHash: row.tx_hash,
     explorerUrl: row.explorer_url,
     // Deliberately omits provider_reference/provider_status/raw_provider_status -
     // those are internal reconciliation fields, never returned to the browser.
     failureReason: row.failure_reason,
     createdAt: row.provider_created_at || row.created_at,
+    submittedAt: row.submitted_at || null,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
   }
@@ -330,6 +336,7 @@ export type CreateWalletWithdrawalOrPayoutInput = {
   asset: string
   amountDecimal: string
   destination: string
+  destinationLabel?: string | null
   note?: string
   idempotencyKey: string
   correlationId?: string | null
@@ -648,6 +655,8 @@ async function createWalletWrite(
   operationType: "WITHDRAWAL" | "PAYOUT" | "SWAP_OUT",
   input: WalletAdapterWriteInput,
   destinationSummary: string,
+  destinationAddress: string | null,
+  destinationLabel: string | null | undefined,
   adapterCall: (
     resolution: Awaited<ReturnType<typeof resolveMerchantWalletProvider>>
   ) => Promise<WalletAdapterOperationResult> | undefined,
@@ -670,6 +679,8 @@ async function createWalletWrite(
     network: networkForWriteInput(input),
     amountBaseUnits: input.amountBaseUnits,
     destinationSummary,
+    destinationAddress: operationType === "WITHDRAWAL" ? destinationAddress : null,
+    destinationLabel: operationType === "WITHDRAWAL" ? destinationLabel?.trim() || null : null,
     idempotencyKey: input.idempotencyKey,
   })
 
@@ -679,6 +690,7 @@ async function createWalletWrite(
       operation.asset !== input.asset ||
       operation.amount_base_units !== input.amountBaseUnits.toString() ||
       operation.destination_summary !== destinationSummary ||
+      (operationType === "WITHDRAWAL" && operation.destination_address && operation.destination_address !== destinationAddress) ||
       (existingProviderAccountId && existingProviderAccountId !== resolution.context.providerAccountId)
     ) {
       throw new WalletApiRouteError(
@@ -1355,6 +1367,8 @@ export async function createWalletWithdrawal(
     "WITHDRAWAL",
     adapterInput,
     maskDestination(validated.destination),
+    validated.destination,
+    input.destinationLabel,
     (resolution) => resolution.adapter.createWithdrawal?.(resolution.context, adapterInput),
     (resolution) => {
       input.diagnostics?.setSubstage?.("destination_classification")
@@ -1456,8 +1470,14 @@ export async function createWalletPayout(
     note: input.note,
     idempotencyKey: input.idempotencyKey,
   }
-  return createWalletWrite(merchantId, "PAYOUT", adapterInput, maskDestination(validated.destination), (resolution) =>
-    resolution.adapter.createPayout?.(resolution.context, adapterInput)
+  return createWalletWrite(
+    merchantId,
+    "PAYOUT",
+    adapterInput,
+    maskDestination(validated.destination),
+    null,
+    null,
+    (resolution) => resolution.adapter.createPayout?.(resolution.context, adapterInput)
   )
 }
 
@@ -1571,7 +1591,7 @@ export async function createWalletSwap(
   }
 
   const adapterInput = { asset: sourceAsset, amountBaseUnits, destination: targetAsset, idempotencyKey }
-  return createWalletWrite(merchantId, "SWAP_OUT", adapterInput, `${sourceAsset} -> ${targetAsset}`, (resolution) =>
+  return createWalletWrite(merchantId, "SWAP_OUT", adapterInput, `${sourceAsset} -> ${targetAsset}`, null, null, (resolution) =>
     resolution.adapter.createSwap?.(resolution.context, {
       sourceAsset,
       targetAsset,

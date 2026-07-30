@@ -165,6 +165,8 @@ export async function submitCanonicalWithdrawal(
       source: input.source,
       destinationId: destination?.id ?? null,
       destinationSnapshot: snapshot,
+      destinationAddress: address,
+      destinationLabel: destination?.label ?? null,
     })
     if (destination) await markWithdrawalDestinationUsed(input.merchantId, destination.id)
     return { kind: "executed", table: "merchant_wallet_operations", write }
