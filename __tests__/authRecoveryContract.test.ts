@@ -114,14 +114,20 @@ describe("prefetch detection", () => {
     return new Headers(values)
   }
 
-  it.each([
+  // Annotated as a uniform array so the cases share one type. Without it,
+  // TypeScript infers a union of six differently-shaped object literals, and
+  // each member carries the other five keys as `?: undefined` - which is not
+  // assignable to Record<string, string>.
+  const prefetchHeaderCases: Array<Record<string, string>> = [
     { "sec-purpose": "prefetch;prerender" },
     { purpose: "prefetch" },
     { "x-purpose": "preview" },
     { "x-moz": "prefetch" },
     { "next-router-prefetch": "1" },
     { "x-middleware-prefetch": "1" },
-  ])("detects %p", (value) => {
+  ]
+
+  it.each(prefetchHeaderCases)("detects %p", (value) => {
     expect(isRecoveryPrefetch(headers(value))).toBe(true)
   })
 
