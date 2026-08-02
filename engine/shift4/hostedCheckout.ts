@@ -41,6 +41,7 @@ export async function completeShift4HostedCheckout(input: {
   const cardToken = readShift4I4GoCallbackToken({ cardToken: input.cardToken })
   const consumed = await consumeShift4TokenizationSession({ ...input, cardToken })
   if (consumed === "unavailable") throw Object.assign(new Error("Tokenization session is invalid or expired"), { status: 409, code: "tokenization_session_unavailable" })
+  if (consumed === "fingerprint_conflict") throw Object.assign(new Error("Tokenization session was already consumed with different token evidence"), { status: 409, code: "tokenization_session_conflict" })
   return {
     cardToken: consumed === "consumed_now" ? cardToken : null,
     alreadyConsumed: consumed === "already_consumed",

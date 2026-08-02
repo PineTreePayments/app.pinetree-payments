@@ -162,6 +162,7 @@ export async function recoverClaimedAttempt(input: {
         merchantProviderConnectionId: attempt.merchant_provider_connection_id,
         pineTreePaymentId: attempt.payment_id,
         pineTreePaymentAttemptId: attempt.attempt_id,
+        requestedAmountMinor: attempt.operation === "void" ? undefined : attempt.amount_minor,
       },
     })
   } catch (error) {
@@ -284,7 +285,11 @@ export async function recoverClaimedAttempt(input: {
     expectedVersion: attempt.version,
     leaseOwner,
     state: mapping.attemptState,
-    recoveryState: mapping.status || mapping.terminal ? "resolved" : "pending_lookup",
+    recoveryState: mapping.lookupRequired
+      ? "pending_lookup"
+      : mapping.reconciliationRequired
+        ? "blocked"
+        : "resolved",
     targetStatus: mapping.status,
     shift4Event: eventNameForState(mapping.attemptState),
     // The invoice lookup is Shift4's authoritative record, not a live response.
@@ -293,10 +298,9 @@ export async function recoverClaimedAttempt(input: {
     // No authorization amount is supplied here either: recovery uses exactly
     // the same database-derived rule as a live response, so an invoice lookup
     // can never resolve to an invented authorized amount.
-    nextCheckAt:
-      mapping.status || mapping.terminal
-        ? null
-        : new Date(now + window.maxMs * (passes + 2)).toISOString(),
+    nextCheckAt: mapping.lookupRequired
+      ? new Date(now + window.maxMs * (passes + 2)).toISOString()
+      : null,
     incrementLookupCount: true,
     releaseLease: true,
     ...evidence,

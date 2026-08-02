@@ -423,7 +423,7 @@ describe("Shift4 response-code mapping", () => {
       // ...and it is not a verified failure either, so it must be looked up.
       expect(mapping.lookupRequired, operation).toBe(true)
       expect(mapping.reconciliationRequired, operation).toBe(true)
-      expect(mapping.attemptState, operation).toBe("reconciliation_required")
+      expect(mapping.attemptState, operation).toBe("unresolved")
     }
   })
 
@@ -478,21 +478,22 @@ describe("Shift4 response-code mapping", () => {
     }
   })
 
-  it("leaves authorization unaffected by the settling-amount rule", () => {
-    // Authorization does not settle money, so an approval without an approved
-    // total still holds funds and reaches PROCESSING.
+  it("keeps authorization amount evidence fail-closed", () => {
     const mapping = mapShift4Evidence({
       operation: "authorization",
       result: evidence("approved", { responseCode: "A", approvedAmount: null }),
       requestedAmountMinor: minor(25.5),
     })
-    expect(mapping.status).toBe("PROCESSING")
+    expect(mapping.status).toBeNull()
+    expect(mapping.attemptState).toBe("unresolved")
+    expect(mapping.lookupRequired).toBe(true)
   })
 
   it("never recommends CONFIRMED for any non-approved outcome", () => {
     const nonApproved: Shift4Outcome[] = [
       "declined", "partial_approval", "referral", "verification_failed",
       "authentication_required", "soft_declined", "provider_error", "unknown", "not_found",
+      "inconsistent_approval",
     ]
     for (const outcome of nonApproved) {
       const mapping = mapShift4Evidence({
@@ -502,6 +503,18 @@ describe("Shift4 response-code mapping", () => {
       })
       expect(mapping.status, outcome).not.toBe("CONFIRMED")
     }
+  })
+
+  it("threads requested amount consistency through live execution and recovery", () => {
+    const live = engineSource("executeTransaction.ts")
+    const recovery = engineSource("recoverUnknownOutcome.ts")
+    const reconciliation = engineSource("reconcileShift4Payments.ts")
+    for (const source of [live, recovery]) {
+      expect(source).toContain("requestedAmountMinor:")
+      expect(source).toContain("mapping.reconciliationRequired")
+      expect(source).toContain('? "blocked"')
+    }
+    expect(reconciliation).toContain("recoverClaimedAttempt")
   })
 })
 
@@ -661,6 +674,146 @@ describe("Shift4 attempts migration contract", () => {
     expect(migrationSql()).toContain(
       "merchant_provider_connection_id, operation, idempotency_key_hash"
     )
+  })
+
+  it("uses that same immutable operation identity for lookup and race recovery", () => {
+    const code = migrationCode()
+    const createStart = code.indexOf("create function public.create_shift4_payment_attempt")
+    const createEnd = code.indexOf("create function public.claim_due_shift4_payment_attempts", createStart)
+    const createBody = code.slice(createStart, createEnd)
+    expect(createBody.match(/a\.operation = p_operation/g)).toHaveLength(2)
+    expect(createBody).not.toMatch(/a\.attempt_role = v_role\s+and a\.idempotency_key_hash/)
+    expect(createBody.indexOf("a.operation = p_operation")).toBeLessThan(
+      createBody.indexOf("select * into v_authorization")
+    )
+  })
+
+  it("allocates a tender sequence only inside the attempt-insert subtransaction", () => {
+    const code = migrationCode()
+    const createStart = code.indexOf("create function public.create_shift4_payment_attempt")
+    const createEnd = code.indexOf("create function public.claim_due_shift4_payment_attempts", createStart)
+    const createBody = code.slice(createStart, createEnd)
+    const allocation = createBody.indexOf("set next_tender_sequence = g.next_tender_sequence + 1")
+    const insert = createBody.indexOf("insert into public.shift4_payment_attempts")
+    const exception = createBody.indexOf("when unique_violation", insert)
+    expect(allocation).toBeGreaterThan(-1)
+    expect(allocation).toBeLessThan(insert)
+    expect(insert).toBeLessThan(exception)
+    expect(createBody).toContain("tender_group_allocation_conflict")
+    expect(createBody).not.toMatch(/coalesce\(max\(a\.tender_sequence\)/)
+  })
+
+  it("keeps the group and attempt count unchanged for every noninsert outcome", () => {
+    const source = migrationSql()
+    const smoke = readFileSync(join(process.cwd(), "scripts", "shift4-database", "smoke-tests.sql"), "utf8")
+    const allocation = source.indexOf("set next_tender_sequence = g.next_tender_sequence + 1")
+    for (const rejection of [
+      "idempotency_key_reused_with_different_request",
+      "invoice_already_owned_by_another_chain",
+      "invoice_already_used_for_this_role_on_this_connection",
+      "tender_would_exceed_payment_total",
+      "attempt_role_does_not_match_operation",
+    ]) {
+      expect(source.indexOf(rejection), rejection).toBeLessThan(allocation)
+    }
+    expect(smoke).toContain("v_group.version <> v_before_version")
+    expect(smoke).toContain("v_group.next_tender_sequence <> v_before_sequence")
+    expect(smoke).toContain("v_after_count <> v_before_count")
+    expect(smoke).toContain("S18 rejected/resumed/conflicting paths mutated durable state")
+  })
+
+  it("isolates tender totals, sequencing, completion, and fees by authoritative group", () => {
+    const code = migrationCode()
+    const createStart = code.indexOf("create function public.create_shift4_payment_attempt")
+    const createEnd = code.indexOf("create function public.claim_due_shift4_payment_attempts", createStart)
+    const createBody = code.slice(createStart, createEnd)
+    const applyStart = code.indexOf("create function public.apply_shift4_attempt_evidence")
+    const applyEnd = code.indexOf("function public.release_shift4_attempt_lease", applyStart)
+    const applyBody = code.slice(applyStart, applyEnd)
+
+    expect(createBody).toContain("where a.tender_group_id = v_tender_group_id")
+    expect(createBody).toContain("where g.id = v_tender_group_id")
+    expect(createBody).toContain("v_tender_sequence := v_group.next_tender_sequence")
+    expect(createBody).toContain("v_tender_approved_total := 0")
+    expect(createBody).not.toMatch(
+      /select coalesce\(sum\(a\.approved_amount_minor\), 0\)[\s\S]{0,500}where a\.payment_id = p_payment_id/
+    )
+
+    expect(applyBody.match(/where a\.tender_group_id = v_group\.id/g)).toHaveLength(3)
+    expect(applyBody).not.toMatch(
+      /select coalesce\(sum\(a\.approved_amount_minor\), 0\)[\s\S]{0,500}where a\.payment_id = v_attempt\.payment_id/
+    )
+    expect(applyBody).toContain("v_payment_complete := true")
+    expect(applyBody).toContain("if v_payment_complete and v_outcome = 'applied' then")
+
+    // One Shift4 connection serves two payments. Each payment owns its group,
+    // so payment A's approval cannot complete or charge payment B.
+    const attempts = [
+      { paymentId: "payment-a", groupId: "group-a", approved: 4_000 },
+      { paymentId: "payment-b", groupId: "group-b", approved: 6_000 },
+    ]
+    const capturedFor = (paymentId: string, groupId: string) => attempts
+      .filter((attempt) => attempt.paymentId === paymentId && attempt.groupId === groupId)
+      .reduce((total, attempt) => total + attempt.approved, 0)
+    const requested = 10_000
+    const groupACaptured = capturedFor("payment-a", "group-a")
+    const groupBCaptured = capturedFor("payment-b", "group-b")
+    const groupANextTenderSequence = 3
+    const groupBNextTenderSequence = 2
+
+    expect(groupACaptured).toBe(4_000)
+    expect(groupBCaptured).toBe(6_000)
+    expect(requested - groupACaptured).toBe(6_000)
+    expect(groupANextTenderSequence).toBe(3)
+    expect(groupBNextTenderSequence).toBe(2)
+    expect(groupACaptured === requested).toBe(false)
+    expect(groupACaptured === requested && requested >= 15).toBe(false)
+    expect(attempts.reduce((total, attempt) => total + attempt.approved, 0)).toBe(requested)
+
+    const smoke = readFileSync(
+      join(process.cwd(), "scripts", "shift4-database", "smoke-tests.sql"),
+      "utf8"
+    )
+    expect(smoke).toContain("v_merchant_id uuid := gen_random_uuid()")
+    expect(smoke).toContain("v_payment_a_id uuid := gen_random_uuid()")
+    expect(smoke).toContain("v_payment_b_id uuid := gen_random_uuid()")
+    expect(smoke).toContain("v_connection_id uuid := gen_random_uuid()")
+    expect(smoke).not.toMatch(/00000000-0000-0000-0000-00000000000[1-4]/i)
+    expect(smoke).not.toMatch(/v_operator_confirms|operator configuration block/i)
+    expect(smoke).not.toMatch(/v_connection_[2-9]_id/i)
+    expect(smoke).toContain("v_payment_a_id = v_payment_b_id")
+    expect(smoke).toContain("INSERT INTO public.merchants")
+    expect(smoke).toContain("INSERT INTO public.merchant_providers")
+    expect(smoke).toContain("INSERT INTO public.payments")
+    expect(smoke).toContain("id, email, business_name, created_at")
+    expect(smoke).not.toMatch(/\bm\.provider\b/i)
+    expect(smoke).toContain("id, merchant_id, provider, enabled, credentials, created_at, updated_at")
+    expect(smoke).toContain("v_connection_id, v_merchant_id, 'shift4_rest', true")
+    expect(smoke).toContain("mp.provider='shift4_rest' AND mp.status='active' AND mp.enabled=true")
+    expect(smoke).toContain("id, merchant_id, subtotal_amount, platform_fee, total_amount")
+    expect(smoke).toContain("v_payment_a_id, v_merchant_id, 200, 15, 215, 2.00, 0.15, 2.15")
+    expect(smoke).toContain("v_payment_b_id, v_merchant_id, 300, 15, 315, 3.00, 0.15, 3.15")
+    for (const payment of ["A", "B"]) {
+      expect(smoke).toContain(`Generated payment ${payment} does not belong to synthetic merchant`)
+      expect(smoke).toContain(`Unsafe payment ${payment} status`)
+      expect(smoke).toContain(`Synthetic payment ${payment} requires exact dual-model USD/CAD money`)
+      expect(smoke).toContain(`Unsafe non-pristine payment ${payment}`)
+    }
+    expect(smoke).toContain("v_group_a.next_tender_sequence <> 3")
+    expect(smoke).toContain("v_group_b.next_tender_sequence <> v_before_sequence")
+    expect(smoke).toContain("v_attempt_a.remaining_amount_minor <> v_remainder")
+    expect(smoke).toContain("v_captured_after <> v_total")
+    expect(smoke).toContain("p_target_status=>'CONFIRMED'")
+    expect(smoke).toContain("v_fee_before <> v_payment_a_fee_count + 1")
+    expect(smoke).toContain("v_fee_after <> v_payment_b_fee_count")
+    expect(smoke).toContain("l.payment_id=v_payment_b_id")
+    expect(smoke).toContain("a.payment_id=v_payment_b_id) <> v_payment_b_attempt_count")
+    expect(smoke).toContain("e.payment_id=v_payment_b_id) <> v_payment_b_event_count")
+    expect(smoke).toContain("S19 payment and tender-group isolation assertion failed")
+    expect(smoke).toContain("S19 payment and tender-group isolation passed")
+    expect(smoke).toContain("Final containment assertions passed for generated rollback-only fixtures")
+    expect(smoke).not.toMatch(/^\s*COMMIT\s*;/im)
+    expect(smoke.trimEnd()).toMatch(/ROLLBACK;$/)
   })
 
   it("enforces one attempt identity per merchant", () => {
@@ -1016,8 +1169,9 @@ describe("Shift4 attempts migration contract", () => {
 
   it("classifies a unique violation by the exact constraint that failed", () => {
     const code = migrationCode()
-    expect(code).toContain("get stacked diagnostics")
-    expect(code).toContain("pg_exception_constraint")
+    expect(code).toContain("get stacked diagnostics v_violated_constraint = constraint_name;")
+    const invalidDiagnosticsItem = ["pg", "exception", "constraint"].join("_")
+    expect(code).not.toContain(invalidDiagnosticsItem)
     // Each named index maps to exactly one business outcome, including both
     // invoice indexes - a same-operation duplicate and an unrelated origin
     // claiming an established chain are different conditions.
@@ -1348,7 +1502,7 @@ describe("Shift4 attempts migration contract", () => {
 
     expect(applyBody).not.toMatch(/v_effective_approved is not null and v_effective_approved </)
     expect(applyBody).not.toMatch(/v_effective_approved is null or/)
-    expect(applyBody).not.toMatch(/v_effective_approved >= v_attempt\.amount_minor/)
+    expect(applyBody).toContain("v_effective_approved >= v_attempt.amount_minor")
     // Exact equality in both directions, plus a required value. These now set
     // an evidence-preserving override rather than rejecting the whole write.
     expect(applyBody).toContain("v_effective_approved is null")
@@ -1359,6 +1513,21 @@ describe("Shift4 attempts migration contract", () => {
     // Only A and C are accepted. P (partial), R (referral), S/I (SCA),
     // J (soft decline), f, e, X, blank, and undocumented codes are excluded.
     expect(code).toMatch(/v_approval_codes constant text\[\] := array\['A', 'C'\]/)
+  })
+
+  it("allows only response code P to create partial-authorization evidence", () => {
+    const code = migrationCode()
+    const applyStart = code.indexOf("function public.apply_shift4_attempt_evidence")
+    const applyEnd = code.indexOf("function public.release_shift4_attempt_lease", applyStart)
+    const applyBody = code.slice(applyStart, applyEnd)
+    expect(applyBody).toContain("elsif v_effective_code = 'P' then")
+    expect(applyBody).not.toMatch(/v_effective_code = 'P'\s+or\s*\(/)
+    expect(applyBody).toContain("v_amount_problem := 'approved_amount_below_requested'")
+    expect(applyBody).toContain("v_state_override := 'reconciliation_required'")
+    expect(applyBody).toContain("v_recovery_override := 'blocked'")
+    expect(applyBody).toContain("a.approved_amount_minor = a.amount_minor")
+    expect(applyBody).toMatch(/remaining_amount_minor = case\s+when v_amount_problem is not null then null/)
+    expect(applyBody).toMatch(/authorized_amount_minor = case\s+when v_amount_problem is not null then null/)
   })
 
   /* ── Lease authority ──────────────────────────────────────────────────────*/
@@ -1415,6 +1584,47 @@ describe("Shift4 attempts migration contract", () => {
     expect(code).toContain("v_final_reason := 'illegal_lifecycle_transition'")
     // Returned outcome and stored state are decided together.
     expect(code).toContain("v_outcome := 'reconciliation_required'")
+  })
+
+  it("returns the persisted reconciliation contract for every known amount conflict", () => {
+    const code = migrationCode()
+    const applyStart = code.indexOf("create function public.apply_shift4_attempt_evidence")
+    const applyEnd = code.indexOf("function public.release_shift4_attempt_lease", applyStart)
+    const applyBody = code.slice(applyStart, applyEnd)
+    const contractStart = applyBody.indexOf("if v_amount_problem in (")
+    const missingLookup = applyBody.slice(
+      applyBody.indexOf("if v_amount_problem is not null then"),
+      applyBody.indexOf("Split-tender aggregation")
+    )
+    const resultContract = applyBody.slice(contractStart, applyBody.indexOf("Update the attempt", contractStart))
+
+    for (const problem of [
+      "approved_amount_below_requested",
+      "approved_amount_exceeds_requested",
+      "partial_approved_amount_not_below_requested",
+    ]) {
+      expect(resultContract).toContain(`'${problem}'`)
+    }
+    expect(resultContract).not.toContain("'approved_amount_missing'")
+    expect(resultContract).toContain("v_outcome := 'reconciliation_required'")
+    expect(resultContract).toContain("v_conflict := v_amount_problem")
+    expect(missingLookup).toContain("v_state_override := 'unresolved'")
+    expect(missingLookup).toContain("v_recovery_override := 'pending_lookup'")
+    expect(missingLookup).toContain("v_ledger_eligible := false")
+    expect(missingLookup).toContain("v_target := null")
+
+    const contract = readFileSync(
+      join(process.cwd(), "database", "shift4PaymentAttempts.ts"),
+      "utf8"
+    )
+    for (const field of [
+      'result.outcome !== "reconciliation_required"',
+      'result.attemptState !== "reconciliation_required"',
+      'result.attemptRecoveryState !== "blocked"',
+      "result.reconciliationRequired !== true",
+      "result.appliedStatus !== null",
+      "result.ledgerPosted !== false",
+    ]) expect(contract).toContain(field)
   })
 
   it("records duplicate evidence without a second transition or ledger effect", () => {

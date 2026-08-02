@@ -509,7 +509,11 @@ export async function executeShift4Transaction(
     attemptId,
     expectedVersion: createdVersion,
     state: mapping.attemptState,
-    recoveryState: mapping.lookupRequired ? "pending_lookup" : "resolved",
+    recoveryState: mapping.lookupRequired
+      ? "pending_lookup"
+      : mapping.reconciliationRequired
+        ? "blocked"
+        : "resolved",
     targetStatus: mapping.status,
     shift4Event: eventNameForState(mapping.attemptState),
     evidenceSource: "provider_response",
@@ -614,6 +618,7 @@ async function callShift4(input: {
     merchantProviderConnectionId: input.connectionId,
     pineTreePaymentId: input.paymentId,
     pineTreePaymentAttemptId: input.attemptId,
+    requestedAmountMinor: input.request.operation === "void" ? undefined : input.amountMinor,
     entryContext: input.request.entryContext,
   }
 

@@ -1284,15 +1284,45 @@ begin
     return;
   end if;
 
-  if v_connection_merchant <> p_merchant_id then
+  if v_connection_merchant is distinct from p_merchant_id then
     return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
       null::text, null::text, null::integer, 'provider_connection_not_owned_by_merchant'::text;
     return;
   end if;
 
-  if v_connection_provider <> 'shift4_rest' then
+  if v_connection_provider is distinct from 'shift4_rest' then
     return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
       null::text, null::text, null::integer, 'provider_connection_is_not_shift4_rest'::text;
+    return;
+  end if;
+
+  if p_operation is null or p_operation not in ('sale', 'authorization', 'capture', 'refund', 'void') then
+    return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
+      null::text, null::text, null::integer, 'operation_is_not_supported'::text;
+    return;
+  end if;
+
+  if p_channel is null or p_channel not in ('retail', 'ecommerce') then
+    return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
+      null::text, null::text, null::integer, 'channel_is_not_supported'::text;
+    return;
+  end if;
+
+  if p_invoice is null or p_invoice !~ '^[0-9]{10}$' then
+    return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
+      null::text, null::text, null::integer, 'invoice_is_invalid'::text;
+    return;
+  end if;
+
+  if p_amount_minor is null or p_amount_minor < 0 then
+    return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
+      null::text, null::text, null::integer, 'amount_minor_is_invalid'::text;
+    return;
+  end if;
+
+  if p_authorized_amount_minor is not null and p_authorized_amount_minor < 0 then
+    return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
+      null::text, null::text, null::integer, 'authorized_amount_minor_is_invalid'::text;
     return;
   end if;
 
@@ -1317,6 +1347,44 @@ begin
   ) then
     return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
       null::text, null::text, null::integer, 'attempt_role_is_not_requestable'::text;
+    return;
+  end if;
+
+  if not (
+    (p_operation = 'sale' and v_role = 'sale')
+    or (p_operation = 'authorization' and v_role in ('authorization', 'manual_authorization'))
+    or (p_operation = 'capture' and v_role = 'capture')
+    or (p_operation = 'void' and v_role = 'void')
+    or (p_operation = 'refund' and v_role = 'refund')
+  ) then
+    return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
+      null::text, null::text, null::integer,
+      'attempt_role_does_not_match_operation'::text;
+    return;
+  end if;
+
+  /* ── Stable idempotency identity, before lineage or tender allocation ────
+   * This predicate exactly matches
+   * shift4_payment_attempts_connection_operation_idem_uidx. attempt_role is
+   * evidence-mutable, while operation is immutable request identity.
+   */
+  select * into v_existing
+    from public.shift4_payment_attempts a
+   where a.merchant_provider_connection_id = p_merchant_provider_connection_id
+     and a.operation = p_operation
+     and a.idempotency_key_hash = p_idempotency_key_hash;
+
+  if found then
+    if v_existing.request_fingerprint <> p_request_fingerprint then
+      return query select 'idempotency_conflict'::text, v_existing.attempt_id,
+        v_existing.id, v_existing.invoice, v_existing.state, v_existing.recovery_state,
+        v_existing.version, 'idempotency_key_reused_with_different_request'::text;
+      return;
+    end if;
+
+    return query select 'resumed'::text, v_existing.attempt_id, v_existing.id,
+      v_existing.invoice, v_existing.state, v_existing.recovery_state,
+      v_existing.version, null::text;
     return;
   end if;
 
@@ -1399,18 +1467,7 @@ begin
       return;
     end if;
 
-    -- A new tender on this payment takes the next sequence number.
-    if v_role in ('sale', 'authorization') then
-      select coalesce(max(a.tender_sequence), 0) + 1 into v_tender_sequence
-        from public.shift4_payment_attempts a
-       where a.payment_id = p_payment_id
-         and a.attempt_role in ('sale', 'authorization',
-                                'referral_authorization', 'manual_authorization',
-                                'partial_authorization')
-         and a.root_attempt_id = a.attempt_id;
-    else
-      v_tender_sequence := 1;
-    end if;
+    v_tender_sequence := 1;
   end if;
 
   /* ── Manual (voice) authorization ──────────────────────────────────────── */
@@ -1493,9 +1550,9 @@ begin
   end if;
 
   /* ── Tender bound: a payment may never be over-authorized ───────────────── */
-  -- A later tender may only request what is still outstanding. Computed under
-  -- FOR SHARE so two concurrent tenders cannot each read the same remainder
-  -- and both succeed.
+  -- A later tender may only request what is still outstanding. The payment,
+  -- group, and sibling rows are locked before the aggregate so two concurrent
+  -- tenders cannot each read the same remainder and both succeed.
   if v_role in ('sale', 'authorization') then
     /* ── LOCK ORDER: payment -> tender group -> attempts (id) -> journal ──────
      * PostgreSQL forbids a locking clause on an aggregate result
@@ -1516,50 +1573,47 @@ begin
        and g.merchant_provider_connection_id = p_merchant_provider_connection_id
        for update;
 
-    if not found then
-      insert into public.shift4_tender_groups (
-        merchant_id, payment_id, merchant_provider_connection_id,
-        currency, requested_amount_minor, next_tender_sequence
-      ) values (
-        p_merchant_id, p_payment_id, p_merchant_provider_connection_id,
-        v_payment_currency, v_payment_requested_minor, 1
-      )
-      returning * into v_group;
-    elsif v_payment_requested_minor <> v_group.requested_amount_minor
-          or v_payment_currency <> v_group.currency then
+    if found and (
+      v_payment_requested_minor <> v_group.requested_amount_minor
+      or v_payment_currency <> v_group.currency
+    ) then
       return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
         null::text, null::text, null::integer,
         'tender_group_does_not_match_locked_payment'::text;
       return;
     end if;
 
-    v_tender_group_id := v_group.id;
-    v_tender_sequence := v_group.next_tender_sequence;
+    if found then
+      v_tender_group_id := v_group.id;
+      v_tender_sequence := v_group.next_tender_sequence;
 
-    -- Lock the sibling rows in deterministic id order BEFORE aggregating.
-    perform 1
-      from public.shift4_payment_attempts a
-     where a.payment_id = p_payment_id
-     order by a.id
-       for update;
+      -- The group, not payment_id, owns the tender remainder. A payment may
+      -- have a separate group for each Shift4 REST provider connection.
+      perform 1
+        from public.shift4_payment_attempts a
+       where a.tender_group_id = v_tender_group_id
+       order by a.id
+         for update;
 
-    -- Separate, UNLOCKED aggregate over rows this transaction already holds.
-    select coalesce(sum(a.approved_amount_minor), 0) into v_tender_approved_total
-      from public.shift4_payment_attempts a
-     where a.payment_id = p_payment_id
-       and a.attempt_role in ('sale', 'authorization',
-                              'referral_authorization', 'manual_authorization',
-                              'partial_authorization')
-       and a.state = 'approved'
-       and a.approved_amount_minor is not null;
+      -- Separate, UNLOCKED aggregate over rows this transaction already holds.
+      select coalesce(sum(a.approved_amount_minor), 0) into v_tender_approved_total
+        from public.shift4_payment_attempts a
+       where a.tender_group_id = v_tender_group_id
+         and a.attempt_role in ('sale', 'authorization',
+                                'referral_authorization', 'manual_authorization',
+                                'partial_authorization')
+         and a.state = 'approved'
+         and a.approved_amount_minor is not null;
+    else
+      v_tender_group_id := null;
+      v_tender_sequence := 1;
+      -- No authoritative group exists for this connection yet, so no sibling
+      -- attempt can contribute. The locked payment row serializes first-group
+      -- creation without reading another connection's group or attempts.
+      v_tender_approved_total := 0;
+    end if;
 
-    update public.shift4_tender_groups g
-       set next_tender_sequence = g.next_tender_sequence + 1,
-           version = g.version + 1,
-           updated_at = now()
-     where g.id = v_group.id;
-
-    if v_tender_approved_total + p_amount_minor > v_group.requested_amount_minor then
+    if v_tender_approved_total + p_amount_minor > v_payment_requested_minor then
       return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
         null::text, null::text, null::integer, 'tender_would_exceed_payment_total'::text;
       return;
@@ -1584,27 +1638,6 @@ begin
     end if;
   end if;
 
-  /* ── Idempotency: same identity resumes, different request conflicts ────── */
-  select * into v_existing
-    from public.shift4_payment_attempts a
-   where a.merchant_provider_connection_id = p_merchant_provider_connection_id
-     and a.attempt_role = v_role
-     and a.idempotency_key_hash = p_idempotency_key_hash;
-
-  if found then
-    if v_existing.request_fingerprint <> p_request_fingerprint then
-      return query select 'idempotency_conflict'::text, v_existing.attempt_id,
-        v_existing.id, v_existing.invoice, v_existing.state, v_existing.recovery_state,
-        v_existing.version, 'idempotency_key_reused_with_different_request'::text;
-      return;
-    end if;
-
-    return query select 'resumed'::text, v_existing.attempt_id, v_existing.id,
-      v_existing.invoice, v_existing.state, v_existing.recovery_state,
-      v_existing.version, null::text;
-    return;
-  end if;
-
   /* ── Duplicate step in this chain, pre-transmission ────────────────────── */
   -- Scoped to (connection, invoice, ROLE), matching the unique index. A capture
   -- legitimately shares its authorization's invoice, and a manual
@@ -1626,6 +1659,30 @@ begin
 
   /* ── Insert before transmission ────────────────────────────────────────── */
   begin
+    -- Allocate only when this request is ready to insert. Allocation and the
+    -- attempt INSERT share this exception subtransaction, so every handled
+    -- unique violation rolls the group creation/increment back as well.
+    if v_role in ('sale', 'authorization') then
+      if v_tender_group_id is null then
+        insert into public.shift4_tender_groups (
+          merchant_id, payment_id, merchant_provider_connection_id,
+          currency, requested_amount_minor, next_tender_sequence
+        ) values (
+          p_merchant_id, p_payment_id, p_merchant_provider_connection_id,
+          v_payment_currency, v_payment_requested_minor, 2
+        )
+        returning * into v_group;
+        v_tender_group_id := v_group.id;
+        v_tender_sequence := 1;
+      else
+        update public.shift4_tender_groups g
+           set next_tender_sequence = g.next_tender_sequence + 1,
+               version = g.version + 1,
+               updated_at = now()
+         where g.id = v_tender_group_id;
+      end if;
+    end if;
+
     insert into public.shift4_payment_attempts (
       attempt_id, merchant_id, payment_id, merchant_provider_connection_id,
       operation, channel, attempt_number,
@@ -1663,7 +1720,14 @@ begin
       -- guessing by re-querying: guessing can attribute an attempt-identity
       -- collision to the invoice index, or vice versa, and each maps to a
       -- different business outcome for the caller.
-      get stacked diagnostics v_violated_constraint = pg_exception_constraint;
+      get stacked diagnostics v_violated_constraint = constraint_name;
+
+      if v_violated_constraint = 'shift4_tender_groups_payment_connection_uidx' then
+        return query select 'rejected'::text, p_attempt_id, null::uuid, p_invoice,
+          null::text, null::text, null::integer,
+          'tender_group_allocation_conflict'::text;
+        return;
+      end if;
 
       if v_violated_constraint = 'shift4_payment_attempts_connection_invoice_role_uidx' then
         return query select 'invoice_collision'::text, p_attempt_id, null::uuid,
@@ -1685,7 +1749,7 @@ begin
         select * into v_existing
           from public.shift4_payment_attempts a
          where a.merchant_provider_connection_id = p_merchant_provider_connection_id
-           and a.attempt_role = v_role
+           and a.operation = p_operation
            and a.idempotency_key_hash = p_idempotency_key_hash;
 
         if not found then
@@ -2029,14 +2093,34 @@ begin
     select * into v_group
       from public.shift4_tender_groups g
      where g.id = v_attempt.tender_group_id
+       and g.payment_id = v_attempt.payment_id
+       and g.merchant_provider_connection_id = v_attempt.merchant_provider_connection_id
+       for update;
+
+    if not found then
+      return query select 'rejected'::text, v_attempt.attempt_id, v_attempt.version,
+        null::text, null::text, false, false, 'tender_group_not_found'::text,
+        v_attempt.state, v_attempt.recovery_state, v_attempt.resolution_reason,
+        v_attempt.next_check_at, null::text;
+      return;
+    end if;
+
+    -- Only siblings owned by this authoritative tender group participate in
+    -- its evidence decision. Another Shift4 connection on the same payment is
+    -- an independent group and must not be locked or observed here.
+    perform 1
+      from public.shift4_payment_attempts a
+     where a.tender_group_id = v_group.id
+     order by a.id
+       for update;
+  else
+    -- Refunds may intentionally have no tender group. Lock only the current
+    -- attempt; there is no authoritative sibling set to lock or aggregate.
+    perform 1
+      from public.shift4_payment_attempts a
+     where a.id = v_attempt.id
        for update;
   end if;
-
-  perform 1
-    from public.shift4_payment_attempts a
-   where a.payment_id = v_attempt.payment_id
-   order by a.id
-     for update;
 
   select * into v_attempt
     from public.shift4_payment_attempts a
@@ -2128,6 +2212,25 @@ begin
    */
   v_effective_code := coalesce(p_response_code, v_attempt.response_code);
   v_effective_approved := coalesce(p_approved_amount_minor, v_attempt.approved_amount_minor);
+
+  -- Amount consistency is derived from the response code itself, regardless of
+  -- the caller's requested state/target. Only P can be a partial approval.
+  if v_effective_code = any (v_approval_codes) then
+    if v_effective_approved is null then
+      v_amount_problem := 'approved_amount_missing';
+    elsif v_effective_approved < v_attempt.amount_minor then
+      v_amount_problem := 'approved_amount_below_requested';
+    elsif v_effective_approved > v_attempt.amount_minor then
+      v_amount_problem := 'approved_amount_exceeds_requested';
+    end if;
+  elsif v_effective_code = 'P' then
+    if v_effective_approved is null then
+      v_amount_problem := 'approved_amount_missing';
+    elsif v_effective_approved <= 0
+          or v_effective_approved >= v_attempt.amount_minor then
+      v_amount_problem := 'partial_approved_amount_not_below_requested';
+    end if;
+  end if;
 
   /* Which targets each operation may ever request. */
   if v_attempt.operation = 'authorization' and v_target is not null
@@ -2276,19 +2379,19 @@ begin
   if v_attempt.attempt_role in (
     'authorization', 'referral_authorization', 'manual_authorization', 'partial_authorization'
   ) then
+    if v_amount_problem is not null
+       and v_final_role = 'partial_authorization' then
+      v_final_role := 'authorization';
+    end if;
+
     if v_effective_code = 'R' then
       -- Referral: a clerk must telephone for approval. Not an authorization.
       v_final_role := 'referral_authorization';
 
-    elsif v_effective_code = 'P' or (
-      p_state = 'approved' and v_effective_approved is not null
-      and v_effective_approved < v_attempt.amount_minor
-    ) then
-      -- Partial approval. Shift4 signals it with P, but an A/C for less than
-      -- was requested is the same economic event and is treated identically.
-      if v_effective_approved is null then
-        v_amount_problem := 'approved_amount_missing';
-      else
+    elsif v_effective_code = 'P' then
+      -- Partial approval is exclusively a P response with a positive amount
+      -- strictly below the request. Every other P amount is inconsistent.
+      if v_amount_problem is null then
         v_final_role := 'partial_authorization';
         v_authorized_amount := v_effective_approved;
         v_remaining_amount := v_attempt.amount_minor - v_effective_approved;
@@ -2296,11 +2399,7 @@ begin
 
     elsif p_state = 'approved' and v_effective_code = any (v_approval_codes) then
       -- A full authorization must state its amount, exactly.
-      if v_effective_approved is null then
-        v_amount_problem := 'approved_amount_missing';
-      elsif v_effective_approved > v_attempt.amount_minor then
-        v_amount_problem := 'approved_amount_exceeds_requested';
-      else
+      if v_amount_problem is null then
         v_authorized_amount := v_effective_approved;
       end if;
     end if;
@@ -2339,8 +2438,7 @@ begin
      */
     select * into v_group
       from public.shift4_tender_groups g
-     where g.payment_id = v_attempt.payment_id
-       and g.merchant_provider_connection_id = v_attempt.merchant_provider_connection_id
+     where g.id = v_group.id
        for update;
 
     if not found then
@@ -2353,7 +2451,7 @@ begin
 
     perform 1
       from public.shift4_payment_attempts a
-     where a.payment_id = v_attempt.payment_id
+     where a.tender_group_id = v_group.id
      order by a.id
        for update;
 
@@ -2361,13 +2459,15 @@ begin
     select coalesce(sum(a.approved_amount_minor), 0)
       into v_captured_total
       from public.shift4_payment_attempts a
-     where a.payment_id = v_attempt.payment_id
+     where a.tender_group_id = v_group.id
        and a.operation in ('sale', 'capture')
        and (
-         a.response_code in ('A', 'C')
-         or (a.operation = 'sale' and a.response_code = 'P')
+         (a.response_code in ('A', 'C')
+          and a.approved_amount_minor = a.amount_minor)
+         or (a.operation = 'sale' and a.response_code = 'P'
+             and a.approved_amount_minor > 0
+             and a.approved_amount_minor < a.amount_minor)
        )
-       and a.approved_amount_minor is not null
        and a.attempt_id <> v_attempt.attempt_id;
 
     -- This capture's own contribution, from provider evidence only.
@@ -2426,7 +2526,16 @@ begin
   v_outcome := 'evidence_recorded';
   v_conflict := null;
 
-  if v_final_reason_override in (
+  if v_amount_problem in (
+    'approved_amount_below_requested',
+    'approved_amount_exceeds_requested',
+    'partial_approved_amount_not_below_requested'
+  ) then
+    -- Known inconsistent provider amounts must report the same reconciliation
+    -- contract that is persisted. Missing amount evidence remains a lookup.
+    v_outcome := 'reconciliation_required';
+    v_conflict := v_amount_problem;
+  elsif v_final_reason_override in (
     'captured_total_exceeds_payment_total', 'payment_total_below_platform_fee'
   ) then
     v_outcome := 'reconciliation_required';
@@ -2470,7 +2579,10 @@ begin
            coalesce(p_voice_center_account_number, a.voice_center_account_number),
          voice_center_phone_number =
            coalesce(p_voice_center_phone_number, a.voice_center_phone_number),
-         remaining_amount_minor = coalesce(v_remaining_amount, a.remaining_amount_minor),
+         remaining_amount_minor = case
+           when v_amount_problem is not null then null
+           else coalesce(v_remaining_amount, a.remaining_amount_minor)
+         end,
          response_code = coalesce(p_response_code, a.response_code),
          primary_code = coalesce(p_primary_code, a.primary_code),
          secondary_code = coalesce(p_secondary_code, a.secondary_code),
@@ -2491,8 +2603,10 @@ begin
          -- ONLY from provider evidence. There is deliberately no fallback to
          -- the requested amount: an authorization must never invent what it
          -- authorized.
-         authorized_amount_minor =
-           coalesce(v_authorized_amount, a.authorized_amount_minor),
+         authorized_amount_minor = case
+           when v_amount_problem is not null then null
+           else coalesce(v_authorized_amount, a.authorized_amount_minor)
+         end,
          provider_occurred_at = coalesce(p_provider_occurred_at, a.provider_occurred_at),
          received_at = v_received,
          request_dispatched_at = case
@@ -2814,21 +2928,25 @@ revoke all on function public.shift4_canonical_status_path(text, text) from auth
 revoke all on function public.shift4_status_event_type(text) from public;
 revoke all on function public.shift4_status_event_type(text) from anon;
 revoke all on function public.shift4_status_event_type(text) from authenticated;
+revoke all on function public.shift4_tender_group_identity_is_immutable()
+  from public, anon, authenticated, service_role;
+revoke all on function public.shift4_tender_group_is_undeletable()
+  from public, anon, authenticated, service_role;
 revoke all on function public.create_shift4_payment_attempt(
   text, uuid, uuid, uuid, text, text, varchar, bigint, varchar,
   text, text, text, text, text, bigint, text, integer, text, text, text
-) from public;
+) from public, anon, authenticated, service_role;
 revoke all on function public.claim_due_shift4_payment_attempts(
   text, integer, integer, uuid, uuid, uuid, text, timestamptz
-) from public;
+) from public, anon, authenticated, service_role;
 revoke all on function public.apply_shift4_attempt_evidence(
   uuid, text, integer, text, text, text, text, text, integer, integer,
   text, text, text, text, text, text, text, text, text, text, text,
   bigint, bigint, timestamptz, timestamptz, text, text, timestamptz, timestamptz,
   boolean, boolean, boolean, boolean, text, text, text
-) from public;
+) from public, anon, authenticated, service_role;
 revoke all on function public.release_shift4_attempt_lease(uuid, text, text, timestamptz)
-  from public;
+  from public, anon, authenticated, service_role;
 
 grant execute on function public.create_shift4_payment_attempt(
   text, uuid, uuid, uuid, text, text, varchar, bigint, varchar,

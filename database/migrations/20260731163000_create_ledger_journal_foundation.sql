@@ -523,7 +523,7 @@ begin
       -- Only the identity index means "someone else created the same account".
       -- Any other unique violation is a different fault and must not be
       -- swallowed into a silent account lookup.
-      get stacked diagnostics v_violated_constraint = pg_exception_constraint;
+      get stacked diagnostics v_violated_constraint = constraint_name;
       if v_violated_constraint <> 'ledger_accounts_identity_uidx' then
         raise;
       end if;
@@ -920,8 +920,9 @@ grant select on public.ledger_transactions to service_role;
 grant select on public.ledger_journal_entries to service_role;
 grant select on public.ledger_links to service_role;
 
-revoke all on function public.ledger_history_is_immutable() from public, anon, authenticated;
-revoke all on function public.assert_ledger_transaction_balanced() from public, anon, authenticated;
+revoke all on function public.ledger_history_is_immutable() from public, anon, authenticated, service_role;
+revoke all on function public.ledger_account_identity_is_immutable() from public, anon, authenticated, service_role;
+revoke all on function public.assert_ledger_transaction_balanced() from public, anon, authenticated, service_role;
 revoke all on function public.resolve_ledger_account(text, text, text, text, text, text, integer)
   from public, anon, authenticated;
 revoke all on function public.post_ledger_transaction(

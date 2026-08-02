@@ -1,8 +1,10 @@
--- PineTree Shift4 database release preflight
--- static source validation only; read-only when executed.
+-- PineTree Shift4 privilege-correction release preflight
+-- static release-package validation; executable smoke SQL generated but not run locally; read-only when executed.
+-- The five deployed migrations must already be installed; only migration 6 is pending.
 DO $$
 DECLARE
   v_missing text;
+  v_name text;
 BEGIN
   IF current_setting('server_version_num')::integer < 140000 THEN RAISE EXCEPTION 'PostgreSQL 14 or newer is required'; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN RAISE EXCEPTION 'service_role is required'; END IF;
@@ -14,8 +16,12 @@ BEGIN
     FROM (VALUES ('id','uuid'),('merchant_id','uuid'),('status','text')) required(column_name,data_type)
     WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns c WHERE c.table_schema='public' AND c.table_name='payments' AND c.column_name=required.column_name AND c.data_type=required.data_type);
   IF v_missing IS NOT NULL THEN RAISE EXCEPTION 'payments columns/types missing: %', v_missing; END IF;
-  IF EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('ledger_accounts','ledger_transactions','ledger_journal_entries','ledger_links','shift4_tender_groups','shift4_payment_attempts','shift4_tokenization_sessions','shift4_onboarding_sessions','shift4_onboarding_events')) THEN RAISE EXCEPTION 'Release object collision detected'; END IF;
-  IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('ledger_history_is_immutable','ledger_account_identity_is_immutable','assert_ledger_transaction_balanced','resolve_ledger_account','post_ledger_transaction','shift4_tender_group_identity_is_immutable','shift4_tender_group_is_undeletable','shift4_canonical_status_path','shift4_status_event_type','create_shift4_payment_attempt','claim_due_shift4_payment_attempts','apply_shift4_attempt_evidence','release_shift4_attempt_lease','enforce_shift4_tokenization_session_ownership','consume_shift4_tokenization_session','shift4_onboarding_guard_ownership','shift4_onboarding_touch_updated_at','shift4_onboarding_events_immutable','create_shift4_onboarding_session','apply_shift4_onboarding_update')) THEN RAISE EXCEPTION 'Release function collision detected'; END IF;
+  FOREACH v_name IN ARRAY ARRAY['ledger_accounts','ledger_transactions','ledger_journal_entries','ledger_links','shift4_tender_groups','shift4_payment_attempts','shift4_tokenization_sessions','shift4_onboarding_sessions','shift4_onboarding_events'] LOOP
+    IF to_regclass('public.' || v_name) IS NULL THEN RAISE EXCEPTION 'Installed foundation table is missing: %', v_name; END IF;
+  END LOOP;
+  FOREACH v_name IN ARRAY ARRAY['ledger_history_is_immutable','ledger_account_identity_is_immutable','assert_ledger_transaction_balanced','resolve_ledger_account','post_ledger_transaction','shift4_tender_group_identity_is_immutable','shift4_tender_group_is_undeletable','shift4_canonical_status_path','shift4_status_event_type','create_shift4_payment_attempt','claim_due_shift4_payment_attempts','apply_shift4_attempt_evidence','release_shift4_attempt_lease','enforce_shift4_tokenization_session_ownership','consume_shift4_tokenization_session','shift4_onboarding_guard_ownership','shift4_onboarding_touch_updated_at','shift4_onboarding_events_immutable','create_shift4_onboarding_session','apply_shift4_onboarding_update'] LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname=v_name) THEN RAISE EXCEPTION 'Installed foundation function is missing: %', v_name; END IF;
+  END LOOP;
   IF EXISTS (SELECT 1 FROM pg_event_trigger) AND current_user IN ('anon','authenticated') THEN RAISE EXCEPTION 'Browser role cannot own migration execution'; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.payments'::regclass AND contype='p') THEN RAISE EXCEPTION 'payments primary-key lifecycle assumption failed'; END IF;
   IF current_user IN ('anon','authenticated','service_role') THEN RAISE EXCEPTION 'Migration owner must be a dedicated privileged owner, not an application role'; END IF;

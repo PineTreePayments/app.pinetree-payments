@@ -51,14 +51,16 @@ export function mapShift4Evidence(input: Shift4EvidenceInput): Shift4EvidenceMap
       // figure PineTree never asked for. Both become reconciliation exceptions
       // rather than confirmations. The database enforces the same rule
       // independently, so neither layer alone can wave a mismatch through.
-      const amountMismatch = settlesPayment
+      const amountMismatch = operation !== "void"
         ? classifyApprovedAmountMinor(result.approvedAmountMinor, requestedAmountMinor)
         : null
 
       if (amountMismatch) {
         return {
           status: null,
-          attemptState: "reconciliation_required",
+          attemptState: amountMismatch === "approved_amount_missing"
+            ? "unresolved"
+            : "reconciliation_required",
           terminal: false,
           lookupRequired: amountMismatch === "approved_amount_missing",
           reconciliationRequired: true,
@@ -116,7 +118,19 @@ export function mapShift4Evidence(input: Shift4EvidenceInput): Shift4EvidenceMap
     /* ── Partial approval: response code P ──────────────────────────────── */
     case "partial_approval": {
       const approved = result.approvedAmountMinor
-      const validPartial = operation === "sale" && approved !== null && approved > 0
+      if (approved === null || approved === undefined || !Number.isSafeInteger(approved)) {
+        return {
+          status: null,
+          attemptState: "unresolved",
+          terminal: false,
+          lookupRequired: true,
+          reconciliationRequired: true,
+          retryClassification: "lookup_required",
+          actionRequired: "approved_amount_missing",
+          reason: APPROVED_AMOUNT_REASONS.approved_amount_missing,
+        }
+      }
+      const validPartial = (operation === "sale" || operation === "authorization") && approved > 0
         && approved < requestedAmountMinor
       return {
         status: validPartial ? "PROCESSING" : null,
@@ -131,6 +145,30 @@ export function mapShift4Evidence(input: Shift4EvidenceInput): Shift4EvidenceMap
         reason: validPartial
           ? "Shift4 approved part of the sale. The payment remains processing until another tender completes the exact total."
           : "Shift4 returned partial-approval evidence with an invalid amount or operation.",
+      }
+    }
+
+    /* ── Amount-inconsistent A/C or P evidence ─────────────────────── */
+    case "inconsistent_approval": {
+      const actionRequired = result.approvedAmountMinor !== null
+        && result.approvedAmountMinor > requestedAmountMinor
+        ? "approved_amount_exceeds_requested"
+        : result.responseCode === "P"
+          ? "invalid_partial_approval_amount"
+          : "approved_amount_below_requested"
+      return {
+        status: null,
+        attemptState: "reconciliation_required",
+        terminal: false,
+        lookupRequired: false,
+        reconciliationRequired: true,
+        retryClassification: "operator_review_required",
+        actionRequired,
+        reason: actionRequired === "approved_amount_exceeds_requested"
+          ? APPROVED_AMOUNT_REASONS.approved_amount_exceeds_requested
+          : actionRequired === "approved_amount_below_requested"
+            ? APPROVED_AMOUNT_REASONS.approved_amount_below_requested
+            : "Shift4 returned partial-approval evidence whose amount is not a positive amount below the request.",
       }
     }
 

@@ -19,9 +19,11 @@ import { describe, expect, it } from "vitest"
 const MIGRATIONS = join(process.cwd(), "database", "migrations")
 const JOURNAL_VERSION = "20260731163000"
 const SHIFT4_VERSION = "20260731163100"
+const LEDGER_ALIAS_FIX_VERSION = "20260802030000"
 
 const JOURNAL = join(MIGRATIONS, `${JOURNAL_VERSION}_create_ledger_journal_foundation.sql`)
 const SHIFT4 = join(MIGRATIONS, `${SHIFT4_VERSION}_create_shift4_payment_attempts.sql`)
+const LEDGER_ALIAS_FIX = join(MIGRATIONS, `${LEDGER_ALIAS_FIX_VERSION}_fix_ledger_posting_link_alias.sql`)
 
 function sql(path: string): string {
   return readFileSync(path, "utf8")
@@ -318,6 +320,73 @@ describe("post_ledger_transaction", () => {
   })
 })
 
+describe("forward ledger posting alias correction", () => {
+  const correction = () => code(LEDGER_ALIAS_FIX)
+
+  it("is a transactional replacement of the exact installed signature", () => {
+    const raw = sql(LEDGER_ALIAS_FIX)
+    const c = correction()
+    expect(raw).toMatch(/^begin;/)
+    expect(raw.trimEnd()).toMatch(/commit;$/)
+    expect(c).toContain("create or replace function public.post_ledger_transaction(")
+    expect(c).toContain("ledger_transaction_id uuid")
+    expect(c).toContain("created boolean")
+    expect(c).toContain("security definer")
+    expect(c).toContain("set search_path = public, pg_temp")
+    expect(c).toContain("to_regprocedure(")
+    expect(c).toContain("post_ledger_transaction(text,text,text,text,uuid,text,jsonb,jsonb,text,date,timestamptz,text,text,uuid,text,integer)")
+  })
+
+  it("uses an explicit value alias for payment-link extraction", () => {
+    expect(correction().replace(/\s+/g, " ")).toContain(
+      "select link_item.value ->> 'payment_id' into v_payment_link from jsonb_array_elements(p_links) as link_item(value) where link_item.value ->> 'link_type' = 'payment'"
+    )
+  })
+
+  it("gives every JSON array range an explicit collision-free column alias", () => {
+    const calls = correction().split("\n").filter((line) => line.includes("jsonb_array_elements("))
+    expect(calls).toHaveLength(9)
+    for (const call of calls) expect(call).toMatch(/as (?:line_item|link_item)\(value\)/)
+    expect(correction()).not.toMatch(/\bas\s+v_link\b/)
+    expect(correction()).not.toMatch(/\bv_link\s+jsonb\s*;/)
+    expect(correction()).toContain("v_line_item jsonb;")
+    expect(correction()).toContain("v_link_item jsonb;")
+  })
+
+  it("preserves the balanced, ownership, replay, and append-only posting contract", () => {
+    const c = correction()
+    for (const invariant of [
+      "A journal transaction requires at least two entry lines",
+      "Journal transaction is unbalanced: debits % <> credits %",
+      "belonging to another merchant",
+      "A payment-event link must belong to the linked payment",
+      "v_account.currency_or_asset <> v_currency",
+      "v_account.network is distinct from v_network",
+      "v_account.unit is distinct from p_unit",
+      "insert into public.ledger_transactions",
+      "when unique_violation then",
+      "was already used with different journal lines",
+      "was already used with different lifecycle links",
+      "insert into public.ledger_journal_entries",
+      "insert into public.ledger_links",
+    ]) expect(c, invariant).toContain(invariant)
+  })
+
+  it("reasserts the exact owner and least-privilege function ACL", () => {
+    const normalized = correction().replace(/\s+/g, " ")
+    expect(normalized).toMatch(/alter function public\.post_ledger_transaction\([^)]+\) owner to postgres;/)
+    expect(normalized).toMatch(/revoke all on function public\.post_ledger_transaction\([^)]+\) from public, anon, authenticated, service_role;/)
+    expect(normalized).toMatch(/grant execute on function public\.post_ledger_transaction\([^)]+\) to service_role;/)
+    expect(correction()).toContain("notify pgrst, 'reload schema';")
+  })
+
+  it("keeps the rollback-contained S05 account and merchant mismatch expectation unchanged", () => {
+    const smoke = readFileSync(join(process.cwd(), "scripts", "shift4-database", "smoke-tests.sql"), "utf8")
+    expect(smoke).toContain("S05 account/merchant mismatch was not rejected: %")
+    expect(smoke).toContain("S05 account and merchant mismatch passed")
+  })
+})
+
 /* ══ Exact money conversion ═════════════════════════════════════════════════ */
 
 describe("exact decimal to minor units", () => {
@@ -424,7 +493,9 @@ describe("journal idempotency and validation", () => {
 
   it("distinguishes the identity constraint when resolving an account", () => {
     const c = code(JOURNAL)
-    expect(c).toContain("get stacked diagnostics v_violated_constraint")
+    expect(c).toContain("get stacked diagnostics v_violated_constraint = constraint_name;")
+    const invalidDiagnosticsItem = ["pg", "exception", "constraint"].join("_")
+    expect(c).not.toContain(invalidDiagnosticsItem)
     expect(c).toContain("v_violated_constraint <> 'ledger_accounts_identity_uidx'")
     // Anything else is re-raised rather than swallowed into a lookup.
     expect(c).toMatch(/\braise;/)

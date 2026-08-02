@@ -114,9 +114,158 @@ describe("Shift4 final local consolidation", () => {
     expect(secondHashes).toEqual(firstHashes)
     expect(JSON.parse(firstOutput)).toEqual(JSON.parse(secondOutput))
     const manifest = JSON.parse(source("artifacts/shift4-database/00-manifest.json")) as { validation: string; runtimeStatus: string; contactedDatabase: boolean; migrations: Array<{ path: string; sha256: string }> }
-    expect(manifest).toEqual(expect.objectContaining({ validation: "static source validation only", runtimeStatus: "not_executed", contactedDatabase: false }))
+    expect(manifest).toEqual(expect.objectContaining({ validation: "static release-package validation; executable smoke SQL generated but not run locally", runtimeStatus: "not_executed", contactedDatabase: false }))
     for (const migration of manifest.migrations) expect(migration.sha256).toBe(hash(readFileSync(join(root, migration.path))))
     expect(source("artifacts/shift4-database/04-smoke-tests.sql")).toMatch(/BEGIN;[\s\S]*ROLLBACK;/)
+    expect(source("artifacts/shift4-database/04-smoke-tests.sql")).toBe(source("scripts/shift4-database/smoke-tests.sql"))
+  })
+
+  it("tracks both forward corrections and generates fail-fast executable smoke coverage", () => {
+    const privilegeMigrationPath = "database/migrations/20260802020000_harden_shift4_function_execute_privileges.sql"
+    const aliasMigrationPath = "database/migrations/20260802030000_fix_ledger_posting_link_alias.sql"
+    const migration = source(privilegeMigrationPath).toLowerCase()
+    const aliasMigration = source(aliasMigrationPath).toLowerCase()
+    const manifest = JSON.parse(source("artifacts/shift4-database/00-manifest.json")) as { migrations: Array<{ path: string; executionOrder: number }> }
+    expect(manifest.migrations.map(({ path }) => path)).toEqual([
+      "database/migrations/20260731163000_create_ledger_journal_foundation.sql",
+      "database/migrations/20260731163100_create_shift4_payment_attempts.sql",
+      "database/migrations/20260801160000_create_shift4_tokenization_sessions.sql",
+      "database/migrations/20260801161000_create_shift4_onboarding_sessions.sql",
+      privilegeMigrationPath,
+      aliasMigrationPath,
+    ])
+    expect(manifest.migrations.at(-1)?.executionOrder).toBe(6)
+    const deployedHashes = new Map([
+      ["database/migrations/20260731163000_create_ledger_journal_foundation.sql", "3D38B541E31CF089AC504CB023B3A1C04311C1110D67A4C98E564345417616DF"],
+      ["database/migrations/20260731163100_create_shift4_payment_attempts.sql", "3D2A838AA7A0F9F56CF3F4032D6B0DC6632BDA57D475029A41CC4D3605BA8F9E"],
+      ["database/migrations/20260801160000_create_shift4_tokenization_sessions.sql", "5E0A6014A0801F503EEA73A7F84740907470D80B43A0B8BF14C6AB71677867FC"],
+      ["database/migrations/20260801161000_create_shift4_onboarding_sessions.sql", "E208AD4D0677A6A6601586D399105E9309EBD2D021E6935DC2F66B79EB84E940"],
+      [privilegeMigrationPath, "696F3CCFD8C41240F075FB41E9B80699A84C22511F5A6ECAAF640ED6540F6FDD"],
+      [aliasMigrationPath, "50D24589CD9CA4DF7E41E32DEA794F702764AC45671C703074F443816DBF00B8"],
+    ])
+    for (const [path, expectedHash] of deployedHashes) expect(hash(readFileSync(join(root, path))), path).toBe(expectedHash)
+    expect(migration).toMatch(/^--[\s\S]*\bbegin;/)
+    expect(migration.trimEnd()).toMatch(/commit;$/)
+    expect(migration).not.toMatch(/create\s+(?:or\s+replace\s+)?function|\b(?:insert|update|delete)\s+(?:into|public\.)/)
+    expect(migration).toContain("notify pgrst, 'reload schema'")
+    expect(aliasMigration).toMatch(/^begin;/)
+    expect(aliasMigration.trimEnd()).toMatch(/commit;$/)
+    expect(aliasMigration).toContain("create or replace function public.post_ledger_transaction(")
+    expect(aliasMigration).toContain("from jsonb_array_elements(p_links) as link_item(value)")
+    expect(aliasMigration).not.toMatch(/\bas\s+v_link\b/)
+    expect(aliasMigration).not.toMatch(/\bv_link\s+jsonb\s*;/)
+    expect(aliasMigration).toContain("owner to postgres")
+    expect(aliasMigration).toContain("from public, anon, authenticated, service_role")
+    expect(aliasMigration).toContain("to service_role")
+
+    const helpers = [
+      "ledger_account_identity_is_immutable",
+      "shift4_tender_group_identity_is_immutable",
+      "shift4_tender_group_is_undeletable",
+    ]
+    const rpcs = [
+      "create_shift4_payment_attempt",
+      "claim_due_shift4_payment_attempts",
+      "apply_shift4_attempt_evidence",
+      "release_shift4_attempt_lease",
+    ]
+    for (const name of [...helpers, ...rpcs]) {
+      expect(migration).toMatch(new RegExp(`revoke\\s+all\\s+on\\s+function\\s+public\\.${name}\\s*\\([\\s\\S]*?\\)\\s+from\\s+public,\\s*anon,\\s*authenticated,\\s*service_role\\s*;`))
+    }
+    const grants = [...migration.matchAll(/grant\s+execute\s+on\s+function\s+public\.([a-z0-9_]+)\s*\([\s\S]*?\)\s+to\s+service_role\s*;/g)].map((match) => match[1])
+    expect(grants).toEqual(rpcs)
+    for (const helper of helpers) expect(migration).not.toMatch(new RegExp(`grant\\s+execute[\\s\\S]*?public\\.${helper}`))
+
+    const ledgerMigration = source("database/migrations/20260731163000_create_ledger_journal_foundation.sql").toLowerCase()
+    const attemptsMigration = source("database/migrations/20260731163100_create_shift4_payment_attempts.sql").toLowerCase()
+    expect(ledgerMigration).toMatch(/revoke\s+all\s+on\s+function\s+public\.ledger_account_identity_is_immutable\(\)\s+from\s+public,\s*anon,\s*authenticated,\s*service_role/)
+    for (const name of [...helpers.slice(1), ...rpcs]) expect(attemptsMigration).toMatch(new RegExp(`revoke\\s+all\\s+on\\s+function\\s+public\\.${name}`))
+
+    const smoke = source("artifacts/shift4-database/04-smoke-tests.sql")
+    const executableSmoke = smoke.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--.*$/gm, " ")
+    for (const smokeCase of ["S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S09b", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S19"]) {
+      expect(executableSmoke).toMatch(new RegExp(`raise\\s+notice\\s+'${smokeCase}\\b`, "i"))
+    }
+    expect(smoke).not.toMatch(/^\s*--\s*S(?:0[1-9]|1[0-9])\b/im)
+    expect(executableSmoke).toMatch(/raise\s+exception/iu)
+    expect(executableSmoke).not.toMatch(/00000000-0000-0000-0000-00000000000[1-4]/i)
+    expect(executableSmoke).not.toMatch(/v_operator_confirms|operator configuration block/i)
+    for (const identifier of ["v_merchant_id", "v_payment_a_id", "v_payment_b_id", "v_connection_id"]) {
+      expect(executableSmoke).toMatch(new RegExp(`\\b${identifier}\\s+uuid\\s*:=\\s*gen_random_uuid\\(\\)`, "i"))
+    }
+    expect(executableSmoke).toContain("v_payment_a_id = v_payment_b_id")
+    expect(executableSmoke).toMatch(/insert\s+into\s+public\.merchants\s*\(\s*id,\s*email,\s*business_name,\s*created_at\s*\)/i)
+    expect(executableSmoke).not.toMatch(/\bm\.provider\b/i)
+    expect(executableSmoke).toMatch(/insert\s+into\s+public\.merchant_providers\s*\(\s*id,\s*merchant_id,\s*provider,\s*enabled,\s*credentials,\s*created_at,\s*updated_at\s*\)\s*values\s*\(\s*v_connection_id,\s*v_merchant_id,\s*'shift4_rest',\s*true,/i)
+    expect(executableSmoke).toContain("mp.provider='shift4_rest' AND mp.status='active' AND mp.enabled=true")
+    expect(executableSmoke).toMatch(/insert\s+into\s+public\.payments\s*\(\s*id,\s*merchant_id,\s*subtotal_amount,\s*platform_fee,\s*total_amount,\s*merchant_amount,\s*pinetree_fee,\s*gross_amount/i)
+    expect(executableSmoke).toMatch(/v_payment_a_id,\s*v_merchant_id,\s*200,\s*15,\s*215,\s*2\.00,\s*0\.15,\s*2\.15/)
+    expect(executableSmoke).toMatch(/v_payment_b_id,\s*v_merchant_id,\s*300,\s*15,\s*315,\s*3\.00,\s*0\.15,\s*3\.15/)
+    expect(executableSmoke).toContain("'merchantAmountMinor',200,'pinetreeFeeMinor',15,'grossAmountMinor',215")
+    expect(executableSmoke).toContain("'merchantAmountMinor',300,'pinetreeFeeMinor',15,'grossAmountMinor',315")
+    for (const payment of ["a", "b"]) {
+      const row = `v_payment_${payment}`
+      expect(executableSmoke).toContain(`${row}.subtotal_amount <> ${row}.merchant_amount * 100`)
+      expect(executableSmoke).toContain(`${row}.platform_fee <> ${row}.pinetree_fee * 100`)
+      expect(executableSmoke).toContain(`${row}.total_amount <> ${row}.gross_amount * 100`)
+      expect(executableSmoke).toContain(`${row}.subtotal_amount + ${row}.platform_fee <> ${row}.total_amount`)
+      expect(executableSmoke).toContain(`${row}.merchant_amount + ${row}.pinetree_fee <> ${row}.gross_amount`)
+    }
+    expect(executableSmoke).toContain("p.subtotal_amount=200 AND p.platform_fee=15 AND p.total_amount=215")
+    expect(executableSmoke).toContain("p.subtotal_amount=300 AND p.platform_fee=15 AND p.total_amount=315")
+    const outerBeginIndex = executableSmoke.toLowerCase().indexOf("begin;")
+    expect(executableSmoke.toLowerCase().indexOf("insert into public.merchants")).toBeGreaterThan(outerBeginIndex)
+    expect(executableSmoke).not.toMatch(/^\s*COMMIT\s*;/im)
+    expect(executableSmoke).not.toMatch(/v_connection_[2-9]_id/i)
+    expect(executableSmoke).not.toMatch(/two\s+(?:distinct\s+)?shift4_rest\s+connections/i)
+    expect(executableSmoke).toContain("S06 nonexistent payment-event ledger-link rejection passed")
+    expect(executableSmoke).toContain("S05 account/merchant mismatch was not rejected: %")
+    expect(executableSmoke).toContain("S05 account and merchant mismatch passed")
+    expect(executableSmoke).toContain("S19 payment and tender-group isolation passed")
+    expect(executableSmoke).toContain("Final containment assertions passed for generated rollback-only fixtures")
+    expect(executableSmoke).not.toMatch(/\B:(?:merchant_id|payment_id|connection_id)\b/i)
+    expect(executableSmoke).not.toMatch(/\b(?:pg_net|net\.http|http_get|http_post|curl|fetch)\b|https?:\/\//i)
+    expect(executableSmoke.trimEnd()).toMatch(/ROLLBACK;$/)
+
+    const postflight = source("artifacts/shift4-database/03-postflight.sql")
+    expect(postflight).toContain("pg_get_function_identity_arguments(p.oid)")
+    expect(postflight).toContain("v_signature")
+    expect(postflight).toContain("v_grantee")
+    expect(postflight).toContain("public.%(%) grantee=%")
+    expect(postflight).toContain("post_ledger_transaction owner must be postgres")
+    expect(postflight).toContain("post_ledger_transaction must be SECURITY DEFINER")
+    expect(postflight).toContain("post_ledger_transaction search_path must be pinned to public, pg_temp")
+    expect(postflight).toContain("PUBLIC must not execute post_ledger_transaction")
+    expect(postflight).toContain("Browser roles must not execute post_ledger_transaction")
+    expect(postflight).toContain("service_role execute privilege missing for post_ledger_transaction")
+    expect(postflight).not.toContain("THEN RAISE EXCEPTION 'Unexpected function EXECUTE privilege';")
+  })
+
+  it("emits one matching named, read-only postflight block without dashboard SQL", () => {
+    const postflight = source("artifacts/shift4-database/03-postflight.sql")
+    const dollarTags = [...postflight.matchAll(/\$[a-z_][a-z0-9_]*\$/gi)].map((match) => match[0])
+    const executablePostflight = postflight
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/--.*$/gm, " ")
+      .replace(/'(?:''|[^'])*'/g, "''")
+
+    expect(dollarTags).toEqual(["$postflight$", "$postflight$"])
+    expect(postflight).toMatch(/^DO \$postflight\$\r?\nDECLARE/m)
+    expect(postflight).toMatch(/END;\r?\n\$postflight\$;\r?\nSELECT/)
+    expect(postflight).not.toContain("DO $$")
+    expect(postflight).not.toMatch(/^\s*\$;\s*$/m)
+    expect(postflight).not.toMatch(/Added by Supabase|ALTER\s+TABLE\s+v_name|dashboard\s+(?:session|user|date)|```/i)
+    expect(postflight.trimEnd()).not.toMatch(/"$/)
+    expect(executablePostflight).not.toMatch(/\b(?:CREATE|ALTER|DROP|GRANT|REVOKE|INSERT|UPDATE|DELETE|TRUNCATE|NOTIFY)\b/i)
+
+    for (const assertion of [
+      "post_ledger_transaction owner must be postgres",
+      "post_ledger_transaction must be SECURITY DEFINER",
+      "post_ledger_transaction search_path must be pinned to public, pg_temp",
+      "PUBLIC must not execute post_ledger_transaction",
+      "Browser roles must not execute post_ledger_transaction",
+      "service_role execute privilege missing for post_ledger_transaction",
+    ]) expect(postflight).toContain(assertion)
   })
 
   it("keeps sentinel values out of dashboard source, generated reports, and database artifacts", () => {

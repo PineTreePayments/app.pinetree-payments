@@ -34,6 +34,8 @@ import type {
  *
  *   approved          responseCode A or C
  *   partial_approval  responseCode P - only amount.total was approved
+ *   inconsistent_approval  A/C amount differs from the request, or P is not a
+ *                     positive amount strictly below the request
  *   declined          responseCode D
  *   referral          responseCode R - voice authorization required
  *   verification_failed  responseCode f - AVS/CSC failure
@@ -48,6 +50,7 @@ import type {
 export type Shift4Outcome =
   | "approved"
   | "partial_approval"
+  | "inconsistent_approval"
   | "declined"
   | "referral"
   | "verification_failed"
@@ -159,6 +162,8 @@ export type NormalizeShift4ResponseInput = {
   merchantProviderConnectionId?: string | null
   pineTreePaymentId?: string | null
   pineTreePaymentAttemptId?: string | null
+  /** Requested integer amount, when the operation has an amount contract. */
+  requestedAmountMinor?: number
   httpStatus: number | null
   requestStartedAt: Date
   requestCompletedAt: Date
@@ -348,6 +353,23 @@ export function normalizeShift4Response(
     (outcome === "approved" || outcome === "partial_approval")
   ) {
     outcome = "unknown"
+  }
+
+  if (
+    Number.isSafeInteger(input.requestedAmountMinor) &&
+    (outcome === "approved" || outcome === "partial_approval")
+  ) {
+    const approved = parsedApprovedAmount.amountMinor
+    const requested = input.requestedAmountMinor as number
+    if (approved === null) {
+      // A response code alone is not amount evidence. Resolve the invoice.
+      outcome = "unknown"
+    } else if (
+      (outcome === "approved" && approved !== requested) ||
+      (outcome === "partial_approval" && (approved <= 0 || approved >= requested))
+    ) {
+      outcome = "inconsistent_approval"
+    }
   }
 
   const entryMode = (card?.entryMode as Shift4CardEntryMode | undefined) ?? null

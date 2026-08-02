@@ -53,7 +53,7 @@ export async function consumeShift4TokenizationSession(input: {
   merchantId: string
   completionSecret: string
   cardToken: string
-}): Promise<"consumed_now" | "already_consumed" | "unavailable"> {
+}): Promise<"consumed_now" | "already_consumed" | "fingerprint_conflict" | "unavailable"> {
   const { data, error } = await db().rpc("consume_shift4_tokenization_session", {
     p_session_id: input.sessionId,
     p_merchant_id: input.merchantId,
@@ -61,5 +61,7 @@ export async function consumeShift4TokenizationSession(input: {
     p_token_fingerprint: digest(input.cardToken).slice(0, 24),
   })
   if (error) throw new Error(`Failed to consume Shift4 tokenization session: ${error.message}`)
-  return data === "consumed_now" || data === "already_consumed" ? data : "unavailable"
+  return data === "consumed_now" || data === "already_consumed" || data === "fingerprint_conflict"
+    ? data
+    : "unavailable"
 }

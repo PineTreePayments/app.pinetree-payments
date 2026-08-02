@@ -113,6 +113,8 @@ export type Shift4RequestContext = {
   merchantProviderConnectionId?: string | null
   pineTreePaymentId?: string | null
   pineTreePaymentAttemptId?: string | null
+  /** Amount PineTree requested; omitted only when the operation has no amount contract. */
+  requestedAmountMinor?: number
   entryContext?: Shift4EntryContext
 }
 
@@ -382,6 +384,7 @@ export async function shift4RestRequest(
     merchantProviderConnectionId: context.merchantProviderConnectionId ?? null,
     pineTreePaymentId: context.pineTreePaymentId ?? null,
     pineTreePaymentAttemptId: context.pineTreePaymentAttemptId ?? null,
+    requestedAmountMinor: context.requestedAmountMinor,
     httpStatus: response.status,
     requestStartedAt,
     requestCompletedAt,

@@ -715,6 +715,51 @@ describe("Shift4 normalized results", () => {
     }
   })
 
+  it("normalizes amount-inconsistent approval evidence before it reaches the Engine", () => {
+    for (const code of ["A", "C"] as const) {
+      const body = approvedSaleBody()
+      body.result[0].transaction.responseCode = code
+      body.result[0].amount.total = 10
+      const result = normalizeShift4Response({
+        operation: "sale",
+        correlationId: `short-${code}`,
+        requestedAmountMinor: 2550,
+        httpStatus: 200,
+        body,
+        ...timing,
+      })
+      expect(result.outcome).toBe("inconsistent_approval")
+      expect(result.requiresInvoiceResolution).toBe(false)
+    }
+
+    const partial = approvedSaleBody()
+    partial.result[0].transaction.responseCode = "P"
+    partial.result[0].amount.total = 25.5
+    expect(normalizeShift4Response({
+      operation: "sale",
+      correlationId: "invalid-partial",
+      requestedAmountMinor: 2550,
+      httpStatus: 200,
+      body: partial,
+      ...timing,
+    }).outcome).toBe("inconsistent_approval")
+  })
+
+  it("requires invoice resolution when approval amount evidence is absent", () => {
+    const body = approvedSaleBody()
+    body.result[0].amount = {} as typeof body.result[0]["amount"]
+    const result = normalizeShift4Response({
+      operation: "sale",
+      correlationId: "missing-approved-total",
+      requestedAmountMinor: 2550,
+      httpStatus: 200,
+      body,
+      ...timing,
+    })
+    expect(result.outcome).toBe("unknown")
+    expect(result.requiresInvoiceResolution).toBe(true)
+  })
+
   it("normalizes a decline", () => {
     const result = normalizeShift4Response({
       operation: "sale",

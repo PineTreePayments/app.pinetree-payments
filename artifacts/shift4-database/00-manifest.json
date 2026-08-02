@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
   "package": "pinetree-shift4-database-release",
-  "validation": "static source validation only",
+  "validation": "static release-package validation; executable smoke SQL generated but not run locally",
   "runtimeStatus": "not_executed",
   "contactedDatabase": false,
-  "migrationCount": 4,
+  "migrationCount": 6,
   "migrations": [
     {
       "executionOrder": 1,
       "filename": "20260731163000_create_ledger_journal_foundation.sql",
       "path": "database/migrations/20260731163000_create_ledger_journal_foundation.sql",
-      "sha256": "240F7BA975F6E44E65C0D025E1717ADE0B7B98080808D936008C30BE95388A32",
-      "byteSize": 39290,
-      "lineCount": 951,
+      "sha256": "3D38B541E31CF089AC504CB023B3A1C04311C1110D67A4C98E564345417616DF",
+      "byteSize": 39427,
+      "lineCount": 952,
       "expectedTables": [
         "ledger_accounts",
         "ledger_transactions",
@@ -41,10 +41,10 @@
       ],
       "expectedFunctionSignatures": [
         "ledger_history_is_immutable()",
+        "ledger_account_identity_is_immutable()",
         "assert_ledger_transaction_balanced()",
         "resolve_ledger_account(text,text,text,text,text,text,integer)",
-        "post_ledger_transaction(text,text,text,text,uuid,text,jsonb,jsonb,text,date,timestamptz,text,text,uuid,text,integer)",
-        "ledger_account_identity_is_immutable()"
+        "post_ledger_transaction(text,text,text,text,uuid,text,jsonb,jsonb,text,date,timestamptz,text,text,uuid,text,integer)"
       ],
       "expectedTriggers": [
         "ledger_transactions_immutable",
@@ -106,9 +106,9 @@
       "executionOrder": 2,
       "filename": "20260731163100_create_shift4_payment_attempts.sql",
       "path": "database/migrations/20260731163100_create_shift4_payment_attempts.sql",
-      "sha256": "87236C943C3ECCFEC8BDC8CC5BA9E03EBF4FEDE7AC21AB3129C7877D08438F26",
-      "byteSize": 131024,
-      "lineCount": 2871,
+      "sha256": "3D2A838AA7A0F9F56CF3F4032D6B0DC6632BDA57D475029A41CC4D3605BA8F9E",
+      "byteSize": 136335,
+      "lineCount": 2989,
       "expectedTables": [
         "shift4_tender_groups",
         "shift4_payment_attempts"
@@ -146,12 +146,12 @@
       "expectedFunctionSignatures": [
         "shift4_canonical_status_path(text,text)",
         "shift4_status_event_type(text)",
+        "shift4_tender_group_identity_is_immutable()",
+        "shift4_tender_group_is_undeletable()",
         "create_shift4_payment_attempt(text,uuid,uuid,uuid,text,text,varchar,bigint,varchar,text,text,text,text,text,bigint,text,integer,text,text,text)",
         "claim_due_shift4_payment_attempts(text,integer,integer,uuid,uuid,uuid,text,timestamptz)",
         "apply_shift4_attempt_evidence(uuid,text,integer,text,text,text,text,text,integer,integer,text,text,text,text,text,text,text,text,text,text,text,bigint,bigint,timestamptz,timestamptz,text,text,timestamptz,timestamptz,boolean,boolean,boolean,boolean,text,text,text)",
-        "release_shift4_attempt_lease(uuid,text,text,timestamptz)",
-        "shift4_tender_group_identity_is_immutable()",
-        "shift4_tender_group_is_undeletable()"
+        "release_shift4_attempt_lease(uuid,text,text,timestamptz)"
       ],
       "expectedTriggers": [
         "shift4_tender_groups_identity_immutable",
@@ -229,9 +229,9 @@
       "executionOrder": 3,
       "filename": "20260801160000_create_shift4_tokenization_sessions.sql",
       "path": "database/migrations/20260801160000_create_shift4_tokenization_sessions.sql",
-      "sha256": "329D88E19C5B76B47F356B2867C4EC366D5AAAFCE5ACC0D3C90F0A202C67DBF0",
-      "byteSize": 4733,
-      "lineCount": 95,
+      "sha256": "5E0A6014A0801F503EEA73A7F84740907470D80B43A0B8BF14C6AB71677867FC",
+      "byteSize": 8773,
+      "lineCount": 196,
       "expectedTables": [
         "shift4_tokenization_sessions"
       ],
@@ -254,7 +254,9 @@
       "expectedRlsTables": [
         "shift4_tokenization_sessions"
       ],
-      "expectedForceRlsTables": [],
+      "expectedForceRlsTables": [
+        "shift4_tokenization_sessions"
+      ],
       "requiredRoles": [
         "service_role",
         "anon",
@@ -283,9 +285,9 @@
       "executionOrder": 4,
       "filename": "20260801161000_create_shift4_onboarding_sessions.sql",
       "path": "database/migrations/20260801161000_create_shift4_onboarding_sessions.sql",
-      "sha256": "D8F18C8CFA9366C0F0BB2CC01E7687D7B03FD4827AC4D29E917E8DA208CFCF6F",
-      "byteSize": 10064,
-      "lineCount": 228,
+      "sha256": "E208AD4D0677A6A6601586D399105E9309EBD2D021E6935DC2F66B79EB84E940",
+      "byteSize": 16846,
+      "lineCount": 389,
       "expectedTables": [
         "shift4_onboarding_sessions",
         "shift4_onboarding_events"
@@ -304,11 +306,11 @@
         "apply_shift4_onboarding_update"
       ],
       "expectedFunctionSignatures": [
-        "create_shift4_onboarding_session(uuid,uuid,text,text,text,text,text)",
-        "apply_shift4_onboarding_update(uuid,text,text,text,text,timestamptz,text,boolean,text)",
         "shift4_onboarding_guard_ownership()",
         "shift4_onboarding_touch_updated_at()",
-        "shift4_onboarding_events_immutable()"
+        "shift4_onboarding_events_immutable()",
+        "create_shift4_onboarding_session(uuid,uuid,text,text,text,text,text)",
+        "apply_shift4_onboarding_update(uuid,uuid,text,text,text,text,timestamptz,text,boolean,text)"
       ],
       "expectedTriggers": [
         "shift4_onboarding_sessions_ownership_trigger",
@@ -335,6 +337,94 @@
         "shift4_onboarding_sessions",
         "shift4_onboarding_events"
       ],
+      "requiredRoles": [
+        "service_role",
+        "anon",
+        "authenticated"
+      ],
+      "requiredExternalObjects": [
+        "extension/function gen_random_uuid()",
+        "table public.merchants",
+        "table public.payments",
+        "table public.merchant_providers",
+        "table public.payment_events",
+        "table public.ledger_entries",
+        "table public.merchants",
+        "column public.payments.id uuid",
+        "column public.payments.merchant_id uuid",
+        "column public.payments.status text",
+        "column public.payments.gross_amount numeric",
+        "column public.payments.currency text-compatible",
+        "columns public.payment_events.id/payment_id/event_type/provider_event/raw_payload",
+        "columns public.ledger_entries legacy compatibility shape",
+        "unique index public.ledger_entries(payment_id)"
+      ],
+      "runtimeStatus": "not_executed"
+    },
+    {
+      "executionOrder": 5,
+      "filename": "20260802020000_harden_shift4_function_execute_privileges.sql",
+      "path": "database/migrations/20260802020000_harden_shift4_function_execute_privileges.sql",
+      "sha256": "696F3CCFD8C41240F075FB41E9B80699A84C22511F5A6ECAAF640ED6540F6FDD",
+      "byteSize": 2578,
+      "lineCount": 50,
+      "expectedTables": [],
+      "expectedIndexes": [],
+      "expectedFunctions": [],
+      "expectedFunctionSignatures": [
+        "ledger_account_identity_is_immutable()",
+        "shift4_tender_group_identity_is_immutable()",
+        "shift4_tender_group_is_undeletable()",
+        "create_shift4_payment_attempt(text,uuid,uuid,uuid,text,text,varchar,bigint,varchar,text,text,text,text,text,bigint,text,integer,text,text,text)",
+        "claim_due_shift4_payment_attempts(text,integer,integer,uuid,uuid,uuid,text,timestamptz)",
+        "apply_shift4_attempt_evidence(uuid,text,integer,text,text,text,text,text,integer,integer,text,text,text,text,text,text,text,text,text,text,text,bigint,bigint,timestamptz,timestamptz,text,text,timestamptz,timestamptz,boolean,boolean,boolean,boolean,text,text,text)",
+        "release_shift4_attempt_lease(uuid,text,text,timestamptz)"
+      ],
+      "expectedTriggers": [],
+      "expectedConstraints": [],
+      "expectedRlsTables": [],
+      "expectedForceRlsTables": [],
+      "requiredRoles": [
+        "service_role",
+        "anon",
+        "authenticated"
+      ],
+      "requiredExternalObjects": [
+        "extension/function gen_random_uuid()",
+        "table public.merchants",
+        "table public.payments",
+        "table public.merchant_providers",
+        "table public.payment_events",
+        "table public.ledger_entries",
+        "table public.merchants",
+        "column public.payments.id uuid",
+        "column public.payments.merchant_id uuid",
+        "column public.payments.status text",
+        "column public.payments.gross_amount numeric",
+        "column public.payments.currency text-compatible",
+        "columns public.payment_events.id/payment_id/event_type/provider_event/raw_payload",
+        "columns public.ledger_entries legacy compatibility shape",
+        "unique index public.ledger_entries(payment_id)"
+      ],
+      "runtimeStatus": "not_executed"
+    },
+    {
+      "executionOrder": 6,
+      "filename": "20260802030000_fix_ledger_posting_link_alias.sql",
+      "path": "database/migrations/20260802030000_fix_ledger_posting_link_alias.sql",
+      "sha256": "50D24589CD9CA4DF7E41E32DEA794F702764AC45671C703074F443816DBF00B8",
+      "byteSize": 12940,
+      "lineCount": 346,
+      "expectedTables": [],
+      "expectedIndexes": [],
+      "expectedFunctions": [],
+      "expectedFunctionSignatures": [
+        "post_ledger_transaction(text,text,text,text,uuid,text,jsonb,jsonb,text,date,timestamptz,text,text,uuid,text,integer)"
+      ],
+      "expectedTriggers": [],
+      "expectedConstraints": [],
+      "expectedRlsTables": [],
+      "expectedForceRlsTables": [],
       "requiredRoles": [
         "service_role",
         "anon",

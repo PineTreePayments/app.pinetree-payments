@@ -118,7 +118,7 @@ select count(*) from public.shift4_tokenization_sessions; -- must fail permissio
 rollback;
 ```
 
-Smoke tests must use synthetic test-environment merchants/payments only. Verify duplicate attempt creation resumes, conflicting idempotency rejects before transmission, one-time tokenization consumption returns `consumed_now` then `already_consumed` only with the same hash, wrong-merchant reads return no row, exact tender completion confirms once, journal debits equal credits, and the $0.15 fee posts once per completed payment.
+Smoke tests must use synthetic test-environment merchants/payments only. Verify a promoted authorization still resumes by stable operation identity; rejected and resumed requests leave tender-group version, next sequence, and attempt count unchanged; only P creates partial/additional-tender behavior; A/C amount mismatches block for reconciliation; one-time tokenization returns `consumed_now`, then `already_consumed` only for the same secret and fingerprint while a changed fingerprint conflicts without overwrite; wrong-merchant access fails; onboarding rejects cross-connection updates and conflicting update-reference reuse; exact tender completion confirms once; journal debits equal credits; and the $0.15 fee posts once per completed payment.
 
 Containment is configuration-only: turn every Shift4 flag off. Preserve all financial and recovery evidence. Do not roll migrations back or delete rows during an incident. If schema containment is later required, author a new reviewed forward migration after reconciliation and backup.
 ## Offline release generation
@@ -133,6 +133,6 @@ Run `npm run shift4:database:release`. It performs no connection and regenerates
 - `artifacts/shift4-database/05-containment.sql`
 - `artifacts/shift4-database/06-operator-checklist.md`
 
-The fourth migration is `database/migrations/20260801161000_create_shift4_onboarding_sessions.sql`. Run preflight first, all four migrations in filename order, postflight, and then the reviewed synthetic smoke test inside its rollback-only transaction. Do not treat artifact generation as runtime validation.
+The first four migrations through `database/migrations/20260801161000_create_shift4_onboarding_sessions.sql` are already installed in the current Supabase database. The fifth migration, `database/migrations/20260802020000_harden_shift4_function_execute_privileges.sql`, is the pending forward-only record of the manually applied privilege correction. Verify the five-entry manifest, run preflight, apply only the fifth migration on the current database, run postflight, and then run the configured executable synthetic smoke test inside its rollback-only transaction. Do not treat artifact generation as runtime validation or rerun the installed foundation migrations.
 
-The generator labels every result `static source validation only`, records `runtimeStatus: not_executed`, and must produce identical hashes on consecutive runs.
+The generator labels the result `static release-package validation; executable smoke SQL generated but not run locally`, records `runtimeStatus: not_executed` and `contactedDatabase: false`, and must produce identical hashes on consecutive runs.

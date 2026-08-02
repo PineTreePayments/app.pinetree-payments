@@ -63,10 +63,10 @@ The real adapter fails closed until Shift4 supplies the hosted/embedded session 
 
 ## Database release package
 
-The final local package is the deterministic seven-file set `00-manifest.json` through `06-operator-checklist.md`. The generator performs **static source validation only**, records `runtimeStatus: not_executed`, and never opens a database connection.
+The final local package is the deterministic seven-file set `00-manifest.json` through `06-operator-checklist.md`. The generator statically validates package structure and generates an executable rollback-contained smoke script, but does not run that SQL: it records `runtimeStatus: not_executed`, `contactedDatabase: false`, and never opens a database connection. The four foundation migrations are installed in the current database; the fifth forward-only privilege migration records the manual correction and remains pending through the approved migration mechanism.
 
 ## Reachability and internal fixture mode
 
 `shift4-reachability-inventory.md` classifies production, internal/admin, fixture, test, deployment, and intentionally blocked code. `/dashboard/admin/shift4` is the only mounted checkout/POS fixture surface. Its admin action calls the certification Engine, which uses synthetic persistence and the Commerce Engine simulator, returns checkout/retail/onboarding state, and reports `providerRequestsSent: 0`. Public checkout and POS remain governed by real server readiness.
 
-`npm run shift4:database:release` validates strict migration contracts and generates reviewed preflight, postflight, synthetic smoke-test, and containment SQL without database access. Runtime order is ledger → attempts/tenders → tokenization sessions → onboarding sessions/events. Containment disables all runtime flags while retaining attempts, journal entries, onboarding evidence, and safe reconciliation.
+`npm run shift4:database:release` validates strict migration contracts and generates reviewed preflight, postflight, executable synthetic smoke-test, and containment SQL without database access. Audited order is ledger → attempts/tenders → tokenization sessions → onboarding sessions/events → execute-privilege hardening. On the current database, do not rerun the installed first four; apply only the pending fifth migration. Containment disables all runtime flags while retaining attempts, journal entries, onboarding evidence, and safe reconciliation.

@@ -13,6 +13,6 @@ export async function POST(request: NextRequest) {
     const body = await readJsonObject(request); const status = String(body.status || "") as Shift4OnboardingStatus
     if (!SHIFT4_ONBOARDING_STATUSES.includes(status)) throw Object.assign(new Error("status is invalid"), { status: 400, code: "invalid_request" })
     const update = shift4OnboardingFixture({ providerApplicationId: requiredString(body, "providerApplicationId"), status, sequence: Number(body.sequence || 1) })
-    return shift4Success(await applyShift4OnboardingUpdate({ merchantId, update, fixtureAuthorized: true }))
+    return shift4Success(await applyShift4OnboardingUpdate({ merchantId, merchantProviderConnectionId: requiredString(body, "merchantProviderConnectionId"), update, fixtureAuthorized: true }))
   } catch (error) { return shift4Error(error, "Unable to apply onboarding fixture") }
 }

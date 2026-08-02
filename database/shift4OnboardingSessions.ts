@@ -37,9 +37,10 @@ export async function getLatestShift4OnboardingSession(merchantId: string): Prom
   return (data || null) as Shift4OnboardingSessionRow | null
 }
 
-export async function applyShift4OnboardingUpdate(input: { merchantId: string; update: Shift4OnboardingUpdate }): Promise<Shift4OnboardingSessionRow> {
+export async function applyShift4OnboardingUpdate(input: { merchantId: string; merchantProviderConnectionId: string; update: Shift4OnboardingUpdate }): Promise<Shift4OnboardingSessionRow> {
   const { data, error } = await db().rpc("apply_shift4_onboarding_update", {
-    p_merchant_id: input.merchantId, p_provider_application_id: input.update.providerApplicationId,
+    p_merchant_id: input.merchantId, p_merchant_provider_connection_id: input.merchantProviderConnectionId,
+    p_provider_application_id: input.update.providerApplicationId,
     p_update_reference: input.update.updateReference, p_status: input.update.status,
     p_status_reason_code: input.update.reasonCode, p_occurred_at: input.update.occurredAt,
     p_correlation_id: input.update.correlationId, p_verified: input.update.verified,

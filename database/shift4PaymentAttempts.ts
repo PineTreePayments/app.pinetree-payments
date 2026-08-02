@@ -400,6 +400,17 @@ export type ApplyShift4EvidenceInput = {
   voiceCenterPhoneNumber?: string | null
 }
 
+export type Shift4InconsistentAmountProblem =
+  | "approved_amount_below_requested"
+  | "approved_amount_exceeds_requested"
+  | "partial_approved_amount_not_below_requested"
+
+const SHIFT4_INCONSISTENT_AMOUNT_PROBLEMS = new Set<string>([
+  "approved_amount_below_requested",
+  "approved_amount_exceeds_requested",
+  "partial_approved_amount_not_below_requested",
+])
+
 export type ApplyShift4EvidenceResult = {
   outcome:
     | "applied"
@@ -422,6 +433,23 @@ export type ApplyShift4EvidenceResult = {
   attemptResolutionReason: string | null
   attemptNextCheckAt: string | null
   tenderGroupState: "open" | "settled" | "closed" | "reconciliation_required" | null
+}
+
+function assertAmountReconciliationContract(result: ApplyShift4EvidenceResult): void {
+  if (!SHIFT4_INCONSISTENT_AMOUNT_PROBLEMS.has(result.conflictReason ?? "")) return
+
+  if (
+    result.outcome !== "reconciliation_required" ||
+    result.attemptState !== "reconciliation_required" ||
+    result.attemptRecoveryState !== "blocked" ||
+    result.reconciliationRequired !== true ||
+    result.appliedStatus !== null ||
+    result.ledgerPosted !== false
+  ) {
+    throw new Error(
+      `apply_shift4_attempt_evidence returned an inconsistent amount-reconciliation contract for ${result.conflictReason}.`
+    )
+  }
 }
 
 /**
@@ -488,7 +516,7 @@ export async function applyShift4AttemptEvidence(
     throw new Error("apply_shift4_attempt_evidence returned no result")
   }
 
-  return {
+  const result: ApplyShift4EvidenceResult = {
     outcome: row.outcome,
     attemptId: row.attempt_id,
     version: row.version ?? null,
@@ -503,6 +531,9 @@ export async function applyShift4AttemptEvidence(
     attemptNextCheckAt: row.attempt_next_check_at ?? null,
     tenderGroupState: row.tender_group_state ?? null,
   }
+
+  assertAmountReconciliationContract(result)
+  return result
 }
 
 /* ── Due-work claiming ────────────────────────────────────────────────────── */
