@@ -17,6 +17,7 @@
 import { assertValidShift4Invoice } from "../invoices/invoiceReference"
 import { formatShift4DateTime } from "../dateTime"
 import { Shift4RestApiError } from "../errors"
+import { minorUnitsToShift4Amount } from "../money"
 import type {
   Shift4Amount,
   Shift4CardOnFile,
@@ -44,12 +45,12 @@ export type Shift4TokenCardInput = {
 
 export type Shift4TransactionRequestInput = {
   invoice: string
-  /** Major currency units. Mapped to `amount.total`. */
-  total: number
-  /** Major currency units. Mapped to `amount.tax`. Required by Shift4. */
-  tax: number
-  tip?: number
-  surcharge?: number
+  /** Integer minor units. Serialized once at this provider boundary. */
+  amountMinor: number
+  /** Integer minor units. Required by Shift4; zero is explicit. */
+  taxAmountMinor: number
+  tipAmountMinor?: number
+  surchargeAmountMinor?: number
   /** Mapped to `clerk.numericId`. Required by Shift4. */
   clerkNumericId: number
   card: Shift4TokenCardInput
@@ -62,22 +63,6 @@ export type Shift4TransactionRequestInput = {
   apiOptions?: string[]
   requestedAt?: Date
   merchantTimeZone?: string
-}
-
-function assertNonNegativeAmount(value: number, label: string, operation: Shift4Operation): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Shift4RestApiError(`Shift4 ${operation} requires a numeric ${label}.`, {
-      diagnostics: { operation },
-    })
-  }
-  if (value < 0) {
-    throw new Shift4RestApiError(`Shift4 ${operation} requires ${label} to be zero or greater.`, {
-      diagnostics: { operation },
-    })
-  }
-  // Shift4's amount fields carry at most two decimal places for USD; rounding
-  // here prevents a floating-point artifact from being sent as the amount.
-  return Math.round(value * 100) / 100
 }
 
 export function buildTokenTransactionRequest(
@@ -100,15 +85,18 @@ export function buildTokenTransactionRequest(
     })
   }
 
+  const currency = String(input.currencyCode || "USD").toUpperCase()
   const amount: Shift4Amount = {
-    total: assertNonNegativeAmount(input.total, "amount.total", operation),
-    tax: assertNonNegativeAmount(input.tax, "amount.tax", operation),
+    total: minorUnitsToShift4Amount(input.amountMinor, currency),
+    tax: minorUnitsToShift4Amount(input.taxAmountMinor, currency, { allowZero: true }),
   }
-  if (input.tip !== undefined) {
-    amount.tip = assertNonNegativeAmount(input.tip, "amount.tip", operation)
+  if (input.tipAmountMinor !== undefined) {
+    amount.tip = minorUnitsToShift4Amount(input.tipAmountMinor, currency, { allowZero: true })
   }
-  if (input.surcharge !== undefined) {
-    amount.surcharge = assertNonNegativeAmount(input.surcharge, "amount.surcharge", operation)
+  if (input.surchargeAmountMinor !== undefined) {
+    amount.surcharge = minorUnitsToShift4Amount(input.surchargeAmountMinor, currency, {
+      allowZero: true,
+    })
   }
 
   const request: Shift4TokenTransactionRequest = {
@@ -137,7 +125,7 @@ export function buildTokenTransactionRequest(
     request.customer = input.customer
   }
   if (input.currencyCode) {
-    request.currencyCode = String(input.currencyCode).toUpperCase()
+    request.currencyCode = currency
   }
   if (input.apiOptions && input.apiOptions.length > 0) {
     request.apiOptions = input.apiOptions

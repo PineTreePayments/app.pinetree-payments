@@ -1,39 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getPineTreeAssistantContext, type AssistantRailSummary } from "@/lib/help/pinetreeAssistantContext"
+import { getPineTreeAssistantContext } from "@/lib/help/pinetreeAssistantContext"
 import {
   getRouteErrorStatus,
   requireMerchantIdFromRequest
 } from "@/lib/api/merchantAuth"
+import { derivePosMethodDebugFlags } from "./derivePosMethodDebugFlags"
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
-}
-
-// Mirrors the explicit rail allowlists already used correctly elsewhere
-// (types/payment.ts's getRailsForCategory("crypto"), providers/cardProviderReadiness.ts's
-// per-provider card checks) - crypto/card must never be derived from "is this
-// value literally the string 'shift4'", since Stripe (a card provider) is a
-// separate provider id from Shift4 and would otherwise be misclassified as crypto.
-// Checked against AssistantRailSummary.rail, which carries the raw
-// merchant_providers.provider id (see buildRailSummaries in
-// lib/help/pinetreeAssistantContext.ts) - never .provider, which is a
-// display label that falls back to the raw id for some providers and a
-// friendly name for others, and is not a reliable set-membership key.
-const CRYPTO_RAIL_PROVIDERS = new Set(["solana", "base", "bitcoin_lightning", "lightning", "lightning_speed", "lightning_nwc"])
-const CARD_RAIL_PROVIDERS = new Set(["shift4", "stripe", "fluidpay"])
-
-export function derivePosMethodDebugFlags(railSummaries: AssistantRailSummary[]): {
-  cryptoEnabled: boolean
-  cardEnabled: boolean
-} {
-  return {
-    cryptoEnabled: railSummaries.some(
-      (r) => r.availableForPos && CRYPTO_RAIL_PROVIDERS.has(r.rail.toLowerCase().trim())
-    ),
-    cardEnabled: railSummaries.some(
-      (r) => r.availableForPos && CARD_RAIL_PROVIDERS.has(r.rail.toLowerCase().trim())
-    ),
-  }
 }
 
 /**

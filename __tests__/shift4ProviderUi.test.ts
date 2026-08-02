@@ -26,9 +26,10 @@ describe("Shift4 provider setup UI", () => {
     expect(source).toContain("Shift4 Merchant Application")
     expect(source).toContain("Complete the application to begin onboarding for card and crypto payment acceptance through Shift4.")
     expect(source).toContain("Begin Application")
-    expect(source).toContain("Application link not configured yet.")
-    expect(source).toContain("NEXT_PUBLIC_SHIFT4_APPLICATION_URL")
-    expect(source).toContain("SHIFT4_APPLICATION_URL")
+    expect(source).toContain("Shift4's authenticated hosted-application session contract is not configured yet.")
+    expect(source).toContain('const shift4ApplicationUrl = ""')
+    expect(source).not.toContain("NEXT_PUBLIC_SHIFT4_APPLICATION_URL")
+    expect(source).not.toContain("SHIFT4_APPLICATION_URL")
 
     expect(source).not.toContain("Shift4 account reference")
     expect(source).not.toContain("Setup notes")

@@ -42,7 +42,10 @@ export const shift4Adapter: ProviderAdapter = {
         feeCaptureMethod: payment.feeCaptureMethod
       }
     } catch (error) {
-      console.error("Shift4 adapter payment error:", error)
+      console.error("Shift4 adapter payment error", {
+        errorName: error instanceof Error ? error.name : "unknown",
+        status: typeof error === "object" && error !== null && "status" in error && typeof error.status === "number" ? error.status : null,
+      })
       setProviderHealth("shift4", false)
       throw error
     }
@@ -59,7 +62,10 @@ export const shift4Adapter: ProviderAdapter = {
       })
       return { status: payment.status }
     } catch (error) {
-      console.error("Shift4 adapter status check error:", error)
+      console.error("Shift4 adapter status check error", {
+        errorName: error instanceof Error ? error.name : "unknown",
+        status: typeof error === "object" && error !== null && "status" in error && typeof error.status === "number" ? error.status : null,
+      })
       throw error
     }
   },

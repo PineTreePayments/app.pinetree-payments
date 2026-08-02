@@ -25,7 +25,12 @@
     "release-candidate:dry-run": "node scripts/release-candidate.mjs --dry-run",
     "sdk:release-candidate": "npm run release-candidate --workspace packages/pinetree-node",
     "package:woocommerce": "node scripts/package-woocommerce-plugin.mjs",
-    "validate:woocommerce-package": "node scripts/package-woocommerce-plugin.mjs --dry-run && node scripts/validate-woocommerce-plugin.mjs"
+    "validate:woocommerce-package": "node scripts/package-woocommerce-plugin.mjs --dry-run && node scripts/validate-woocommerce-plugin.mjs",
+    "shift4:certification:verify": "node scripts/shift4-certification/verify-manifest.mjs",
+    "shift4:certification:determinism": "node scripts/shift4-certification/verify-determinism.mjs",
+    "shift4:certification:fixture": "node scripts/shift4-certification/run.mjs --mode fixture",
+    "shift4:fixtures:all": "node scripts/shift4-certification/run.mjs --mode fixture --channel all",
+    "shift4:database:release": "node scripts/shift4-database/release.mjs"
   },
   "dependencies": {
     "@dynamic-labs/bitcoin": "^4.92.4",

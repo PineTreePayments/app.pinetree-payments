@@ -39,7 +39,7 @@ export async function createPayment(
 }
 
 export function buildShift4CreatePaymentRequest(input: Shift4CreatePaymentInput) {
-  const amount = Math.round(Number(input.grossAmount) * 100)
+  const amount = exactMajorUnitsToMinorUnits(input.grossAmount)
   const currency = String(input.currency || "").toUpperCase()
 
   return {
@@ -64,6 +64,19 @@ export function buildShift4CreatePaymentRequest(input: Shift4CreatePaymentInput)
     },
     vendorReference: input.paymentId
   }
+}
+
+function exactMajorUnitsToMinorUnits(value: number): number {
+  const text = String(value)
+  if (!/^\d+(?:\.\d{1,2})?$/.test(text)) {
+    throw new Error("Shift4 checkout amount must be a non-negative decimal with at most two fractional digits")
+  }
+  const [whole, fraction = ""] = text.split(".")
+  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, "0"))
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    throw new Error("Shift4 checkout amount must resolve to a positive safe integer in minor units")
+  }
+  return amount
 }
 
 export function normalizeShift4PaymentStatus(status: unknown): PaymentStatus | null {
@@ -102,7 +115,10 @@ export function normalizeShift4PaymentStatus(status: unknown): PaymentStatus | n
   if (normalized === "refunded") return "REFUNDED"
 
   // Unknown provider statuses must never confirm a payment.
-  console.warn("[shift4] unknown payment status", { providerStatus: normalized || null })
+  console.warn("[shift4] unknown payment status", {
+    providerStatusPresent: Boolean(normalized),
+    providerStatusLength: normalized.length,
+  })
   return null
 }
 

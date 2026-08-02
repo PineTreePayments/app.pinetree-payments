@@ -204,12 +204,11 @@ HMAC-signed state cookie pattern (mirrors Shopify OAuth). The start route is bro
 
 ## Needs Follow-up (GAP)
 
-Routes with no authentication that accept mutations or manage session state. Remaining items not yet fixed.
+Routes with no authentication that accept mutations or manage session state. Remaining items not yet fixed. The obsolete `/api/shift4/apply` route previously listed here was removed during the final Shift4 consolidation; the canonical onboarding route is merchant-authenticated and readiness-gated under `/api/internal/shift4/onboarding/start`.
 
 | Route | Methods | Gap | Risk | Suggested Fix |
 |-------|---------|-----|------|---------------|
 | `/api/wallet-connect-session` | POST | Unauthenticated (see detail below) | Status-restricted; session_id is unguessable UUID | Accept for now; see detail below |
-| `/api/shift4/apply` | POST | No auth | Starts Shift4 merchant onboarding with just an email | Add MERCHANT auth |
 
 ### wallet-connect-session POST — Remaining exposure and why it stays open
 

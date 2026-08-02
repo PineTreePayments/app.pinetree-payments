@@ -1,6 +1,6 @@
 import { createConfig, http } from "wagmi"
 import { base } from "wagmi/chains"
-import { walletConnect } from "wagmi/connectors"
+import { walletConnect } from "wagmi/connectors/walletConnect"
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || ""
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || ""

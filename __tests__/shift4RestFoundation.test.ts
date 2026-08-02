@@ -23,6 +23,7 @@ import {
   invoiceMatchesReference,
   isShift4CommunicationErrorCode,
   isShift4UnknownOutcomeError,
+  minorUnitsToShift4Amount,
   normalizeShift4Response,
   redactShift4Headers,
   redactShift4Payload,
@@ -327,10 +328,10 @@ describe("Shift4 redaction", () => {
     expect(redacted.emv).toBe(SHIFT4_REDACTED)
 
     const card = redacted.card as unknown as {
-      token: { value: string }
+      token: string
       securityCode: { value: string; result: string }
     }
-    expect(card.token.value).toBe(SHIFT4_REDACTED)
+    expect(card.token).toBe(SHIFT4_REDACTED)
     expect(card.securityCode.value).toBe(SHIFT4_REDACTED)
     // Verification RESULTS are certification evidence and must survive.
     expect(card.securityCode.result).toBe("M")
@@ -689,12 +690,29 @@ describe("Shift4 normalized results", () => {
     expect(result.avsResult).toBe("Y")
     expect(result.cscResult).toBe("M")
     expect(result.entryChannel).toBe("ecommerce")
-    expect(result.approvedAmount).toBe(25.5)
+    expect(result.approvedAmountMinor).toBe(2550)
     expect(result.elapsedMs).toBe(1500)
     expect(result.cardTokenValue).toBe("TOKEN00000000001")
 
     // Provider evidence only - no canonical PineTree status is produced.
     expect(Object.values(result)).not.toContain("CONFIRMED")
+  })
+
+  it("rejects malformed approved totals instead of rounding or parsing loosely", () => {
+    for (const malformed of ["1e2", "-1.00", "1.001", "90071992547409.92"]) {
+      const body = approvedSaleBody()
+      body.result[0].amount.total = malformed as unknown as number
+      const result = normalizeShift4Response({
+        operation: "sale",
+        correlationId: `malformed-${malformed}`,
+        httpStatus: 200,
+        body,
+        ...timing,
+      })
+      expect(result.approvedAmountMinor, malformed).toBeNull()
+      expect(result.outcome, malformed).toBe("unknown")
+      expect(result.requiresInvoiceResolution, malformed).toBe(true)
+    }
   })
 
   it("normalizes a decline", () => {
@@ -1141,11 +1159,35 @@ describe("Shift4 invoice correlation", () => {
 
 /* ── Transaction wrappers ────────────────────────────────────────────────── */
 
+describe("Shift4 minor-unit serialization", () => {
+  it.each([
+    [1, 0.01],
+    [15, 0.15],
+    [11161, 111.61],
+    [21900, 219],
+    [99999801, 999998.01],
+  ])("serializes %i minor units as %d", (amountMinor, expected) => {
+    expect(minorUnitsToShift4Amount(amountMinor, "USD")).toBe(expected)
+  })
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid transaction total %s",
+    (amountMinor) => {
+      expect(() => minorUnitsToShift4Amount(amountMinor, "USD")).toThrow()
+    }
+  )
+
+  it("rejects unsupported currencies while allowing an explicit zero component", () => {
+    expect(() => minorUnitsToShift4Amount(100, "EUR")).toThrow(/USD and CAD/)
+    expect(minorUnitsToShift4Amount(0, "CAD", { allowZero: true })).toBe(0)
+  })
+})
+
 describe("Shift4 transaction wrappers", () => {
   const requestBase = {
     invoice: "1234567890",
-    total: 25.5,
-    tax: 0,
+    amountMinor: 2550,
+    taxAmountMinor: 0,
     clerkNumericId: 1,
     card: { tokenValue: "TOKEN00000000001" },
     accessToken: FAKE_ACCESS_TOKEN,

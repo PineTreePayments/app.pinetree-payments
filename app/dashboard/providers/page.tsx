@@ -19,15 +19,13 @@ import {
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import StripeConnectOnboarding from "@/components/dashboard/StripeConnectOnboarding"
 import StripeTerminalSettings from "@/components/dashboard/StripeTerminalSettings"
-import {
-  type Shift4DisplayStatus
-} from "@/lib/shift4DisplayStatus"
+import Shift4RestReadinessCard from "@/components/dashboard/Shift4RestReadinessCard"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 
-const shift4ApplicationUrl =
-  process.env.NEXT_PUBLIC_SHIFT4_APPLICATION_URL ||
-  process.env.SHIFT4_APPLICATION_URL ||
-  ""
+// Shift4 onboarding must start through the authenticated Engine boundary.
+// A static browser URL is deliberately never mounted because it cannot bind a
+// merchant/application session or provide verified status correlation.
+const shift4ApplicationUrl = ""
 const canonicalLightningMode =
   process.env.NEXT_PUBLIC_PINE_TREE_LIGHTNING_MODE === "speed_platform_treasury_sweep" ||
   (
@@ -56,7 +54,7 @@ const cardProviderSetupContent: Record<CardOnboardingProvider, {
     modalTitle: "Shift4 Merchant Application",
     subtitle: "Complete the application to begin onboarding for card and crypto payment acceptance through Shift4.",
     primaryAction: "Begin Application",
-    missingUrlMessage: "Application link not configured yet."
+    missingUrlMessage: "Shift4's authenticated hosted-application session contract is not configured yet."
   },
   stripe: {
     name: "Stripe",
@@ -164,12 +162,6 @@ type ProvidersApiResponse = {
   error?: string
 }
 
-
-function getConnectedAndEnabledProvidersCount(providers: ProviderRecord[]) {
-  return providers.filter(
-    (p) => p.enabled && (p.status === "connected" || p.status === "active")
-  ).length
-}
 
 function formatWalletLabel(
   provider: string,
@@ -658,32 +650,8 @@ export default function ProvidersPage() {
     }
   }
 
-  function optionButtonClass(selected: boolean) {
-    return `border rounded-lg py-2 px-3 text-sm transition ${
-      selected
-        ? "border-blue-600 bg-blue-50 text-blue-600"
-        : "border-blue-600 bg-white text-blue-600 hover:bg-blue-50"
-    }`
-  }
-
-  function actionButtonClass() {
-    return "rounded-lg border border-blue-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
-  }
-
   function primaryButtonClass() {
     return primaryActionButtonClass
-  }
-
-  function compactPrimaryButtonClass() {
-    return "inline-flex h-10 items-center justify-center rounded-lg bg-blue-600 px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-  }
-
-  function compactSecondaryButtonClass() {
-    return "inline-flex h-10 items-center justify-center rounded-lg border border-gray-200 bg-white px-3.5 text-sm font-semibold text-gray-700 shadow-sm transition hover:border-gray-300 hover:bg-gray-50"
-  }
-
-  function quietButtonClass() {
-    return "inline-flex h-10 items-center justify-center rounded-lg px-2.5 text-sm font-semibold text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
   }
 
   function lightningInputClass() {
@@ -754,13 +722,6 @@ export default function ProvidersPage() {
     if (provider === "solana") return Boolean(pineTreeWalletProfile?.solanaAddressPresent)
     if (provider === "base") return Boolean(pineTreeWalletProfile?.baseAddressPresent)
     return Boolean(pineTreeWalletProfile?.bitcoinAddressPresent)
-  }
-
-  function shift4StatusBadgeClass(tone: Shift4DisplayStatus["tone"]) {
-    if (tone === "blue") return "border-blue-200 bg-blue-50 text-blue-700"
-    if (tone === "amber") return "border-amber-200 bg-amber-50 text-amber-800"
-    if (tone === "red") return "border-red-200 bg-red-50 text-red-700"
-    return "border-gray-200 bg-gray-50 text-gray-600"
   }
 
   function isManagedCardProvider(provider: string | null | undefined): provider is CardOnboardingProvider {
@@ -1153,6 +1114,7 @@ export default function ProvidersPage() {
           description="Accept card payments through Fluid Pay once merchant onboarding is approved."
         />
         </div>
+        <Shift4RestReadinessCard />
       </div>
       </DashboardSection>
       )}

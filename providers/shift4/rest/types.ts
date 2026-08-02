@@ -167,6 +167,8 @@ export type Shift4TransactionRequestBlock = {
   notes?: string
   businessDate?: string
   cardOnFile?: Shift4CardOnFile
+  /** Six-character voice approval code; manual-authorization requests only. */
+  authorizationCode?: string
 }
 
 /**
@@ -214,6 +216,21 @@ export type Shift4TokenTransactionRequest = {
   apiOptions?: string[]
 }
 
+/**
+ * Voice-authorization contact details.
+ *
+ * Certification retail test 7 states that `voiceCenter.accountNumber` and
+ * `voiceCenter.phoneNumber` are returned so a clerk can telephone for approval
+ * after a referral. Typed as OPTIONAL and parsed defensively: the block is not
+ * present on an ordinary approval, and PineTree has no documentation fixing
+ * which response shapes carry it. Both are non-secret contact details — the
+ * account number here is a MERCHANT account reference, never a card number.
+ */
+export type Shift4VoiceCenterBlock = {
+  accountNumber?: string
+  phoneNumber?: string
+}
+
 export type Shift4TransactionResponseBlock = {
   authorizationCode?: string
   authSource?: Shift4AuthSource
@@ -253,7 +270,12 @@ export type Shift4TransactionResult = {
   customer?: { firstName?: string; lastName?: string }
   clerk?: Shift4Clerk
   device?: { terminalId?: string }
-  merchant?: { mid?: number; name?: string }
+  merchant?: {
+    mid?: number
+    name?: string
+    cardTypes?: string[]
+    voiceCenter?: Shift4VoiceCenterBlock
+  }
   transaction?: Shift4TransactionResponseBlock
   server?: Shift4Server
   universalToken?: { value?: string }
@@ -279,10 +301,12 @@ export type Shift4VoidResult = Shift4TransactionResult
 export type Shift4Operation =
   | "access_token_exchange"
   | "authorization"
+  | "manual_authorization"
   | "capture"
   | "sale"
   | "refund"
   | "invoice_information"
+  | "merchant_information"
   | "void"
 
 export const SHIFT4_OPERATION_ENDPOINTS: Record<
@@ -291,10 +315,12 @@ export const SHIFT4_OPERATION_ENDPOINTS: Record<
 > = {
   access_token_exchange: { method: "POST", path: "/credentials/accesstoken" },
   authorization: { method: "POST", path: "/transactions/authorization" },
+  manual_authorization: { method: "POST", path: "/transactions/manualauthorization" },
   capture: { method: "POST", path: "/transactions/capture" },
   sale: { method: "POST", path: "/transactions/sale" },
   refund: { method: "POST", path: "/transactions/refund" },
   invoice_information: { method: "GET", path: "/transactions/invoice" },
+  merchant_information: { method: "GET", path: "/merchants/merchant" },
   void: { method: "DELETE", path: "/transactions/invoice" },
 } as const
 
@@ -304,12 +330,12 @@ export const SHIFT4_OPERATION_ENDPOINTS: Record<
  * lookup returns "Invoice Not Found", and then only with the same invoice.
  */
 export const SHIFT4_TRANSACTION_CREATING_OPERATIONS: readonly Shift4Operation[] = [
-  "authorization", "capture", "sale", "refund", "void",
+  "authorization", "manual_authorization", "capture", "sale", "refund", "void",
 ] as const
 
 /** Read-only, safely repeatable operations. */
 export const SHIFT4_IDEMPOTENT_LOOKUP_OPERATIONS: readonly Shift4Operation[] = [
-  "invoice_information",
+  "invoice_information", "merchant_information",
 ] as const
 
 export function isShift4TransactionCreatingOperation(operation: Shift4Operation): boolean {

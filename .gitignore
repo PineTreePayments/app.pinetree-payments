@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/artifacts/shift4-certification/
 
 # next.js
 /.next/

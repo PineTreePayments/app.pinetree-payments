@@ -31,6 +31,8 @@ import type { Shift4NormalizedOperationResult } from "../normalizeResponse"
 import type { Shift4InvoiceReference } from "../invoices/invoiceReference"
 import { buildTokenTransactionRequest, type Shift4TransactionRequestInput } from "./request"
 
+export { manualAuthorization } from "./manualAuthorization"
+
 export type Shift4TransactionCallInput = Shift4TransactionRequestInput & {
   accessToken: string
   context?: Omit<Shift4RequestContext, "invoice">

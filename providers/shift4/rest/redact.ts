@@ -27,6 +27,7 @@ const REDACTED_HEADER_NAMES = new Set([
   "authorization",
   "authtoken",
   "clientguid",
+  "servicerolekey",
   "token",
   "proxy-authorization",
   "cookie",
@@ -50,7 +51,8 @@ const REDACTED_HEADER_NAMES = new Set([
  */
 const REDACTED_FIELD_NAMES = new Set([
   // Credentials
-  "accesstoken", "authtoken", "clientguid", "apipassword", "apiserialnumber",
+  "accesstoken", "authtoken", "clientguid", "servicerolekey", "apipassword", "apiserialnumber",
+  "authorizationcode", "manualauthorizationcode", "voicecenteraccountnumber",
   // Raw cardholder data
   "number", "cardnumber", "pan", "maskedpan", "primaryaccountnumber",
   "expirationdate", "track", "track1", "track2", "track3", "trackdata",
@@ -61,11 +63,15 @@ const REDACTED_FIELD_NAMES = new Set([
   "extendedcarddata", "tlvdata", "encrypteddata", "encryptedcarddata",
   "p2pedata", "onguardsde", "dukpt",
   // Payment / wallet tokens
-  "universaltoken", "cardbrandtoken", "i4go", "i4goaccessblock",
+  "token", "cardtoken", "universaltoken", "cardbrandtoken", "i4go", "i4goaccessblock",
   "i4gotruetoken", "applepay", "googlepay", "paymentdata", "walletdata",
   "onlinepaymentcryptogram", "cryptogram",
   // Signature image payloads
   "signaturedata",
+  // Merchant application and personal/banking data
+  "applicationbody", "taxid", "ssn", "bankaccount", "routingnumber", "attachmentcontent",
+  // Raw transport material
+  "rawpayload", "requestbody", "responsebody",
 ])
 
 /**
@@ -74,7 +80,8 @@ const REDACTED_FIELD_NAMES = new Set([
  */
 const REDACTED_SUBTREE_NAMES = new Set([
   "emv", "p2pe", "i4go", "applepay", "googlepay", "signature",
-  "extendedcarddata", "cardbrandtoken",
+  "extendedcarddata", "cardbrandtoken", "headers", "rawpayload", "requestbody",
+  "responsebody", "applicationbody", "attachmentcontent",
 ])
 
 function normalizeKey(key: string): string {
@@ -133,7 +140,7 @@ export function redactShift4Payload(value: unknown, depth = 0): unknown {
     // `securityCode.result` and `avs.result` are required certification
     // evidence. Decide by the parent key instead of blanket-redacting every
     // `value` leaf, so the results survive and the secrets do not.
-    if (normalized === "token" || normalized === "securitycode") {
+    if (normalized === "securitycode") {
       output[key] = redactSensitiveValueContainer(entry)
       continue
     }
