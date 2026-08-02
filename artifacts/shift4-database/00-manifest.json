@@ -1,0 +1,453 @@
+{
+  "schemaVersion": 1,
+  "package": "pinetree-shift4-database-release",
+  "validation": "static release-package validation; executable smoke SQL generated but not run locally",
+  "runtimeStatus": "not_executed",
+  "contactedDatabase": false,
+  "migrationCount": 6,
+  "migrations": [
+    {
+      "executionOrder": 1,
+      "filename": "20260731163000_create_ledger_journal_foundation.sql",
+      "path": "database/migrations/20260731163000_create_ledger_journal_foundation.sql",
+      "sha256": "3D38B541E31CF089AC504CB023B3A1C04311C1110D67A4C98E564345417616DF",
+      "byteSize": 39427,
+      "lineCount": 952,
+      "expectedTables": [
+        "ledger_accounts",
+        "ledger_transactions",
+        "ledger_journal_entries",
+        "ledger_links"
+      ],
+      "expectedIndexes": [
+        "ledger_accounts_identity_uidx",
+        "ledger_accounts_owner_idx",
+        "ledger_transactions_posting_key_uidx",
+        "ledger_transactions_merchant_date_idx",
+        "ledger_transactions_reversal_idx",
+        "ledger_journal_entries_line_uidx",
+        "ledger_journal_entries_transaction_idx",
+        "ledger_journal_entries_account_idx",
+        "ledger_links_identity_uidx",
+        "ledger_links_payment_idx",
+        "ledger_links_merchant_idx"
+      ],
+      "expectedFunctions": [
+        "ledger_history_is_immutable",
+        "ledger_account_identity_is_immutable",
+        "assert_ledger_transaction_balanced",
+        "resolve_ledger_account",
+        "post_ledger_transaction"
+      ],
+      "expectedFunctionSignatures": [
+        "ledger_history_is_immutable()",
+        "ledger_account_identity_is_immutable()",
+        "assert_ledger_transaction_balanced()",
+        "resolve_ledger_account(text,text,text,text,text,text,integer)",
+        "post_ledger_transaction(text,text,text,text,uuid,text,jsonb,jsonb,text,date,timestamptz,text,text,uuid,text,integer)"
+      ],
+      "expectedTriggers": [
+        "ledger_transactions_immutable",
+        "ledger_accounts_identity_immutable",
+        "ledger_accounts_undeletable",
+        "ledger_journal_entries_immutable",
+        "ledger_links_immutable",
+        "ledger_journal_entries_balanced"
+      ],
+      "expectedConstraints": [
+        "ledger_accounts_owner_type_check",
+        "ledger_accounts_account_type_check",
+        "ledger_accounts_currency_check",
+        "ledger_accounts_precision_check",
+        "ledger_accounts_status_check",
+        "ledger_transactions_posting_key_check",
+        "ledger_transactions_lifecycle_domain_check",
+        "ledger_transactions_currency_check",
+        "ledger_transactions_not_self_reversing_check",
+        "ledger_journal_entries_side_check",
+        "ledger_journal_entries_amount_check",
+        "ledger_journal_entries_line_number_check",
+        "ledger_journal_entries_currency_check",
+        "ledger_links_link_type_check",
+        "ledger_links_record_id_check"
+      ],
+      "expectedRlsTables": [
+        "ledger_accounts",
+        "ledger_transactions",
+        "ledger_journal_entries",
+        "ledger_links"
+      ],
+      "expectedForceRlsTables": [],
+      "requiredRoles": [
+        "service_role",
+        "anon",
+        "authenticated"
+      ],
+      "requiredExternalObjects": [
+        "extension/function gen_random_uuid()",
+        "table public.merchants",
+        "table public.payments",
+        "table public.merchant_providers",
+        "table public.payment_events",
+        "table public.ledger_entries",
+        "table public.merchants",
+        "column public.payments.id uuid",
+        "column public.payments.merchant_id uuid",
+        "column public.payments.status text",
+        "column public.payments.gross_amount numeric",
+        "column public.payments.currency text-compatible",
+        "columns public.payment_events.id/payment_id/event_type/provider_event/raw_payload",
+        "columns public.ledger_entries legacy compatibility shape",
+        "unique index public.ledger_entries(payment_id)"
+      ],
+      "runtimeStatus": "not_executed"
+    },
+    {
+      "executionOrder": 2,
+      "filename": "20260731163100_create_shift4_payment_attempts.sql",
+      "path": "database/migrations/20260731163100_create_shift4_payment_attempts.sql",
+      "sha256": "3D2A838AA7A0F9F56CF3F4032D6B0DC6632BDA57D475029A41CC4D3605BA8F9E",
+      "byteSize": 136335,
+      "lineCount": 2989,
+      "expectedTables": [
+        "shift4_tender_groups",
+        "shift4_payment_attempts"
+      ],
+      "expectedIndexes": [
+        "shift4_tender_groups_payment_connection_uidx",
+        "shift4_tender_groups_merchant_idx",
+        "shift4_payment_attempts_merchant_attempt_uidx",
+        "shift4_payment_attempts_connection_invoice_role_uidx",
+        "shift4_payment_attempts_connection_chain_invoice_uidx",
+        "shift4_payment_attempts_chain_root_uidx",
+        "shift4_payment_attempts_chain_idx",
+        "shift4_payment_attempts_tender_idx",
+        "shift4_payment_attempts_tender_group_idx",
+        "shift4_payment_attempts_connection_operation_idem_uidx",
+        "shift4_payment_attempts_payment_idx",
+        "shift4_payment_attempts_merchant_created_idx",
+        "shift4_payment_attempts_connection_created_idx",
+        "shift4_payment_attempts_authorization_idx",
+        "shift4_payment_attempts_related_idx",
+        "shift4_payment_attempts_recovery_state_idx",
+        "shift4_payment_attempts_due_work_idx",
+        "shift4_payment_attempts_active_lease_idx"
+      ],
+      "expectedFunctions": [
+        "shift4_tender_group_identity_is_immutable",
+        "shift4_tender_group_is_undeletable",
+        "shift4_canonical_status_path",
+        "shift4_status_event_type",
+        "create_shift4_payment_attempt",
+        "claim_due_shift4_payment_attempts",
+        "apply_shift4_attempt_evidence",
+        "release_shift4_attempt_lease"
+      ],
+      "expectedFunctionSignatures": [
+        "shift4_canonical_status_path(text,text)",
+        "shift4_status_event_type(text)",
+        "shift4_tender_group_identity_is_immutable()",
+        "shift4_tender_group_is_undeletable()",
+        "create_shift4_payment_attempt(text,uuid,uuid,uuid,text,text,varchar,bigint,varchar,text,text,text,text,text,bigint,text,integer,text,text,text)",
+        "claim_due_shift4_payment_attempts(text,integer,integer,uuid,uuid,uuid,text,timestamptz)",
+        "apply_shift4_attempt_evidence(uuid,text,integer,text,text,text,text,text,integer,integer,text,text,text,text,text,text,text,text,text,text,text,bigint,bigint,timestamptz,timestamptz,text,text,timestamptz,timestamptz,boolean,boolean,boolean,boolean,text,text,text)",
+        "release_shift4_attempt_lease(uuid,text,text,timestamptz)"
+      ],
+      "expectedTriggers": [
+        "shift4_tender_groups_identity_immutable",
+        "shift4_tender_groups_undeletable"
+      ],
+      "expectedConstraints": [
+        "shift4_tender_groups_payment_fk",
+        "shift4_tender_groups_connection_fk",
+        "shift4_tender_groups_currency_check",
+        "shift4_tender_groups_requested_amount_check",
+        "shift4_tender_groups_next_sequence_check",
+        "shift4_tender_groups_state_check",
+        "shift4_payment_attempts_payment_fk",
+        "shift4_payment_attempts_connection_fk",
+        "shift4_payment_attempts_tender_group_fk",
+        "shift4_payment_attempts_operation_check",
+        "shift4_payment_attempts_channel_check",
+        "shift4_payment_attempts_attempt_role_check",
+        "shift4_payment_attempts_role_matches_operation_check",
+        "shift4_payment_attempts_chain_root_check",
+        "shift4_payment_attempts_tender_sequence_check",
+        "shift4_payment_attempts_tender_group_required_check",
+        "shift4_payment_attempts_remaining_amount_check",
+        "shift4_payment_attempts_partial_remainder_check",
+        "shift4_payment_attempts_manual_code_check",
+        "shift4_payment_attempts_state_check",
+        "shift4_payment_attempts_recovery_state_check",
+        "shift4_payment_attempts_timeout_classification_check",
+        "shift4_payment_attempts_currency_check",
+        "shift4_payment_attempts_invoice_check",
+        "shift4_payment_attempts_amount_minor_check",
+        "shift4_payment_attempts_approved_amount_minor_check",
+        "shift4_payment_attempts_authorized_amount_minor_check",
+        "shift4_payment_attempts_lookup_attempt_count_check",
+        "shift4_payment_attempts_resend_count_check",
+        "shift4_payment_attempts_attempt_number_check",
+        "shift4_payment_attempts_version_check",
+        "shift4_payment_attempts_capture_requires_authorization_check",
+        "shift4_payment_attempts_void_requires_related_check",
+        "shift4_payment_attempts_refund_requires_refund_id_check",
+        "shift4_payment_attempts_capture_lineage_alias_check",
+        "shift4_payment_attempts_capture_equals_authorization_check",
+        "shift4_payment_attempts_lease_pairing_check"
+      ],
+      "expectedRlsTables": [
+        "shift4_tender_groups",
+        "shift4_payment_attempts"
+      ],
+      "expectedForceRlsTables": [],
+      "requiredRoles": [
+        "service_role",
+        "anon",
+        "authenticated"
+      ],
+      "requiredExternalObjects": [
+        "extension/function gen_random_uuid()",
+        "table public.merchants",
+        "table public.payments",
+        "table public.merchant_providers",
+        "table public.payment_events",
+        "table public.ledger_entries",
+        "table public.merchants",
+        "column public.payments.id uuid",
+        "column public.payments.merchant_id uuid",
+        "column public.payments.status text",
+        "column public.payments.gross_amount numeric",
+        "column public.payments.currency text-compatible",
+        "columns public.payment_events.id/payment_id/event_type/provider_event/raw_payload",
+        "columns public.ledger_entries legacy compatibility shape",
+        "unique index public.ledger_entries(payment_id)"
+      ],
+      "runtimeStatus": "not_executed"
+    },
+    {
+      "executionOrder": 3,
+      "filename": "20260801160000_create_shift4_tokenization_sessions.sql",
+      "path": "database/migrations/20260801160000_create_shift4_tokenization_sessions.sql",
+      "sha256": "5E0A6014A0801F503EEA73A7F84740907470D80B43A0B8BF14C6AB71677867FC",
+      "byteSize": 8773,
+      "lineCount": 196,
+      "expectedTables": [
+        "shift4_tokenization_sessions"
+      ],
+      "expectedIndexes": [
+        "shift4_tokenization_sessions_merchant_payment_idx",
+        "shift4_tokenization_sessions_expiry_idx"
+      ],
+      "expectedFunctions": [
+        "enforce_shift4_tokenization_session_ownership",
+        "consume_shift4_tokenization_session"
+      ],
+      "expectedFunctionSignatures": [
+        "consume_shift4_tokenization_session(uuid,uuid,text,text)",
+        "enforce_shift4_tokenization_session_ownership()"
+      ],
+      "expectedTriggers": [
+        "shift4_tokenization_session_ownership"
+      ],
+      "expectedConstraints": [],
+      "expectedRlsTables": [
+        "shift4_tokenization_sessions"
+      ],
+      "expectedForceRlsTables": [
+        "shift4_tokenization_sessions"
+      ],
+      "requiredRoles": [
+        "service_role",
+        "anon",
+        "authenticated"
+      ],
+      "requiredExternalObjects": [
+        "extension/function gen_random_uuid()",
+        "table public.merchants",
+        "table public.payments",
+        "table public.merchant_providers",
+        "table public.payment_events",
+        "table public.ledger_entries",
+        "table public.merchants",
+        "column public.payments.id uuid",
+        "column public.payments.merchant_id uuid",
+        "column public.payments.status text",
+        "column public.payments.gross_amount numeric",
+        "column public.payments.currency text-compatible",
+        "columns public.payment_events.id/payment_id/event_type/provider_event/raw_payload",
+        "columns public.ledger_entries legacy compatibility shape",
+        "unique index public.ledger_entries(payment_id)"
+      ],
+      "runtimeStatus": "not_executed"
+    },
+    {
+      "executionOrder": 4,
+      "filename": "20260801161000_create_shift4_onboarding_sessions.sql",
+      "path": "database/migrations/20260801161000_create_shift4_onboarding_sessions.sql",
+      "sha256": "E208AD4D0677A6A6601586D399105E9309EBD2D021E6935DC2F66B79EB84E940",
+      "byteSize": 16846,
+      "lineCount": 389,
+      "expectedTables": [
+        "shift4_onboarding_sessions",
+        "shift4_onboarding_events"
+      ],
+      "expectedIndexes": [
+        "shift4_onboarding_sessions_merchant_created_idx",
+        "shift4_onboarding_sessions_status_idx",
+        "shift4_onboarding_events_session_received_idx",
+        "shift4_onboarding_events_merchant_received_idx"
+      ],
+      "expectedFunctions": [
+        "shift4_onboarding_guard_ownership",
+        "shift4_onboarding_touch_updated_at",
+        "shift4_onboarding_events_immutable",
+        "create_shift4_onboarding_session",
+        "apply_shift4_onboarding_update"
+      ],
+      "expectedFunctionSignatures": [
+        "shift4_onboarding_guard_ownership()",
+        "shift4_onboarding_touch_updated_at()",
+        "shift4_onboarding_events_immutable()",
+        "create_shift4_onboarding_session(uuid,uuid,text,text,text,text,text)",
+        "apply_shift4_onboarding_update(uuid,uuid,text,text,text,text,timestamptz,text,boolean,text)"
+      ],
+      "expectedTriggers": [
+        "shift4_onboarding_sessions_ownership_trigger",
+        "shift4_onboarding_sessions_updated_at_trigger",
+        "shift4_onboarding_events_immutable_trigger"
+      ],
+      "expectedConstraints": [
+        "shift4_onboarding_sessions_status_check",
+        "shift4_onboarding_sessions_application_unique",
+        "shift4_onboarding_sessions_launch_unique",
+        "shift4_onboarding_sessions_reason_safe",
+        "shift4_onboarding_sessions_hosted_url_safe",
+        "shift4_onboarding_sessions_correlation_present",
+        "shift4_onboarding_events_identity_unique",
+        "shift4_onboarding_events_status_check",
+        "shift4_onboarding_events_source_check",
+        "shift4_onboarding_events_reason_safe"
+      ],
+      "expectedRlsTables": [
+        "shift4_onboarding_sessions",
+        "shift4_onboarding_events"
+      ],
+      "expectedForceRlsTables": [
+        "shift4_onboarding_sessions",
+        "shift4_onboarding_events"
+      ],
+      "requiredRoles": [
+        "service_role",
+        "anon",
+        "authenticated"
+      ],
+      "requiredExternalObjects": [
+        "extension/function gen_random_uuid()",
+        "table public.merchants",
+        "table public.payments",
+        "table public.merchant_providers",
+        "table public.payment_events",
+        "table public.ledger_entries",
+        "table public.merchants",
+        "column public.payments.id uuid",
+        "column public.payments.merchant_id uuid",
+        "column public.payments.status text",
+        "column public.payments.gross_amount numeric",
+        "column public.payments.currency text-compatible",
+        "columns public.payment_events.id/payment_id/event_type/provider_event/raw_payload",
+        "columns public.ledger_entries legacy compatibility shape",
+        "unique index public.ledger_entries(payment_id)"
+      ],
+      "runtimeStatus": "not_executed"
+    },
+    {
+      "executionOrder": 5,
+      "filename": "20260802020000_harden_shift4_function_execute_privileges.sql",
+      "path": "database/migrations/20260802020000_harden_shift4_function_execute_privileges.sql",
+      "sha256": "696F3CCFD8C41240F075FB41E9B80699A84C22511F5A6ECAAF640ED6540F6FDD",
+      "byteSize": 2578,
+      "lineCount": 50,
+      "expectedTables": [],
+      "expectedIndexes": [],
+      "expectedFunctions": [],
+      "expectedFunctionSignatures": [
+        "ledger_account_identity_is_immutable()",
+        "shift4_tender_group_identity_is_immutable()",
+        "shift4_tender_group_is_undeletable()",
+        "create_shift4_payment_attempt(text,uuid,uuid,uuid,text,text,varchar,bigint,varchar,text,text,text,text,text,bigint,text,integer,text,text,text)",
+        "claim_due_shift4_payment_attempts(text,integer,integer,uuid,uuid,uuid,text,timestamptz)",
+        "apply_shift4_attempt_evidence(uuid,text,integer,text,text,text,text,text,integer,integer,text,text,text,text,text,text,text,text,text,text,text,bigint,bigint,timestamptz,timestamptz,text,text,timestamptz,timestamptz,boolean,boolean,boolean,boolean,text,text,text)",
+        "release_shift4_attempt_lease(uuid,text,text,timestamptz)"
+      ],
+      "expectedTriggers": [],
+      "expectedConstraints": [],
+      "expectedRlsTables": [],
+      "expectedForceRlsTables": [],
+      "requiredRoles": [
+        "service_role",
+        "anon",
+        "authenticated"
+      ],
+      "requiredExternalObjects": [
+        "extension/function gen_random_uuid()",
+        "table public.merchants",
+        "table public.payments",
+        "table public.merchant_providers",
+        "table public.payment_events",
+        "table public.ledger_entries",
+        "table public.merchants",
+        "column public.payments.id uuid",
+        "column public.payments.merchant_id uuid",
+        "column public.payments.status text",
+        "column public.payments.gross_amount numeric",
+        "column public.payments.currency text-compatible",
+        "columns public.payment_events.id/payment_id/event_type/provider_event/raw_payload",
+        "columns public.ledger_entries legacy compatibility shape",
+        "unique index public.ledger_entries(payment_id)"
+      ],
+      "runtimeStatus": "not_executed"
+    },
+    {
+      "executionOrder": 6,
+      "filename": "20260802030000_fix_ledger_posting_link_alias.sql",
+      "path": "database/migrations/20260802030000_fix_ledger_posting_link_alias.sql",
+      "sha256": "50D24589CD9CA4DF7E41E32DEA794F702764AC45671C703074F443816DBF00B8",
+      "byteSize": 12940,
+      "lineCount": 346,
+      "expectedTables": [],
+      "expectedIndexes": [],
+      "expectedFunctions": [],
+      "expectedFunctionSignatures": [
+        "post_ledger_transaction(text,text,text,text,uuid,text,jsonb,jsonb,text,date,timestamptz,text,text,uuid,text,integer)"
+      ],
+      "expectedTriggers": [],
+      "expectedConstraints": [],
+      "expectedRlsTables": [],
+      "expectedForceRlsTables": [],
+      "requiredRoles": [
+        "service_role",
+        "anon",
+        "authenticated"
+      ],
+      "requiredExternalObjects": [
+        "extension/function gen_random_uuid()",
+        "table public.merchants",
+        "table public.payments",
+        "table public.merchant_providers",
+        "table public.payment_events",
+        "table public.ledger_entries",
+        "table public.merchants",
+        "column public.payments.id uuid",
+        "column public.payments.merchant_id uuid",
+        "column public.payments.status text",
+        "column public.payments.gross_amount numeric",
+        "column public.payments.currency text-compatible",
+        "columns public.payment_events.id/payment_id/event_type/provider_event/raw_payload",
+        "columns public.ledger_entries legacy compatibility shape",
+        "unique index public.ledger_entries(payment_id)"
+      ],
+      "runtimeStatus": "not_executed"
+    }
+  ]
+}

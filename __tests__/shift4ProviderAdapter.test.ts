@@ -3,6 +3,7 @@ import path from "path"
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
 
 import {
+  buildShift4CreatePaymentRequest,
   createPayment,
   getPaymentStatus,
   translateEvent,
@@ -282,6 +283,21 @@ describe("Shift4 provider adapter", () => {
       },
       vendorReference: "pay_123"
     })
+  })
+
+  it("rejects fractional-minor and unsafe checkout amounts instead of rounding", () => {
+    const input = {
+      paymentId: "pay_123",
+      merchantAmount: 10,
+      pinetreeFee: 0.15,
+      grossAmount: 10.123,
+      currency: "usd",
+      merchantWallet: "shift4_merchant-1",
+      pinetreeWallet: "",
+      merchantId: "merchant-1",
+    }
+    expect(() => buildShift4CreatePaymentRequest(input)).toThrow(/at most two fractional digits/)
+    expect(() => buildShift4CreatePaymentRequest({ ...input, grossAmount: Number.MAX_SAFE_INTEGER })).toThrow(/safe integer/)
   })
 
   it("registers Shift4 in the provider registry", async () => {

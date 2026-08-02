@@ -15,7 +15,7 @@ vi.mock("@/lib/api/merchantAuth", () => ({
   getRouteErrorStatus: vi.fn(),
 }))
 
-const { derivePosMethodDebugFlags } = await import("@/app/api/help/assistant/context-debug/route")
+const { derivePosMethodDebugFlags } = await import("@/app/api/help/assistant/context-debug/derivePosMethodDebugFlags")
 
 function railSummary(overrides: Partial<AssistantRailSummary> & { rail: string }): AssistantRailSummary {
   return {

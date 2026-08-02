@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.error("[webhooks/shift4] processing error", {
-      error: message,
+      errorName: error instanceof Error ? error.name : "unknown",
       bodyLength: rawBody.length
     })
     return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 })

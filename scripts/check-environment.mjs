@@ -153,6 +153,23 @@ const groups = [
       ["SHIFT4_INTERFACE_VERSION", false, "text"],
       ["SHIFT4_COMPANY_NAME", false, "text"],
       ["SHIFT4_CREDENTIAL_ENCRYPTION_KEY", false, "hex64"],
+      ["SHIFT4_REST_ENABLED", false, "boolean"],
+      ["SHIFT4_ECOMMERCE_ENABLED", false, "boolean"],
+      ["SHIFT4_RETAIL_ENABLED", false, "boolean"],
+      ["SHIFT4_CERTIFICATION_MODE", false, "boolean"],
+      ["SHIFT4_MANUAL_AUTH_ENABLED", false, "boolean"],
+      ["SHIFT4_PARTIAL_APPROVAL_ENABLED", false, "boolean"],
+      ["SHIFT4_SPLIT_TENDER_ENABLED", false, "boolean"],
+      ["SHIFT4_APPLE_PAY_ENABLED", false, "boolean"],
+      ["SHIFT4_GOOGLE_PAY_ENABLED", false, "boolean"],
+      ["SHIFT4_PRODUCTION_ENABLED", false, "boolean"],
+      ["SHIFT4_ONBOARDING_REQUIRED", false, "boolean"],
+      ["SHIFT4_COMMERCE_ENGINE_CONFIGURED", false, "boolean"],
+      ["SHIFT4_I4GO_SCRIPT_URL", false, "url"],
+      ["SHIFT4_I4GO_IFRAME_ORIGIN", false, "url"],
+      ["SHIFT4_I4GO_APPLICATION_ID", false, "text"],
+      ["SHIFT4_ONBOARDING_HOSTED_URL", false, "url"],
+      ["SHIFT4_ONBOARDING_SENDER_DOMAINS", false, "text"],
     ],
   },
   {
@@ -330,6 +347,30 @@ if (present("SHIFT4_REST_ENVIRONMENT")) {
       `SHIFT4_REST_ENVIRONMENT=production targets the live Shift4 gateway while NODE_ENV is ${nodeEnv}.`
     )
   }
+}
+
+const shift4Flag = (name) => ["true", "1"].includes(String(env[name] ?? "").trim().toLowerCase())
+const enabledShift4Features = [
+  "SHIFT4_REST_ENABLED", "SHIFT4_ECOMMERCE_ENABLED", "SHIFT4_RETAIL_ENABLED",
+  "SHIFT4_MANUAL_AUTH_ENABLED", "SHIFT4_PARTIAL_APPROVAL_ENABLED",
+  "SHIFT4_SPLIT_TENDER_ENABLED", "SHIFT4_APPLE_PAY_ENABLED", "SHIFT4_GOOGLE_PAY_ENABLED",
+  "SHIFT4_PRODUCTION_ENABLED",
+  "SHIFT4_ONBOARDING_REQUIRED", "SHIFT4_COMMERCE_ENGINE_CONFIGURED",
+].filter(shift4Flag)
+if (enabledShift4Features.length > 0 && shift4Present.length < shift4Vars.length) {
+  requiredFailures += 1
+  warnings.push(`Shift4 features are enabled without the complete server credential configuration: ${enabledShift4Features.join(", ")}.`)
+}
+if (shift4Flag("SHIFT4_ECOMMERCE_ENABLED")) {
+  const missingI4Go = ["SHIFT4_I4GO_SCRIPT_URL", "SHIFT4_I4GO_IFRAME_ORIGIN", "SHIFT4_I4GO_APPLICATION_ID"].filter((name) => !present(name))
+  if (missingI4Go.length > 0) {
+    requiredFailures += 1
+    warnings.push(`Shift4 e-commerce is enabled without official i4Go configuration. Missing: ${missingI4Go.join(", ")}.`)
+  }
+}
+if (shift4Flag("SHIFT4_PRODUCTION_ENABLED") && String(env.SHIFT4_REST_ENVIRONMENT || "").trim().toLowerCase() !== "production") {
+  requiredFailures += 1
+  warnings.push("SHIFT4_PRODUCTION_ENABLED=true requires SHIFT4_REST_ENVIRONMENT=production.")
 }
 
 const stripeSecretKey = String(env.STRIPE_SECRET_KEY ?? "").trim()

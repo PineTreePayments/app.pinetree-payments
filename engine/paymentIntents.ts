@@ -27,6 +27,7 @@ import {
   isSpeedAccountReadyForPayments,
 } from "@/lib/pinetreeRailReadiness"
 import { getPaymentRailDefinition } from "@/types/payment"
+import { resolveShift4Readiness } from "./shift4/readiness"
 
 // Deliberately NOT derived from the full canonical rail set
 // (types/payment.ts's PAYMENT_RAIL_DEFINITIONS has 6 networks, including
@@ -268,13 +269,20 @@ export async function getMerchantAvailableNetworks(merchantId: string): Promise<
     .map((n) => normalizeWalletNetwork(n))
     .filter((n): n is WalletNetwork => Boolean(n && SUPPORTED_NETWORKS.includes(n)))
 
-  const enabledHostedNetworks = hostedCheckoutNetworks.filter((network) => {
+  let enabledHostedNetworks = hostedCheckoutNetworks.filter((network) => {
     if (network === "bitcoin_lightning") return railReadiness.bitcoin_lightning.paymentReady
     if (!isProviderAvailableForCheckout(network, enabledProviders)) return false
 
     return true
 
   })
+
+  if (enabledHostedNetworks.includes("shift4")) {
+    const shift4Readiness = await resolveShift4Readiness(merchantId)
+    if (!shift4Readiness.capabilities.hosted_checkout.ready) {
+      enabledHostedNetworks = enabledHostedNetworks.filter((network) => network !== "shift4")
+    }
+  }
 
   return uniqueNetworks([...walletNetworks, ...pineTreeWalletNetworks, ...enabledHostedNetworks])
 }

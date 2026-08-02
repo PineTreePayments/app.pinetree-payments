@@ -37,6 +37,7 @@ export {
 } from "./config"
 
 export { formatShift4DateTime } from "./dateTime"
+export { minorUnitsToShift4Amount } from "./money"
 
 export {
   SHIFT4_COMMUNICATION_ERROR_CODES,
@@ -106,6 +107,10 @@ export {
 } from "./invoices/invoiceReference"
 
 export { getInvoice, type Shift4InvoiceLookup } from "./invoices/getInvoice"
+export {
+  getMerchantInformation,
+  type Shift4MerchantInformation,
+} from "./merchants/getMerchantInformation"
 export { voidInvoice, type Shift4VoidReason } from "./invoices/voidInvoice"
 
 export {
@@ -127,6 +132,7 @@ export {
   capture,
   sale,
   refund,
+  manualAuthorization,
   type Shift4TransactionCallInput,
 } from "./transactions"
 

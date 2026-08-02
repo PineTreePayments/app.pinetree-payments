@@ -34,6 +34,8 @@ import type {
  *
  *   approved          responseCode A or C
  *   partial_approval  responseCode P - only amount.total was approved
+ *   inconsistent_approval  A/C amount differs from the request, or P is not a
+ *                     positive amount strictly below the request
  *   declined          responseCode D
  *   referral          responseCode R - voice authorization required
  *   verification_failed  responseCode f - AVS/CSC failure
@@ -48,6 +50,7 @@ import type {
 export type Shift4Outcome =
   | "approved"
   | "partial_approval"
+  | "inconsistent_approval"
   | "declined"
   | "referral"
   | "verification_failed"
@@ -100,6 +103,18 @@ export type Shift4NormalizedOperationResult = {
   cardOnFileTransactionId: string | null
 
   /**
+   * Voice-authorization contact details, present only alongside a referral.
+   *
+   * Both are non-secret MERCHANT contact details, not cardholder data — the
+   * account number is a merchant account reference and must never be treated as
+   * a PAN. They are deliberately EXCLUDED from `shift4ResultForLog` so they
+   * never reach a general provider log, and travel only in controlled referral
+   * evidence.
+   */
+  voiceCenterAccountNumber: string | null
+  voiceCenterPhoneNumber: string | null
+
+  /**
    * Token reference returned by Shift4 (Global Token Vault token).
    * Required for capture and refund. Treated as sensitive: excluded from the
    * log-safe projection and redacted by redact.ts.
@@ -116,8 +131,8 @@ export type Shift4NormalizedOperationResult = {
   cardType: string | null
   cardPresent: boolean | null
 
-  /** Amount Shift4 confirmed. Authoritative for a partial approval. */
-  approvedAmount: number | null
+  /** Amount Shift4 confirmed, strictly parsed into integer minor units. */
+  approvedAmountMinor: number | null
 
   /** Timestamps. */
   providerDateTime: string | null
@@ -147,6 +162,8 @@ export type NormalizeShift4ResponseInput = {
   merchantProviderConnectionId?: string | null
   pineTreePaymentId?: string | null
   pineTreePaymentAttemptId?: string | null
+  /** Requested integer amount, when the operation has an amount contract. */
+  requestedAmountMinor?: number
   httpStatus: number | null
   requestStartedAt: Date
   requestCompletedAt: Date
@@ -232,6 +249,23 @@ function readNumber(value: unknown): number | null {
   return null
 }
 
+function readShift4AmountMinor(value: unknown): {
+  amountMinor: number | null
+  malformed: boolean
+} {
+  if (value === null || value === undefined) return { amountMinor: null, malformed: false }
+  const text = String(value).trim()
+  const match = /^(0|[1-9]\d*)(?:\.(\d{1,2}))?$/.exec(text)
+  if (!match) return { amountMinor: null, malformed: true }
+
+  const minor = BigInt(match[1]) * BigInt(100)
+    + BigInt((match[2] ?? "").padEnd(2, "0") || "0")
+  if (minor > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return { amountMinor: null, malformed: true }
+  }
+  return { amountMinor: Number(minor), malformed: false }
+}
+
 function readText(value: unknown): string | null {
   const text = typeof value === "string" ? value.trim() : ""
   return text === "" ? null : text
@@ -256,7 +290,10 @@ export function isShift4Envelope(body: unknown): boolean {
  * those, the absence of a code is an unknown outcome - never an approval - so
  * that an HTTP 200 can never by itself be read as money having moved.
  */
-const OPERATIONS_WITHOUT_RESPONSE_CODE: readonly Shift4Operation[] = ["access_token_exchange"]
+const OPERATIONS_WITHOUT_RESPONSE_CODE: readonly Shift4Operation[] = [
+  "access_token_exchange",
+  "merchant_information",
+]
 
 function isSuccessfulHttpStatus(status: number | null): boolean {
   return status !== null && status >= 200 && status < 300
@@ -269,6 +306,7 @@ export function normalizeShift4Response(
   const error: Shift4ErrorObject | null = (result?.error as Shift4ErrorObject | undefined) ?? null
   const transaction = result?.transaction ?? null
   const card = result?.card ?? null
+  const parsedApprovedAmount = readShift4AmountMinor(result?.amount?.total)
 
   const responseCodeRaw = transaction?.responseCode
   const responseCode =
@@ -310,6 +348,30 @@ export function normalizeShift4Response(
     }
   }
 
+  if (
+    parsedApprovedAmount.malformed &&
+    (outcome === "approved" || outcome === "partial_approval")
+  ) {
+    outcome = "unknown"
+  }
+
+  if (
+    Number.isSafeInteger(input.requestedAmountMinor) &&
+    (outcome === "approved" || outcome === "partial_approval")
+  ) {
+    const approved = parsedApprovedAmount.amountMinor
+    const requested = input.requestedAmountMinor as number
+    if (approved === null) {
+      // A response code alone is not amount evidence. Resolve the invoice.
+      outcome = "unknown"
+    } else if (
+      (outcome === "approved" && approved !== requested) ||
+      (outcome === "partial_approval" && (approved <= 0 || approved >= requested))
+    ) {
+      outcome = "inconsistent_approval"
+    }
+  }
+
   const entryMode = (card?.entryMode as Shift4CardEntryMode | undefined) ?? null
   const cardPresent =
     card?.present === "Y" ? true : card?.present === "N" ? false : null
@@ -345,6 +407,10 @@ export function normalizeShift4Response(
     retrievalReference: readText(transaction?.retrievalReference),
     saleFlag: (transaction?.saleFlag as Shift4SaleFlag | undefined) ?? null,
     cardOnFileTransactionId: readText(transaction?.cardOnFile?.transactionId),
+    // Bounded so a malformed or oversized provider value cannot become an
+    // unbounded string in evidence. Absent block normalizes to null.
+    voiceCenterAccountNumber: readText(result?.merchant?.voiceCenter?.accountNumber),
+    voiceCenterPhoneNumber: readText(result?.merchant?.voiceCenter?.phoneNumber),
 
     cardTokenValue: readText(card?.token?.value),
 
@@ -356,7 +422,7 @@ export function normalizeShift4Response(
     cardType: readText(card?.type),
     cardPresent,
 
-    approvedAmount: readNumber(result?.amount?.total),
+    approvedAmountMinor: parsedApprovedAmount.amountMinor,
 
     providerDateTime: readText(result?.dateTime),
     requestStartedAt: input.requestStartedAt.toISOString(),
@@ -401,7 +467,7 @@ export function shift4ResultForLog(
     cscResult: result.cscResult,
     entryChannel: result.entryChannel,
     cardType: result.cardType,
-    approvedAmount: result.approvedAmount,
+    approvedAmountMinor: result.approvedAmountMinor,
     authorizationCode: result.authorizationCode ? "[present]" : null,
     httpStatus: result.httpStatus,
     timedOut: result.timedOut,
