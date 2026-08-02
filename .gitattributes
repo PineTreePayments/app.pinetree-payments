@@ -1,0 +1,4 @@
+# Database-release hashes must be stable across Windows and POSIX checkouts.
+/database/migrations/*.sql text eol=lf
+/scripts/shift4-database/smoke-tests.sql text eol=lf
+/artifacts/shift4-database/* text eol=lf

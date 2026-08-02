@@ -1,6 +1,6 @@
 # Shift4 staging database execution
 
-Status: corrective operator handoff. Migrations 1-5 are reported as deployed in the existing Supabase database. This locally regenerated package and its sixth forward-only journal-function correction have not been executed by this work; no database was contacted while preparing it.
+Status: live runtime verification completed before repository consolidation. Migrations 1-6 applied successfully, the corrected postflight passed, smoke scenarios S01-S19 passed, and the final synthetic-residue counts were all zero. These results are recorded from the completed operator execution; repository consolidation did not rerun SQL or contact the database.
 
 The canonical internal merchant-provider key for this package is exactly `shift4_rest`. The bare `shift4` key remains the separate legacy/customer-facing rail and is not accepted by the attempts, tokenization, or onboarding database contracts. Onboarding updates use `apply_shift4_onboarding_update(uuid, uuid, text, text, text, text, timestamptz, text, boolean, text)`, with merchant-provider connection ID as the second argument.
 
