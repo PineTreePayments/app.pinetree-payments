@@ -52,6 +52,43 @@ production host and a production token can never reach the test host.
 
 All flags default false. A production connection additionally requires `SHIFT4_PRODUCTION_ENABLED=true`. Browser controls cannot override readiness.
 
+Readiness distinguishes five states and never conflates them. `not_configured`
+means no credential is stored for the merchant at all; once any credential
+exists the state is `configured`, even when the specific channel asked about is
+the one still missing. Authentication is decided by whether a usable encrypted
+credential is stored — clearing a credential strips its ciphertext, so a
+disconnected or revoked row cannot read as authenticated. Channel-specific
+capabilities are projected against that channel's own credential, so a Retail
+token never makes E-commerce look ready, and the blocking reason names the one
+gate that is failing. `authenticatedChannels` and `credentialPresent` expose
+this to surfaces directly rather than making them infer it from the aggregate.
+
+### Readiness is a client-fetched snapshot
+
+`Shift4RestReadinessCard` fetches `GET /api/internal/shift4/readiness` in the
+browser and holds the result in component state. A successful Access Token
+Exchange performed by the sibling `Shift4RetailConnectCard` changes server state
+that this snapshot cannot observe on its own.
+
+The first Retail sandbox exchange demonstrated this concretely. Deployed request
+timestamps show readiness fetched at 23:23:01, the exchange succeeding at
+23:24:04, and the connect surface refreshing at 23:24:07 — with **no** readiness
+request after the POST. The readiness card was therefore still rendering its
+pre-exchange snapshot, taken when the merchant genuinely had no credential, which
+is why it read `not configured` while the connection card correctly read
+connected. The projection was correct; the component had simply not refetched.
+
+The fix is an explicit one-shot refresh signal, not polling and not a retry:
+`app/dashboard/providers/page.tsx` owns a `shift4ReadinessVersion` counter,
+passes `onConnectionChanged` to the connect card, and passes the version to the
+readiness card, whose effect is keyed on it. The callback fires exactly once and
+only for a success — `shouldRefreshAfterOutcome` returns false for a failure,
+a replayed token, and a timed-out or otherwise unclear outcome, because
+refreshing on an unproven outcome would imply an exchange that may not have
+happened. The callback takes no arguments, so no credential material crosses the
+boundary. `router.refresh()` is deliberately not the mechanism: both cards own
+client-fetched state that a server re-render would not update.
+
 ## E-commerce and i4Go
 
 The i4Go adapter accepts administrator-provided HTTPS configuration only. It does not guess scripts, origins, field names, messages, or wire payloads. Its TypeScript contracts cannot represent PAN, CVV/CSC, track data, or PIN data.

@@ -79,6 +79,19 @@ export function buildRetailConnectBody(input: {
   }
 }
 
+/**
+ * Whether an outcome changed the stored credential and should therefore
+ * refresh sibling surfaces.
+ *
+ * ONLY a success qualifies. A failure changed nothing, and a timeout or
+ * transport error leaves the outcome genuinely unknown - treating either as a
+ * state change would assert something PineTree cannot prove, and would refresh
+ * a readiness card into implying the exchange worked.
+ */
+export function shouldRefreshAfterOutcome(outcome: RetailConnectOutcome): boolean {
+  return outcome.status === "success"
+}
+
 /** Whether the operator has satisfied every precondition for the button. */
 export function canSubmitRetailConnection(state: {
   enabled: boolean

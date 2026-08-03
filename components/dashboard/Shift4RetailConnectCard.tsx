@@ -30,6 +30,7 @@ import {
   canSubmitRetailConnection,
   RETAIL_CONFIRMATION_TEXT,
   SHIFT4_CONNECT_PATH,
+  shouldRefreshAfterOutcome,
   submitRetailConnection,
   type RetailConnectFailure,
   type RetailConnectResult,
@@ -61,7 +62,17 @@ function formatTimestamp(value: string): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString()
 }
 
-export default function Shift4RetailConnectCard() {
+/**
+ * @param onConnectionChanged Invoked EXACTLY ONCE after a successful exchange,
+ *   so a sibling surface (the readiness card) can refetch its own server state.
+ *   It carries no arguments by design: no credential, fingerprint, or provider
+ *   detail crosses this boundary, only the fact that something changed. It is
+ *   never called for a failed, timed-out, or unclear outcome, because those must
+ *   not be treated as a state change.
+ */
+export default function Shift4RetailConnectCard({
+  onConnectionChanged,
+}: { onConnectionChanged?: () => void } = {}) {
   const [surface, setSurface] = useState<ConnectSurface | null>(null)
   const [authToken, setAuthToken] = useState("")
   const [confirmed, setConfirmed] = useState(false)
@@ -123,11 +134,17 @@ export default function Shift4RetailConnectCard() {
         onTokenConsumed: () => setAuthToken(""),
       })
 
+      // Only a success changed the stored credential. A failure, timeout, or
+      // unclear outcome must not refresh a sibling into implying it worked.
+      const changed = shouldRefreshAfterOutcome(outcome)
+
       if (outcome.status === "success") {
         setResult(outcome.result)
         setConfirmed(false)
         setReplacing(false)
         setSurface(await loadSurface().catch(() => surface))
+        // Exactly once, and only here.
+        if (changed) onConnectionChanged?.()
         return
       }
 
@@ -139,7 +156,7 @@ export default function Shift4RetailConnectCard() {
       // cleared again on every exit path.
       setAuthToken("")
     }
-  }, [authToken, confirmed, loadSurface, surface])
+  }, [authToken, confirmed, loadSurface, onConnectionChanged, surface])
 
   // Renders only for an authenticated merchant whose deployment has the REST
   // gate on and is targeting the Shift4 test host.

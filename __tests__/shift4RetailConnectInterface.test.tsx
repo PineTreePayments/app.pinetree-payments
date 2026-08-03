@@ -353,12 +353,21 @@ describe("Shift4 Retail connect interface", () => {
       expect(renderToStaticMarkup(createElement(Card))).toBe("")
     })
 
-    it("is a client component inside the authenticated dashboard, not a public page", () => {
+    it("is a client component inside the admin dashboard, not a merchant or public page", () => {
       expect(cardSource).toMatch(/^"use client"/m)
+
+      // Mounted only inside the operator-gated admin section.
+      const section = readFileSync(
+        "components/admin/Shift4SandboxOperationsSection.tsx",
+        "utf8"
+      )
+      expect(section).toMatch(
+        /<Shift4RetailConnectCard onConnectionChanged=\{handleConnectionChanged\} \/>/
+      )
+
+      // And absent from the merchant Providers page entirely.
       const providers = readFileSync("app/dashboard/providers/page.tsx", "utf8")
-      expect(providers).toContain("Shift4RetailConnectCard")
-      // Mounted in the merchant Providers area only.
-      expect(providers).toMatch(/<Shift4RetailConnectCard \/>/)
+      expect(providers).not.toContain("Shift4RetailConnectCard")
     })
 
     it("masks the auth token input and opts out of autofill", () => {
@@ -580,15 +589,15 @@ describe("Shift4 Retail connect interface", () => {
       // GET describes the surface, POST performs the exchange - one route.
       expect(route).toMatch(/export async function GET/)
       expect(route).toMatch(/export async function POST/)
-      expect(route).toMatch(/requireMerchantIdFromRequest/)
+      expect(route).toMatch(/requireShift4OperatorFromRequest/)
       expect(clientSource).toContain(SHIFT4_CONNECT_PATH)
       // The interface talks to exactly one path.
       expect(clientSource.match(/\/api\/internal\/shift4\//g)?.length).toBe(1)
     })
 
-    it("derives merchant identity from the session on both verbs", () => {
+    it("derives merchant identity from the operator session on both verbs", () => {
       const route = readFileSync("app/api/internal/shift4/connect/route.ts", "utf8")
-      expect(route.match(/requireMerchantIdFromRequest\(request/g)?.length).toBe(2)
+      expect(route.match(/requireShift4OperatorFromRequest\(request\)/g)?.length).toBe(2)
       expect(route).toMatch(/merchant_id_not_accepted/)
     })
   })

@@ -21,7 +21,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 import { getShift4RetailConnectSurface, isValidIanaTimeZone } from "@/engine/shift4/connectSurface"
 import { connectShift4Merchant, Shift4ConnectionError } from "@/engine/shift4Connection"
-import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
+import { requireShift4OperatorFromRequest } from "@/lib/api/shift4OperatorAuth"
 import { shift4Error, shift4Success } from "@/lib/api/shift4Routes"
 
 export const dynamic = "force-dynamic"
@@ -154,7 +154,7 @@ function noStore(response: NextResponse): NextResponse {
  */
 export async function GET(request: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(request)
+    const merchantId = await requireShift4OperatorFromRequest(request)
     return noStore(shift4Success(await getShift4RetailConnectSurface(merchantId)))
   } catch (error) {
     return noStore(shift4Error(error, "Unable to load the Shift4 connect surface"))
@@ -163,7 +163,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const merchantId = await requireMerchantIdFromRequest(request, "checkout.sessions:write")
+    // Operator authorization first: an unauthorized caller must not be able to
+    // probe body validation, and must never reach the exchange.
+    const merchantId = await requireShift4OperatorFromRequest(request)
     const { authToken, channel, merchantTimeZone } = await readConnectRequest(request)
 
     const result = await connectShift4Merchant({

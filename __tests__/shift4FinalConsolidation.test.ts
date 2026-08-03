@@ -73,7 +73,14 @@ describe("Shift4 final local consolidation", () => {
       expect(matrix, routeFile).toContain(url)
       const routeSource = source(routeFile)
       if (routeFile.includes("/admin/shift4/")) expect(routeSource).toContain("requireAdminFromRequest")
-      if (routeFile.includes("/internal/shift4/")) expect(routeSource).toContain("requireMerchantIdFromRequest")
+      // Internal routes derive identity from the verified session, never a body.
+      // The credential-exchange and raw-readiness surfaces are operator tools
+      // and use the stricter admin+email check instead of merchant auth.
+      if (routeFile.includes("/internal/shift4/")) {
+        expect(routeSource, routeFile).toMatch(
+          /requireMerchantIdFromRequest|requireShift4OperatorFromRequest/
+        )
+      }
       if (routeFile.includes("/admin/shift4/") || routeFile.includes("/internal/shift4/")) {
         expect(routeSource).toMatch(/shift4Success/)
         expect(routeSource).toMatch(/shift4Error/)

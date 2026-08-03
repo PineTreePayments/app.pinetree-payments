@@ -59,6 +59,15 @@ export type Shift4Readiness = Readonly<{
   connectionId: string | null
   environment: "test" | "production" | null
   authenticated: boolean
+  /**
+   * Per-channel authentication. Shift4 scopes an access token to one merchant
+   * account and interface, so the aggregate `authenticated` flag alone cannot
+   * say whether THIS channel can authenticate. Exposed so a surface never has
+   * to infer a channel's credential state from the aggregate.
+   */
+  authenticatedChannels: Readonly<Record<Shift4Channel, boolean>>
+  /** True when a credential row exists at all, in any shape or channel. */
+  credentialPresent: boolean
   processingEnabled: boolean
   capabilities: Readonly<Record<Shift4Capability, Shift4CapabilityView>>
   flags: Shift4FeatureFlags
@@ -105,7 +114,18 @@ export async function resolveShift4Readiness(
   const onboardingReadiness = projectShift4OnboardingReadiness(onboarding, flags.onboardingRequired)
   const i4goConfigured = deps.i4goConfigured ?? getShift4I4GoBrowserConfig().configured
   const readers = flags.retail ? await listReaders(merchantId, "shift4") : []
-  const authenticated = Boolean(connection?.connected && connection.accessTokenPresent)
+  /**
+   * Authentication is decided by whether a USABLE encrypted credential is
+   * stored, which is exactly what the Engine needs to call Shift4.
+   *
+   * It deliberately does not also require `connection.connected`. Clearing a
+   * credential strips the ciphertext, so `accessTokenPresent` is already false
+   * for a disconnected or revoked row; adding the status check on top only
+   * created a failure mode where a perfectly good stored credential could
+   * project as unauthenticated because of row-status drift.
+   */
+  const credentialPresent = Boolean(connection?.accessTokenPresent)
+  const authenticated = credentialPresent
   const certified = Boolean(connection?.cardProcessingVerified)
   const testEnvironment = connection?.environment === "test"
   const productionAllowed = connection?.environment === "production" ? flags.production : testEnvironment
@@ -128,9 +148,39 @@ export async function resolveShift4Readiness(
       connection?.legacySharedCredentialPresent
     )
 
-  const gated = (flag: boolean, label: string, extra = true): Shift4CapabilityView => {
+  /**
+   * Project one capability.
+   *
+   * Order matters and is deliberate: the REST gate, then AUTHENTICATION for the
+   * specific channel, then the feature gate, then remaining prerequisites, then
+   * certification, then production permission. Each step has its own state and
+   * reason so a surface never has to guess which one is blocking.
+   *
+   * `channel` scopes the authentication check. Without it the aggregate is used,
+   * which is correct only for capabilities that are not channel-specific.
+   */
+  const gated = (
+    flag: boolean,
+    label: string,
+    extra = true,
+    channel?: Shift4Channel
+  ): Shift4CapabilityView => {
     if (!flags.restApi) return view("disabled", false, "SHIFT4_REST_ENABLED is off")
-    if (!authenticated) return view(connection ? "configured" : "not_configured", false, "Merchant authentication is required")
+
+    const channelAuth = channel ? channelAuthenticated(channel) : authenticated
+    if (!channelAuth) {
+      // "not_configured" is reserved for a merchant with NO stored credential.
+      // Once a credential exists the state is "configured", even when this
+      // particular channel is the one still missing.
+      return view(
+        connection ? "configured" : "not_configured",
+        false,
+        channel
+          ? `No ${label} credential is connected for this merchant`
+          : "Merchant authentication is required"
+      )
+    }
+
     if (!flag) return view("disabled", false, `${label} feature gate is off`)
     if (!extra) return view("blocked", false, `${label} prerequisites are incomplete`)
     if (!certified) return view("certification_required", false, "Shift4 certification is not verified")
@@ -148,15 +198,18 @@ export async function resolveShift4Readiness(
     merchant_onboarding: onboardingReadiness.blocksProduction
       ? view(onboarding ? "configured" : "not_configured", false, onboardingReadiness.reason)
       : view(onboardingReadiness.approved ? "enabled" : "capable", true, onboardingReadiness.reason),
-    ecommerce: gated(flags.ecommerce, "E-commerce", channelAuthenticated("ecommerce") && !onboardingReadiness.blocksProduction),
-    retail: gated(flags.retail, "Retail", channelAuthenticated("retail") && activeTerminal && flags.commerceEngineConfigured && !onboardingReadiness.blocksProduction),
-    tokenization: gated(flags.ecommerce, "i4Go tokenization", channelAuthenticated("ecommerce") && i4goConfigured && !onboardingReadiness.blocksProduction),
-    hosted_checkout: gated(flags.ecommerce, "Hosted checkout", channelAuthenticated("ecommerce") && i4goConfigured && !onboardingReadiness.blocksProduction),
+    // Channel-specific capabilities pass their channel so a missing credential
+    // is reported as such instead of being flattened into "prerequisites are
+    // incomplete" alongside terminal and configuration gates.
+    ecommerce: gated(flags.ecommerce, "E-commerce", !onboardingReadiness.blocksProduction, "ecommerce"),
+    retail: gated(flags.retail, "Retail", activeTerminal && flags.commerceEngineConfigured && !onboardingReadiness.blocksProduction, "retail"),
+    tokenization: gated(flags.ecommerce, "i4Go tokenization", i4goConfigured && !onboardingReadiness.blocksProduction, "ecommerce"),
+    hosted_checkout: gated(flags.ecommerce, "Hosted checkout", i4goConfigured && !onboardingReadiness.blocksProduction, "ecommerce"),
     manual_authorization: gated(flags.manualAuthorization && flags.certificationMode, "Manual authorization"),
     partial_approval: gated(flags.partialApproval && flags.retail, "Partial approval"),
     split_tender: gated(flags.splitTender, "Split tender"),
-    apple_pay: gated(flags.applePay && flags.ecommerce, "Apple Pay"),
-    google_pay: gated(flags.googlePay && flags.ecommerce, "Google Pay"),
+    apple_pay: gated(flags.applePay && flags.ecommerce, "Apple Pay", true, "ecommerce"),
+    google_pay: gated(flags.googlePay && flags.ecommerce, "Google Pay", true, "ecommerce"),
     terminal: activeTerminal
       ? view(certifiedBase && flags.retail ? "enabled" : "capable", certifiedBase && flags.retail, "A Shift4 terminal is registered and online")
       : view(readers.length ? "configured" : "not_configured", false, "No online Shift4 terminal"),
@@ -172,6 +225,11 @@ export async function resolveShift4Readiness(
     connectionId: connection?.connectionId ?? null,
     environment: connection?.environment ?? null,
     authenticated,
+    authenticatedChannels: Object.freeze({
+      retail: channelAuthenticated("retail"),
+      ecommerce: channelAuthenticated("ecommerce"),
+    }),
+    credentialPresent,
     processingEnabled: capabilities.production_processing.ready,
     capabilities: Object.freeze(capabilities),
     flags,

@@ -14,6 +14,8 @@ type AdminStatus = {
   isAdmin: boolean
   merchantId: string
   email: string | null
+  /** Confirmed primary email. Null for API keys and unconfirmed accounts. */
+  verifiedEmail: string | null
   role: string | null
 }
 
@@ -31,6 +33,7 @@ export async function getAdminStatusFromRequest(req: NextRequest): Promise<Admin
       isAdmin: false,
       merchantId: auth.merchantId,
       email: null,
+      verifiedEmail: null,
       role: null,
     }
   }
@@ -47,6 +50,7 @@ export async function getAdminStatusFromRequest(req: NextRequest): Promise<Admin
     isAdmin: Boolean(data && isAdminRole(role)),
     merchantId: auth.merchantId,
     email: auth.email,
+    verifiedEmail: auth.verifiedEmail,
     role,
   }
 }

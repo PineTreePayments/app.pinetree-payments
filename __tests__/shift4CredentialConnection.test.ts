@@ -411,13 +411,13 @@ describe("Shift4 credential connection", () => {
   /* ── Route contract (D1) ──────────────────────────────────────────────── */
 
   describe("POST /api/internal/shift4/connect", () => {
-    const requireMerchantIdFromRequest = vi.fn()
+    const requireShift4OperatorFromRequest = vi.fn()
     const connectShift4Merchant = vi.fn()
 
     beforeEach(() => {
-      requireMerchantIdFromRequest.mockReset()
+      requireShift4OperatorFromRequest.mockReset()
       connectShift4Merchant.mockReset()
-      requireMerchantIdFromRequest.mockResolvedValue("merchant-from-token")
+      requireShift4OperatorFromRequest.mockResolvedValue("merchant-from-token")
       connectShift4Merchant.mockResolvedValue({
         connectionId: "connection-1",
         exchanged: true,
@@ -429,11 +429,11 @@ describe("Shift4 credential connection", () => {
         serverName: "TM01CE",
       })
 
-      vi.doMock("@/lib/api/merchantAuth", async () => {
-        const actual = await vi.importActual<typeof import("@/lib/api/merchantAuth")>(
-          "@/lib/api/merchantAuth"
+      vi.doMock("@/lib/api/shift4OperatorAuth", async () => {
+        const actual = await vi.importActual<typeof import("@/lib/api/shift4OperatorAuth")>(
+          "@/lib/api/shift4OperatorAuth"
         )
-        return { ...actual, requireMerchantIdFromRequest }
+        return { ...actual, requireShift4OperatorFromRequest }
       })
       vi.doMock("@/engine/shift4Connection", async () => {
         const actual = await vi.importActual<typeof import("@/engine/shift4Connection")>(
@@ -444,7 +444,7 @@ describe("Shift4 credential connection", () => {
     })
 
     afterEach(() => {
-      vi.doUnmock("@/lib/api/merchantAuth")
+      vi.doUnmock("@/lib/api/shift4OperatorAuth")
       vi.doUnmock("@/engine/shift4Connection")
     })
 
@@ -466,14 +466,16 @@ describe("Shift4 credential connection", () => {
       merchantTimeZone: "America/Los_Angeles",
     }
 
-    it("requires an authenticated merchant identity", async () => {
-      requireMerchantIdFromRequest.mockRejectedValue(
-        Object.assign(new Error("Missing bearer token"), { status: 401 })
+    it("requires Shift4 operator authorization", async () => {
+      // The helper answers every unauthorized case with one generic 404.
+      requireShift4OperatorFromRequest.mockRejectedValue(
+        Object.assign(new Error("Not found"), { status: 404, code: "not_found" })
       )
 
-      const { response } = await post(validBody)
+      const { response, json } = await post(validBody)
 
-      expect(response.status).toBe(401)
+      expect(response.status).toBe(404)
+      expect((json.error as Record<string, unknown>).code).toBe("not_found")
       expect(connectShift4Merchant).not.toHaveBeenCalled()
     })
 
@@ -648,7 +650,7 @@ describe("Shift4 credential connection", () => {
     it("keeps the connect route server-only", () => {
       const route = source("app/api/internal/shift4/connect/route.ts")
       expect(route).not.toMatch(/"use client"/)
-      expect(route).toMatch(/requireMerchantIdFromRequest/)
+      expect(route).toMatch(/requireShift4OperatorFromRequest/)
       // The route delegates; it never speaks to Shift4 or the database itself.
       expect(route).not.toMatch(/fetch\(|supabaseAdmin|from\(["']merchant_providers/)
     })

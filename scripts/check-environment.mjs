@@ -153,6 +153,10 @@ const groups = [
       ["SHIFT4_INTERFACE_VERSION", false, "text"],
       ["SHIFT4_COMPANY_NAME", false, "text"],
       ["SHIFT4_CREDENTIAL_ENCRYPTION_KEY", false, "hex64"],
+      // The single administrator allowed to use the Shift4 sandbox operator
+      // tools. Promoted to required by the conditional block below whenever
+      // SHIFT4_REST_ENABLED is on. Its value is never printed.
+      ["SHIFT4_OPERATOR_EMAIL", false, "email"],
       ["SHIFT4_REST_ENABLED", false, "boolean"],
       ["SHIFT4_ECOMMERCE_ENABLED", false, "boolean"],
       ["SHIFT4_RETAIL_ENABLED", false, "boolean"],
@@ -237,6 +241,14 @@ function validation(name, kind) {
   if (kind === "boolean") return ["true", "false", "1", "0"].includes(value.toLowerCase())
     ? { ok: true }
     : { ok: false, detail: "expected true/false or 1/0" }
+  if (kind === "email") {
+    // Shape only. The detail string deliberately describes the expectation and
+    // never echoes the configured address.
+    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value === value.trim()
+    return valid
+      ? { ok: true }
+      : { ok: false, detail: "expected a single full email address with no surrounding whitespace" }
+  }
   if (kind === "authmode") return ["external_jwt", "dynamic_email_fallback"].includes(value)
     ? { ok: true }
     : { ok: false, detail: "expected external_jwt or dynamic_email_fallback" }
@@ -360,6 +372,16 @@ const enabledShift4Features = [
 if (enabledShift4Features.length > 0 && shift4Present.length < shift4Vars.length) {
   requiredFailures += 1
   warnings.push(`Shift4 features are enabled without the complete server credential configuration: ${enabledShift4Features.join(", ")}.`)
+}
+// The Shift4 sandbox operator interface ships with the REST integration. With
+// no operator configured the tools fail closed and are unreachable, which is
+// safe but silently non-functional - so it is reported as a required issue.
+if (shift4Flag("SHIFT4_REST_ENABLED") && !present("SHIFT4_OPERATOR_EMAIL")) {
+  requiredFailures += 1
+  warnings.push(
+    "SHIFT4_REST_ENABLED is on without SHIFT4_OPERATOR_EMAIL. " +
+    "The Shift4 sandbox operator tools in /dashboard/admin will be unreachable for every account."
+  )
 }
 if (shift4Flag("SHIFT4_ECOMMERCE_ENABLED")) {
   const missingI4Go = ["SHIFT4_I4GO_SCRIPT_URL", "SHIFT4_I4GO_IFRAME_ORIGIN", "SHIFT4_I4GO_APPLICATION_ID"].filter((name) => !present(name))

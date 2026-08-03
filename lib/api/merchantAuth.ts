@@ -7,6 +7,14 @@ type MerchantRequestAuth = {
   merchantId: string
   authUserId: string
   email: string | null
+  /**
+   * The account's PRIMARY email, and only when Supabase has confirmed it.
+   *
+   * Deliberately separate from `email`, which falls back to user metadata that
+   * the account holder can set freely. Any authorization decision keyed on an
+   * address must use this field, never `email`.
+   */
+  verifiedEmail: string | null
   source: "api_key" | "supabase"
 }
 
@@ -58,7 +66,15 @@ export async function requireMerchantAuthFromRequest(
     if (!verified) {
       throw createStatusError("Invalid or revoked API key", 401)
     }
-    return { merchantId: verified.merchantId, authUserId: verified.merchantId, email: null, source: "api_key" }
+    // An API key carries no human identity, so it can never satisfy an
+    // email-based authorization check.
+    return {
+      merchantId: verified.merchantId,
+      authUserId: verified.merchantId,
+      email: null,
+      verifiedEmail: null,
+      source: "api_key",
+    }
   }
 
   // ── Supabase session path ─────────────────────────────────────────────────
@@ -84,10 +100,18 @@ export async function requireMerchantAuthFromRequest(
     ""
   ).trim().toLowerCase() || null
 
+  // Only the provider-confirmed primary address counts as verified. An
+  // unconfirmed or metadata-supplied address yields null, so an authorization
+  // check keyed on it fails closed.
+  const primaryEmail = String(authData.user.email || "").trim().toLowerCase()
+  const verifiedEmail =
+    primaryEmail && authData.user.email_confirmed_at ? primaryEmail : null
+
   return {
     merchantId: authData.user.id,
     authUserId: authData.user.id,
     email,
+    verifiedEmail,
     source: "supabase",
   }
 }

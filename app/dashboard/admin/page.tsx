@@ -28,6 +28,7 @@ import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/Segmente
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import AdminPageHeader, { adminHeaderIconButtonDesktopClass } from "@/components/admin/AdminPageHeader"
+import Shift4SandboxOperationsSection from "@/components/admin/Shift4SandboxOperationsSection"
 import AdminSupportTicketPanel, {
   type AdminSupportMessage,
   type AdminSupportTicket,
@@ -486,6 +487,9 @@ export default function AdminPage() {
   const router = useRouter()
   const [token, setToken] = useState("")
   const [unauthorized, setUnauthorized] = useState(false)
+  // Server-decided Shift4 operator authorization. `undefined` until
+  // /api/admin/me answers, so the operator section never flashes.
+  const [shift4Operator, setShift4Operator] = useState<boolean | undefined>(undefined)
   const [activeTab, setActiveTab] = useState<AdminTab>("overview")
 
   // ── Overview state ──────────────────────────────────────────────────────────
@@ -561,6 +565,30 @@ export default function AdminPage() {
     if (!token) return
     void fetchOverview(token)
   }, [token, fetchOverview])
+
+  // Ask the server whether this admin is the Shift4 sandbox operator. The
+  // response is a single boolean; the configured address never reaches the
+  // browser and no email comparison happens in client code.
+  useEffect(() => {
+    if (!token) return
+    let active = true
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/me", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        })
+        const body = (await res.json().catch(() => null)) as { shift4Operator?: boolean } | null
+        if (active) setShift4Operator(res.ok && body?.shift4Operator === true)
+      } catch {
+        // Fail closed: the section stays hidden, and its routes reject anyway.
+        if (active) setShift4Operator(false)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [token])
 
   // ── Load tickets ────────────────────────────────────────────────────────────
 
@@ -1243,6 +1271,13 @@ export default function AdminPage() {
               </div>
             </div>
           )}
+
+          {/* Internal Shift4 operator tools. Renders only for the single
+              server-authorized operator; every admin else sees nothing, and the
+              routes behind it enforce the same check independently. */}
+          <div className="pb-8">
+            <Shift4SandboxOperationsSection authorized={shift4Operator} />
+          </div>
         </>
       )}
 
