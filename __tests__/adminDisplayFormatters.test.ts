@@ -380,4 +380,13 @@ describe("admin surfaces share one formatter", () => {
     expect(reports.match(/columns=\{VOLUME_COLUMNS\}/g)).toHaveLength(2)
     expect(reports.match(/<AdminMetricTable/g)).toHaveLength(3)
   })
+
+  it("keeps rail and provider naming inside the shared expandable rows", () => {
+    // The mobile redesign did not fork naming: both tables still pass the same
+    // column definitions and their own formatter to one component.
+    expect(reports).toContain("formatRailName(net)")
+    expect(reports).toContain("formatProviderName(prov)")
+    expect(reports).not.toContain("MobileRail")
+    expect(reports).not.toContain("MobileProvider")
+  })
 })

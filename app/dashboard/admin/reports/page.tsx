@@ -157,19 +157,22 @@ function pct(num: number, total: number): string {
 // Volume by Rail and Volume by Provider are the same table of the same metrics
 // over a different grouping key, so they share one column definition. Column
 // widths therefore cannot drift between the two.
+// `header` is the short desktop column head; `detailHeader` is the spelled-out
+// label the mobile detail panel uses. `summary` marks the one metric a
+// collapsed mobile row shows.
 const VOLUME_COLUMNS: AdminMetricColumn<[string, ByNetworkEntry]>[] = [
-  { key: "total",     header: "Total",     width: "90px",  numeric: true, render: ([, v]) => fmt(v.total) },
-  { key: "confirmed", header: "Confirmed", width: "90px",  numeric: true, render: ([, v]) => fmt(v.confirmed) },
-  { key: "volume",    header: "Volume",    width: "120px", numeric: true, emphasis: true, render: ([, v]) => fmtUSD(v.volume) },
-  { key: "fees",      header: "Fees",      width: "110px", numeric: true, render: ([, v]) => fmtUSD(v.fees) },
-  { key: "conv",      header: "Conv %",    width: "80px",  numeric: true, render: ([, v]) => pct(v.confirmed, v.total) },
+  { key: "total",     header: "Total",     detailHeader: "Total payments",     width: "90px",  numeric: true, render: ([, v]) => fmt(v.total) },
+  { key: "confirmed", header: "Confirmed", detailHeader: "Confirmed payments", width: "90px",  numeric: true, render: ([, v]) => fmt(v.confirmed) },
+  { key: "volume",    header: "Volume",    detailHeader: "Confirmed volume",   width: "120px", numeric: true, emphasis: true, summary: true, render: ([, v]) => fmtUSD(v.volume) },
+  { key: "fees",      header: "Fees",      detailHeader: "Platform fees",      width: "110px", numeric: true, render: ([, v]) => fmtUSD(v.fees) },
+  { key: "conv",      header: "Conv %",    detailHeader: "Conversion rate",    width: "80px",  numeric: true, render: ([, v]) => pct(v.confirmed, v.total) },
 ]
 
 type TopMerchantRow = { merchantId: string; confirmedVolume: number; confirmedCount: number }
 
 const TOP_MERCHANT_COLUMNS: AdminMetricColumn<TopMerchantRow>[] = [
-  { key: "confirmed", header: "Confirmed", width: "100px", numeric: true, render: (m) => fmt(m.confirmedCount) },
-  { key: "volume",    header: "Volume",    width: "120px", numeric: true, emphasis: true, render: (m) => fmtUSD(m.confirmedVolume) },
+  { key: "confirmed", header: "Confirmed", detailHeader: "Confirmed payments", width: "100px", numeric: true, render: (m) => fmt(m.confirmedCount) },
+  { key: "volume",    header: "Volume",    detailHeader: "Confirmed volume",   width: "120px", numeric: true, emphasis: true, summary: true, render: (m) => fmtUSD(m.confirmedVolume) },
 ]
 
 function sortedByVolume(entries: Record<string, ByNetworkEntry>): Array<[string, ByNetworkEntry]> {
