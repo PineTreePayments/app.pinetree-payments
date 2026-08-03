@@ -30,6 +30,8 @@ export type MerchantSettings = {
   pinetree_fee_amount: number
   tax_enabled: boolean
   tax_rate: number
+  /** The merchant's configured IANA time zone (for example "America/Chicago"). */
+  timezone?: string | null
   created_at: string
   updated_at: string
 }

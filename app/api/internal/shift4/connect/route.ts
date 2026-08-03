@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 
+import { getShift4RetailConnectSurface, isValidIanaTimeZone } from "@/engine/shift4/connectSurface"
 import { connectShift4Merchant, Shift4ConnectionError } from "@/engine/shift4Connection"
 import { requireMerchantIdFromRequest } from "@/lib/api/merchantAuth"
 import { shift4Error, shift4Success } from "@/lib/api/shift4Routes"
@@ -39,21 +40,6 @@ const ALLOWED_FIELDS = new Set(["authToken", "channel", "merchantTimeZone"])
 
 function badRequest(message: string, code: string): Error & { status: number; code: string } {
   return Object.assign(new Error(message), { status: 400, code })
-}
-
-/**
- * True when the runtime recognizes the string as an IANA time zone.
- *
- * `Intl.DateTimeFormat` throws a RangeError for an unknown zone, which is the
- * only check that stays correct as the tz database is updated.
- */
-function isValidTimeZone(value: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value })
-    return true
-  } catch {
-    return false
-  }
 }
 
 /**
@@ -144,7 +130,7 @@ async function readConnectRequest(request: NextRequest): Promise<{
   if (!merchantTimeZone) {
     throw badRequest("merchantTimeZone is required", "invalid_request")
   }
-  if (!isValidTimeZone(merchantTimeZone)) {
+  if (!isValidIanaTimeZone(merchantTimeZone)) {
     throw badRequest("merchantTimeZone must be a valid IANA time zone", "invalid_time_zone")
   }
 
@@ -156,6 +142,23 @@ function noStore(response: NextResponse): NextResponse {
   response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, private")
   response.headers.set("Pragma", "no-cache")
   return response
+}
+
+/**
+ * Describe the connect surface for the authenticated merchant.
+ *
+ * Deliberately lives on the SAME route as the exchange rather than a second
+ * connection endpoint. Read-only: it performs no exchange and enables nothing.
+ * The response carries one environment-derived boolean plus a coarse reason
+ * code, the merchant's configured time zone, and non-secret channel status.
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const merchantId = await requireMerchantIdFromRequest(request)
+    return noStore(shift4Success(await getShift4RetailConnectSurface(merchantId)))
+  } catch (error) {
+    return noStore(shift4Error(error, "Unable to load the Shift4 connect surface"))
+  }
 }
 
 export async function POST(request: NextRequest) {

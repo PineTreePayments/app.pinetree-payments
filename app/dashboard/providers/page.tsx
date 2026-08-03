@@ -20,6 +20,7 @@ import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessPro
 import StripeConnectOnboarding from "@/components/dashboard/StripeConnectOnboarding"
 import StripeTerminalSettings from "@/components/dashboard/StripeTerminalSettings"
 import Shift4RestReadinessCard from "@/components/dashboard/Shift4RestReadinessCard"
+import Shift4RetailConnectCard from "@/components/dashboard/Shift4RetailConnectCard"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
 
 // Shift4 onboarding must start through the authenticated Engine boundary.
@@ -1114,6 +1115,7 @@ export default function ProvidersPage() {
           description="Accept card payments through Fluid Pay once merchant onboarding is approved."
         />
         </div>
+        <Shift4RetailConnectCard />
         <Shift4RestReadinessCard />
       </div>
       </DashboardSection>
