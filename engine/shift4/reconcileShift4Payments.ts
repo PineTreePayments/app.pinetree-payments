@@ -148,6 +148,7 @@ export async function reconcileShift4Payments(
           payment_id: row.paymentId,
           merchant_provider_connection_id: row.merchantProviderConnectionId,
           operation: row.operation,
+          channel: row.channel,
           invoice: row.invoice,
           amount_minor: row.amountMinor,
           correlation_id: row.correlationId,

@@ -7,7 +7,16 @@ import { executeShift4Transaction } from "./executeTransaction"
 import { recoverUnknownOutcome } from "./recoverUnknownOutcome"
 import { assertShift4Capability, capabilityForOperation, resolveShift4Readiness } from "./readiness"
 import { assertAdditionalTenderAmount, getShift4TenderProgress } from "./tenders"
-import type { Shift4ExecuteRequest, Shift4EngineOperation } from "./types"
+import type { Shift4Channel, Shift4ExecuteRequest, Shift4EngineOperation } from "./types"
+
+/** Validate a caller-supplied channel. There is no default and no inference. */
+export function assertShift4Channel(value: unknown): Shift4Channel {
+  if (value === "retail" || value === "ecommerce") return value
+  throw Object.assign(
+    new Error("channel must be \"retail\" or \"ecommerce\""),
+    { status: 400, code: "invalid_channel" }
+  )
+}
 
 export async function getShift4ReadinessForMerchant(merchantId: string) {
   return resolveShift4Readiness(merchantId)
@@ -54,14 +63,29 @@ export async function recoverMerchantShift4Attempt(merchantId: string, attemptId
   return recoverUnknownOutcome({ merchantId, attemptId })
 }
 
-export async function getMerchantShift4CertificationInformation(merchantId: string) {
+/**
+ * Merchant Information for certification evidence.
+ *
+ * The channel is REQUIRED and never inferred: the lookup authenticates with one
+ * channel's access token, so answering for "the merchant" without saying which
+ * credential was used would be misleading evidence.
+ */
+export async function getMerchantShift4CertificationInformation(
+  merchantId: string,
+  channel: Shift4Channel
+) {
   const readiness = await resolveShift4Readiness(merchantId)
   if (!readiness.flags.certificationMode) {
     throw Object.assign(new Error("Shift4 certification mode is disabled"), { status: 403, code: "certification_disabled" })
   }
   assertShift4Capability(readiness, "rest_api")
-  const connection = await getShift4RestAccessToken(merchantId)
-  if (!connection) throw Object.assign(new Error("Shift4 authentication is unavailable"), { status: 503, code: "connection_unavailable" })
+  // Explicit legacy compatibility: a merchant connected before the channel map
+  // existed still has one usable credential.
+  const connection = await getShift4RestAccessToken(merchantId, {
+    channel,
+    allowLegacySharedCredential: true,
+  })
+  if (!connection) throw Object.assign(new Error(`Shift4 authentication is unavailable for the ${channel} channel`), { status: 503, code: "connection_unavailable" })
   return getMerchantInformation({
     accessToken: connection.accessToken,
     certificationScopeConfirmed: true,

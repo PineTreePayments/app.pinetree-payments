@@ -184,10 +184,19 @@ export async function executeShift4Transaction(
   /* ── 2. Resolve the authenticated connection ──────────────────────────── */
   // This proves PineTree can authenticate as the merchant. It deliberately does
   // NOT imply the merchant account is boarded or a device is certified.
-  const connection = await getShift4RestAccessToken(merchantId)
+  //
+  // The credential is resolved FOR THIS REQUEST'S CHANNEL. A retail sale can
+  // only ever use the retail token and an e-commerce sale only the e-commerce
+  // token; there is no cross-channel fallback. `allowLegacySharedCredential` is
+  // the explicit compatibility path for merchants connected before the channel
+  // map existed - without it their in-flight payments would fail closed.
+  const connection = await getShift4RestAccessToken(merchantId, {
+    channel: request.channel,
+    allowLegacySharedCredential: true,
+  })
   if (!connection) {
     throw new Shift4ExecutionError(
-      "This merchant has no connected Shift4 REST credential.",
+      `This merchant has no connected Shift4 REST credential for the ${request.channel} channel.`,
       "connection_unavailable"
     )
   }

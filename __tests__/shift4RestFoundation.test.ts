@@ -500,6 +500,8 @@ describe("Shift4 exchange duplicate protection", () => {
     }))
     vi.doMock("@/database/merchantShift4RestConnections", () => ({
       SHIFT4_REST_PROVIDER_NAME: "shift4_rest",
+      isShift4RestConnectionChannel: (value: unknown) =>
+        value === "retail" || value === "ecommerce",
       saveShift4RestConnection,
       getShift4RestConnectionStatus: vi.fn(),
       clearShift4RestCredential: vi.fn(),
@@ -528,6 +530,7 @@ describe("Shift4 exchange duplicate protection", () => {
     const error = await connectShift4Merchant({
       merchantId: "merchant-1",
       authToken: FAKE_AUTH_TOKEN,
+      channel: "retail",
     }).catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(Shift4ConnectionError)
@@ -546,6 +549,7 @@ describe("Shift4 exchange duplicate protection", () => {
     const error = await connectShift4Merchant({
       merchantId: "merchant-1",
       authToken: FAKE_AUTH_TOKEN,
+      channel: "retail",
     }).catch((caught: unknown) => caught)
 
     expect((error as { code: string }).code).toBe("auth_token_already_used")
@@ -559,7 +563,7 @@ describe("Shift4 exchange duplicate protection", () => {
     })
 
     const { connectShift4Merchant } = await import("@/engine/shift4Connection")
-    await connectShift4Merchant({ merchantId: "merchant-1", authToken: FAKE_AUTH_TOKEN })
+    await connectShift4Merchant({ merchantId: "merchant-1", authToken: FAKE_AUTH_TOKEN, channel: "retail" })
       .catch(() => undefined)
 
     const claimArgs = claimApiIdempotency.mock.calls[0][0] as { keyHash: string }
@@ -577,7 +581,7 @@ describe("Shift4 exchange duplicate protection", () => {
     const { connectShift4Merchant } = await import("@/engine/shift4Connection")
 
     // The mocked provider exchange rejects; no network call is made.
-    await connectShift4Merchant({ merchantId: "merchant-1", authToken: FAKE_AUTH_TOKEN })
+    await connectShift4Merchant({ merchantId: "merchant-1", authToken: FAKE_AUTH_TOKEN, channel: "retail" })
       .catch(() => undefined)
 
     expect(exchangeAccessTokenMock).toHaveBeenCalledTimes(1)
@@ -611,6 +615,7 @@ describe("Shift4 exchange duplicate protection", () => {
     const result = await connectShift4Merchant({
       merchantId: "merchant-1",
       authToken: FAKE_AUTH_TOKEN,
+      channel: "retail",
     })
 
     expect(result.connectionId).toBe("connection-1")

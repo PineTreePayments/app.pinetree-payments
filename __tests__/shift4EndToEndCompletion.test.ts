@@ -13,7 +13,9 @@ const flags: Shift4FeatureFlags = Object.freeze({ restApi: true, ecommerce: true
   production: false, onboardingRequired: true, commerceEngineConfigured: true })
 const connection = { connectionId: "connection-1", status: "connected", enabled: true, connected: true, environment: "test" as const,
   accessTokenPresent: true, accessTokenFingerprint: "safe-fingerprint", interfaceName: null, interfaceVersion: null, companyName: null,
-  connectedAt: null, lastExchangeCorrelationId: null, lastExchangeServerName: null, channel: "shared" as const, cardProcessingVerified: true }
+  connectedAt: null, lastExchangeCorrelationId: null, lastExchangeServerName: null, channel: "shared" as const,
+  channels: { retail: null, ecommerce: null }, legacySharedCredentialPresent: true, credentialVersion: 1,
+  cardProcessingVerified: true }
 
 describe("Shift4 end-to-end completion contracts", () => {
   it("keeps real onboarding fail-closed and fixture onboarding deterministic", () => {

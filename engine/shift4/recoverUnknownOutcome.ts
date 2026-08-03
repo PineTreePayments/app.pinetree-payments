@@ -93,6 +93,9 @@ export async function recoverClaimedAttempt(input: {
     | "payment_id"
     | "merchant_provider_connection_id"
     | "operation"
+    // Recovery must re-authenticate on the channel the attempt was dispatched
+    // on, so the credential it resolves is the same one Shift4 saw.
+    | "channel"
     | "invoice"
     | "amount_minor"
     | "correlation_id"
@@ -138,7 +141,14 @@ export async function recoverClaimedAttempt(input: {
     }
   }
 
-  const connection = await getShift4RestAccessToken(attempt.merchant_id)
+  // Recovery must use the SAME channel the original attempt was dispatched on,
+  // which the attempt row records. `allowLegacySharedCredential` is the explicit
+  // compatibility path so an attempt created before the channel map existed can
+  // still be resolved rather than being stranded in an unknown outcome.
+  const connection = await getShift4RestAccessToken(attempt.merchant_id, {
+    channel: attempt.channel,
+    allowLegacySharedCredential: true,
+  })
   if (!connection) {
     await releaseShift4AttemptLease({
       merchantId: attempt.merchant_id,
@@ -376,6 +386,7 @@ export async function recoverUnknownOutcome(input: {
       payment_id: row.paymentId,
       merchant_provider_connection_id: row.merchantProviderConnectionId,
       operation: row.operation,
+      channel: row.channel,
       invoice: row.invoice,
       amount_minor: row.amountMinor,
       correlation_id: row.correlationId,

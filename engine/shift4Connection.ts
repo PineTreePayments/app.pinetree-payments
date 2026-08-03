@@ -29,7 +29,9 @@ import {
 import {
   clearShift4RestCredential,
   getShift4RestConnectionStatus,
+  isShift4RestConnectionChannel,
   saveShift4RestConnection,
+  type Shift4RestConnectionChannel,
   type Shift4RestConnectionStatusView,
 } from "@/database/merchantShift4RestConnections"
 import { getShift4RestConfig } from "@/providers/shift4/rest/config"
@@ -48,6 +50,7 @@ export class Shift4ConnectionError extends Error {
     | "exchange_in_progress"
     | "auth_token_already_used"
     | "exchange_failed"
+    | "invalid_channel"
     | "not_configured"
 
   /**
@@ -74,6 +77,7 @@ export type ConnectShift4MerchantResult = {
   /** True when this call performed the exchange; false when it replayed one. */
   exchanged: boolean
   environment: string
+  channel: Shift4RestConnectionChannel
   accessTokenFingerprint: string
   correlationId: string
   connectedAt: string
@@ -87,19 +91,28 @@ function hashAuthToken(authToken: string): string {
 /**
  * Exchange a merchant Auth Token for a Shift4 Access Token and store it.
  *
+ * The CHANNEL is required. Shift4 scopes an access token to one merchant
+ * account and interface, so Retail and E-commerce each need their own
+ * exchange, and the resulting credentials are stored under separate keys in one
+ * `shift4_rest` row. Passing the channel explicitly is what makes it impossible
+ * for one channel's exchange to overwrite the other's credential.
+ *
  * Concurrency and duplication are guarded by the existing
  * `api_idempotency_claims` table, whose unique constraint makes the claim
  * atomic across serverless instances:
  *   - a second concurrent call for the same auth token loses the race and is
  *     rejected with `exchange_in_progress`;
  *   - a later call reusing an auth token that already succeeded is rejected with
- *     `auth_token_already_used`, matching Shift4's single-use production rule;
+ *     `auth_token_already_used`, matching Shift4's single-use production rule.
+ *     The claim key is the auth-token hash alone, deliberately not the channel,
+ *     so a token spent on Retail cannot be replayed against E-commerce;
  *   - a failed exchange releases its claim so the merchant can retry with the
  *     new auth token their Account Administrator issues.
  */
 export async function connectShift4Merchant(input: {
   merchantId: string
   authToken: string
+  channel: Shift4RestConnectionChannel
   merchantTimeZone?: string
 }): Promise<ConnectShift4MerchantResult> {
   const merchantId = String(input.merchantId || "").trim()
@@ -112,6 +125,14 @@ export async function connectShift4Merchant(input: {
     throw new Shift4ConnectionError(
       "A Shift4 auth token is required to connect this merchant.",
       "exchange_failed"
+    )
+  }
+
+  const channel = input.channel
+  if (!isShift4RestConnectionChannel(channel)) {
+    throw new Shift4ConnectionError(
+      "A Shift4 channel of \"retail\" or \"ecommerce\" is required. There is no shared connection.",
+      "invalid_channel"
     )
   }
 
@@ -130,7 +151,7 @@ export async function connectShift4Merchant(input: {
   const correlationId = randomUUID()
   const keyHash = hashAuthToken(authToken)
   const requestHash = createHash("sha256")
-    .update(`${merchantId}|${config.environment}|${config.identity.interfaceName}`)
+    .update(`${merchantId}|${channel}|${config.environment}|${config.identity.interfaceName}`)
     .digest("hex")
 
   const claim = await claimApiIdempotency({
@@ -167,6 +188,7 @@ export async function connectShift4Merchant(input: {
 
     const { connectionId } = await saveShift4RestConnection({
       merchantId,
+      channel,
       encryptedAccessToken,
       accessTokenFingerprint: outcome.auditableResult.accessTokenFingerprint,
       environment: config.environment,
@@ -184,6 +206,7 @@ export async function connectShift4Merchant(input: {
       resourceId: connectionId,
       responseBody: {
         environment: config.environment,
+        channel,
         accessTokenFingerprint: outcome.auditableResult.accessTokenFingerprint,
         correlationId: outcome.auditableResult.correlationId,
         exchangedAt: outcome.auditableResult.exchangedAt,
@@ -194,6 +217,7 @@ export async function connectShift4Merchant(input: {
     console.info("[shift4-connection] access_token_exchange_succeeded", {
       merchantId,
       connectionId,
+      channel,
       environment: config.environment,
       correlationId: outcome.auditableResult.correlationId,
       accessTokenFingerprint: outcome.auditableResult.accessTokenFingerprint,
@@ -204,6 +228,7 @@ export async function connectShift4Merchant(input: {
       connectionId,
       exchanged: true,
       environment: config.environment,
+      channel,
       accessTokenFingerprint: outcome.auditableResult.accessTokenFingerprint,
       correlationId: outcome.auditableResult.correlationId,
       connectedAt: outcome.auditableResult.exchangedAt,
@@ -218,6 +243,7 @@ export async function connectShift4Merchant(input: {
       // different claim key and is therefore never blocked by this row.
       console.warn("[shift4-connection] claim_release_failed", {
         merchantId,
+        channel,
         correlationId,
         reason: releaseError instanceof Error ? releaseError.message : "unknown",
       })
@@ -225,6 +251,7 @@ export async function connectShift4Merchant(input: {
 
     console.warn("[shift4-connection] access_token_exchange_failed", {
       merchantId,
+      channel,
       environment: config.environment,
       correlationId,
       ...describeShift4Error(error),
@@ -250,11 +277,20 @@ export async function getShift4MerchantConnection(
  * Disconnect or mark revoked. Shift4 documents that an access token can be
  * revoked by the merchant's Account Administrator, after which a new Auth Token
  * is required, so `revoked` is a distinct outcome from a merchant disconnect.
+ *
+ * With `channel` omitted every stored credential is cleared. With a channel
+ * supplied only that channel is cleared, so revoking Retail does not take
+ * E-commerce offline.
  */
 export async function disconnectShift4Merchant(
   merchantId: string,
-  reason: "disconnected" | "revoked" = "disconnected"
+  reason: "disconnected" | "revoked" = "disconnected",
+  channel?: Shift4RestConnectionChannel
 ): Promise<void> {
-  await clearShift4RestCredential(merchantId, reason)
-  console.info("[shift4-connection] credential_cleared", { merchantId, reason })
+  await clearShift4RestCredential(merchantId, reason, channel)
+  console.info("[shift4-connection] credential_cleared", {
+    merchantId,
+    reason,
+    channel: channel ?? "all",
+  })
 }

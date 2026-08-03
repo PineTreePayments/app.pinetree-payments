@@ -10,6 +10,42 @@ The only supported direction is:
 
 The browser never imports the REST or Commerce Engine adapters. Provider modules do not own PineTree payment state, tenant authorization, journal entries, or database policy. The database remains canonical for payments, attempts, tender totals, lifecycle transitions, and balanced journal posting.
 
+## Merchant credential connection
+
+A merchant connects through `POST /api/internal/shift4/connect`, which runs the
+Access Token Exchange along the standard layering: authenticated route →
+`engine/shift4Connection.ts` → `providers/shift4/rest/credentials` → encrypted
+storage in `database/merchantShift4RestConnections.ts`.
+
+The Auth Token is a runtime-only input. It is never an environment variable,
+never persisted, and never logged; only its SHA-256 hash is retained, as the
+single-use replay key in `api_idempotency_claims`.
+
+Retail and E-commerce each require their own exchange, because Shift4 scopes an
+access token to one merchant account and interface. Both live in **one**
+`shift4_rest` row — there are no `shift4_rest_retail` / `shift4_rest_ecommerce`
+provider keys — under a versioned channel map in the existing `credentials`
+JSONB:
+
+```
+{ provider_model, credential_version: 2,
+  channels: { retail?: <credential>, ecommerce?: <credential> },
+  legacy_shared?: <credential> }
+```
+
+Each channel credential holds its own AES-256-GCM envelope, so one exchange can
+never overwrite the other's token. `legacy_shared` is a migrated version-1
+document written before channels existed; it is readable only through the
+explicit `allowLegacySharedCredential` compatibility path, never as a silent
+fallback.
+
+Access-token resolution requires the operation's channel. Retail operations use
+the Retail token and E-commerce operations the E-commerce token, with no
+cross-channel fallback; an ambiguous or missing credential fails closed. Before
+decryption the stored credential's environment is compared to
+`getShift4RestConfig().environment`, so a test token can never reach the
+production host and a production token can never reach the test host.
+
 ## Readiness
 
 `engine/shift4/readiness.ts` derives server-side capability states. An encrypted access token proves authentication only. Processing additionally requires the REST gate, channel gate, recorded certification evidence, environment permission, and—for retail—an online Shift4 terminal. Capabilities use explicit `enabled`, `disabled`, `blocked`, `certification_required`, and related states; no vague “available” state is used.

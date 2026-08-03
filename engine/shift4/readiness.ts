@@ -115,6 +115,19 @@ export async function resolveShift4Readiness(
     ["online", "active", "connected", "ready"].includes(String(reader.status).toLowerCase())
   )
 
+  /**
+   * Whether that channel can actually authenticate.
+   *
+   * A credential is per-channel, so an E-commerce token must not make Retail
+   * look ready. A legacy pre-channel credential still counts: the Engine
+   * resolves it through the documented compatibility path.
+   */
+  const channelAuthenticated = (channel: "retail" | "ecommerce"): boolean =>
+    Boolean(
+      connection?.channels?.[channel]?.accessTokenPresent ||
+      connection?.legacySharedCredentialPresent
+    )
+
   const gated = (flag: boolean, label: string, extra = true): Shift4CapabilityView => {
     if (!flags.restApi) return view("disabled", false, "SHIFT4_REST_ENABLED is off")
     if (!authenticated) return view(connection ? "configured" : "not_configured", false, "Merchant authentication is required")
@@ -135,10 +148,10 @@ export async function resolveShift4Readiness(
     merchant_onboarding: onboardingReadiness.blocksProduction
       ? view(onboarding ? "configured" : "not_configured", false, onboardingReadiness.reason)
       : view(onboardingReadiness.approved ? "enabled" : "capable", true, onboardingReadiness.reason),
-    ecommerce: gated(flags.ecommerce, "E-commerce", !onboardingReadiness.blocksProduction),
-    retail: gated(flags.retail, "Retail", activeTerminal && flags.commerceEngineConfigured && !onboardingReadiness.blocksProduction),
-    tokenization: gated(flags.ecommerce, "i4Go tokenization", i4goConfigured && !onboardingReadiness.blocksProduction),
-    hosted_checkout: gated(flags.ecommerce, "Hosted checkout", i4goConfigured && !onboardingReadiness.blocksProduction),
+    ecommerce: gated(flags.ecommerce, "E-commerce", channelAuthenticated("ecommerce") && !onboardingReadiness.blocksProduction),
+    retail: gated(flags.retail, "Retail", channelAuthenticated("retail") && activeTerminal && flags.commerceEngineConfigured && !onboardingReadiness.blocksProduction),
+    tokenization: gated(flags.ecommerce, "i4Go tokenization", channelAuthenticated("ecommerce") && i4goConfigured && !onboardingReadiness.blocksProduction),
+    hosted_checkout: gated(flags.ecommerce, "Hosted checkout", channelAuthenticated("ecommerce") && i4goConfigured && !onboardingReadiness.blocksProduction),
     manual_authorization: gated(flags.manualAuthorization && flags.certificationMode, "Manual authorization"),
     partial_approval: gated(flags.partialApproval && flags.retail, "Partial approval"),
     split_tender: gated(flags.splitTender, "Split tender"),

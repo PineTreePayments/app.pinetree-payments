@@ -12,6 +12,11 @@ const connection = {
   environment: "test" as const, accessTokenPresent: true, accessTokenFingerprint: "fingerprint",
   interfaceName: null, interfaceVersion: null, companyName: null, connectedAt: null,
   lastExchangeCorrelationId: null, lastExchangeServerName: null, channel: "shared" as const,
+  // A pre-channel (version 1) credential: readable by either channel through
+  // the documented compatibility path.
+  channels: { retail: null, ecommerce: null },
+  legacySharedCredentialPresent: true,
+  credentialVersion: 1,
   cardProcessingVerified: true,
 }
 
