@@ -19,7 +19,11 @@ describe("admin support ticket panel structure", () => {
   })
 
   it("is a right-side slide-over matching the Platform Transaction Detail panel", () => {
-    const transactionPanel = read("app/dashboard/admin/transactions/page.tsx")
+    // The transaction drawer is now one shared component, so the comparison is
+    // against that component rather than a page that inlined the markup.
+    const transactionPanel = read(
+      "components/admin/TransactionDetail/AdminTransactionDetailPanel.tsx"
+    )
 
     // Same shell geometry and chrome as the transaction detail drawer.
     expect(panel).toContain("fixed inset-y-0 right-0 z-50 flex")

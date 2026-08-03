@@ -20,6 +20,9 @@ import {
 } from "@/components/dashboard/displayHelpers"
 import { getPaymentAssetDisplay } from "@/lib/paymentAssetDisplay"
 import { normalizeTransactionAsset } from "@/lib/transactionDisplay"
+// Shared vocabulary, imported from lib rather than the Admin module so the
+// merchant view stays independent of Admin presentation.
+import { formatPaymentSource } from "@/lib/utils/paymentSource"
 
 export type DashboardPaymentSummary = {
   id?: string | null
@@ -231,7 +234,10 @@ function buildDetailRows(input: {
     ...(tx.terminal_reason && tx.status !== "CONFIRMED"
       ? [{ label: "Reason", value: tx.terminal_reason }]
       : []),
-    { label: "Channel", value: tx.channel || null }
+    // "Payment Source" is the one user-facing name for payment origin. The
+    // stored `channel` value is never shown raw; an untagged row omits the row
+    // rather than reading "Unknown source" to a merchant.
+    { label: "Payment Source", value: tx.channel ? formatPaymentSource(tx.channel) : null }
   ]
 
   if (provider === "cash") {

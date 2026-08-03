@@ -11,7 +11,6 @@ import {
   RefreshCw,
   Search,
   Star,
-  X,
 } from "lucide-react"
 import {
   CompactMetricTile,
@@ -20,14 +19,19 @@ import {
   MetricGrid,
 } from "@/components/dashboard/DashboardPrimitives"
 import {
-  formatDashboardProvider,
-  formatDashboardNetwork,
-} from "@/components/dashboard/displayHelpers"
+  formatProviderName,
+  formatRailName,
+} from "@/components/admin/displayFormatters"
 import PaymentStatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons, segmentedButtonClass } from "@/components/ui/SegmentedButtons"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
-import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import AdminPageHeader, { adminHeaderIconButtonDesktopClass } from "@/components/admin/AdminPageHeader"
+// The one Admin transaction-detail component. Overview owns no drawer markup,
+// no field mapping and no transaction formatting of its own.
+import {
+  AdminTransactionDetailPanel,
+  useAdminTransactionDetail,
+} from "@/components/admin/TransactionDetail"
 import Shift4SandboxOperationsSection from "@/components/admin/Shift4SandboxOperationsSection"
 import AdminSupportTicketPanel, {
   type AdminSupportMessage,
@@ -49,7 +53,6 @@ import {
   supportPriorityPillClass,
   supportStatusPillClass,
 } from "@/lib/support/supportDisplay"
-import { normalizeTransactionAsset } from "@/lib/transactionDisplay"
 import { normalizeStoredPaymentStatus } from "@/lib/utils/canonicalPaymentStatus"
 
 // ─── Overview types ────────────────────────────────────────────────────────────
@@ -140,50 +143,6 @@ type Feedback = {
   created_at: string
 }
 
-type AdminTxDetail = {
-  id?: string
-  paymentId?: string
-  merchant_id?: string
-  merchantId?: string
-  status?: string
-  canonicalStatus?: string
-  provider: string | null
-  network: string | null
-  rail?: string | null
-  asset?: string | null
-  selectedAsset?: string | null
-  selected_asset?: string | null
-  nativeSymbol?: string | null
-  gross_amount?: number
-  amountMinor?: number
-  grossAmountMinor?: number | null
-  merchant_amount?: number
-  merchantAmountMinor?: number | null
-  pinetree_fee?: number
-  feeAmountMinor?: number | null
-  currency: string
-  provider_reference?: string | null
-  providerReference?: string | null
-  transactionHash?: string | null
-  paymentMode?: "live" | "test"
-  metadata: unknown
-  created_at?: string
-  createdAt?: string
-  occurredAt?: string
-  updated_at?: string
-  updatedAt?: string
-}
-
-type TxEvent = {
-  id: string
-  event_type?: string
-  type?: string
-  provider_event?: string | null
-  providerEvent?: string | null
-  created_at?: string
-  occurredAt?: string | null
-}
-
 type ProviderOnboarding = {
   merchantId: string
   provider: "stripe" | "fluidpay"
@@ -242,14 +201,23 @@ const PRIORITY_FILTERS = ["urgent", "high", "normal", "low"]
 
 // Overview "Recent …" cards: equal, fixed height with the list scrolling inside
 // the card. The card itself never grows with its content.
+//
+// `w-full min-w-0` is what keeps the card inside a phone viewport: without an
+// explicit min-width of 0 a grid/flex item is floored at its content's
+// min-content width, so one long unbroken string (a UUID, a URL pasted into
+// feedback) widens the whole track and pushes the card off-screen.
 const ADMIN_RECENT_CARD_CLASS =
-  "flex h-[20rem] flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]"
+  "flex h-[20rem] flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)] w-full min-w-0 max-w-full"
 
 // Every row carries its own bottom divider — including the last one — so the
 // remaining card space reads as empty list space instead of blending into the
 // final row and making one ticket look card-height tall.
+//
+// `overflow-x-hidden` is explicit: a lone `overflow-y-auto` computes the other
+// axis to `auto` too, which is exactly the hidden sideways scroll this card
+// must never have.
 const ADMIN_RECENT_SCROLL_CLASS =
-  "min-h-0 flex-1 overflow-y-auto overscroll-contain [&>*]:border-b [&>*]:border-gray-100"
+  "min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [&>*]:border-b [&>*]:border-gray-100"
 
 const SUPPORT_STAT_CONFIG = [
   { key: "open" as const, tone: "blue" as const },
@@ -295,19 +263,6 @@ function currentMonthLabel() {
   return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })
 }
 
-const EVENT_LABELS: Record<string, string> = {
-  "payment.created":    "Created",
-  "payment.pending":    "Waiting",
-  "payment.processing": "Processing",
-  "payment.confirmed":  "Confirmed",
-  "payment.failed":     "Failed",
-  "payment.cancelled":  "Canceled",
-  "payment.canceled":   "Canceled",
-  "payment.incomplete": "Incomplete",
-  "payment.expired":    "Expired",
-  "payment.refunded":   "Refunded",
-}
-
 function recentPaymentId(payment: RecentTx): string {
   return payment.paymentId || payment.id || ""
 }
@@ -328,85 +283,6 @@ function recentAmount(payment: RecentTx): number {
   return payment.amountMinor != null
     ? payment.amountMinor / 100
     : Number(payment.gross_amount ?? 0)
-}
-
-function detailPaymentId(payment: AdminTxDetail): string {
-  return payment.paymentId || payment.id || ""
-}
-
-function detailMerchantId(payment: AdminTxDetail): string {
-  return payment.merchantId || payment.merchant_id || ""
-}
-
-function detailStatus(payment: AdminTxDetail): string {
-  return normalizeStoredPaymentStatus(payment.canonicalStatus || payment.status)
-}
-
-function detailRail(payment: AdminTxDetail): string | null {
-  return payment.rail || payment.network || null
-}
-
-function detailAsset(payment: AdminTxDetail): string {
-  const metadata = payment.metadata && typeof payment.metadata === "object" && !Array.isArray(payment.metadata)
-    ? payment.metadata as Record<string, unknown>
-    : {}
-  const split = metadata.split && typeof metadata.split === "object" && !Array.isArray(metadata.split)
-    ? metadata.split as Record<string, unknown>
-    : null
-  return normalizeTransactionAsset({
-    provider: payment.provider,
-    network: detailRail(payment),
-    currency: payment.currency,
-    metadata: {
-      selectedAsset: payment.selectedAsset ?? payment.selected_asset ?? (metadata.selectedAsset ?? metadata.selected_asset) as string | null | undefined,
-      asset: payment.asset ?? (metadata.asset ?? metadata.token) as string | null | undefined,
-      split: {
-        asset: split?.asset as string | null | undefined,
-        nativeSymbol: payment.nativeSymbol ?? split?.nativeSymbol as string | null | undefined,
-      },
-    },
-  })
-}
-
-function detailGrossAmount(payment: AdminTxDetail): number {
-  const minor = payment.grossAmountMinor ?? payment.amountMinor
-  return minor != null ? minor / 100 : Number(payment.gross_amount ?? 0)
-}
-
-function detailMerchantAmount(payment: AdminTxDetail): number {
-  return payment.merchantAmountMinor != null
-    ? payment.merchantAmountMinor / 100
-    : Number(payment.merchant_amount ?? 0)
-}
-
-function detailFeeAmount(payment: AdminTxDetail): number {
-  return payment.feeAmountMinor != null
-    ? payment.feeAmountMinor / 100
-    : Number(payment.pinetree_fee ?? 0)
-}
-
-function detailCreatedAt(payment: AdminTxDetail): string {
-  return payment.occurredAt || payment.createdAt || payment.created_at || ""
-}
-
-function detailUpdatedAt(payment: AdminTxDetail): string {
-  return payment.updatedAt || payment.updated_at || detailCreatedAt(payment)
-}
-
-function detailReference(payment: AdminTxDetail): string | null {
-  return payment.transactionHash || payment.providerReference || payment.provider_reference || null
-}
-
-function timelineEventType(event: TxEvent): string {
-  return event.type || event.event_type || "payment.created"
-}
-
-function timelineProviderEvent(event: TxEvent): string | null {
-  return event.providerEvent || event.provider_event || null
-}
-
-function timelineOccurredAt(event: TxEvent): string {
-  return event.occurredAt || event.created_at || ""
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -519,10 +395,9 @@ export default function AdminPage() {
   const [loadingFeedback, setLoadingFeedback] = useState(false)
   const [feedbackLoaded, setFeedbackLoaded] = useState(false)
 
-  // ── Transaction detail state ─────────────────────────────────────────────────
-  const [selectedTxId, setSelectedTxId] = useState<string | null>(null)
-  const [txDetail, setTxDetail] = useState<{ payment: AdminTxDetail; events: TxEvent[] } | null>(null)
-  const [loadingTxDetail, setLoadingTxDetail] = useState(false)
+  // ── Transaction detail ───────────────────────────────────────────────────────
+  // Shared controller — the same fetch, model and panel every admin surface uses.
+  const transactionDetail = useAdminTransactionDetail()
 
   // ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -679,29 +554,6 @@ export default function AdminPage() {
       fetchFeedback(token)
     }
   }, [token, activeTab, feedbackLoaded, fetchFeedback])
-
-  // ── Open transaction detail ──────────────────────────────────────────────────
-
-  const openTxDetail = useCallback(async (id: string, tk: string) => {
-    setSelectedTxId(id)
-    setTxDetail(null)
-    setLoadingTxDetail(true)
-    try {
-      const res = await fetch(`/api/admin/transactions/${encodeURIComponent(id)}`, {
-        headers: { Authorization: `Bearer ${tk}` },
-      })
-      if (!res.ok) {
-        toast.error("Failed to load transaction detail")
-        return
-      }
-      const data = await res.json()
-      setTxDetail({ payment: data.payment, events: data.events || [] })
-    } catch {
-      toast.error("Failed to load transaction detail")
-    } finally {
-      setLoadingTxDetail(false)
-    }
-  }, [])
 
   // ── Open ticket detail ──────────────────────────────────────────────────────
 
@@ -1120,15 +972,15 @@ export default function AdminPage() {
                   </Link>
                 }
               >
-                <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+                <div className="min-w-0 overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
                   {!overview?.recentTransactions.length ? (
                     <p className="px-5 py-10 text-center text-sm text-gray-400">
                       No transactions yet.
                     </p>
                   ) : (
-                    <div className="divide-y divide-gray-100">
+                    <div className="min-w-0 divide-y divide-gray-100">
                       <div className="hidden grid-cols-[1fr_120px_110px_130px_100px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                        {["Payment ID", "Provider", "Network", "Amount", "Status"].map((h) => (
+                        {["Payment ID", "Provider", "Rail", "Amount", "Status"].map((h) => (
                           <div
                             key={h}
                             className="text-[11px] font-semibold uppercase tracking-wider text-gray-400"
@@ -1143,27 +995,29 @@ export default function AdminPage() {
                         return (
                         <button
                           key={paymentId}
-                          onClick={() => openTxDetail(paymentId, token)}
-                          className="w-full text-left flex items-center gap-3 px-5 py-3.5 sm:grid sm:grid-cols-[1fr_120px_110px_130px_100px] sm:gap-4 transition-colors hover:bg-[#0052FF]/[0.025] focus:outline-none"
+                          onClick={() => transactionDetail.open(paymentId)}
+                          className="flex w-full min-w-0 items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[#0052FF]/[0.025] focus:outline-none sm:grid sm:grid-cols-[1fr_120px_110px_130px_100px] sm:gap-4 sm:px-5"
                         >
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-mono text-xs text-gray-700">
                               {paymentId.slice(0, 16)}{paymentId.length > 16 ? "…" : ""}
                             </p>
-                            <p className="mt-0.5 text-[11px] text-gray-400">
+                            <p className="mt-0.5 truncate text-[11px] text-gray-400">
                               {fmtDate(recentCreatedAt(tx))}
                             </p>
                           </div>
                           <div className="hidden text-sm text-gray-600 sm:block">
-                            {tx.provider ? formatDashboardProvider(tx.provider) : <span className="text-gray-300">—</span>}
+                            {tx.provider ? formatProviderName(tx.provider) : <span className="text-gray-300">—</span>}
                           </div>
+                          {/* The recent-activity DTO carries the canonical rail,
+                              so this column uses the rail vocabulary. */}
                           <div className="hidden text-sm text-gray-600 sm:block">
-                            {rail ? formatDashboardNetwork(rail) : <span className="text-gray-300">—</span>}
+                            {rail ? formatRailName(rail) : <span className="text-gray-300">—</span>}
                           </div>
                           <div className="hidden text-sm font-medium text-gray-900 sm:block">
                             {tx.displayAmount || fmtUSD(recentAmount(tx))}
                           </div>
-                          <div>
+                          <div className="shrink-0">
                             <PaymentStatusBadge status={recentStatus(tx)} />
                           </div>
                         </button>
@@ -1177,9 +1031,12 @@ export default function AdminPage() {
               {/* Recent Tickets + Feedback.
                   Both cards are fixed-height with their own internal scroll
                   container, so neither list can stretch the dashboard as
-                  activity grows — only the inside of each card scrolls. */}
+                  activity grows — only the inside of each card scrolls.
+                  `min-w-0` on each grid child stops a single long value from
+                  widening the shared column track past the phone viewport. */}
               <div className="grid gap-6 lg:grid-cols-2">
                 <DashboardSection
+                  className="min-w-0"
                   title="Recent Tickets"
                   titleTone="blue"
                   action={
@@ -1202,18 +1059,18 @@ export default function AdminPage() {
                           <button
                             key={t.id}
                             onClick={() => setActiveTab("support")}
-                            className="flex w-full items-start gap-3 px-5 py-3.5 text-left transition-colors hover:bg-[#0052FF]/[0.025]"
+                            className="flex w-full min-w-0 items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[#0052FF]/[0.025] sm:px-5"
                           >
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-medium text-gray-900">
                                 {t.subject}
                               </p>
-                              <p className="mt-0.5 text-xs text-gray-400">
+                              <p className="mt-0.5 truncate text-xs text-gray-400">
                                 {t.merchant_email ?? t.merchant_business_name ?? "—"} ·{" "}
                                 {fmtDate(t.created_at)}
                               </p>
                             </div>
-                            <div className="flex shrink-0 flex-col items-end gap-1">
+                            <div className="flex min-w-0 shrink-0 flex-col items-end gap-1">
                               <StatusBadge status={t.status} />
                               <PriorityBadge priority={t.priority} />
                             </div>
@@ -1225,6 +1082,7 @@ export default function AdminPage() {
                 </DashboardSection>
 
                 <DashboardSection
+                  className="min-w-0"
                   title="Recent Feedback"
                   titleTone="blue"
                   action={
@@ -1244,22 +1102,25 @@ export default function AdminPage() {
                     ) : (
                       <div className={ADMIN_RECENT_SCROLL_CLASS}>
                         {overview.recentFeedback.map((fb) => (
-                          <div key={fb.id} className="px-5 py-3.5">
-                            <div className="flex items-center gap-2 flex-wrap">
+                          <div key={fb.id} className="min-w-0 px-4 py-3.5 sm:px-5">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-600">
                                 {formatSupportEnumLabel(fb.type)}
                               </span>
                               {fb.rating !== null && (
-                                <span className="text-xs text-amber-500 font-medium">
+                                <span className="text-xs font-medium text-amber-500">
                                   {"★".repeat(fb.rating)}
                                   {"☆".repeat(5 - fb.rating)}
                                 </span>
                               )}
                             </div>
-                            <p className="mt-2 line-clamp-1 text-sm text-gray-700">
+                            {/* Merchant-authored text: `break-words` so a pasted
+                                URL or token cannot set a min-content width the
+                                card has to grow to. */}
+                            <p className="mt-2 line-clamp-1 break-words text-sm text-gray-700">
                               {fb.message}
                             </p>
-                            <p className="mt-1 text-xs text-gray-400">
+                            <p className="mt-1 truncate text-xs text-gray-400">
                               {fb.merchant_id.slice(0, 12)}… · {fmtDate(fb.created_at)}
                             </p>
                           </div>
@@ -1294,14 +1155,16 @@ export default function AdminPage() {
                 <div className="flex flex-col items-center justify-center px-5 py-10 text-center">
                   <p className="text-sm font-semibold text-gray-950">No provider onboarding records</p>
                   <p className="mt-1 max-w-md text-sm text-gray-500">
-                    Stripe and Fluid Pay setup requests appear here once a merchant starts onboarding.
+                    Stripe and FluidPay setup requests appear here once a merchant starts onboarding.
                   </p>
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">
                   {providerOnboarding.map((item) => {
                     const key = `${item.provider}:${item.merchantId}`
-                    const providerLabel = item.provider === "stripe" ? "Stripe" : "Fluid Pay"
+                    // Same formatter as every other Admin provider label, so
+                    // this tab cannot name a provider differently from Reports.
+                    const providerLabel = formatProviderName(item.provider)
                     const statusLabel =
                       item.applicationStatus === "approved"
                         ? "Approved"
@@ -1318,7 +1181,7 @@ export default function AdminPage() {
                           : "border-amber-200 bg-amber-50 text-amber-700"
 
                     return (
-                      <div key={key} className="flex flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div key={key} className="flex min-w-0 flex-col gap-4 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-sm font-semibold text-gray-950">{providerLabel}</p>
@@ -1329,7 +1192,7 @@ export default function AdminPage() {
                               {item.enabled ? "Enabled" : "Disabled"}
                             </span>
                           </div>
-                          <p className="mt-1 font-mono text-xs text-gray-500">Merchant: {item.merchantId}</p>
+                          <p className="mt-1 break-all font-mono text-xs text-gray-500">Merchant: {item.merchantId}</p>
                           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
                             <span>Started: {item.setupStartedAt ? fmtDateTime(item.setupStartedAt) : "-"}</span>
                             <span>Returned: {item.setupReturnedAt ? fmtDateTime(item.setupReturnedAt) : "-"}</span>
@@ -1447,12 +1310,12 @@ export default function AdminPage() {
                     onClick={() => openTicket(ticket.id, token)}
                     className="w-full text-left transition-colors hover:bg-[#0052FF]/[0.025] focus:outline-none"
                   >
-                    <div className="flex items-center gap-3 px-5 py-4 sm:grid sm:grid-cols-[1fr_190px_100px_120px_110px_28px] sm:gap-4">
+                    <div className="flex min-w-0 items-center gap-3 px-4 py-4 sm:grid sm:grid-cols-[1fr_190px_100px_120px_110px_28px] sm:gap-4 sm:px-5">
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-gray-900">
                           {ticket.subject}
                         </p>
-                        <p className="mt-0.5 text-xs text-gray-400">
+                        <p className="mt-0.5 truncate text-xs text-gray-400">
                           {formatSupportCategory(ticket.category)}
                         </p>
                       </div>
@@ -1507,9 +1370,9 @@ export default function AdminPage() {
             feedback.map((fb) => (
               <div
                 key={fb.id}
-                className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.10),0_0_36px_rgba(37,99,235,0.14)]"
+                className="min-w-0 rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_18px_50px_rgba(15,23,42,0.10),0_0_36px_rgba(37,99,235,0.14)] sm:p-5"
               >
-                <div className="flex items-start gap-4">
+                <div className="flex min-w-0 items-start gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-600">
@@ -1517,10 +1380,12 @@ export default function AdminPage() {
                       </span>
                       <StarRating rating={fb.rating} />
                     </div>
-                    <p className="mt-3 whitespace-pre-wrap text-sm text-gray-700">
+                    {/* Merchant-authored text: preserve line breaks, but never
+                        let one long token widen the card past the viewport. */}
+                    <p className="mt-3 whitespace-pre-wrap break-words text-sm text-gray-700">
                       {fb.message}
                     </p>
-                    <p className="mt-2 text-xs text-gray-400">
+                    <p className="mt-2 break-words text-xs text-gray-400">
                       Merchant: {fb.merchant_id.slice(0, 12)}… · {fmtDate(fb.created_at)}
                     </p>
                   </div>
@@ -1532,182 +1397,31 @@ export default function AdminPage() {
       )}
 
       {/* ════════════════════════════════════════════════════════════════════════
+          TRANSACTION DETAIL PANEL — the shared Admin component, identical to
+          the one Transaction Explorer renders. No panel markup lives here.
+      ════════════════════════════════════════════════════════════════════════ */}
+      {transactionDetail.paymentId && (
+        <AdminTransactionDetailPanel
+          paymentId={transactionDetail.paymentId}
+          detail={transactionDetail.detail}
+          loading={transactionDetail.loading}
+          error={transactionDetail.error}
+          onClose={transactionDetail.close}
+          footer={
+            <Link
+              href={`/dashboard/admin/transactions?search=${encodeURIComponent(transactionDetail.paymentId)}`}
+              className="text-xs font-medium text-[#0052FF] hover:underline"
+              onClick={transactionDetail.close}
+            >
+              Open in Transaction Explorer →
+            </Link>
+          }
+        />
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════════════
           TICKET DETAIL PANEL (shared, available from support tab)
       ════════════════════════════════════════════════════════════════════════ */}
-      {/* ════════════════════════════════════════════════════════════════════════
-          TRANSACTION DETAIL PANEL
-      ════════════════════════════════════════════════════════════════════════ */}
-      {selectedTxId && (
-        <>
-          <div
-            data-pinetree-overlay="true"
-            className="pinetree-modal-backdrop fixed inset-0 z-40"
-            onClick={() => {
-              setSelectedTxId(null)
-              setTxDetail(null)
-            }}
-          />
-          <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-white shadow-2xl sm:w-[560px] lg:w-[620px]">
-            {/* Panel header */}
-            <div className="flex-none border-b border-gray-100 px-6 py-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
-                    Platform Transaction Detail
-                  </p>
-                  <h2 className="mt-1 font-mono text-sm text-gray-800 break-all">
-                    {txDetail ? detailPaymentId(txDetail.payment) : selectedTxId}
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
-                  aria-label="Close transaction detail"
-                  className={modalCloseButtonClass}
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            {loadingTxDetail ? (
-              <div className="flex flex-1 items-center justify-center">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-              </div>
-            ) : txDetail ? (
-              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-                {/* Status + amounts */}
-                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                  <div className="flex items-center justify-between gap-3 mb-4">
-                    <PaymentStatusBadge status={detailStatus(txDetail.payment)} />
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Total</p>
-                      <p className="mt-1 text-lg font-bold text-gray-900">
-                        {fmtUSD(detailGrossAmount(txDetail.payment))}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Merchant</p>
-                      <p className="mt-1 text-lg font-bold text-gray-900">
-                        {fmtUSD(detailMerchantAmount(txDetail.payment))}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Fee</p>
-                      <p className="mt-1 text-lg font-bold text-[#0052FF]">
-                        {fmtUSD(detailFeeAmount(txDetail.payment))}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Details grid */}
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
-                  <div>
-                    <p className="text-gray-400">Merchant ID</p>
-                    <p className="mt-0.5 font-mono text-gray-700 break-all">{detailMerchantId(txDetail.payment)}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400">Currency</p>
-                    <p className="mt-0.5 text-gray-700">{txDetail.payment.currency || "USD"}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400">Network / Rail</p>
-                    <p className="mt-0.5 text-gray-700">
-                      {detailRail(txDetail.payment)
-                        ? formatDashboardNetwork(detailRail(txDetail.payment))
-                        : "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400">Asset</p>
-                    <p className="mt-0.5 text-gray-700">{detailAsset(txDetail.payment)}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400">Provider</p>
-                    <p className="mt-0.5 text-gray-700">
-                      {txDetail.payment.provider
-                        ? formatDashboardProvider(txDetail.payment.provider)
-                        : "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400">Created</p>
-                    <p className="mt-0.5 text-gray-700">{fmtDateTime(detailCreatedAt(txDetail.payment))}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400">Updated</p>
-                    <p className="mt-0.5 text-gray-700">{fmtDateTime(detailUpdatedAt(txDetail.payment))}</p>
-                  </div>
-                  {detailReference(txDetail.payment) && (
-                    <div className="col-span-2">
-                      <p className="text-gray-400">Tx Hash / Reference</p>
-                      <p className="mt-0.5 font-mono text-gray-700 break-all text-[11px]">
-                        {detailReference(txDetail.payment)}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Event timeline */}
-                {txDetail.events.length > 0 && (
-                  <div>
-                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
-                      Payment Timeline
-                    </p>
-                    <div className="space-y-1">
-                      {txDetail.events.map((ev) => (
-                        <div
-                          key={ev.id}
-                          className="flex items-start gap-3 rounded-xl bg-gray-50 px-3 py-2.5"
-                        >
-                          <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-blue-400" />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs font-medium text-gray-800">
-                                {EVENT_LABELS[timelineEventType(ev)] ?? timelineEventType(ev)}
-                              </p>
-                              <p className="shrink-0 text-[11px] text-gray-400">
-                                {fmtDateTime(timelineOccurredAt(ev))}
-                              </p>
-                            </div>
-                            {timelineProviderEvent(ev) && (
-                              <p className="mt-0.5 text-[11px] text-gray-400">{timelineProviderEvent(ev)}</p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {txDetail.events.length === 0 && (
-                  <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                    <p className="text-xs text-gray-400">No payment events recorded for this payment.</p>
-                  </div>
-                )}
-
-                {/* View in explorer */}
-                <div className="border-t border-gray-100 pt-4">
-                  <Link
-                    href={`/dashboard/admin/transactions?search=${encodeURIComponent(detailPaymentId(txDetail.payment))}`}
-                    className="text-xs font-medium text-[#0052FF] hover:underline"
-                    onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
-                  >
-                    Open in Transaction Explorer →
-                  </Link>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-1 items-center justify-center">
-                <p className="text-sm text-gray-400">Failed to load transaction detail.</p>
-              </div>
-            )}
-          </div>
-        </>
-      )}
 
       {selectedTicketId && (
         <AdminSupportTicketPanel

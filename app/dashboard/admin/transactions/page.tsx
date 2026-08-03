@@ -5,11 +5,16 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { supabase } from "@/lib/supabaseClient"
 import { toast } from "sonner"
-import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
-import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import { PaginationControls } from "@/components/ui/PaginationControls"
 import AdminPageHeader, { adminHeaderIconButtonDesktopClass } from "@/components/admin/AdminPageHeader"
+// The one Admin transaction-detail component. The Explorer owns no drawer
+// markup, no field mapping and no transaction formatting of its own.
+import {
+  AdminTransactionDetailPanel,
+  useAdminTransactionDetail,
+} from "@/components/admin/TransactionDetail"
 import {
   filterChipClass,
   filterInputClass,
@@ -25,13 +30,12 @@ import {
   MetricGrid,
 } from "@/components/dashboard/DashboardPrimitives"
 import {
-  formatDashboardProvider,
-  formatDashboardNetwork,
-} from "@/components/dashboard/displayHelpers"
+  formatNetworkName,
+  formatProviderName,
+  formatRailName,
+} from "@/components/admin/displayFormatters"
 import PaymentStatusBadge from "@/components/ui/StatusBadge"
-import { normalizeTransactionAsset } from "@/lib/transactionDisplay"
 import { normalizeStoredPaymentStatus } from "@/lib/utils/canonicalPaymentStatus"
-import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -96,64 +100,8 @@ type AppliedFilters = {
   datePreset: string
 }
 
-// Detail drawer types
-
-type TxDetailPayment = {
-  id?: string
-  paymentId?: string
-  merchant_id?: string
-  merchantId?: string
-  status?: string
-  canonicalStatus?: string
-  provider: string | null
-  network: string | null
-  rail?: string | null
-  asset?: string | null
-  selectedAsset?: string | null
-  selected_asset?: string | null
-  nativeSymbol?: string | null
-  gross_amount?: number
-  amountMinor?: number
-  grossAmountMinor?: number | null
-  merchant_amount?: number
-  merchantAmountMinor?: number | null
-  pinetree_fee?: number
-  feeAmountMinor?: number | null
-  currency: string
-  provider_reference?: string | null
-  providerReference?: string | null
-  transactionHash?: string | null
-  paymentMode?: "live" | "test"
-  metadata: unknown
-  created_at?: string
-  createdAt?: string
-  occurredAt?: string
-  updated_at?: string
-  updatedAt?: string
-}
-
-type TxDetailEvent = {
-  id: string
-  event_type?: string
-  type?: string
-  provider_event?: string | null
-  providerEvent?: string | null
-  raw_payload?: unknown
-  created_at?: string
-  occurredAt?: string | null
-}
-
-type TxDetailMerchant = {
-  id: string
-  email: string | null
-  business_name: string | null
-}
-
-type TxDetail = {
-  payment: TxDetailPayment
-  events: TxDetailEvent[]
-  merchant: TxDetailMerchant | null
-}
+// Transaction detail types live with the shared Admin Transaction Detail
+// component, so this page and the panel cannot drift apart.
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -170,54 +118,21 @@ const STATUSES = [
   { value: "EXPIRED",    label: "Expired" },
 ]
 
-const TERMINAL_STATUSES = new Set([
-  "CONFIRMED",
-  "FAILED",
-  "INCOMPLETE",
-  "EXPIRED",
-  "CANCELED",
-  "CANCELLED",
-  "REFUNDED",
-])
+// Filter VALUES stay canonical: they are sent to /api/admin/transactions and
+// compared against stored provider/network columns. Only the visible label is
+// formatted, so the option and its active pill read "Bitcoin Lightning" while
+// the request still carries `bitcoin_lightning`.
+const NETWORK_FILTER_VALUES = ["solana", "base", "ethereum", "bitcoin_lightning"]
 
-const EVENT_LABELS: Record<string, string> = {
-  "payment.created":    "Waiting",
-  "payment.pending":    "Waiting",
-  "payment.processing": "Processing",
-  "payment.confirmed":  "Confirmed",
-  "payment.failed":     "Failed",
-  "payment.cancelled":  "Canceled",
-  "payment.canceled":   "Canceled",
-  "payment.incomplete": "Incomplete",
-  "payment.expired":    "Expired",
-  "payment.refunded":   "Refunded",
-}
-
-const NETWORK_LABELS_DETAIL: Record<string, string> = {
-  solana:            "Solana",
-  base:              "Base",
-  bitcoin_lightning: "Bitcoin Lightning",
-  btc_lightning:     "Bitcoin Lightning",
-  lightning:         "Bitcoin Lightning",
-  ethereum:          "Ethereum",
-}
-
-const NETWORKS = [
-  { value: "", label: "All Networks" },
-  { value: "solana",          label: "Solana" },
-  { value: "base",            label: "Base" },
-  { value: "ethereum",        label: "Ethereum" },
-  { value: "bitcoin_lightning", label: "Bitcoin Lightning" },
-]
-
-const PROVIDERS = [
-  { value: "", label: "All Providers" },
-  { value: "solana",   label: "Solana Pay" },
-  { value: "coinbase", label: "Coinbase" },
-  { value: "shift4",   label: "Shift4" },
-  { value: "base",     label: "Base Pay" },
-  { value: "lightning", label: "Lightning" },
-  { value: "cash",     label: "Cash" },
+const PROVIDER_FILTER_VALUES = [
+  "solana",
+  "coinbase",
+  "shift4",
+  "stripe",
+  "fluidpay",
+  "base",
+  "lightning",
+  "cash",
 ]
 
 const DATE_PRESETS = [
@@ -265,16 +180,6 @@ function topKey(map: Record<string, number>): string | null {
   const entries = Object.entries(map)
   if (!entries.length) return null
   return entries.reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0]
-}
-
-function labelProvider(p: string | null): string {
-  if (!p) return "—"
-  return formatDashboardProvider(p)
-}
-
-function labelNetwork(n: string | null): string {
-  if (!n) return "—"
-  return formatDashboardNetwork(n)
 }
 
 function txPaymentId(tx: Pick<TxRow, "paymentId" | "id">): string {
@@ -360,160 +265,6 @@ function StatusBadge({ status }: { status: string }) {
   return <PaymentStatusBadge status={status} />
 }
 
-// ─── Detail drawer helpers ─────────────────────────────────────────────────────
-
-function extractMeta(payment: TxDetailPayment): {
-  paymentMode: "live" | "test"
-  merchantWallet: string | null
-  pinetreeWallet: string | null
-  splitContract: string | null
-  asset: string | null
-  strategy: string | null
-} {
-  const metadata = payment.metadata
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    const asset = normalizeTransactionAsset({
-      provider: payment.provider,
-      network: payment.rail || payment.network,
-      currency: payment.currency,
-      metadata: {
-        selectedAsset: payment.selectedAsset ?? payment.selected_asset,
-        asset: payment.asset,
-        split: { nativeSymbol: payment.nativeSymbol },
-      },
-    })
-    return {
-      paymentMode: payment.paymentMode === "test" ? "test" : "live",
-      merchantWallet: null,
-      pinetreeWallet: null,
-      splitContract: null,
-      asset: asset === "Unknown asset" ? null : asset,
-      strategy: null,
-    }
-  }
-  const m = metadata as Record<string, unknown>
-  const split = m.split && typeof m.split === "object" && !Array.isArray(m.split)
-    ? m.split as Record<string, unknown>
-    : null
-  const asset = normalizeTransactionAsset({
-    provider: payment.provider,
-    network: payment.rail || payment.network,
-    currency: payment.currency,
-    metadata: {
-      selectedAsset: payment.selectedAsset ?? payment.selected_asset ?? (m.selectedAsset ?? m.selected_asset) as string | null | undefined,
-      asset: payment.asset ?? (m.asset ?? m.token) as string | null | undefined,
-      split: {
-        asset: split?.asset as string | null | undefined,
-        nativeSymbol: payment.nativeSymbol ?? split?.nativeSymbol as string | null | undefined,
-      },
-    },
-  })
-  return {
-    paymentMode: payment.paymentMode === "test" || m.payment_mode === "test" ? "test" : "live",
-    merchantWallet: (m.merchant_wallet ?? m.merchantWallet ?? m.wallet_address ?? null) as string | null,
-    pinetreeWallet: (m.pinetree_wallet ?? m.treasury_wallet ?? m.pinetreeWallet ?? m.treasuryWallet ?? null) as string | null,
-    splitContract: (m.split_contract ?? m.splitContract ?? m.splitContractAddress ?? null) as string | null,
-    asset: asset === "Unknown asset" ? null : asset,
-    strategy: (m.strategy ?? null) as string | null,
-  }
-}
-
-function detailPaymentId(payment: TxDetailPayment): string {
-  return payment.paymentId || payment.id || ""
-}
-
-function detailMerchantId(payment: TxDetailPayment): string {
-  return payment.merchantId || payment.merchant_id || ""
-}
-
-function detailStatus(payment: TxDetailPayment): string {
-  return normalizeStoredPaymentStatus(payment.canonicalStatus || payment.status)
-}
-
-function detailRail(payment: TxDetailPayment): string | null {
-  return payment.rail || payment.network || null
-}
-
-function detailGrossAmount(payment: TxDetailPayment): number {
-  const minor = payment.grossAmountMinor ?? payment.amountMinor
-  return minor != null ? minor / 100 : Number(payment.gross_amount ?? 0)
-}
-
-function detailMerchantAmount(payment: TxDetailPayment): number {
-  return payment.merchantAmountMinor != null
-    ? payment.merchantAmountMinor / 100
-    : Number(payment.merchant_amount ?? 0)
-}
-
-function detailFeeAmount(payment: TxDetailPayment): number {
-  return payment.feeAmountMinor != null
-    ? payment.feeAmountMinor / 100
-    : Number(payment.pinetree_fee ?? 0)
-}
-
-function detailCreatedAt(payment: TxDetailPayment): string {
-  return payment.occurredAt || payment.createdAt || payment.created_at || ""
-}
-
-function detailUpdatedAt(payment: TxDetailPayment): string {
-  return payment.updatedAt || payment.updated_at || detailCreatedAt(payment)
-}
-
-function detailReference(payment: TxDetailPayment): string | null {
-  return payment.transactionHash || payment.providerReference || payment.provider_reference || null
-}
-
-function eventType(event: TxDetailEvent): string {
-  return event.type || event.event_type || "payment.created"
-}
-
-function eventProvider(event: TxDetailEvent): string | null {
-  return event.providerEvent || event.provider_event || null
-}
-
-function eventOccurredAt(event: TxDetailEvent): string {
-  return event.occurredAt || event.created_at || ""
-}
-
-function extractEventPayload(raw_payload: unknown): {
-  adminAction: string | null
-  failureReason: string | null
-  txHash: string | null
-} {
-  if (!raw_payload || typeof raw_payload !== "object" || Array.isArray(raw_payload)) {
-    return { adminAction: null, failureReason: null, txHash: null }
-  }
-  const p = raw_payload as Record<string, unknown>
-  return {
-    adminAction:   (p.adminAction   ?? p.admin_action   ?? null) as string | null,
-    failureReason: (p.failureReason ?? p.failure_reason ?? p.error ?? p.reason ?? null) as string | null,
-    txHash:        (p.txHash ?? p.tx_hash ?? p.signature ?? p.hash ?? null) as string | null,
-  }
-}
-
-function CopyButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false)
-  function doCopy() {
-    navigator.clipboard.writeText(value).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
-  }
-  return (
-    <button
-      onClick={doCopy}
-      title="Copy"
-      className="ml-1.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 hover:text-gray-700 transition-colors"
-    >
-      {copied ? (
-        <span className="text-[10px] font-semibold text-emerald-600">✓</span>
-      ) : (
-        <Copy size={11} />
-      )}
-    </button>
-  )
-}
-
 function UnauthorizedScreen() {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
@@ -564,10 +315,9 @@ export default function AdminTransactionsPage() {
   const [result,    setResult]    = useState<TxResult | null>(null)
   const [loading,   setLoading]   = useState(true)
 
-  // detail drawer
-  const [selectedTxId,    setSelectedTxId]    = useState<string | null>(null)
-  const [txDetail,        setTxDetail]        = useState<TxDetail | null>(null)
-  const [loadingTxDetail, setLoadingTxDetail] = useState(false)
+  // Shared transaction-detail controller — the same fetch, model and panel the
+  // Admin Overview uses, so both entry points render identically.
+  const transactionDetail = useAdminTransactionDetail()
 
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -618,29 +368,6 @@ export default function AdminTransactionsPage() {
     setMerchantId(""); setDatePreset("")
     setApplied(EMPTY_FILTERS)
     setOffset(0)
-  }, [])
-
-  const openTxDetail = useCallback(async (id: string) => {
-    setSelectedTxId(id)
-    setTxDetail(null)
-    setLoadingTxDetail(true)
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) return
-      const res = await fetch(`/api/admin/transactions/${encodeURIComponent(id)}`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-      if (!res.ok) {
-        toast.error("Failed to load transaction detail")
-        return
-      }
-      const data = await res.json() as TxDetail
-      setTxDetail(data)
-    } catch {
-      toast.error("Failed to load transaction detail")
-    } finally {
-      setLoadingTxDetail(false)
-    }
   }, [])
 
   // Auto-apply when dropdown fields change
@@ -694,8 +421,8 @@ export default function AdminTransactionsPage() {
     const topNetwork  = topKey(d.networks)
     if (topProvider || topNetwork) {
       const parts: string[] = []
-      if (topProvider) parts.push(`Top provider: ${labelProvider(topProvider)}`)
-      if (topNetwork)  parts.push(`Top network: ${labelNetwork(topNetwork)}`)
+      if (topProvider) parts.push(`Top provider: ${formatProviderName(topProvider)}`)
+      if (topNetwork)  parts.push(`Top network: ${formatNetworkName(topNetwork)}`)
       lines.push(parts.join(" — "))
     }
 
@@ -872,8 +599,9 @@ export default function AdminTransactionsPage() {
               onChange={(e) => handleDropdownChange("network", e.target.value)}
               className={filterSelectClass}
             >
-              {NETWORKS.map((n) => (
-                <option key={n.value} value={n.value}>{n.label}</option>
+              <option value="">All Networks</option>
+              {NETWORK_FILTER_VALUES.map((value) => (
+                <option key={value} value={value}>{formatNetworkName(value)}</option>
               ))}
             </select>
 
@@ -884,8 +612,9 @@ export default function AdminTransactionsPage() {
               onChange={(e) => handleDropdownChange("provider", e.target.value)}
               className={filterSelectClass}
             >
-              {PROVIDERS.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
+              <option value="">All Providers</option>
+              {PROVIDER_FILTER_VALUES.map((value) => (
+                <option key={value} value={value}>{formatProviderName(value)}</option>
               ))}
             </select>
 
@@ -926,12 +655,12 @@ export default function AdminTransactionsPage() {
               )}
               {applied.network && (
                 <span className={filterChipClass}>
-                  Network: {labelNetwork(applied.network)}
+                  Network: {formatNetworkName(applied.network)}
                 </span>
               )}
               {applied.provider && (
                 <span className={filterChipClass}>
-                  Provider: {labelProvider(applied.provider)}
+                  Provider: {formatProviderName(applied.provider)}
                 </span>
               )}
               {applied.datePreset && (
@@ -940,13 +669,19 @@ export default function AdminTransactionsPage() {
                 </span>
               )}
               {applied.search && (
-                <span className={filterChipClass}>
-                  Search: &ldquo;{applied.search}&rdquo;
+                // Operator-typed value: bounded so an unbroken search string
+                // cannot widen the filter card past the phone viewport.
+                <span className={`${filterChipClass} max-w-full`}>
+                  <span className="min-w-0 truncate">
+                    Search: &ldquo;{applied.search}&rdquo;
+                  </span>
                 </span>
               )}
               {applied.merchantId && (
-                <span className={filterChipClass}>
-                  Merchant: {applied.merchantId.slice(0, 12)}…
+                <span className={`${filterChipClass} max-w-full`}>
+                  <span className="min-w-0 truncate">
+                    Merchant: {applied.merchantId.slice(0, 12)}…
+                  </span>
                 </span>
               )}
             </div>
@@ -968,7 +703,7 @@ export default function AdminTransactionsPage() {
           )
         }
       >
-        <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
+        <div className="min-w-0 overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
           {loading ? (
             <Spinner />
           ) : !result?.rows.length ? (
@@ -984,7 +719,7 @@ export default function AdminTransactionsPage() {
             <>
               {/* Desktop header */}
               <div className="hidden grid-cols-[140px_1fr_140px_110px_110px_100px_100px_110px] gap-3 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                {["Time", "Payment ID / Merchant", "Provider", "Network", "Amount", "Fee", "Status"].map(
+                {["Time", "Payment ID / Merchant", "Provider", "Rail", "Amount", "Fee", "Status"].map(
                   (h, i) => (
                     <div
                       key={i}
@@ -996,7 +731,7 @@ export default function AdminTransactionsPage() {
                 )}
               </div>
 
-              <div className="divide-y divide-gray-100">
+              <div className="min-w-0 divide-y divide-gray-100">
                 {result.rows.map((tx) => {
                   const paymentId = txPaymentId(tx)
                   const merchant = txMerchantId(tx)
@@ -1005,11 +740,11 @@ export default function AdminTransactionsPage() {
                   return (
                   <button
                     key={paymentId}
-                    onClick={() => openTxDetail(paymentId)}
-                    className="w-full text-left flex flex-col gap-1.5 px-5 py-3.5 transition-colors hover:bg-[#0052FF]/[0.025] focus:outline-none sm:grid sm:grid-cols-[140px_1fr_140px_110px_110px_100px_100px_110px] sm:items-center sm:gap-3"
+                    onClick={() => transactionDetail.open(paymentId)}
+                    className="flex w-full min-w-0 flex-col gap-1.5 px-4 py-3.5 text-left transition-colors hover:bg-[#0052FF]/[0.025] focus:outline-none sm:grid sm:grid-cols-[140px_1fr_140px_110px_110px_100px_100px_110px] sm:items-center sm:gap-3 sm:px-5"
                   >
                     {/* Time */}
-                    <div className="text-xs text-gray-500">
+                    <div className="truncate text-xs text-gray-500">
                       {fmtDateTime(txCreatedAt(tx))}
                     </div>
 
@@ -1025,12 +760,13 @@ export default function AdminTransactionsPage() {
 
                     {/* Provider */}
                     <div className="hidden text-sm text-gray-700 sm:block">
-                      {labelProvider(tx.provider)}
+                      {formatProviderName(tx.provider)}
                     </div>
 
-                    {/* Network */}
+                    {/* Network — the row carries the canonical rail, so it is
+                        labelled with the rail vocabulary, not the provider's. */}
                     <div className="hidden text-sm text-gray-600 sm:block">
-                      {rail ? labelNetwork(rail) : <span className="text-gray-300">—</span>}
+                      {rail ? formatRailName(rail) : <span className="text-gray-300">—</span>}
                     </div>
 
                     {/* Amount */}
@@ -1082,306 +818,17 @@ export default function AdminTransactionsPage() {
       </DashboardSection>
 
       {/* ════════════════════════════════════════════════════════════════════════
-          TRANSACTION DETAIL DRAWER
+          TRANSACTION DETAIL PANEL — the shared Admin component, identical to
+          the one Admin Overview renders. No panel markup lives here.
       ════════════════════════════════════════════════════════════════════════ */}
-      {selectedTxId && (
-        <>
-          <div
-            data-pinetree-overlay="true"
-            className="pinetree-modal-backdrop fixed inset-0 z-40"
-            onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
-          />
-          <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-white shadow-2xl sm:w-[580px] lg:w-[640px]">
-
-            {/* Panel header */}
-            <div className="flex-none border-b border-gray-100 px-6 py-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
-                    Platform Transaction Detail
-                  </p>
-                  <div className="mt-1 flex items-center gap-1">
-                    <h2 className="font-mono text-sm text-gray-800 break-all leading-snug">
-                      {txDetail ? detailPaymentId(txDetail.payment) : selectedTxId}
-                    </h2>
-                    <CopyButton value={txDetail ? detailPaymentId(txDetail.payment) : selectedTxId} />
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setSelectedTxId(null); setTxDetail(null) }}
-                  aria-label="Close transaction detail"
-                  className={modalCloseButtonClass}
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            {loadingTxDetail ? (
-              <div className="flex flex-1 items-center justify-center">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-              </div>
-            ) : txDetail ? (
-              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-
-                {/* ── Status + amounts ─────────────────────────────────────── */}
-                {(() => {
-                  const meta = extractMeta(txDetail.payment)
-                  const status = detailStatus(txDetail.payment)
-                  const isT = TERMINAL_STATUSES.has(status)
-                  return (
-                    <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4 space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <StatusBadge status={status} />
-                        <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${meta.paymentMode === "test" ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
-                          {meta.paymentMode === "test" ? "Test" : "Live"}
-                        </span>
-                        <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${isT ? "bg-gray-100 text-gray-500 border-gray-200" : "bg-blue-50 text-blue-600 border-blue-200"}`}>
-                          {isT ? "Terminal" : "Non-terminal"}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500">{getPaymentDisplayStatus(status).message}</p>
-                      <div className="grid grid-cols-3 gap-3 pt-1">
-                        <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Gross Total</p>
-                          <p className="mt-1 text-lg font-bold text-gray-900">
-                            {fmtUSD(detailGrossAmount(txDetail.payment))}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Merchant</p>
-                          <p className="mt-1 text-lg font-bold text-gray-900">
-                            {fmtUSD(detailMerchantAmount(txDetail.payment))}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-400">Service fee</p>
-                          <p className="mt-1 text-lg font-bold text-[#0052FF]">
-                            {fmtUSD(detailFeeAmount(txDetail.payment))}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })()}
-
-                {/* ── Core details ─────────────────────────────────────────── */}
-                <div>
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Core Details</p>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
-                    <div>
-                      <p className="text-gray-400">Merchant ID</p>
-                      <div className="mt-0.5 flex items-start gap-1">
-                        <p className="font-mono text-gray-700 break-all">{detailMerchantId(txDetail.payment)}</p>
-                        <CopyButton value={detailMerchantId(txDetail.payment)} />
-                      </div>
-                    </div>
-                    {txDetail.merchant && (
-                      <div>
-                        <p className="text-gray-400">Business / Email</p>
-                        <p className="mt-0.5 text-gray-700">
-                          {txDetail.merchant.business_name || txDetail.merchant.email || "—"}
-                        </p>
-                        {txDetail.merchant.business_name && txDetail.merchant.email && (
-                          <p className="text-[11px] text-gray-400">{txDetail.merchant.email}</p>
-                        )}
-                      </div>
-                    )}
-                    <div>
-                      <p className="text-gray-400">Network / Rail</p>
-                      <p className="mt-0.5 text-gray-700">
-                        {detailRail(txDetail.payment)
-                          ? (NETWORK_LABELS_DETAIL[detailRail(txDetail.payment)!.toLowerCase()] ?? labelNetwork(detailRail(txDetail.payment)))
-                          : "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400">Provider</p>
-                      <p className="mt-0.5 text-gray-700">{labelProvider(txDetail.payment.provider)}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400">Currency</p>
-                      <p className="mt-0.5 text-gray-700">{txDetail.payment.currency || "USD"}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400">Asset</p>
-                      <p className="mt-0.5 text-gray-700">{extractMeta(txDetail.payment).asset || "Unknown asset"}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400">Payment Mode</p>
-                      <p className="mt-0.5 text-gray-700 capitalize">
-                        {extractMeta(txDetail.payment).paymentMode}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400">Created</p>
-                      <p className="mt-0.5 text-gray-700">{fmtDateTime(detailCreatedAt(txDetail.payment))}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400">Updated</p>
-                      <p className="mt-0.5 text-gray-700">{fmtDateTime(detailUpdatedAt(txDetail.payment))}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* ── References ───────────────────────────────────────────── */}
-                {detailReference(txDetail.payment) && (
-                  <div>
-                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Reference / Hash</p>
-                    <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
-                      <div className="flex items-start gap-1">
-                        <p className="font-mono text-[11px] text-gray-700 break-all leading-relaxed">
-                          {detailReference(txDetail.payment)}
-                        </p>
-                        <CopyButton value={detailReference(txDetail.payment)!} />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Wallet / split ───────────────────────────────────────── */}
-                {(() => {
-                  const meta = extractMeta(txDetail.payment)
-                  const hasWallet = meta.merchantWallet || meta.pinetreeWallet || meta.splitContract || meta.strategy
-                  if (!hasWallet) return null
-                  return (
-                    <div>
-                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">Wallet & Routing</p>
-                      <div className="space-y-2 text-xs">
-                        {meta.merchantWallet && (
-                          <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                            <p className="text-gray-400">Merchant Wallet</p>
-                            <div className="mt-0.5 flex items-start gap-1">
-                              <p className="font-mono text-[11px] text-gray-700 break-all">{meta.merchantWallet}</p>
-                              <CopyButton value={meta.merchantWallet} />
-                            </div>
-                          </div>
-                        )}
-                        {meta.pinetreeWallet && (
-                          <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                            <p className="text-gray-400">PineTree Treasury Wallet</p>
-                            <div className="mt-0.5 flex items-start gap-1">
-                              <p className="font-mono text-[11px] text-gray-700 break-all">{meta.pinetreeWallet}</p>
-                              <CopyButton value={meta.pinetreeWallet} />
-                            </div>
-                          </div>
-                        )}
-                        {meta.splitContract && (
-                          <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                            <p className="text-gray-400">Split Contract</p>
-                            <div className="mt-0.5 flex items-start gap-1">
-                              <p className="font-mono text-[11px] text-gray-700 break-all">{meta.splitContract}</p>
-                              <CopyButton value={meta.splitContract} />
-                            </div>
-                          </div>
-                        )}
-                        {meta.strategy && (
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                              <p className="text-gray-400">Strategy</p>
-                              <p className="mt-0.5 text-gray-700">{meta.strategy}</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })()}
-
-                {/* ── Payment timeline ─────────────────────────────────────── */}
-                <div>
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-400">
-                    Payment Timeline
-                  </p>
-                  {txDetail.events.length === 0 ? (
-                    <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                      <p className="text-xs text-gray-400">No payment events recorded.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {txDetail.events.map((ev) => {
-                        const ep = extractEventPayload(ev.raw_payload)
-                        const isAdminAction = Boolean(ep.adminAction)
-                        const type = eventType(ev)
-                        const providerEvent = eventProvider(ev)
-                        return (
-                          <div
-                            key={ev.id}
-                            className={`rounded-xl px-3 py-2.5 ${isAdminAction ? "bg-amber-50 border border-amber-100" : "bg-gray-50"}`}
-                          >
-                            <div className="flex items-start gap-3">
-                              <div className={`mt-1 h-2 w-2 shrink-0 rounded-full ${isAdminAction ? "bg-amber-400" : "bg-blue-400"}`} />
-                              <div className="min-w-0 flex-1 text-xs">
-                                <div className="flex items-center justify-between gap-2">
-                                  <p className="font-medium text-gray-800">
-                                    {EVENT_LABELS[type] ?? type}
-                                  </p>
-                                  <p className="shrink-0 text-[11px] text-gray-400">
-                                    {fmtDateTime(eventOccurredAt(ev))}
-                                  </p>
-                                </div>
-                                {providerEvent && (
-                                  <p className="mt-0.5 text-[11px] text-gray-400">{providerEvent}</p>
-                                )}
-                                {ep.txHash && (
-                                  <div className="mt-1 flex items-center gap-1">
-                                    <p className="font-mono text-[11px] text-gray-500 truncate max-w-[240px]" title={ep.txHash}>
-                                      {ep.txHash.length > 24 ? ep.txHash.slice(0, 12) + "…" + ep.txHash.slice(-8) : ep.txHash}
-                                    </p>
-                                    <CopyButton value={ep.txHash} />
-                                  </div>
-                                )}
-                                {ep.failureReason && (
-                                  <p className="mt-1 text-[11px] text-red-600">↳ {ep.failureReason}</p>
-                                )}
-                                {isAdminAction && (
-                                  <p className="mt-1 text-[11px] font-medium text-amber-700">
-                                    Admin action: {ep.adminAction}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* ── Audit ────────────────────────────────────────────────── */}
-                {(() => {
-                  const adminEvents = txDetail.events.filter((ev) => {
-                    const ep = extractEventPayload(ev.raw_payload)
-                    return Boolean(ep.adminAction)
-                  })
-                  if (!adminEvents.length) return null
-                  return (
-                    <div className="rounded-2xl border border-amber-200/60 bg-amber-50/50 px-4 py-3 text-xs space-y-1">
-                      <p className="font-semibold text-amber-800">Admin Cleanup Detected</p>
-                      {adminEvents.map((ev) => {
-                        const ep = extractEventPayload(ev.raw_payload)
-                        const type = eventType(ev)
-                        return (
-                          <p key={ev.id} className="text-amber-700">
-                            {EVENT_LABELS[type] ?? type} · {ep.adminAction}
-                            {ep.failureReason ? ` — ${ep.failureReason}` : ""}
-                            <span className="ml-1 text-amber-500">{fmtDateTime(eventOccurredAt(ev))}</span>
-                          </p>
-                        )
-                      })}
-                    </div>
-                  )
-                })()}
-
-              </div>
-            ) : (
-              <div className="flex flex-1 items-center justify-center">
-                <p className="text-sm text-gray-400">Failed to load transaction detail.</p>
-              </div>
-            )}
-          </div>
-        </>
+      {transactionDetail.paymentId && (
+        <AdminTransactionDetailPanel
+          paymentId={transactionDetail.paymentId}
+          detail={transactionDetail.detail}
+          loading={transactionDetail.loading}
+          error={transactionDetail.error}
+          onClose={transactionDetail.close}
+        />
       )}
     </div>
   )

@@ -15,6 +15,12 @@ import PaymentStatusBadge from "@/components/ui/StatusBadge"
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import AdminPageHeader, { adminHeaderIconButtonDesktopClass } from "@/components/admin/AdminPageHeader"
+import AdminMetricTable, { type AdminMetricColumn } from "@/components/admin/AdminMetricTable"
+import {
+  formatNetworkName,
+  formatProviderName,
+  formatRailName,
+} from "@/components/admin/displayFormatters"
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -106,25 +112,10 @@ const MODES: { value: PlatformReportMode; label: string }[] = [
   { value: "test", label: "Test/dev only" },
 ]
 
-const NETWORK_LABELS: Record<string, string> = {
-  solana:           "Solana",
-  base:             "Base",
-  bitcoin_lightning: "Bitcoin Lightning",
-  btc_lightning:     "Bitcoin Lightning",
-  lightning:         "Bitcoin Lightning",
-  ethereum:         "Ethereum",
-  unknown:          "Cash",
-}
-
-const PROVIDER_LABELS: Record<string, string> = {
-  solana:    "Solana Pay",
-  coinbase:  "Coinbase",
-  shift4:    "Shift4",
-  base:      "Base Pay",
-  lightning: "Bitcoin Lightning",
-  cash:      "Cash",
-  unknown:   "Unknown",
-}
+// Rail, provider and network naming come from the shared Admin formatters.
+// This page deliberately holds no label map of its own — the previous local
+// tables were keyed by stored values the report never emits, so unmapped keys
+// such as `stripe` and `lightning_speed` fell through and rendered raw.
 
 const AGE_LABELS: Record<string, string> = {
   under_15m: "< 15 min",
@@ -161,6 +152,28 @@ function fmtDateTime(iso: string) {
 function pct(num: number, total: number): string {
   if (!total) return "—"
   return ((num / total) * 100).toFixed(1) + "%"
+}
+
+// Volume by Rail and Volume by Provider are the same table of the same metrics
+// over a different grouping key, so they share one column definition. Column
+// widths therefore cannot drift between the two.
+const VOLUME_COLUMNS: AdminMetricColumn<[string, ByNetworkEntry]>[] = [
+  { key: "total",     header: "Total",     width: "90px",  numeric: true, render: ([, v]) => fmt(v.total) },
+  { key: "confirmed", header: "Confirmed", width: "90px",  numeric: true, render: ([, v]) => fmt(v.confirmed) },
+  { key: "volume",    header: "Volume",    width: "120px", numeric: true, emphasis: true, render: ([, v]) => fmtUSD(v.volume) },
+  { key: "fees",      header: "Fees",      width: "110px", numeric: true, render: ([, v]) => fmtUSD(v.fees) },
+  { key: "conv",      header: "Conv %",    width: "80px",  numeric: true, render: ([, v]) => pct(v.confirmed, v.total) },
+]
+
+type TopMerchantRow = { merchantId: string; confirmedVolume: number; confirmedCount: number }
+
+const TOP_MERCHANT_COLUMNS: AdminMetricColumn<TopMerchantRow>[] = [
+  { key: "confirmed", header: "Confirmed", width: "100px", numeric: true, render: (m) => fmt(m.confirmedCount) },
+  { key: "volume",    header: "Volume",    width: "120px", numeric: true, emphasis: true, render: (m) => fmtUSD(m.confirmedVolume) },
+]
+
+function sortedByVolume(entries: Record<string, ByNetworkEntry>): Array<[string, ByNetworkEntry]> {
+  return Object.entries(entries).sort((a, b) => b[1].volume - a[1].volume)
 }
 
 function eligibilityLabel(e: StaleEligibility): string {
@@ -432,8 +445,8 @@ export default function AdminReportsPage() {
           </DashboardSection>
 
           {/* ── Mode notice ──────────────────────────────────────────────────── */}
-          <div className="rounded-2xl border border-amber-200/60 bg-amber-50/60 px-5 py-4">
-            <p className="text-sm font-medium text-amber-800">Data mode: {mode === "all" ? "All modes (live + test + untagged)" : mode === "live" ? "Live only — excludes metadata.payment_mode=test" : "Test/dev only — payments tagged metadata.payment_mode=test"}</p>
+          <div className="min-w-0 rounded-2xl border border-amber-200/60 bg-amber-50/60 px-4 py-4 sm:px-5">
+            <p className="break-words text-sm font-medium text-amber-800">Data mode: {mode === "all" ? "All modes (live + test + untagged)" : mode === "live" ? "Live only — excludes metadata.payment_mode=test" : "Test/dev only — payments tagged metadata.payment_mode=test"}</p>
             <p className="mt-1 text-xs text-amber-700">
               The global admin overview always shows all modes. Run the Stale Diagnostic below to see the test/live breakdown of historical rows.
             </p>
@@ -442,106 +455,56 @@ export default function AdminReportsPage() {
           {/* ── By network ───────────────────────────────────────────────────── */}
           {r && Object.keys(r.byNetwork).length > 0 && (
             <DashboardSection title="Volume by Rail" titleTone="blue">
-              <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-                <div className="hidden grid-cols-[1fr_90px_90px_110px_100px_80px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                  {["Rail", "Total", "Confirmed", "Volume", "Fees", "Conv %"].map((h) => (
-                    <div key={h} className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                      {h}
-                    </div>
-                  ))}
-                </div>
-                <div className="divide-y divide-gray-100">
-                  {Object.entries(r.byNetwork)
-                    .sort((a, b) => b[1].volume - a[1].volume)
-                    .map(([net, v]) => (
-                      <div
-                        key={net}
-                        className="grid grid-cols-[1fr_90px_90px_110px_100px_80px] gap-4 px-5 py-3"
-                      >
-                        <div className="text-sm font-medium text-gray-900">
-                          {NETWORK_LABELS[net] ?? net}
-                        </div>
-                        <div className="text-sm text-gray-600">{fmt(v.total)}</div>
-                        <div className="text-sm text-gray-600">{fmt(v.confirmed)}</div>
-                        <div className="text-sm font-medium text-gray-900">{fmtUSD(v.volume)}</div>
-                        <div className="text-sm text-gray-600">{fmtUSD(v.fees)}</div>
-                        <div className="text-sm text-gray-500">{pct(v.confirmed, v.total)}</div>
-                      </div>
-                    ))}
-                </div>
-              </div>
+              <AdminMetricTable
+                leadingLabel="Rail"
+                columns={VOLUME_COLUMNS}
+                rows={sortedByVolume(r.byNetwork)}
+                rowKey={([net]) => net}
+                rowLabel={([net]) => (
+                  <span className="block truncate">{formatRailName(net)}</span>
+                )}
+              />
             </DashboardSection>
           )}
 
           {/* ── By provider ──────────────────────────────────────────────────── */}
           {r && Object.keys(r.byProvider ?? {}).length > 0 && (
             <DashboardSection title="Volume by Provider" titleTone="blue">
-              <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-                <div className="hidden grid-cols-[1fr_90px_90px_110px_100px_80px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                  {["Provider", "Total", "Confirmed", "Volume", "Fees", "Conv %"].map((h) => (
-                    <div key={h} className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                      {h}
-                    </div>
-                  ))}
-                </div>
-                <div className="divide-y divide-gray-100">
-                  {Object.entries(r.byProvider)
-                    .sort((a, b) => b[1].volume - a[1].volume)
-                    .map(([prov, v]) => (
-                      <div
-                        key={prov}
-                        className="grid grid-cols-[1fr_90px_90px_110px_100px_80px] gap-4 px-5 py-3"
-                      >
-                        <div className="text-sm font-medium text-gray-900">
-                          {PROVIDER_LABELS[prov] ?? prov}
-                        </div>
-                        <div className="text-sm text-gray-600">{fmt(v.total)}</div>
-                        <div className="text-sm text-gray-600">{fmt(v.confirmed)}</div>
-                        <div className="text-sm font-medium text-gray-900">{fmtUSD(v.volume)}</div>
-                        <div className="text-sm text-gray-600">{fmtUSD(v.fees)}</div>
-                        <div className="text-sm text-gray-500">{pct(v.confirmed, v.total)}</div>
-                      </div>
-                    ))}
-                </div>
-              </div>
+              <AdminMetricTable
+                leadingLabel="Provider"
+                columns={VOLUME_COLUMNS}
+                rows={sortedByVolume(r.byProvider)}
+                rowKey={([prov]) => prov}
+                rowLabel={([prov]) => (
+                  <span className="block truncate">{formatProviderName(prov)}</span>
+                )}
+              />
             </DashboardSection>
           )}
 
           {/* ── Top merchants ─────────────────────────────────────────────────── */}
           {r && r.topMerchants.length > 0 && (
             <DashboardSection title="Top Merchants by Volume" titleTone="blue">
-              <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.05)]">
-                <div className="hidden grid-cols-[1fr_100px_120px] gap-4 bg-gray-50/60 px-5 py-2.5 sm:grid">
-                  {["Merchant ID", "Confirmed", "Volume"].map((h) => (
-                    <div key={h} className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-                      {h}
-                    </div>
-                  ))}
-                </div>
-                <div className="divide-y divide-gray-100">
-                  {r.topMerchants.map((m, i) => (
-                    <div
-                      key={m.merchantId}
-                      className="grid grid-cols-[1fr_100px_120px] gap-4 px-5 py-3"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-[11px] font-bold text-gray-400 tabular-nums w-5 shrink-0">
-                          {i + 1}
-                        </span>
-                        <span className="truncate font-mono text-xs text-gray-700">{m.merchantId}</span>
-                      </div>
-                      <div className="text-sm text-gray-600">{fmt(m.confirmedCount)}</div>
-                      <div className="text-sm font-semibold text-gray-900">{fmtUSD(m.confirmedVolume)}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <AdminMetricTable
+                leadingLabel="Merchant ID"
+                columns={TOP_MERCHANT_COLUMNS}
+                rows={r.topMerchants}
+                rowKey={(m) => m.merchantId}
+                rowLabel={(m, i) => (
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="w-5 shrink-0 text-[11px] font-bold tabular-nums text-gray-400">
+                      {i + 1}
+                    </span>
+                    <span className="truncate font-mono text-xs text-gray-700">{m.merchantId}</span>
+                  </div>
+                )}
+              />
             </DashboardSection>
           )}
 
           {/* ── Stale payment diagnostic ──────────────────────────────────────── */}
           <DashboardSection title="Stale Payment Diagnostic" titleTone="blue">
-            <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] space-y-4">
+            <div className="min-w-0 space-y-4 rounded-2xl border border-gray-200/80 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5">
               <p className="text-sm text-gray-600">
                 Shows all Waiting and Processing payments with age classification and cleanup eligibility.
                 Eligible Waiting payments can be safely marked Incomplete via the state machine.
@@ -580,8 +543,8 @@ export default function AdminReportsPage() {
                   </div>
 
                   {/* Eligibility summary */}
-                  <div className="flex gap-3">
-                    <div className="flex-1 rounded-xl border border-green-100 bg-green-50 p-3">
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <div className="min-w-0 flex-1 rounded-xl border border-green-100 bg-green-50 p-3">
                       <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-green-600">
                         Eligible for Incomplete
                       </p>
@@ -590,7 +553,7 @@ export default function AdminReportsPage() {
                       </p>
                       <p className="mt-0.5 text-[11px] text-green-600">Waiting &gt; 60 min</p>
                     </div>
-                    <div className="flex-1 rounded-xl border border-amber-100 bg-amber-50 p-3">
+                    <div className="min-w-0 flex-1 rounded-xl border border-amber-100 bg-amber-50 p-3">
                       <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-amber-600">
                         Review Required
                       </p>
@@ -713,7 +676,7 @@ export default function AdminReportsPage() {
                                     <PaymentStatusBadge status={row.status} />
                                   </td>
                                   <td className="px-4 py-2.5 text-gray-500">
-                                    {row.network ? (NETWORK_LABELS[row.network] ?? row.network) : "—"}
+                                    {formatNetworkName(row.network)}
                                   </td>
                                   <td className="px-4 py-2.5 font-medium text-gray-700">
                                     {fmtUSD(row.gross_amount)}
@@ -752,7 +715,7 @@ export default function AdminReportsPage() {
 
                       {/* Safe cleanup action */}
                       {(stale.eligibleCount ?? 0) > 0 && (
-                        <div className="rounded-2xl border border-green-200/60 bg-green-50/40 p-5 space-y-4">
+                        <div className="min-w-0 space-y-4 rounded-2xl border border-green-200/60 bg-green-50/40 p-4 sm:p-5">
                           <div>
                             <p className="text-sm font-semibold text-green-800">
                               Safe Cleanup: Mark Stale Waiting Payments Incomplete
@@ -792,7 +755,7 @@ export default function AdminReportsPage() {
                                   {previewResult.ineligible.length > 0 && (
                                     <div className="max-h-28 overflow-y-auto space-y-1 rounded-lg bg-gray-50 p-2">
                                       {previewResult.ineligible.map((item) => (
-                                        <p key={item.paymentId} className="font-mono text-[11px] text-gray-500">
+                                        <p key={item.paymentId} className="break-words font-mono text-[11px] text-gray-500">
                                           {item.paymentId.slice(0, 8)}… — {item.staleReason}
                                         </p>
                                       ))}
@@ -845,7 +808,7 @@ export default function AdminReportsPage() {
                               {markResult.skipped.length > 0 && (
                                 <div className="max-h-28 overflow-y-auto space-y-1 rounded-lg bg-gray-50 p-2">
                                   {markResult.skipped.map((item) => (
-                                    <p key={item.paymentId} className="font-mono text-[11px] text-gray-500">
+                                    <p key={item.paymentId} className="break-words font-mono text-[11px] text-gray-500">
                                       {item.paymentId.slice(0, 8)}… — {item.reason}
                                     </p>
                                   ))}
@@ -871,11 +834,11 @@ export default function AdminReportsPage() {
               )}
 
               {/* Admin overview filter recommendation (Task 7) — always visible */}
-              <div className="rounded-xl border border-blue-100 bg-blue-50/50 px-4 py-3">
+              <div className="min-w-0 rounded-xl border border-blue-100 bg-blue-50/50 px-4 py-3">
                 <p className="text-xs font-semibold text-blue-700">
                   Admin Overview Filter Recommendation
                 </p>
-                <p className="mt-1 text-xs text-blue-600">
+                <p className="mt-1 break-words text-xs text-blue-600">
                   The admin overview currently counts all payment modes (live + test + untagged) with no filter.
                   To add mode filtering: (1) add a <code className="rounded bg-blue-100 px-1 font-mono text-[11px]">mode</code> parameter
                   to <code className="rounded bg-blue-100 px-1 font-mono text-[11px]">getAdminPaymentMetrics()</code> in{" "}

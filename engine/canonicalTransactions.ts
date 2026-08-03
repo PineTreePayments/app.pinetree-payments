@@ -12,6 +12,11 @@ import {
 } from "@/database/canonicalTransactions"
 import { normalizeStoredPaymentStatus } from "@/lib/utils/canonicalPaymentStatus"
 import { getPaymentStatusLabel } from "@/lib/utils/paymentStatus"
+import {
+  resolveCanonicalPaymentSource,
+  type CanonicalPaymentSource,
+  type CanonicalPaymentSourceKey,
+} from "@/lib/utils/paymentSource"
 
 export type CanonicalPaymentLifecycleStatus =
   | "CREATED"
@@ -41,6 +46,17 @@ export type CanonicalTransactionDiagnostic = {
   paymentId: string
   rawValue: string | null
 }
+
+/**
+ * How a payment originated, decided once here on the canonical record.
+ *
+ * The vocabulary itself lives in `lib/utils/paymentSource` so the engine and
+ * Admin presentation share one mapping. Surfaces render `paymentSource.label`
+ * verbatim — no UI may re-derive "Terminal" vs "Online Checkout" from
+ * `channel`, `source`, or metadata.
+ */
+export type { CanonicalPaymentSource, CanonicalPaymentSourceKey }
+export { resolveCanonicalPaymentSource }
 
 export type CanonicalLifecycleEvent = {
   id: string
@@ -82,8 +98,10 @@ export type CanonicalTransaction = {
   displayStatus: string
   occurredAt: string
   createdAt: string
+  updatedAt: string | null
   confirmedAt: string | null
   source: string
+  paymentSource: CanonicalPaymentSource
 
   provider: string
   channel: string | null
@@ -451,6 +469,7 @@ function readPaymentMode(metadata: Record<string, unknown>): "live" | "test" {
   return metadata.payment_mode === "test" ? "test" : "live"
 }
 
+
 /**
  * Pure canonical projector. The only input to `canonicalStatus` is
  * `row.status` from payments. Event, transaction, provider, timeout, and
@@ -502,8 +521,10 @@ export function projectCanonicalTransaction(
     displayStatus: status.displayStatus,
     occurredAt: String(row.created_at || ""),
     createdAt: String(row.created_at || ""),
+    updatedAt: text(row.updated_at),
     confirmedAt: confirmedAt(status.canonicalStatus, lifecycleEvents, row),
     source,
+    paymentSource: resolveCanonicalPaymentSource(channel),
     provider,
     channel,
     paymentMode: readPaymentMode(metadata),

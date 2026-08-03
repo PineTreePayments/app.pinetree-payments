@@ -1,63 +1,91 @@
 import { cashTransactionSecondaryLabel } from "@/lib/transactionRailDisplay"
 import { normalizeTransactionAsset, type TransactionDisplayMetadata } from "@/lib/transactionDisplay"
 
-export function formatDashboardProvider(provider: string | null | undefined) {
-  const normalized = String(provider || "").trim().toLowerCase()
+/**
+ * Comparison key for a stored identifier: case- and separator-insensitive, so
+ * `lightning_speed`, `LIGHTNING-SPEED` and `Lightning Speed` are one lookup.
+ * Presentation only — the stored value is never rewritten.
+ */
+function displayKey(value: unknown) {
+  return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "")
+}
 
-  const labels: Record<string, string> = {
-    coinbase: "Coinbase Business",
-    solana: "Solana Pay",
-    shift4: "Shift4",
-    base: "Base Pay",
-    stripe: "Stripe",
-    lightning: "Bitcoin Lightning",
-    lightning_speed: "Bitcoin Lightning",
-    tryspeed: "Bitcoin Lightning",
-    try_speed: "Bitcoin Lightning",
-    speed_lightning: "Bitcoin Lightning",
-    lightning_nwc: "Bitcoin Lightning",
-    nwc_lightning: "Bitcoin Lightning",
-    cash: "Cash",
-    speed: "Bitcoin Lightning",
-    nwc: "Bitcoin Lightning",
-    phantom: "Phantom",
-    solflare: "Solflare",
-    metamask: "MetaMask",
-    trust: "Trust Wallet",
-    coinbase_wallet: "Coinbase Wallet",
-    baseapp: "Base Wallet"
-  }
-
-  if (labels[normalized]) return labels[normalized]
-  if (!normalized) return "-"
-
-  return normalized
+/** Readable fallback for an identifier PineTree has no polished name for. */
+export function titleCaseIdentifier(value: string) {
+  return value
+    .trim()
     .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
+/**
+ * The one provider naming table in the repo. Keys are comparison keys, so a
+ * stored `base_pay`, `basePay` or `BASE PAY` all resolve to "Base Pay".
+ *
+ * Providers are commercial products ("Base Pay", "Solana Pay"); rails and
+ * networks are settlement concepts ("Base", "Solana"). The two vocabularies
+ * are deliberately kept apart — see `formatRailName` in
+ * components/admin/displayFormatters.ts.
+ */
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  coinbase: "Coinbase Business",
+  coinbasewallet: "Coinbase Wallet",
+  solana: "Solana Pay",
+  solanapay: "Solana Pay",
+  shift4: "Shift4",
+  fluidpay: "FluidPay",
+  fluid: "FluidPay",
+  base: "Base Pay",
+  basepay: "Base Pay",
+  stripe: "Stripe",
+  lightning: "Bitcoin Lightning",
+  lightningspeed: "Bitcoin Lightning",
+  speedlightning: "Bitcoin Lightning",
+  bitcoinlightning: "Bitcoin Lightning",
+  btclightning: "Bitcoin Lightning",
+  lightningbtc: "Bitcoin Lightning",
+  tryspeed: "Bitcoin Lightning",
+  speed: "Bitcoin Lightning",
+  lightningnwc: "Bitcoin Lightning",
+  nwclightning: "Bitcoin Lightning",
+  nwc: "Bitcoin Lightning",
+  cash: "Cash",
+  phantom: "Phantom",
+  solflare: "Solflare",
+  metamask: "MetaMask",
+  trust: "Trust Wallet",
+  baseapp: "Base Wallet"
+}
+
+export function formatDashboardProvider(provider: string | null | undefined) {
+  const key = displayKey(provider)
+  if (PROVIDER_DISPLAY_NAMES[key]) return PROVIDER_DISPLAY_NAMES[key]
+  if (!key) return "-"
+  return titleCaseIdentifier(String(provider))
+}
+
+/**
+ * The one network naming table in the repo. Networks are settlement networks,
+ * so `solana` is "Solana" here and never "Solana Pay".
+ */
+const NETWORK_DISPLAY_NAMES: Record<string, string> = {
+  cash: "Cash",
+  usd: "USD",
+  solana: "Solana",
+  base: "Base",
+  ethereum: "Ethereum",
+  bitcoinlightning: "Bitcoin Lightning",
+  btclightning: "Bitcoin Lightning",
+  lightningbtc: "Bitcoin Lightning",
+  lightning: "Bitcoin Lightning"
+}
+
 export function formatDashboardNetwork(network: string | null | undefined) {
-  const normalized = String(network || "").trim().toLowerCase()
-
-  const labels: Record<string, string> = {
-    cash: "Cash",
-    usd: "USD",
-    solana: "Solana",
-    base: "Base",
-    ethereum: "Ethereum",
-    bitcoin_lightning: "Bitcoin Lightning",
-    btc_lightning: "Bitcoin Lightning",
-    lightning_btc: "Bitcoin Lightning",
-    lightning: "Bitcoin Lightning",
-    "bitcoin lightning": "Bitcoin Lightning"
-  }
-
-  if (labels[normalized]) return labels[normalized]
-  if (!normalized) return "-"
-
-  return normalized
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase())
+  const key = displayKey(network)
+  if (NETWORK_DISPLAY_NAMES[key]) return NETWORK_DISPLAY_NAMES[key]
+  if (!key) return "-"
+  return titleCaseIdentifier(String(network))
 }
 
 export function formatTransactionSecondaryLabel(
