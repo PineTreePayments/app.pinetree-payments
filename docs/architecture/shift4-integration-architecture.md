@@ -109,7 +109,39 @@ Partial approval is durable provider evidence, not a new canonical payment statu
 
 Retail uses the existing `merchant_terminal_locations` and `merchant_terminal_readers` identity. `Shift4PaxDeviceAdapter` handles device discovery, claim, and release. `Shift4CommerceEngineClient` is the transport seam. The deterministic simulator supports approval, decline, partial approval, referral, and timeout evidence.
 
-The real Commerce Engine client deliberately throws `documentation_required`: official endpoint, authentication, device-session, and request/response schemas were not available in the reviewed sources. No guessed payload or device call exists. Retail interactions time out after no more than one minute and produce an unresolved/lookup-required result, never an automatic failure or blind resend.
+### Commerce Engine For Cloud
+
+PineTree is a cloud-based POS, so it uses **Commerce Engine For Cloud**, not On-Premise. Both deployments share the hosted Shift4 URLs already used by Host Direct — test `https://api.shift4test.com/api/rest/v1`, production `https://api.shift4api.net/api/rest/v1` — and the same documented headers (`InterfaceVersion`, `InterfaceName`, `CompanyName`, `AccessToken`). There is deliberately no second HTTP stack: `providers/shift4/commerce-engine/cloud/` is pure request construction and response reading, and transport stays in `providers/shift4/rest/client.ts`.
+
+**A Cloud request addresses the device by manufacturer and serial number, not by terminal ID.** The published `device` object is `{ cloud: true, manufacturer, serialNumber }`, where `manufacturer` is the enum `Ingenico | Innowi | PAX | Verifone | Castles | Miura` and `serialNumber` is at most 64 characters. The On-Premise variant of `/devices/getstatus` carries **no** `device` object at all (it is addressed by the local network URL), so the two bodies are not interchangeable. PineTree's stored `provider_reader_id` remains the Shift4-side terminal binding and PineTree's evidence key, but it is not a field in the Cloud request body.
+
+`dateTime` is ISO 8601 **with a timezone offset, in the merchant's local time**. Server UTC is not used blindly; a trailing `Z` is rejected, because near midnight it would send the wrong local date.
+
+#### Operation to integration method
+
+| Operation | Endpoint | PineTree route | Why |
+|---|---|---|---|
+| Authorization | `POST /transactions/authorization` | Commerce Engine For Cloud | Card is read at the device. |
+| Sale/Purchase | `POST /transactions/sale` | Commerce Engine For Cloud | Card is read at the device. |
+| Card-present refund | `POST /transactions/refund` | Commerce Engine For Cloud | Requires a card interaction; `card.present` is required. |
+| Capture | `POST /transactions/capture` | Host Direct | The published body offers only token variants — no Cloud variant. Capture needs no card interaction. |
+| Void | `DELETE /transactions/invoice` | Host Direct (either by stage) | No request body; addressed by the `Invoice` header. |
+| Invoice Information | `GET /transactions/invoice` | Host Direct (either by stage) | Read-only lookup, no body. |
+| Manual authorization | `POST /transactions/manualauthorization` | **Not used for Cloud** | Spec ambiguity: a `comengcloud` body variant exists, but the path's `servers` block lists only Host Direct and locally installed UTG. PineTree treats the servers block as authoritative pending Shift4 confirmation. |
+| Device status | `POST /devices/getstatus` | Commerce Engine For Cloud | Published for On-Premise and Cloud only; there is no Host Direct server for this path. |
+| Device Information | `GET /devices/info` | **Not used** | See the limitation below. |
+
+#### Device Information is not a cloud endpoint
+
+`GET /devices/info` publishes **only** the locally installed UTG URL in its `servers` block — no Host Direct, no Commerce Engine For Cloud. It is therefore not a cloud terminal-listing or auto-discovery endpoint, and PineTree does not use it as one. No terminal synchronization is invented: terminal identifiers still come from Shift4/TMS provisioning and are entered through the authorized Admin surface.
+
+#### Device status normalization and freshness
+
+`POST /devices/getstatus` returns `result[0].{cloudRegistered, cloudConnected, offlineMode}`. A terminal is reported **online only** for the exact combination `cloudRegistered = Y`, `cloudConnected = Y`, `offlineMode = N`. `cloudRegistered = N` maps to `unregistered`; `cloudConnected = N` or `offlineMode = Y` maps to `offline`; anything missing, contradictory, or the documented `offlineMode = "U"` maps to `unknown`. An HTTP 200 on its own never maps to online.
+
+Evidence is persisted in the existing `merchant_terminal_readers` columns — no migration. The `status` column takes source-specific values (`shift4_online`, `shift4_offline`, `shift4_unregistered`, `shift4_unknown`) that cannot be confused with the locally written configuration strings, and `last_seen_at` is the evidence timestamp. Evidence is current for **five minutes**; past that it is downgraded to `unverified` and marked stale, so an expired "online" can never gate processing. PineTree does not poll — a status check is operator-initiated only.
+
+The Commerce Engine dispatch seam now fails closed on `device_unavailable`, not `documentation_required`: the request contract is published and implemented, and what remains blocked is physical — terminal delivery, TMS assignment, Commerce Engine provisioning, and the Retail gate. Retail interactions time out after no more than one minute and produce an unresolved/lookup-required result, never an automatic failure or blind resend.
 
 ## Recovery and events
 

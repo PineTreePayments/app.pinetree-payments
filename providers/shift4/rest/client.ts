@@ -96,7 +96,9 @@ export function shift4TimeoutForOperation(
   operation: Shift4Operation,
   entryContext: Shift4EntryContext = "standard"
 ): number {
-  if (operation === "invoice_information") {
+  // Both are read-only queries, not card entry, so neither may claim the long
+  // device Global Timer.
+  if (operation === "invoice_information" || operation === "device_status") {
     return readPositiveIntEnv("SHIFT4_LOOKUP_TIMEOUT_MS", SHIFT4_LOOKUP_TIMEOUT_MS)
   }
   if (entryContext === "device_pin_pad") {
@@ -135,10 +137,16 @@ export type Shift4RestRequestOptions = {
   /**
    * The ONLY sanctioned access to an unredacted Shift4 response body.
    *
-   * It exists for exactly one reason: the access-token exchange must read
-   * `result[0].credential.accessToken`, which redaction blanks by design. The
-   * hook receives the parsed body synchronously and the client never returns,
-   * stores, or logs that body, so the unredacted value cannot escape the
+   * Two callers, and no others, may use it:
+   *   1. the access-token exchange, which must read
+   *      `result[0].credential.accessToken` — a value redaction blanks by design;
+   *   2. `device_status`, whose documented result fields (`cloudRegistered`,
+   *      `cloudConnected`, `offlineMode`) live outside the transaction shape
+   *      `normalizeShift4Response` models, and which must be read exactly rather
+   *      than inferred from an HTTP status.
+   *
+   * The hook receives the parsed body synchronously and the client never
+   * returns, stores, or logs that body, so nothing read here can escape the
    * caller's own scope. Do not use this hook for diagnostics or logging.
    */
   onParsedBody?: (body: unknown) => void

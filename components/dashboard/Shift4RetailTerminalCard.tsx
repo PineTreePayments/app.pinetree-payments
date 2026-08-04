@@ -30,6 +30,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { primaryActionButtonClass } from "@/components/ui/PrimaryActionButton"
 import {
   canSubmitTerminalRequest,
+  EVIDENCE_FRESHNESS_MINUTES,
   isTerminalFormComplete,
   loadRetailTerminal,
   submitRetailTerminal,
@@ -55,7 +56,9 @@ function formatTimestamp(value: string): string {
 const READINESS_LABELS: Record<string, string> = {
   not_configured: "Not configured",
   configured: "Locally configured",
+  unregistered: "Not registered with Shift4 cloud",
   offline: "Offline",
+  unknown: "Status unreadable",
   online: "Online",
   disabled: "Disabled",
   certification_required: "Certification required",
@@ -66,22 +69,32 @@ const READINESS_LABELS: Record<string, string> = {
 const CONNECTIVITY_LABELS: Record<string, string> = {
   not_configured: "No terminal configured",
   unverified: "Not verified",
+  unregistered: "Not registered with cloud service",
   offline: "Reported unavailable",
+  unknown: "Answered, but not readable",
   online: "Reported available",
 }
 
 const EVIDENCE_LABELS: Record<string, string> = {
   none: "No check has been run",
   pinetree_local_configuration: "PineTree local configuration",
-  shift4_status_operation: "Shift4 status operation",
+  shift4_status_operation: "Shift4 device status operation",
+}
+
+/** Shift4's own Y/N/U flags, shown verbatim rather than reinterpreted. */
+const FLAG_LABELS: Record<string, string> = {
+  Y: "Yes",
+  N: "No",
+  U: "Unknown",
 }
 
 const AWAITING_LABELS: Record<string, string> = {
   pinetree_terminal_configuration: "A terminal record configured in PineTree",
   shift4_device_assignment: "Shift4 assigning a physical or test device to this account",
-  shift4_terminal_status_operation_documentation:
-    "Official documentation for a Shift4 terminal-status operation",
-  commerce_engine_configuration: "Commerce Engine endpoint and authentication documentation",
+  terminal_serial_number:
+    "The device serial number — Commerce Engine For Cloud addresses a device by manufacturer and serial number",
+  physical_terminal_delivery: "Delivery of the physical PAX or Verifone terminal",
+  commerce_engine_provisioning: "Commerce Engine provisioning for this merchant account",
   shift4_certification: "Shift4 certification of this integration",
 }
 
@@ -104,6 +117,11 @@ export default function Shift4RetailTerminalCard() {
   const [editing, setEditing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [verifying, setVerifying] = useState(false)
+  const [selectedReaderId, setSelectedReaderId] = useState("")
+
+  // Every Shift4 reader this merchant owns. Drives the "which terminal?" choice
+  // that keeps a multi-terminal check from silently landing on readers[0].
+  const readers = terminal?.readers ?? []
 
   // Refs, not state: they block a second submit synchronously, before React has
   // any chance to re-render with the pending flag set.
@@ -115,7 +133,13 @@ export default function Shift4RetailTerminalCard() {
     let active = true
     void (async () => {
       const outcome = await loadRetailTerminal({ getBearerToken: currentAccessToken })
-      if (active && outcome.status === "success") setTerminal(outcome.result)
+      if (!active || outcome.status !== "success") return
+      setTerminal(outcome.result)
+      // Preselect only when there is no ambiguity. With several terminals the
+      // operator chooses, so no device is checked under another's name.
+      if (outcome.result.readers.length === 1) {
+        setSelectedReaderId(outcome.result.readers[0].readerId ?? "")
+      }
     })()
     return () => {
       active = false
@@ -168,19 +192,25 @@ export default function Shift4RetailTerminalCard() {
     setVerification(null)
 
     try {
-      const outcome = await submitRetailTerminalVerification({
-        getBearerToken: currentAccessToken,
-      })
+      // Exactly one dispatch, carrying at most the chosen PineTree reader id.
+      const outcome = await submitRetailTerminalVerification(
+        { getBearerToken: currentAccessToken },
+        selectedReaderId || null
+      )
       if (outcome.status === "success") setVerification(outcome.result)
       else setFailure(outcome.failure)
     } finally {
       verifyRef.current = false
       setVerifying(false)
     }
-  }, [])
+  }, [selectedReaderId])
 
   const canSave = canSubmitTerminalRequest({ submitting }) && isTerminalFormComplete(form)
-  const canVerify = canSubmitTerminalRequest({ submitting: verifying })
+  // With several terminals the operator must pick one first; there is no
+  // implicit default that would quietly check the wrong device.
+  const canVerify =
+    canSubmitTerminalRequest({ submitting: verifying }) &&
+    (readers.length <= 1 || selectedReaderId.length > 0)
   const configured = terminal?.configured === true
 
   const rows: [string, string][] = [
@@ -315,23 +345,47 @@ export default function Shift4RetailTerminalCard() {
           </div>
         </div>
       ) : (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={beginEdit}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
-          >
-            {configured ? "Edit terminal" : "Configure terminal"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void verify()}
-            disabled={!canVerify}
-            aria-busy={verifying}
-            className={`${primaryActionButtonClass} disabled:cursor-not-allowed disabled:opacity-50`}
-          >
-            {verifying ? "Checking…" : "Verify Shift4 Terminal Readiness"}
-          </button>
+        <div className="mt-3 space-y-2">
+          {/* With more than one device the operator must name which to check.
+              Verifying an unnamed readers[0] would report one terminal's health
+              under another terminal's name. */}
+          {readers.length > 1 ? (
+            <label className="block text-xs font-medium text-gray-700">
+              Terminal to verify
+              <select
+                value={selectedReaderId}
+                onChange={(event) => setSelectedReaderId(event.target.value)}
+                className={fieldClass}
+              >
+                <option value="">Choose a terminal…</option>
+                {readers.map((reader) => (
+                  <option key={reader.readerId ?? ""} value={reader.readerId ?? ""}>
+                    {[reader.label, reader.model, reader.maskedSerial, reader.isDefault ? "Default" : ""]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={beginEdit}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700"
+            >
+              {configured ? "Edit terminal" : "Configure terminal"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void verify()}
+              disabled={!canVerify}
+              aria-busy={verifying}
+              className={`${primaryActionButtonClass} disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              {verifying ? "Checking…" : "Verify Shift4 Terminal Readiness"}
+            </button>
+          </div>
         </div>
       )}
 
@@ -339,13 +393,20 @@ export default function Shift4RetailTerminalCard() {
       {verification ? (
         <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-3">
           <p className="text-sm font-semibold text-blue-900">
-            {verification.configured
-              ? "Locally configured — provider connectivity not yet verified"
-              : "No Shift4 terminal is configured in PineTree"}
+            {!verification.configured
+              ? "No Shift4 terminal is configured in PineTree"
+              : verification.deviceStatus
+                ? `Shift4 device status: ${
+                    CONNECTIVITY_LABELS[verification.deviceStatus.connectivityState] ?? "Not readable"
+                  }`
+                : "Locally configured — provider connectivity not yet verified"}
           </p>
           <p className="mt-1 text-xs text-blue-900">
-            PineTree checked its own stored configuration. No request was sent to Shift4, because
-            no documented Shift4 terminal-status operation is available to this integration.
+            {verification.deviceStatus
+              ? "PineTree sent exactly one POST /devices/getstatus request for the selected terminal and reports the documented flags below."
+              : verification.configured
+                ? "PineTree checked its own stored configuration. No device request was sent."
+                : "PineTree checked its own stored configuration. With no terminal configured, no request was sent to Shift4."}
           </p>
           <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
             {[
@@ -365,6 +426,42 @@ export default function Shift4RetailTerminalCard() {
               </div>
             ))}
           </dl>
+          {verification.deviceStatus ? (
+            <div className="mt-3 rounded-md border border-blue-200 bg-white px-3 py-2">
+              <p className="text-xs font-semibold text-blue-900">Shift4 device status</p>
+              <dl className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+                {[
+                  ["Terminal", verification.deviceStatus.label ?? verification.deviceStatus.readerId],
+                  ["Device model", verification.deviceStatus.model ?? "Not recorded"],
+                  ["Serial number", verification.deviceStatus.maskedSerial ?? "Not provided"],
+                  ["Manufacturer", verification.deviceStatus.manufacturer ?? "Unresolved"],
+                  ["Cloud registered", FLAG_LABELS[verification.deviceStatus.cloudRegistered ?? ""] ?? "Not reported"],
+                  ["Cloud connected", FLAG_LABELS[verification.deviceStatus.cloudConnected ?? ""] ?? "Not reported"],
+                  ["Offline mode", FLAG_LABELS[verification.deviceStatus.offlineMode ?? ""] ?? "Not reported"],
+                  [
+                    "Normalized state",
+                    CONNECTIVITY_LABELS[verification.deviceStatus.connectivityState] ?? "Not readable",
+                  ],
+                  ["Verified at", formatTimestamp(verification.deviceStatus.verifiedAt ?? "")],
+                  ["Evidence freshness", `Current for ${EVIDENCE_FRESHNESS_MINUTES} minutes`],
+                  ["Correlation ID", verification.deviceStatus.correlationId],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex flex-wrap gap-1 text-xs">
+                    <dt className="font-semibold text-blue-900">{label}:</dt>
+                    <dd className="break-all font-mono text-blue-800">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-2 text-xs text-blue-800">{verification.deviceStatus.deviceNote}</p>
+            </div>
+          ) : null}
+
+          {verification.deviceStatusError ? (
+            <p className="mt-3 text-xs text-blue-900">
+              Device check: {verification.deviceStatusError.message}
+            </p>
+          ) : null}
+
           {verification.awaiting.length > 0 ? (
             <div className="mt-3">
               <p className="text-xs font-semibold text-blue-900">Still required externally</p>

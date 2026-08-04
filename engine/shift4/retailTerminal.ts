@@ -45,9 +45,10 @@ import { getShift4RestConfig, type Shift4RestEnvironment } from "@/providers/shi
 
 import { logShift4Event } from "./observability"
 import { readShift4FeatureFlags } from "./readiness"
+import { resolveShift4TerminalConnectivity } from "./terminalConnectivity"
 import {
   projectShift4TerminalReadiness,
-  resolveShift4TerminalConnectivity,
+  readShift4ReaderConnectivity,
   type Shift4TerminalConnectivityEvidence,
   type Shift4TerminalEvidenceSource,
   type Shift4TerminalReadinessState,
@@ -381,8 +382,13 @@ export async function getShift4RetailTerminal(
  * This is intentionally a read-only selector projection: it exposes PineTree
  * reader IDs and masked local metadata, never credentials or raw provider
  * responses. The order is deterministic: the merchant default first, then the
- * existing database creation order. Connectivity remains unverified until a
- * documented Shift4 status operation exists.
+ * existing database creation order.
+ *
+ * Connectivity is resolved PER READER from that row's own recorded evidence,
+ * never once for the merchant and copied across. Two devices genuinely have two
+ * different states, and a shared claim would let one online terminal vouch for
+ * another that was never checked. Evidence older than the freshness window is
+ * already downgraded by `readShift4ReaderConnectivity`.
  */
 export async function listShift4RetailTerminalSelections(
   merchantId: string
@@ -390,19 +396,24 @@ export async function listShift4RetailTerminalSelections(
   requireRestEnabled()
   const environment = requireEnvironment()
   const readers = await loadShift4Readers(merchantId)
-  const connectivity = await resolveShift4TerminalConnectivity(merchantId)
   const correlationId = randomUUID()
+  const now = new Date()
   return Object.freeze(
     [...readers]
       .sort((left, right) => Number(right.is_default) - Number(left.is_default))
-      .map((reader) => projectView({
-        reader,
-        environment,
-        connectivity,
-        evidenceSource: "none",
-        lastVerifiedAt: null,
-        correlationId,
-      }))
+      .map((reader) => {
+        const connectivity = readShift4ReaderConnectivity(reader, now)
+        return projectView({
+          reader,
+          environment,
+          connectivity,
+          // "none" would deny evidence this reader actually has; the source is
+          // whatever the row's own status proves.
+          evidenceSource: connectivity.source,
+          lastVerifiedAt: connectivity.source === "shift4_status_operation" ? connectivity.observedAt : null,
+          correlationId,
+        })
+      })
   )
 }
 
@@ -540,7 +551,10 @@ export async function verifyShift4RetailTerminalReadiness(
   requireRestEnabled()
   const environment = requireEnvironment()
   const readers = await loadShift4Readers(merchantId)
-  const reader = readers[0] ?? null
+  // The merchant default, not an unnamed `readers[0]`. This projection reports
+  // local configuration; the per-reader device check is a separate, explicitly
+  // selected action.
+  const reader = readers.find((candidate) => candidate.is_default) ?? readers[0] ?? null
 
   const connectivity = await resolveShift4TerminalConnectivity(merchantId)
   const verifiedAt = new Date().toISOString()
@@ -595,8 +609,12 @@ export async function verifyShift4RetailTerminalReadiness(
       [
         reader ? null : "pinetree_terminal_configuration",
         "shift4_device_assignment",
-        "shift4_terminal_status_operation_documentation",
-        flags.commerceEngineConfigured ? null : "commerce_engine_configuration",
+        // "shift4_terminal_status_operation_documentation" was removed: Shift4
+        // documents POST /devices/getstatus for Commerce Engine For Cloud, and
+        // PineTree implements it. What remains is a physical device to check.
+        reader && !reader.serial_number ? "terminal_serial_number" : null,
+        "physical_terminal_delivery",
+        flags.commerceEngineConfigured ? null : "commerce_engine_provisioning",
         "shift4_certification",
       ].filter((item): item is string => item !== null)
     ),

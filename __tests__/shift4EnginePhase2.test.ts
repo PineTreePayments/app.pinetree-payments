@@ -2695,18 +2695,28 @@ describe("Shift4 Engine security boundaries", () => {
 
     walk(join(process.cwd(), "app", "api"))
     expect(routeImporters.length).toBeGreaterThan(0)
-    const allowedPosSelector = "app/api/pos/shift4-retail-readers/route.ts"
+
+    /**
+     * The only POS-facing routes permitted to reach the Shift4 Engine. Both are
+     * terminal-session authenticated, take at most a PineTree reader id, and
+     * dispatch nothing to Shift4.
+     */
+    const allowedPosRoutes = new Set([
+      "app/api/pos/shift4-retail-readers/route.ts",
+      "app/api/pos/shift4-retail-preparation/route.ts",
+    ])
     expect(routeImporters.every((path) =>
       path.startsWith("app/api/internal/shift4/") ||
       path.startsWith("app/api/admin/shift4/") ||
-      path === allowedPosSelector
+      allowedPosRoutes.has(path)
     )).toBe(true)
     for (const path of routeImporters) {
       const routeSource = readFileSync(join(process.cwd(), path), "utf8")
       expect(routeSource).not.toMatch(/@\/providers\/shift4\/(rest|commerce-engine)/)
-      if (path === allowedPosSelector) {
+      if (allowedPosRoutes.has(path)) {
+        // Merchant identity comes from the signed session claim, never a body.
         expect(routeSource).toContain("requireTerminalSession")
-        expect(routeSource).not.toMatch(/merchantId\s*:/)
+        expect(routeSource).not.toMatch(/merchantId\s*:\s*(?!merchantId\b)["'a-zA-Z0-9_.]+/)
       }
     }
   })

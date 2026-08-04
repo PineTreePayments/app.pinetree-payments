@@ -229,6 +229,43 @@ export async function getTerminalReaderByActivePayment(
   return (data as MerchantTerminalReader) || null
 }
 
+/**
+ * Records provider status evidence for ONE reader owned by ONE merchant.
+ *
+ * Distinct from `updateTerminalReaderStatusByProviderId`, which matches on
+ * `provider_reader_id` across every merchant — safe for a provider webhook that
+ * carries no merchant, unsafe for an operator-initiated check where the
+ * merchant is known and must be enforced. `merchant_id` and `provider` are part
+ * of the filter, so an id belonging to another tenant updates nothing and
+ * returns null rather than throwing something a caller could distinguish.
+ *
+ * `last_seen_at` is the evidence timestamp used for freshness. No migration is
+ * needed: both columns already exist.
+ */
+export async function recordTerminalReaderProviderStatus(input: {
+  merchantId: string
+  readerId: string
+  provider: string
+  status: string
+  observedAt: string
+}): Promise<MerchantTerminalReader | null> {
+  const { data, error } = await db
+    .from("merchant_terminal_readers")
+    .update({
+      status: input.status,
+      last_seen_at: input.observedAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.readerId)
+    .eq("merchant_id", input.merchantId)
+    .eq("provider", input.provider)
+    .select("*")
+    .maybeSingle()
+
+  if (error) throw new Error(`Failed to record reader status: ${error.message}`)
+  return (data as MerchantTerminalReader) || null
+}
+
 /** Updates reader status from a provider webhook/sync (by provider reader id). */
 export async function updateTerminalReaderStatusByProviderId(
   providerReaderId: string,

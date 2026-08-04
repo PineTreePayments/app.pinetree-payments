@@ -308,6 +308,12 @@ export type Shift4Operation =
   | "invoice_information"
   | "merchant_information"
   | "void"
+  /**
+   * Commerce Engine For Cloud device status. Published for Commerce Engine On
+   * Premise and Commerce Engine For Cloud only — there is no Host Direct server
+   * for this path. Read-only: it moves no money and creates no transaction.
+   */
+  | "device_status"
 
 export const SHIFT4_OPERATION_ENDPOINTS: Record<
   Shift4Operation,
@@ -322,6 +328,7 @@ export const SHIFT4_OPERATION_ENDPOINTS: Record<
   invoice_information: { method: "GET", path: "/transactions/invoice" },
   merchant_information: { method: "GET", path: "/merchants/merchant" },
   void: { method: "DELETE", path: "/transactions/invoice" },
+  device_status: { method: "POST", path: "/devices/getstatus" },
 } as const
 
 /**
@@ -333,9 +340,16 @@ export const SHIFT4_TRANSACTION_CREATING_OPERATIONS: readonly Shift4Operation[] 
   "authorization", "manual_authorization", "capture", "sale", "refund", "void",
 ] as const
 
-/** Read-only, safely repeatable operations. */
+/**
+ * Read-only operations. None creates or modifies a transaction.
+ *
+ * "Safely repeatable" describes the operation, not PineTree's policy: the only
+ * automatic retry in this integration is the documented single Invoice
+ * Information retry. `device_status` is explicitly never retried automatically
+ * — one operator action sends exactly one request.
+ */
 export const SHIFT4_IDEMPOTENT_LOOKUP_OPERATIONS: readonly Shift4Operation[] = [
-  "invoice_information", "merchant_information",
+  "invoice_information", "merchant_information", "device_status",
 ] as const
 
 export function isShift4TransactionCreatingOperation(operation: Shift4Operation): boolean {

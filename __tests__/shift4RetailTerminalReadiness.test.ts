@@ -24,7 +24,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   isShift4TerminalOnline,
   projectShift4TerminalReadiness,
-  resolveShift4TerminalConnectivity,
   SHIFT4_TERMINAL_CONNECTIVITY_UNVERIFIED,
   type Shift4TerminalConnectivityEvidence,
 } from "@/engine/shift4/terminalReadiness"
@@ -72,7 +71,12 @@ const SAFE_TERMINAL_FIELDS = [
 const evidence = (
   state: Shift4TerminalConnectivityEvidence["state"],
   source: Shift4TerminalConnectivityEvidence["source"] = "shift4_status_operation"
-): Shift4TerminalConnectivityEvidence => ({ state, source, observedAt: "2026-08-03T00:00:00.000Z" })
+): Shift4TerminalConnectivityEvidence => ({
+  state,
+  source,
+  observedAt: "2026-08-03T00:00:00.000Z",
+  stale: false,
+})
 
 const BASE_PROJECTION = {
   configuredCount: 1,
@@ -341,13 +345,44 @@ describe("Shift4 Retail terminal", () => {
       expect(isShift4TerminalOnline(evidence("online"))).toBe(true)
     })
 
-    it("cannot produce online evidence today and contacts nothing to try", async () => {
-      const result = await resolveShift4TerminalConnectivity("merchant-1")
+    it("reports unverified with no reader rows and contacts nothing to try", async () => {
+      // The resolver READS persisted evidence; it never performs the device
+      // check itself. With no reader there is nothing to read and nothing to ask.
+      vi.doMock("@/database/merchantTerminalReaders", () => ({
+        listMerchantTerminalReaders: async () => [],
+      }))
+      const { resolveShift4TerminalConnectivity: resolve } = await import(
+        "@/engine/shift4/terminalConnectivity"
+      )
+
+      const result = await resolve("merchant-1")
 
       expect(result.state).toBe("unverified")
       expect(result.source).toBe("none")
       expect(result.observedAt).toBeNull()
+      expect(result.stale).toBe(false)
       expect(fetchSpy).not.toHaveBeenCalled()
+      vi.doUnmock("@/database/merchantTerminalReaders")
+    })
+
+    it("never treats a locally written status as provider evidence", async () => {
+      // "ready" is what configureDevice writes for a simulated reader. It looks
+      // healthy and proves nothing, so it must not survive as connectivity.
+      vi.doMock("@/database/merchantTerminalReaders", () => ({
+        listMerchantTerminalReaders: async () => [
+          { id: "reader-1", status: "ready", last_seen_at: new Date().toISOString(), is_default: true },
+        ],
+      }))
+      const { resolveShift4TerminalConnectivity: resolve } = await import(
+        "@/engine/shift4/terminalConnectivity"
+      )
+
+      const result = await resolve("merchant-1")
+
+      expect(result.state).toBe("unverified")
+      expect(result.source).toBe("none")
+      expect(fetchSpy).not.toHaveBeenCalled()
+      vi.doUnmock("@/database/merchantTerminalReaders")
     })
   })
 
@@ -629,8 +664,11 @@ describe("Shift4 Retail terminal", () => {
       const result = await verifyShift4RetailTerminalReadiness("merchant-1")
 
       expect(result.awaiting).toContain("shift4_device_assignment")
-      expect(result.awaiting).toContain("shift4_terminal_status_operation_documentation")
+      expect(result.awaiting).toContain("physical_terminal_delivery")
       expect(result.awaiting).toContain("shift4_certification")
+      // Shift4 now documents POST /devices/getstatus, so claiming the operation
+      // is undocumented would be false. What is missing is the physical device.
+      expect(result.awaiting).not.toContain("shift4_terminal_status_operation_documentation")
       expect(result.proves).toBe("local_terminal_configuration_present")
       expect(result.doesNotProve).toContain("provider_connectivity")
       expect(result.doesNotProve).toContain("card_processing_approval")

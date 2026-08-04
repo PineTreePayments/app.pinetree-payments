@@ -22,6 +22,16 @@ export const SHIFT4_RETAIL_TERMINAL_VERIFICATION_PATH =
 
 export const RETAIL_TERMINAL_TIMEOUT_MS = 30_000
 
+/**
+ * How long a device-status answer is treated as current, in minutes.
+ *
+ * Mirrors `SHIFT4_TERMINAL_EVIDENCE_FRESHNESS_MS` in the Engine. Duplicated as a
+ * plain number rather than imported so this browser module keeps no dependency
+ * on server code; the Engine remains the enforcing side, and a test asserts the
+ * two agree.
+ */
+export const EVIDENCE_FRESHNESS_MINUTES = 5
+
 /** Exactly the fields the configuration routes are permitted to return. */
 export type RetailTerminalView = {
   readerId: string | null
@@ -39,6 +49,44 @@ export type RetailTerminalView = {
   correlationId: string
   readinessState: string
   retailProcessingEnabled: boolean
+  /** Every Shift4 reader this merchant owns, so the operator can name one. */
+  readers: RetailTerminalReader[]
+}
+
+/** One selectable terminal. Safe metadata only — never a full serial number. */
+export type RetailTerminalReader = {
+  readerId: string | null
+  label: string | null
+  terminalId: string | null
+  model: string | null
+  maskedSerial: string | null
+  locationId: string | null
+  isDefault: boolean
+  connectivityState: string
+  readinessState: string
+  lastVerifiedAt: string | null
+}
+
+/**
+ * The safe device-status result. Three documented Shift4 flags plus PineTree's
+ * own normalization. There is no raw provider response, no serial number, no
+ * access token, and no Client GUID — none of those is named here, so none can
+ * be displayed even if a server were to send it.
+ */
+export type RetailDeviceStatus = {
+  readerId: string
+  label: string | null
+  model: string | null
+  maskedSerial: string | null
+  manufacturer: string | null
+  deviceClassification: string
+  deviceNote: string
+  cloudRegistered: string | null
+  cloudConnected: string | null
+  offlineMode: string | null
+  connectivityState: string
+  verifiedAt: string | null
+  correlationId: string
 }
 
 /** The verification adds only these, and never a provider payload. */
@@ -47,6 +95,10 @@ export type RetailTerminalVerification = RetailTerminalView & {
   awaiting: string[]
   proves: string
   doesNotProve: string[]
+  /** Present only when a real /devices/getstatus request was performed. */
+  deviceStatus: RetailDeviceStatus | null
+  /** Present when the device check was attempted and did not complete. */
+  deviceStatusError: { code: string; message: string } | null
 }
 
 export type RetailTerminalFailure = {
@@ -120,7 +172,30 @@ function readView(data: Record<string, unknown>): RetailTerminalView {
     correlationId: readString(data.correlationId),
     readinessState: readString(data.readinessState),
     retailProcessingEnabled: data.retailProcessingEnabled === true,
+    readers: readReaders(data.readers),
   }
+}
+
+function readReaders(value: unknown): RetailTerminalReader[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return []
+    const data = entry as Record<string, unknown>
+    return [
+      {
+        readerId: readStringOrNull(data.readerId),
+        label: readStringOrNull(data.label),
+        terminalId: readStringOrNull(data.terminalId),
+        model: readStringOrNull(data.model),
+        maskedSerial: readStringOrNull(data.maskedSerial),
+        locationId: readStringOrNull(data.locationId),
+        isDefault: data.isDefault === true,
+        connectivityState: readString(data.connectivityState),
+        readinessState: readString(data.readinessState),
+        lastVerifiedAt: readStringOrNull(data.lastVerifiedAt),
+      },
+    ]
+  })
 }
 
 function readVerification(data: Record<string, unknown>): RetailTerminalVerification {
@@ -141,11 +216,47 @@ function readVerification(data: Record<string, unknown>): RetailTerminalVerifica
     correlationId: view.correlationId,
     readinessState: view.readinessState,
     retailProcessingEnabled: view.retailProcessingEnabled,
+    // The verification response does not re-send the reader list; the card
+    // already holds it from the GET.
+    readers: view.readers,
     providerCallPerformed: data.providerCallPerformed === true,
     awaiting: readStringList(data.awaiting),
     proves: readString(data.proves),
     doesNotProve: readStringList(data.doesNotProve),
+    deviceStatus: readDeviceStatus(data.deviceStatus),
+    deviceStatusError: readDeviceStatusError(data.deviceStatusError),
   }
+}
+
+/** Rebuilt field by field, exactly like the view, for the same reason. */
+function readDeviceStatus(value: unknown): RetailDeviceStatus | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const data = value as Record<string, unknown>
+  const readerId = readString(data.readerId)
+  if (!readerId) return null
+  return {
+    readerId,
+    label: readStringOrNull(data.label),
+    model: readStringOrNull(data.model),
+    maskedSerial: readStringOrNull(data.maskedSerial),
+    manufacturer: readStringOrNull(data.manufacturer),
+    deviceClassification: readString(data.deviceClassification),
+    deviceNote: readString(data.deviceNote),
+    cloudRegistered: readStringOrNull(data.cloudRegistered),
+    cloudConnected: readStringOrNull(data.cloudConnected),
+    offlineMode: readStringOrNull(data.offlineMode),
+    connectivityState: readString(data.connectivityState),
+    verifiedAt: readStringOrNull(data.verifiedAt),
+    correlationId: readString(data.correlationId),
+  }
+}
+
+function readDeviceStatusError(value: unknown): { code: string; message: string } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const data = value as Record<string, unknown>
+  const message = readString(data.message)
+  if (!message) return null
+  return { code: readString(data.code), message }
 }
 
 /**
@@ -260,13 +371,25 @@ export function submitRetailTerminal(
   )
 }
 
-/** Run the explicit read-only readiness check. Sends no body. */
+/**
+ * Run the explicit readiness check, optionally naming which reader to verify.
+ *
+ * `readerId` is the ONLY field ever sent, and it is a PineTree row id — never a
+ * Shift4 terminal ID, serial number, manufacturer, environment, or merchant.
+ * Exactly one request is dispatched; there is no retry on any outcome.
+ */
 export function submitRetailTerminalVerification(
-  deps: RetailTerminalDeps
+  deps: RetailTerminalDeps,
+  readerId?: string | null
 ): Promise<RetailTerminalOutcome<RetailTerminalVerification>> {
+  const selected = String(readerId ?? "").trim()
   return dispatch(
     deps,
-    { path: SHIFT4_RETAIL_TERMINAL_VERIFICATION_PATH, method: "POST" },
+    {
+      path: SHIFT4_RETAIL_TERMINAL_VERIFICATION_PATH,
+      method: "POST",
+      body: selected ? JSON.stringify({ readerId: selected }) : undefined,
+    },
     readVerification
   )
 }

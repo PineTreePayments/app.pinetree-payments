@@ -283,6 +283,7 @@ describe("Shift4 readiness channel projection", () => {
           state: "online",
           source: "shift4_status_operation",
           observedAt: "2026-08-03T00:00:00.000Z",
+          stale: false,
         }),
       })
 

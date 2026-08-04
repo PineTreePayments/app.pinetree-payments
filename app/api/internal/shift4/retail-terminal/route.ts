@@ -29,6 +29,7 @@ import { NextRequest, NextResponse } from "next/server"
 import {
   configureShift4RetailTerminal,
   getShift4RetailTerminal,
+  listShift4RetailTerminalSelections,
   normalizeShift4TerminalInput,
   Shift4RetailTerminalError,
   type Shift4RetailTerminalView,
@@ -145,7 +146,31 @@ async function readBody(request: NextRequest): Promise<Record<string, unknown>> 
 export async function GET(request: NextRequest) {
   try {
     const merchantId = await requireShift4OperatorFromRequest(request)
-    return noStore(shift4Success(terminalBody(await getShift4RetailTerminal(merchantId))))
+    const [view, selections] = await Promise.all([
+      getShift4RetailTerminal(merchantId),
+      listShift4RetailTerminalSelections(merchantId),
+    ])
+
+    // The list exists so an operator with several terminals can name which one
+    // to verify. Each entry is rebuilt from the same explicit safe field set —
+    // no serial number, credential, or provider payload travels with it.
+    return noStore(
+      shift4Success({
+        ...terminalBody(view),
+        readers: selections.map((reader) => ({
+          readerId: reader.readerId,
+          label: reader.label,
+          terminalId: reader.terminalId,
+          model: reader.model,
+          maskedSerial: reader.maskedSerial,
+          locationId: reader.locationId,
+          isDefault: reader.isDefault,
+          connectivityState: reader.connectivityState,
+          readinessState: reader.readinessState,
+          lastVerifiedAt: reader.lastVerifiedAt,
+        })),
+      })
+    )
   } catch (error) {
     return noStore(shift4Error(mapTerminalError(error), "Shift4 terminal lookup failed"))
   }

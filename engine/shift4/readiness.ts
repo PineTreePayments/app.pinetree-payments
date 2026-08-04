@@ -3,10 +3,10 @@ import { getShift4RestConnectionStatus, type Shift4RestConnectionStatusView } fr
 import { listMerchantTerminalReaders, type MerchantTerminalReader } from "@/database/merchantTerminalReaders"
 import { getLatestShift4OnboardingSession, type Shift4OnboardingSessionRow } from "@/database/shift4OnboardingSessions"
 import { projectShift4OnboardingReadiness } from "./onboarding/readiness"
+import { resolveShift4TerminalConnectivity } from "./terminalConnectivity"
 import {
   isShift4TerminalOnline,
   projectShift4TerminalReadiness,
-  resolveShift4TerminalConnectivity,
   SHIFT4_TERMINAL_CONNECTIVITY_UNVERIFIED,
   type Shift4TerminalConnectivityEvidence,
 } from "./terminalReadiness"
@@ -41,11 +41,18 @@ export type Shift4CapabilityState =
   | "disabled"
   | "blocked"
   /**
-   * Terminal-only. Both require evidence from a documented provider status
-   * operation; neither may be inferred from PineTree's own stored configuration.
+   * Terminal-only. All four require evidence from a documented provider status
+   * operation; none may be inferred from PineTree's own stored configuration.
+   *
+   * `unregistered` — Shift4 reports `cloudRegistered: "N"`; a provisioning gap,
+   *   distinct from a device that is simply unreachable.
+   * `unknown` — Shift4 answered but the flags could not be read as available or
+   *   unavailable (a missing flag, or the documented `offlineMode: "U"`).
    */
   | "online"
   | "offline"
+  | "unregistered"
+  | "unknown"
 
 export type Shift4FeatureFlags = Readonly<{
   restApi: boolean

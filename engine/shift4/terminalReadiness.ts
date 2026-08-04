@@ -15,23 +15,31 @@
  * "A Shift4 terminal is registered and online". Locally typed configuration was
  * being reported as live provider connectivity.
  *
- * ── Why "online" is unreachable today ────────────────────────────────────────
- * The Shift4 Payment Platform REST API this integration is built on documents
- * nine operations (`SHIFT4_OPERATION_ENDPOINTS`); none of them reports terminal
- * or device status. `device.terminalId` appears only inside a TRANSACTION
- * result, which this phase must never produce. The Commerce Engine transport —
- * where a device session would live — is `DocumentBlockedShift4CommerceEngine-
- * Client`, which throws `documentation_required` because no official endpoint,
- * authentication, device-session, or payload schema was available.
+ * ── How "online" became reachable ────────────────────────────────────────────
+ * This module previously stated that no documented Shift4 terminal-status
+ * operation existed. That is no longer true. Shift4 publishes
+ * `POST /devices/getstatus` for Commerce Engine For On Premise and Commerce
+ * Engine For Cloud, returning three flags: `cloudRegistered`, `cloudConnected`
+ * and `offlineMode`. The state machine below was already written for that day,
+ * so only the evidence resolver changed — the projector and its tests did not.
  *
- * So PineTree has no way to obtain connectivity evidence, and this module says
- * so explicitly rather than inferring one. The projector still models `online`
- * and `offline` fully, so the day a documented status operation exists only the
- * EVIDENCE RESOLVER changes — not the state machine, and not its tests.
+ * `online` still requires the exact documented combination and nothing less.
  */
 
-/** What PineTree currently knows about a terminal's availability at Shift4. */
-export type Shift4TerminalConnectivityState = "unverified" | "offline" | "online"
+/**
+ * What PineTree knows about a terminal's availability at Shift4.
+ *
+ * `unverified` and `unknown` are distinct on purpose: `unverified` means nobody
+ * asked, `unknown` means Shift4 answered with evidence PineTree cannot read as
+ * either available or unavailable (a missing flag, an undocumented string, or
+ * the documented `offlineMode: "U"`).
+ */
+export type Shift4TerminalConnectivityState =
+  | "unverified"
+  | "unregistered"
+  | "offline"
+  | "online"
+  | "unknown"
 
 /** Where a connectivity claim came from. Attached to every claim, never implied. */
 export type Shift4TerminalEvidenceSource =
@@ -39,7 +47,7 @@ export type Shift4TerminalEvidenceSource =
   | "none"
   /** PineTree checked its OWN stored configuration. Says nothing about Shift4. */
   | "pinetree_local_configuration"
-  /** A documented Shift4 status operation answered. Not reachable in this phase. */
+  /** A documented Shift4 status operation answered. */
   | "shift4_status_operation"
 
 export type Shift4TerminalConnectivityEvidence = Readonly<{
@@ -47,40 +55,146 @@ export type Shift4TerminalConnectivityEvidence = Readonly<{
   source: Shift4TerminalEvidenceSource
   /** When the evidence was observed; null when there is none to date. */
   observedAt: string | null
+  /**
+   * True when provider evidence exists but has aged past the freshness window.
+   * A stale claim is never reported as current connectivity.
+   */
+  stale: boolean
 }>
 
 /**
- * The only evidence PineTree can produce today.
- *
  * `unverified` is deliberately not `offline`: PineTree has not been told the
- * terminal is unavailable, it simply has no way to ask. Reporting "offline"
- * would be as dishonest as reporting "online".
+ * terminal is unavailable, it simply has not asked. Reporting "offline" would
+ * be as dishonest as reporting "online".
  */
 export const SHIFT4_TERMINAL_CONNECTIVITY_UNVERIFIED: Shift4TerminalConnectivityEvidence =
-  Object.freeze({ state: "unverified", source: "none", observedAt: null })
+  Object.freeze({ state: "unverified", source: "none", observedAt: null, stale: false })
 
 /**
- * Resolve live terminal connectivity for a merchant.
+ * How long a `/devices/getstatus` answer may be treated as current.
  *
- * Returns "unverified" unconditionally and performs NO provider request, because
- * no documented Shift4 terminal-status operation exists in the sources this
- * integration is built from. Implemented as a function rather than a constant so
- * the seam is explicit: a future phase replaces this body, and everything
- * downstream — projector, Engine, route, UI, tests — already handles `online`
- * and `offline`.
+ * Deliberately short. A countertop terminal can lose its cloud connection
+ * between one sale and the next, so an hours-old "online" is not evidence of
+ * anything. Five minutes is long enough that an operator who checks the
+ * terminal and then starts a sale is not re-checking constantly, and short
+ * enough that a stale claim cannot survive a coffee break.
+ *
+ * PineTree does NOT poll to keep this fresh. Expiry downgrades the claim; it
+ * does not trigger a request.
  */
-export async function resolveShift4TerminalConnectivity(
-  _merchantId: string
-): Promise<Shift4TerminalConnectivityEvidence> {
-  void _merchantId
-  return SHIFT4_TERMINAL_CONNECTIVITY_UNVERIFIED
+export const SHIFT4_TERMINAL_EVIDENCE_FRESHNESS_MS = 5 * 60 * 1000
+
+/**
+ * Map the three documented `/devices/getstatus` flags to a connectivity state.
+ *
+ * The ONLY combination that yields `online` is the documented one:
+ *   cloudRegistered = Y, cloudConnected = Y, offlineMode = N
+ *
+ * Everything else resolves to a state that blocks processing. In particular an
+ * HTTP 200 with no readable flags yields `unknown`, never `online`.
+ */
+export function mapShift4CloudDeviceStatus(flags: {
+  cloudRegistered: "Y" | "N" | null
+  cloudConnected: "Y" | "N" | null
+  offlineMode: "Y" | "N" | "U" | null
+}): Shift4TerminalConnectivityState {
+  const { cloudRegistered, cloudConnected, offlineMode } = flags
+
+  // Any missing or unreadable flag means PineTree was not told enough.
+  if (cloudRegistered === null || cloudConnected === null || offlineMode === null) {
+    return "unknown"
+  }
+  // Not registered is a distinct, actionable provisioning state.
+  if (cloudRegistered === "N") return "unregistered"
+  // Registered but unreachable, or explicitly running offline.
+  if (cloudConnected === "N") return "offline"
+  if (offlineMode === "Y") return "offline"
+  if (cloudRegistered === "Y" && cloudConnected === "Y" && offlineMode === "N") return "online"
+  // Reachable only via `offlineMode: "U"`, which Shift4 documents as unknown.
+  return "unknown"
+}
+
+/**
+ * Downgrade provider evidence that has aged past the freshness window.
+ *
+ * Returns the evidence unchanged when it is fresh, has no timestamp, or did not
+ * come from a provider operation. A stale claim keeps its `observedAt` (so the
+ * UI can say when it was last checked) but reports `unverified`, because the
+ * question "is the terminal online right now" no longer has an answer.
+ */
+export function applyShift4EvidenceFreshness(
+  evidence: Shift4TerminalConnectivityEvidence,
+  now: Date = new Date(),
+  freshnessMs: number = SHIFT4_TERMINAL_EVIDENCE_FRESHNESS_MS
+): Shift4TerminalConnectivityEvidence {
+  if (evidence.source !== "shift4_status_operation" || !evidence.observedAt) return evidence
+
+  const observed = Date.parse(evidence.observedAt)
+  if (!Number.isFinite(observed)) {
+    return Object.freeze({ ...evidence, state: "unknown" as const, stale: true })
+  }
+  if (now.getTime() - observed <= freshnessMs) return evidence
+
+  return Object.freeze({ ...evidence, state: "unverified" as const, stale: true })
+}
+
+/**
+ * Persisted-status encoding.
+ *
+ * These values are written to `merchant_terminal_readers.status` ONLY after a
+ * real `/devices/getstatus` response. They are namespaced so they can never be
+ * confused with the locally written configuration strings ("configured",
+ * "ready") that `configureDevice` produces — the exact confusion that used to
+ * let typed configuration masquerade as provider connectivity. No migration is
+ * required: the column is already free-form text.
+ */
+export const SHIFT4_READER_STATUS_BY_STATE = {
+  online: "shift4_online",
+  offline: "shift4_offline",
+  unregistered: "shift4_unregistered",
+  unknown: "shift4_unknown",
+} as const
+
+const STATE_BY_READER_STATUS: Record<string, Shift4TerminalConnectivityState> = {
+  shift4_online: "online",
+  shift4_offline: "offline",
+  shift4_unregistered: "unregistered",
+  shift4_unknown: "unknown",
+}
+
+/**
+ * Read one reader row's stored status as connectivity evidence.
+ *
+ * A row whose status is NOT one of the namespaced provider values carries no
+ * provider evidence at all, however plausible the string looks. "ready",
+ * "online", "active" and "connected" are local configuration and are treated as
+ * `unverified` — that is the honesty rule this module exists to enforce.
+ */
+export function readShift4ReaderConnectivity(
+  reader: { status?: string | null; last_seen_at?: string | null } | null | undefined,
+  now: Date = new Date()
+): Shift4TerminalConnectivityEvidence {
+  const state = STATE_BY_READER_STATUS[String(reader?.status ?? "").trim()]
+  if (!state) return SHIFT4_TERMINAL_CONNECTIVITY_UNVERIFIED
+
+  return applyShift4EvidenceFreshness(
+    Object.freeze({
+      state,
+      source: "shift4_status_operation" as const,
+      observedAt: reader?.last_seen_at ?? null,
+      stale: false,
+    }),
+    now
+  )
 }
 
 /** The states the terminal capability may report. A subset of Shift4CapabilityState. */
 export type Shift4TerminalReadinessState =
   | "not_configured"
   | "configured"
+  | "unregistered"
   | "offline"
+  | "unknown"
   | "online"
   | "disabled"
   | "certification_required"
@@ -124,14 +238,18 @@ const projection = (
  *   2. configuration unreadable   -> blocked   (never "not configured")
  *   3. no terminal row            -> not_configured
  *   4. Retail gate off            -> disabled
- *   5. proved unavailable         -> offline
- *   6. no provider evidence       -> configured   <- local configuration only
- *   7. proved available, uncertified -> certification_required
- *   8. proved available, production not permitted -> blocked
- *   9. everything passes          -> enabled
+ *   5. not registered with cloud  -> unregistered
+ *   6. proved unavailable         -> offline
+ *   7. unreadable provider answer -> unknown
+ *   8. no provider evidence       -> configured   <- local configuration only
+ *   9. proved available, uncertified -> certification_required
+ *  10. proved available, production not permitted -> blocked
+ *  11. everything passes          -> enabled
  *
- * Only step 9 sets `ready`. A locally configured terminal stops at step 6 and
- * can never advance, which is the entire point.
+ * Only step 11 sets `ready`. A locally configured terminal stops at step 8 and
+ * can never advance, which is the entire point. Stale provider evidence has
+ * already been downgraded to `unverified` before it reaches this function, so
+ * an expired "online" also stops at step 8.
  */
 export function projectShift4TerminalReadiness(
   input: Shift4TerminalReadinessInput
@@ -152,8 +270,24 @@ export function projectShift4TerminalReadiness(
     return projection("disabled", false, "Retail feature gate is off")
   }
 
+  if (input.connectivity.state === "unregistered") {
+    return projection(
+      "unregistered",
+      false,
+      "Shift4 reports this device is not registered with the cloud service"
+    )
+  }
+
   if (input.connectivity.state === "offline") {
     return projection("offline", false, "Shift4 reported this terminal as unavailable")
+  }
+
+  if (input.connectivity.state === "unknown") {
+    return projection(
+      "unknown",
+      false,
+      "Shift4 answered, but the device status could not be read as available or unavailable"
+    )
   }
 
   if (input.connectivity.state !== "online") {
@@ -180,11 +314,16 @@ export function projectShift4TerminalReadiness(
 /**
  * Whether the terminal may be treated as a Retail processing prerequisite.
  *
- * True only for proven-online evidence. Retail card processing must not become
- * reachable because an operator typed a terminal ID into an admin form.
+ * True only for CURRENT proven-online evidence. Retail card processing must not
+ * become reachable because an operator typed a terminal ID into an admin form,
+ * nor because the device was online several hours ago.
  */
 export function isShift4TerminalOnline(
   connectivity: Shift4TerminalConnectivityEvidence
 ): boolean {
-  return connectivity.state === "online" && connectivity.source === "shift4_status_operation"
+  return (
+    connectivity.state === "online" &&
+    connectivity.source === "shift4_status_operation" &&
+    !connectivity.stale
+  )
 }
