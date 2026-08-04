@@ -9,6 +9,10 @@ const SAFE_KEYS = new Set([
   // row id, the configured Shift4 environment name, Shift4's documented
   // `server.name`, and a PineTree timestamp.
   "connectionId", "environment", "serverName", "verifiedAt",
+  // Terminal readiness evidence: which source a connectivity claim came from.
+  // A fixed enum ("none" / "pinetree_local_configuration" /
+  // "shift4_status_operation"), never a device identifier or serial.
+  "evidenceSource",
 ])
 
 const FORBIDDEN_KEY = /(token|secret|authorization|credential|password|guid|service.?role|pan|cardnumber|cvv|csc|track|pin|payload|body|header|tax|ssn|bank|routing|attachment|voice.?center)/i

@@ -95,6 +95,51 @@ export async function upsertMerchantTerminalReader(input: {
   return data as MerchantTerminalReader
 }
 
+/**
+ * Replaces one existing reader's configuration IN PLACE, addressed by its
+ * PineTree row id.
+ *
+ * Distinct from `upsertMerchantTerminalReader`, which conflicts on
+ * `(merchant_id, provider, provider_reader_id)` and therefore INSERTS a second
+ * row when the provider reader id changes — exactly the silent duplicate an
+ * "edit the terminal ID" action must not create.
+ *
+ * `provider` is part of the filter, not just the payload, so a call scoped to
+ * one provider can never rewrite another provider's reader even if given its id.
+ */
+export async function replaceMerchantTerminalReaderById(input: {
+  merchantId: string
+  readerId: string
+  provider: string
+  providerReaderId: string
+  terminalLocationId: string | null
+  label: string
+  deviceType: string
+  serialNumber: string | null
+  status: string
+}): Promise<MerchantTerminalReader> {
+  const { data, error } = await db
+    .from("merchant_terminal_readers")
+    .update({
+      provider_reader_id: input.providerReaderId,
+      terminal_location_id: input.terminalLocationId,
+      label: input.label,
+      device_type: input.deviceType,
+      serial_number: input.serialNumber,
+      status: input.status,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", input.readerId)
+    .eq("merchant_id", input.merchantId)
+    .eq("provider", input.provider)
+    .select("*")
+    .maybeSingle()
+
+  if (error) throw new Error(`Failed to replace terminal reader: ${error.message}`)
+  if (!data) throw new Error("Reader not found for this merchant and provider")
+  return data as MerchantTerminalReader
+}
+
 /** Marks one reader as the merchant default (clears any previous default). */
 export async function setMerchantDefaultTerminalReader(
   merchantId: string,
