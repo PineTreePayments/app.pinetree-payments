@@ -90,6 +90,7 @@ export const SHIFT4_TERMINAL_CONFIGURED_STATUS = "configured" as const
 /** The only fields an operator may supply. Everything else is server-derived. */
 export const SHIFT4_TERMINAL_INPUT_FIELDS = [
   "intent",
+  "readerId",
   "terminalId",
   "model",
   "serialNumber",
@@ -100,6 +101,7 @@ export type Shift4TerminalIntent = "create" | "replace"
 
 export type Shift4RetailTerminalInput = {
   intent: Shift4TerminalIntent
+  readerId?: string | null
   terminalId: string
   model: string
   serialNumber: string | null
@@ -119,6 +121,7 @@ export class Shift4RetailTerminalError extends Error {
     | "invalid_input"
     | "terminal_already_configured"
     | "terminal_not_configured"
+    | "terminal_selection_required"
     | "location_not_found"
     | "configuration_unavailable"
 
@@ -174,8 +177,14 @@ export function normalizeShift4TerminalInput(raw: Record<string, unknown>): Shif
     throw invalid("locationId must be a PineTree terminal location identifier")
   }
 
+  const readerRaw = typeof raw.readerId === "string" ? raw.readerId.trim() : ""
+  if (readerRaw && !UUID_PATTERN.test(readerRaw)) {
+    throw invalid("readerId must be a PineTree terminal reader identifier")
+  }
+
   return {
     intent,
+    readerId: readerRaw || null,
     terminalId,
     model,
     serialNumber: serialRaw || null,
@@ -204,12 +213,16 @@ export function maskSerialNumber(serial: string | null | undefined): string | nu
 export type Shift4RetailTerminalView = Readonly<{
   /** PineTree's own row id. Not a Shift4 identifier. */
   readerId: string | null
+  /** PineTree-owned reader label; safe for merchant selection. */
+  label: string | null
   /** The Shift4 terminal identifier the operator configured. */
   terminalId: string | null
   model: string | null
   /** Masked. The full serial is never returned by any path. */
   maskedSerial: string | null
   locationId: string | null
+  /** A merchant's default is deterministic when more than one reader exists. */
+  isDefault: boolean
   integrationMethod: typeof SHIFT4_TERMINAL_INTEGRATION_METHOD
   environment: Shift4RestEnvironment
   channel: typeof SHIFT4_TERMINAL_CHANNEL
@@ -308,10 +321,12 @@ function projectView(input: {
 
   return Object.freeze({
     readerId: input.reader ? String(input.reader.id) : null,
+    label: input.reader ? String(input.reader.label) : null,
     terminalId: input.reader ? String(input.reader.provider_reader_id) : null,
     model: input.reader ? String(input.reader.device_type) : null,
     maskedSerial: input.reader ? maskSerialNumber(input.reader.serial_number) : null,
     locationId: input.reader?.terminal_location_id ?? null,
+    isDefault: input.reader?.is_default === true,
     integrationMethod: SHIFT4_TERMINAL_INTEGRATION_METHOD,
     environment: input.environment,
     channel: SHIFT4_TERMINAL_CHANNEL,
@@ -349,14 +364,57 @@ export async function getShift4RetailTerminal(
   const readers = await loadShift4Readers(merchantId)
 
   return projectView({
-    // The oldest row is the merchant's terminal. This phase configures one.
-    reader: readers[0] ?? null,
+    // Legacy single-reader callers receive the merchant default when one is
+    // configured. The POS list below is the multi-reader runtime surface.
+    reader: readers.find((reader) => reader.is_default) ?? readers[0] ?? null,
     environment,
     connectivity: await resolveShift4TerminalConnectivity(merchantId),
     evidenceSource: "none",
     lastVerifiedAt: null,
     correlationId: randomUUID(),
   })
+}
+
+/**
+ * List every Shift4 reader assigned to the authenticated merchant.
+ *
+ * This is intentionally a read-only selector projection: it exposes PineTree
+ * reader IDs and masked local metadata, never credentials or raw provider
+ * responses. The order is deterministic: the merchant default first, then the
+ * existing database creation order. Connectivity remains unverified until a
+ * documented Shift4 status operation exists.
+ */
+export async function listShift4RetailTerminalSelections(
+  merchantId: string
+): Promise<readonly Shift4RetailTerminalView[]> {
+  requireRestEnabled()
+  const environment = requireEnvironment()
+  const readers = await loadShift4Readers(merchantId)
+  const connectivity = await resolveShift4TerminalConnectivity(merchantId)
+  const correlationId = randomUUID()
+  return Object.freeze(
+    [...readers]
+      .sort((left, right) => Number(right.is_default) - Number(left.is_default))
+      .map((reader) => projectView({
+        reader,
+        environment,
+        connectivity,
+        evidenceSource: "none",
+        lastVerifiedAt: null,
+        correlationId,
+      }))
+  )
+}
+
+/** Resolve one POS-selected reader after reapplying merchant/provider scope. */
+export async function getShift4RetailTerminalSelection(
+  merchantId: string,
+  readerId: string
+): Promise<Shift4RetailTerminalView | null> {
+  if (!UUID_PATTERN.test(readerId)) return null
+  return (await listShift4RetailTerminalSelections(merchantId)).find(
+    (reader) => reader.readerId === readerId
+  ) ?? null
 }
 
 /**
@@ -379,12 +437,20 @@ export async function configureShift4RetailTerminal(
   requireRestEnabled()
   const environment = requireEnvironment()
   const readers = await loadShift4Readers(merchantId)
-  const existing = readers[0] ?? null
+  const existing = input.readerId
+    ? readers.find((reader) => String(reader.id) === input.readerId) ?? null
+    : readers.length === 1 ? readers[0] : null
 
-  if (input.intent === "create" && existing) {
+  if (input.intent === "create" && readers.some((reader) => reader.provider_reader_id === input.terminalId)) {
     throw new Shift4RetailTerminalError(
       "A Shift4 terminal is already configured. Use Replace to edit it.",
       "terminal_already_configured"
+    )
+  }
+  if (input.intent === "replace" && readers.length > 1 && !input.readerId) {
+    throw new Shift4RetailTerminalError(
+      "Choose the PineTree reader to replace.",
+      "terminal_selection_required"
     )
   }
   if (input.intent === "replace" && !existing) {
@@ -422,8 +488,8 @@ export async function configureShift4RetailTerminal(
     status: SHIFT4_TERMINAL_CONFIGURED_STATUS,
   }
 
-  const reader = existing
-    ? await replaceMerchantTerminalReaderById({ ...shared, readerId: String(existing.id) })
+  const reader = input.intent === "replace"
+    ? await replaceMerchantTerminalReaderById({ ...shared, readerId: String(existing!.id) })
     : await upsertMerchantTerminalReader({
         ...shared,
         // Server-fixed. An operator cannot register a simulated device, which is
@@ -508,10 +574,12 @@ export async function verifyShift4RetailTerminalReadiness(
   // field added later cannot reach an API response by accident.
   return Object.freeze({
     readerId: view.readerId,
+    label: view.label,
     terminalId: view.terminalId,
     model: view.model,
     maskedSerial: view.maskedSerial,
     locationId: view.locationId,
+    isDefault: view.isDefault,
     integrationMethod: view.integrationMethod,
     environment: view.environment,
     channel: view.channel,

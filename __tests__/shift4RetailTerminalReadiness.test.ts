@@ -46,6 +46,7 @@ const TERMINAL_ROUTE = "app/api/internal/shift4/retail-terminal/route.ts"
 const VERIFY_ROUTE = "app/api/internal/shift4/retail-terminal/verification/route.ts"
 const CLIENT = "lib/shift4/retailTerminalClient.ts"
 const CARD = "components/dashboard/Shift4RetailTerminalCard.tsx"
+const DEVELOPMENT_CARD = "components/dashboard/Shift4RetailDevelopmentReadinessCard.tsx"
 const ADMIN_SECTION = "components/admin/Shift4SandboxOperationsSection.tsx"
 const PROVIDERS_PAGE = "app/dashboard/providers/page.tsx"
 
@@ -485,22 +486,21 @@ describe("Shift4 Retail terminal", () => {
       expect(fetchSpy).not.toHaveBeenCalled()
     })
 
-    it("refuses to create a second terminal and never duplicates silently", async () => {
-      const { calls } = mountReaders([
+    it("creates a distinct second terminal without changing the existing reader", async () => {
+      const { calls, rows } = mountReaders([
         { id: "reader-1", provider: "shift4", provider_reader_id: "TERM-0001", device_type: "PAX", serial_number: "SN1", terminal_location_id: null, status: "configured" },
       ])
-      const { configureShift4RetailTerminal, Shift4RetailTerminalError } = await import(
-        "@/engine/shift4/retailTerminal"
-      )
+      const { configureShift4RetailTerminal } = await import("@/engine/shift4/retailTerminal")
 
+      const view = await configureShift4RetailTerminal("merchant-1", { ...VALID, terminalId: "TERM-0002" })
       await expect(
         configureShift4RetailTerminal("merchant-1", { ...VALID, terminalId: "TERM-0002" })
       ).rejects.toMatchObject({ code: "terminal_already_configured" })
-      await expect(
-        configureShift4RetailTerminal("merchant-1", { ...VALID, terminalId: "TERM-0002" })
-      ).rejects.toBeInstanceOf(Shift4RetailTerminalError)
 
-      expect(calls.upsert).toBe(0)
+      expect(view.terminalId).toBe("TERM-0002")
+      expect(rows).toHaveLength(2)
+      expect(rows[0].provider_reader_id).toBe("TERM-0001")
+      expect(calls.upsert).toBe(1)
       expect(calls.replace).toBe(0)
     })
 
@@ -699,6 +699,18 @@ describe("Shift4 Retail terminal", () => {
       expect(positions).toEqual([...positions].sort((a, b) => a - b))
     })
 
+    it("keeps development readiness explanatory and inside the operator-only section", () => {
+      const section = source(ADMIN_SECTION)
+      const card = source(DEVELOPMENT_CARD)
+
+      expect(section).toContain("Shift4RetailDevelopmentReadinessCard")
+      expect(card).toContain("Shift4 Retail Development Readiness")
+      expect(card).toContain("Awaiting hardware")
+      expect(card).toContain("Blocked by documentation")
+      expect(card).toContain("does not change Retail, certification, or production eligibility")
+      expect(card).not.toMatch(/fetch\(|accessToken|clientGuid|SHIFT4_OPERATOR_EMAIL/)
+    })
+
     it("adds nothing to the merchant Providers page", () => {
       const providers = source(PROVIDERS_PAGE)
 
@@ -777,6 +789,7 @@ describe("Shift4 Retail terminal", () => {
         "intent",
         "locationId",
         "model",
+        "readerId",
         "serialNumber",
         "terminalId",
       ])

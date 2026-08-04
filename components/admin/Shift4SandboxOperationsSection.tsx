@@ -24,6 +24,7 @@ import { useCallback, useState } from "react"
 
 import Shift4RestReadinessCard from "@/components/dashboard/Shift4RestReadinessCard"
 import Shift4RetailConnectCard from "@/components/dashboard/Shift4RetailConnectCard"
+import Shift4RetailDevelopmentReadinessCard from "@/components/dashboard/Shift4RetailDevelopmentReadinessCard"
 import Shift4RetailTerminalCard from "@/components/dashboard/Shift4RetailTerminalCard"
 import Shift4RetailVerificationCard from "@/components/dashboard/Shift4RetailVerificationCard"
 
@@ -67,6 +68,7 @@ export default function Shift4SandboxOperationsSection({
           enables no processing; it never contacts Shift4. */}
       <Shift4RetailTerminalCard />
       <Shift4RestReadinessCard refreshVersion={readinessVersion} />
+      <Shift4RetailDevelopmentReadinessCard />
     </section>
   )
 }

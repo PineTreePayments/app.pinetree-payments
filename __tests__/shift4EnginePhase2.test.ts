@@ -2675,7 +2675,7 @@ describe("Shift4 Engine security boundaries", () => {
     expect(offenders).toEqual([])
   })
 
-  it("is wired only through feature-gated internal or admin server routes", () => {
+  it("is wired only through feature-gated internal/admin routes or the signed POS reader selector", () => {
     const routeImporters: string[] = []
 
     const walk = (dir: string) => {
@@ -2695,12 +2695,19 @@ describe("Shift4 Engine security boundaries", () => {
 
     walk(join(process.cwd(), "app", "api"))
     expect(routeImporters.length).toBeGreaterThan(0)
+    const allowedPosSelector = "app/api/pos/shift4-retail-readers/route.ts"
     expect(routeImporters.every((path) =>
-      path.startsWith("app/api/internal/shift4/") || path.startsWith("app/api/admin/shift4/")
+      path.startsWith("app/api/internal/shift4/") ||
+      path.startsWith("app/api/admin/shift4/") ||
+      path === allowedPosSelector
     )).toBe(true)
     for (const path of routeImporters) {
       const routeSource = readFileSync(join(process.cwd(), path), "utf8")
       expect(routeSource).not.toMatch(/@\/providers\/shift4\/(rest|commerce-engine)/)
+      if (path === allowedPosSelector) {
+        expect(routeSource).toContain("requireTerminalSession")
+        expect(routeSource).not.toMatch(/merchantId\s*:/)
+      }
     }
   })
 

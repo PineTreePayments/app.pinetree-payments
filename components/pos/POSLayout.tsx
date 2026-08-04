@@ -13,6 +13,7 @@ import PosCardPaymentExperience, {
   type PosCardCapabilities,
   type PosCardView,
 } from "./PosCardPaymentExperience"
+import Shift4RetailReaderSelector from "./Shift4RetailReaderSelector"
 import {
   initPosBaseWalletConnect,
   prewarmPosBaseWalletConnect,
@@ -2121,6 +2122,7 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
                     {cardLoading ? "Preparing card payment…" : "Card"}
                   </Button>
                 </div>
+                <Shift4RetailReaderSelector sessionToken={terminalContext?.sessionToken} />
                 <Button variant="danger" fullWidth onClick={resetSale}>
                   Cancel Payment
                 </Button>
