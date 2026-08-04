@@ -28,12 +28,42 @@
  */
 
 import { getShift4RestAccessToken } from "@/database/merchantShift4RestConnections"
+import { getMerchantTerminalLocationById } from "@/database/merchantTerminalLocations"
+import { getMerchantReportContext } from "@/database/reports"
 import { classifyShift4Device, shift4RoutingFor } from "@/providers/shift4/commerce-engine/cloud"
 import { getShift4RestConfig, type Shift4RestEnvironment } from "@/providers/shift4/rest/config"
 
 import { resolveShift4CloudDevice, SHIFT4_PROVIDER_KEY } from "./deviceStatus"
+import { normalizeShift4PostalCode } from "./purchaseCardData"
 import { readShift4FeatureFlags } from "./readiness"
 import { readShift4ReaderConnectivity } from "./terminalReadiness"
+
+/**
+ * Resolve the postal code Level 2 data will use, in documented priority order.
+ *
+ * A retail sale has no shipping address, so the chain here is the terminal
+ * location's own postal code, then the merchant's stored business address. The
+ * shipping destination takes precedence when a payment actually has one; that
+ * is applied at the payment path, which knows the order.
+ */
+async function resolvePreparationPostalCode(
+  merchantId: string,
+  terminalLocationId: string | null
+): Promise<string | null> {
+  if (terminalLocationId) {
+    const location = await getMerchantTerminalLocationById(merchantId, terminalLocationId).catch(
+      () => null
+    )
+    const address = (location?.address ?? {}) as Record<string, unknown>
+    const fromLocation = normalizeShift4PostalCode(
+      address.postalCode ?? address.postal_code ?? address.zip
+    )
+    if (fromLocation) return fromLocation
+  }
+
+  const context = await getMerchantReportContext(merchantId).catch(() => null)
+  return normalizeShift4PostalCode(context?.settings?.zip)
+}
 
 /** The safe reason a blocked preparation reports. Never a provider error. */
 export const SHIFT4_AWAITING_RETAIL_ENABLEMENT = "Awaiting Retail test enablement" as const
@@ -45,6 +75,7 @@ export class Shift4RetailPreparationError extends Error {
     | "reader_not_ready"
     | "connection_unavailable"
     | "environment_not_permitted"
+    | "postal_code_unavailable"
 
   constructor(message: string, code: Shift4RetailPreparationError["code"]) {
     super(message)
@@ -73,8 +104,13 @@ export type Shift4RetailPreparationPlan = Readonly<{
   environment: Shift4RestEnvironment
   channel: "retail"
   /**
-   * Documented-required fields PineTree cannot supply until a real payment
-   * exists (the invoice) or until Shift4 clarifies (`transaction.purchaseCard`).
+   * True once a real Level 2 postal code resolved from the terminal location or
+   * the merchant's business address. The postal code itself stays server-side.
+   */
+  purchaseCardReady: boolean
+  /**
+   * The only documented-required field PineTree still cannot supply in a dry
+   * run: `transaction.invoice`, which is derived from a real payment attempt.
    */
   pendingRequiredFields: readonly string[]
 }>
@@ -167,6 +203,21 @@ export async function prepareShift4RetailCardPayment(input: {
     )
   }
 
+  // Level 2 purchasing-card data is required by the sale and authorization
+  // schemas, and a real postal code is required to build it. Failing here is
+  // deliberate: the alternative is sending a fabricated ZIP the merchant would
+  // be attesting to.
+  const postalCode = await resolvePreparationPostalCode(
+    input.merchantId,
+    reader.terminal_location_id ?? null
+  )
+  if (!postalCode) {
+    throw new Shift4RetailPreparationError(
+      "No postal code is recorded for this terminal location or the merchant's business address. Level 2 purchasing-card data requires one.",
+      "postal_code_unavailable"
+    )
+  }
+
   const operation = input.operation ?? "sale"
   const routing = shift4RoutingFor(operation)
   const classification = classifyShift4Device(reader.device_type)
@@ -183,12 +234,12 @@ export async function prepareShift4RetailCardPayment(input: {
     integrationMethod: "commerce_engine_cloud" as const,
     environment,
     channel: "retail" as const,
-    pendingRequiredFields: Object.freeze([
-      // Derived from a real PineTree payment attempt; none exists in a dry run.
-      "transaction.invoice",
-      // Documented as required while the spec's own retail example omits it.
-      "transaction.purchaseCard",
-    ]),
+    purchaseCardReady: true,
+    // `transaction.purchaseCard` is NO LONGER listed here: PineTree derives all
+    // three Level 2 fields from real merchant and payment data through
+    // `purchaseCardData.ts`. Only the invoice genuinely requires a real payment
+    // attempt, which a dry run does not create.
+    pendingRequiredFields: Object.freeze(["transaction.invoice"]),
   })
 
   // Every gate that would permit a real dispatch is still closed, and this is

@@ -2704,6 +2704,7 @@ describe("Shift4 Engine security boundaries", () => {
     const allowedPosRoutes = new Set([
       "app/api/pos/shift4-retail-readers/route.ts",
       "app/api/pos/shift4-retail-preparation/route.ts",
+      "app/api/pos/shift4-manual-authorization/route.ts",
     ])
     expect(routeImporters.every((path) =>
       path.startsWith("app/api/internal/shift4/") ||

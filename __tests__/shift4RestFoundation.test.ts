@@ -1242,6 +1242,13 @@ describe("Shift4 transaction wrappers", () => {
     card: { tokenValue: "TOKEN00000000001" },
     accessToken: FAKE_ACCESS_TOKEN,
     config: testConfig(),
+    // Level 2 data is required by the sale/authorization/manual-authorization
+    // schemas. Real-shaped PineTree values, never Shift4's examples.
+    purchaseCard: {
+      customerReference: "PT0000000000001",
+      destinationPostalCode: "606543201",
+      productDescriptors: ["Retail Purchase"],
+    },
   }
 
   it("builds the documented tokenized request body", () => {
@@ -1305,6 +1312,9 @@ describe("Shift4 transaction wrappers", () => {
 
     const result = await refund({
       ...requestBase,
+      // The refund GTV schema does not define transaction.purchaseCard, so the
+      // builder refuses it. Sending it anyway would be an undocumented field.
+      purchaseCard: undefined,
       invoice: refundReference.invoice,
       refundInvoiceReference: refundReference,
       fetchImpl: fetchReturning(

@@ -23,6 +23,7 @@ import type {
   Shift4CardOnFile,
   Shift4CustomerBlock,
   Shift4Operation,
+  Shift4PurchaseCard,
   Shift4SecurityCodeIndicator,
   Shift4TokenTransactionRequest,
 } from "../types"
@@ -63,7 +64,22 @@ export type Shift4TransactionRequestInput = {
   apiOptions?: string[]
   requestedAt?: Date
   merchantTimeZone?: string
+  /**
+   * Level 2 purchasing-card data, built by `engine/shift4/purchaseCardData.ts`.
+   *
+   * REQUIRED by the sale, authorization and manual-authorization GTV schemas;
+   * absent from the capture schema. The caller passes it for the operations
+   * that need it, and this builder attaches it only for those.
+   */
+  purchaseCard?: Shift4PurchaseCard
 }
+
+/** GTV-token operations whose published schema requires `transaction.purchaseCard`. */
+const PURCHASE_CARD_OPERATIONS: readonly Shift4Operation[] = [
+  "sale",
+  "authorization",
+  "manual_authorization",
+]
 
 export function buildTokenTransactionRequest(
   operation: Shift4Operation,
@@ -115,6 +131,23 @@ export function buildTokenTransactionRequest(
   if (input.card.present !== undefined) {
     request.card.present = input.card.present ? "Y" : "N"
   }
+  if (PURCHASE_CARD_OPERATIONS.includes(operation)) {
+    if (!input.purchaseCard) {
+      throw new Shift4RestApiError(
+        `Shift4 ${operation} requires transaction.purchaseCard (Level 2 purchasing-card data).`,
+        { diagnostics: { operation, invoice } }
+      )
+    }
+    request.transaction.purchaseCard = input.purchaseCard
+  } else if (input.purchaseCard) {
+    // Capture's published schema has no purchaseCard. Attaching it anyway would
+    // send a field the selected body does not define.
+    throw new Shift4RestApiError(
+      `Shift4 ${operation} does not accept transaction.purchaseCard.`,
+      { diagnostics: { operation, invoice } }
+    )
+  }
+
   if (input.notes) {
     request.transaction.notes = input.notes
   }

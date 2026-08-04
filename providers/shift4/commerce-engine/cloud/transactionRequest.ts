@@ -23,25 +23,37 @@
  * PineTree type that could hold cardholder data would be a PCI liability with
  * no purpose, so none exists.
  *
- * ── The purchaseCard gap is reported, not papered over ───────────────────────
- * The spec marks `transaction.purchaseCard` required for sale and authorization
- * while its own retail example omits it. PineTree has no truthful source for
- * `customerReference` / `destinationPostalCode` / `productDescriptors` in an
- * ordinary retail sale. The builder therefore OMITS it and reports it through
- * `unresolvedRequiredFields`, so the gap reaches a human instead of being
- * filled with invented values.
+ * ── purchaseCard is required, supplied, and validated here ───────────────────
+ * `transaction.purchaseCard` is required by the sale, authorization and manual-
+ * authorization schemas. An earlier revision omitted it and reported it as an
+ * unresolved question for Shift4; that was wrong. The caller supplies it from
+ * `engine/shift4/purchaseCardData.ts`, which derives all three fields from real
+ * PineTree merchant and payment data, and this builder enforces the documented
+ * limits. It is NOT added to refund, whose Cloud variant does not require it.
  *
  * SECURITY: pure. No I/O, no credential, no environment read.
  */
 
 import {
-  SHIFT4_CLOUD_UNRESOLVED_REQUIRED_FIELDS,
+  SHIFT4_PURCHASE_CARD_LIMITS,
+  shift4RequiresPurchaseCard,
   type Shift4CloudDevice,
 } from "./contract"
 import { Shift4CloudRequestError, buildShift4CloudDeviceStatusRequest } from "./deviceStatus"
 
 /** Operations that carry a documented Commerce Engine For Cloud body. */
-export type Shift4CloudTransactionOperation = "sale" | "authorization" | "refund"
+export type Shift4CloudTransactionOperation =
+  | "sale"
+  | "authorization"
+  | "refund"
+  | "manual_authorization"
+
+/** Level 2 purchasing-card data, as the schema publishes it. */
+export type Shift4CloudPurchaseCard = Readonly<{
+  customerReference: string
+  destinationPostalCode: string
+  productDescriptors: readonly string[]
+}>
 
 export type Shift4CloudAmount = Readonly<{
   total: number
@@ -53,6 +65,9 @@ export type Shift4CloudClerk = Readonly<{ numericId: number }>
 export type Shift4CloudTransactionBlock = Readonly<{
   invoice: string
   notes?: string
+  /** Six characters, alphanumeric. Manual-authorization requests only. */
+  authorizationCode?: string
+  purchaseCard?: Shift4CloudPurchaseCard
 }>
 
 export type Shift4CloudCard = Readonly<{ present: "Y" | "N" }>
@@ -70,21 +85,66 @@ export type Shift4CloudTransactionBuild = Readonly<{
   operation: Shift4CloudTransactionOperation
   endpoint: string
   body: Shift4CloudTransactionRequest
-  /**
-   * Documented-required fields PineTree cannot supply truthfully yet. Non-empty
-   * means this request is NOT ready to send, however healthy every gate is.
-   */
-  unresolvedRequiredFields: readonly string[]
 }>
 
 const ENDPOINTS: Record<Shift4CloudTransactionOperation, string> = {
   sale: "/transactions/sale",
   authorization: "/transactions/authorization",
   refund: "/transactions/refund",
+  manual_authorization: "/transactions/manualauthorization",
 }
 
 /** Documented max length of `transaction.invoice`. */
 const INVOICE_MAX_LENGTH = 10
+
+/** Documented max length of `transaction.authorizationCode`. */
+const AUTHORIZATION_CODE_PATTERN = /^[A-Z0-9]{6}$/
+
+/**
+ * Validate Level 2 purchasing-card data against the documented limits.
+ *
+ * Enforced here as well as at the factory because this is the last point before
+ * the wire: a caller assembling the object by hand still cannot exceed a limit.
+ */
+function assertPurchaseCard(purchaseCard: Shift4CloudPurchaseCard): Shift4CloudPurchaseCard {
+  const customerReference = String(purchaseCard.customerReference || "").trim()
+  const destinationPostalCode = String(purchaseCard.destinationPostalCode || "").trim()
+  const productDescriptors = (purchaseCard.productDescriptors ?? []).map((entry) =>
+    String(entry || "").trim()
+  ).filter(Boolean)
+
+  if (!customerReference || customerReference.length > SHIFT4_PURCHASE_CARD_LIMITS.customerReference) {
+    throw new Shift4CloudRequestError(
+      "transaction.purchaseCard.customerReference is required and must be at most 25 characters.",
+      "invalid_purchase_card"
+    )
+  }
+  if (
+    !destinationPostalCode ||
+    destinationPostalCode.length > SHIFT4_PURCHASE_CARD_LIMITS.destinationPostalCode
+  ) {
+    throw new Shift4CloudRequestError(
+      "transaction.purchaseCard.destinationPostalCode is required and must be at most 9 characters.",
+      "invalid_purchase_card"
+    )
+  }
+  if (
+    productDescriptors.length < 1 ||
+    productDescriptors.length > SHIFT4_PURCHASE_CARD_LIMITS.productDescriptorCount ||
+    productDescriptors.some((entry) => entry.length > SHIFT4_PURCHASE_CARD_LIMITS.productDescriptor)
+  ) {
+    throw new Shift4CloudRequestError(
+      "transaction.purchaseCard.productDescriptors must contain one to four entries of at most 40 characters.",
+      "invalid_purchase_card"
+    )
+  }
+
+  return Object.freeze({
+    customerReference,
+    destinationPostalCode,
+    productDescriptors: Object.freeze(productDescriptors),
+  })
+}
 
 /**
  * Shift4 amounts are major-unit decimals (the spec's examples are `160`, `15`).
@@ -112,6 +172,10 @@ export function buildShift4CloudTransactionRequest(input: {
   /** Refund is card-present at the device; the spec requires `card.present`. */
   cardPresent?: boolean
   notes?: string
+  /** Required for sale, authorization and manual authorization. */
+  purchaseCard?: Shift4CloudPurchaseCard
+  /** Six alphanumeric characters. Manual authorization only. */
+  authorizationCode?: string
 }): Shift4CloudTransactionBuild {
   // Reuse the device-status builder's validation so `device` is constructed and
   // validated in exactly one place. Its dateTime rule is the same rule.
@@ -136,9 +200,42 @@ export function buildShift4CloudTransactionRequest(input: {
     )
   }
 
+  // purchaseCard is added only where the SELECTED schema requires it. Refund's
+  // Cloud variant does not, and blindly attaching it would send a field the
+  // documented body does not define.
+  const needsPurchaseCard = shift4RequiresPurchaseCard(input.operation)
+  if (needsPurchaseCard && !input.purchaseCard) {
+    throw new Shift4CloudRequestError(
+      `Shift4 ${input.operation} requires transaction.purchaseCard.`,
+      "invalid_purchase_card"
+    )
+  }
+
+  let authorizationCode: string | undefined
+  if (input.operation === "manual_authorization") {
+    authorizationCode = String(input.authorizationCode || "").trim().toUpperCase()
+    if (!AUTHORIZATION_CODE_PATTERN.test(authorizationCode)) {
+      throw new Shift4CloudRequestError(
+        "transaction.authorizationCode must be exactly six alphanumeric characters.",
+        "invalid_authorization_code"
+      )
+    }
+  } else if (input.authorizationCode) {
+    // Only manual authorization carries a voice approval code; attaching one
+    // elsewhere would misrepresent how the transaction was approved.
+    throw new Shift4CloudRequestError(
+      "transaction.authorizationCode is only valid for manual authorization.",
+      "invalid_authorization_code"
+    )
+  }
+
   const transaction: Shift4CloudTransactionBlock = Object.freeze({
     invoice,
     ...(input.notes ? { notes: input.notes } : {}),
+    ...(authorizationCode ? { authorizationCode } : {}),
+    ...(needsPurchaseCard && input.purchaseCard
+      ? { purchaseCard: assertPurchaseCard(input.purchaseCard) }
+      : {}),
   })
 
   const body: Shift4CloudTransactionRequest = Object.freeze({
@@ -161,9 +258,5 @@ export function buildShift4CloudTransactionRequest(input: {
     operation: input.operation,
     endpoint: ENDPOINTS[input.operation],
     body,
-    unresolvedRequiredFields:
-      input.operation === "refund"
-        ? Object.freeze([])
-        : SHIFT4_CLOUD_UNRESOLVED_REQUIRED_FIELDS,
   })
 }

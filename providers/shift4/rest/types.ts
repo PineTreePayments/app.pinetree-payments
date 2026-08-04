@@ -161,6 +161,24 @@ export type Shift4CardOnFile = {
   transactionLinkId?: string
 }
 
+/**
+ * Level 2 purchasing-card data.
+ *
+ * Documented limits, transcribed from the OpenAPI:
+ *   customerReference      max 25
+ *   destinationPostalCode  max 9
+ *   productDescriptors     1-4 entries, each max 40
+ *
+ * Required by the sale, authorization and manual-authorization schemas (both the
+ * Commerce Engine For Cloud and GTV-token variants). NOT part of the capture,
+ * refund, void, or invoice-information schemas.
+ */
+export type Shift4PurchaseCard = {
+  customerReference: string
+  destinationPostalCode: string
+  productDescriptors: string[]
+}
+
 export type Shift4TransactionRequestBlock = {
   /** Max 10 characters. The correlation key for every subsequent operation. */
   invoice: string
@@ -169,6 +187,8 @@ export type Shift4TransactionRequestBlock = {
   cardOnFile?: Shift4CardOnFile
   /** Six-character voice approval code; manual-authorization requests only. */
   authorizationCode?: string
+  /** Required by the sale/authorization/manual-authorization schemas. */
+  purchaseCard?: Shift4PurchaseCard
 }
 
 /**

@@ -36,7 +36,12 @@ import {
 } from "./contract"
 
 export class Shift4CloudRequestError extends Error {
-  readonly code: "invalid_manufacturer" | "invalid_serial_number" | "invalid_date_time"
+  readonly code:
+    | "invalid_manufacturer"
+    | "invalid_serial_number"
+    | "invalid_date_time"
+    | "invalid_purchase_card"
+    | "invalid_authorization_code"
 
   constructor(message: string, code: Shift4CloudRequestError["code"]) {
     super(message)

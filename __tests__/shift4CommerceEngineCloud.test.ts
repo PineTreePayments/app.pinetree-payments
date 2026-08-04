@@ -19,6 +19,7 @@ import {
   readShift4CloudDeviceStatusFlags,
   SHIFT4_CLOUD_DEVICE_MANUFACTURERS,
   SHIFT4_COMMERCE_ENGINE_DEVICES,
+  SHIFT4_OPERATION_ROUTING,
   Shift4CloudRequestError,
   shift4CloudAmountFromMinor,
   shift4RoutingFor,
@@ -33,6 +34,13 @@ const source = (path: string) => readFileSync(join(process.cwd(), path), "utf8")
 
 const VALID_DATE_TIME = "2026-08-04T09:18:23.283-05:00"
 const DEVICE = { manufacturer: "PAX", serialNumber: "1170301234" }
+
+/** Level 2 data shaped like the factory's real output, not Shift4's examples. */
+const PURCHASE_CARD = {
+  customerReference: "PT-10241",
+  destinationPostalCode: "606543201",
+  productDescriptors: ["Espresso", "Croissant"],
+} as const
 
 describe("Commerce Engine For Cloud contract", () => {
   describe("hosted URLs and headers are reused, not reinvented", () => {
@@ -176,6 +184,7 @@ describe("Commerce Engine For Cloud contract", () => {
       clerkNumericId: 1576,
       invoice: "0510093358",
       device: DEVICE,
+      purchaseCard: PURCHASE_CARD,
     }
 
     it("builds the documented sale body with the device object", () => {
@@ -217,13 +226,33 @@ describe("Commerce Engine For Cloud contract", () => {
       ).toThrow(/10/)
     })
 
-    it("reports the documented-required field it cannot supply instead of inventing values", () => {
-      // The spec marks transaction.purchaseCard required for sale/authorization
-      // while its own retail example omits it. Fabricating a customerReference
-      // would be fabricating transaction data.
-      const built = buildShift4CloudTransactionRequest({ ...base, operation: "sale" })
-      expect(built.unresolvedRequiredFields).toContain("transaction.purchaseCard")
-      expect(JSON.stringify(built.body)).not.toContain("purchaseCard")
+    it("requires transaction.purchaseCard for sale and authorization", () => {
+      // The schema marks it required, and PineTree derives all three fields from
+      // real merchant/payment data rather than treating it as unresolved.
+      expect(() =>
+        buildShift4CloudTransactionRequest({ ...base, operation: "sale", purchaseCard: undefined })
+      ).toThrow(/purchaseCard/)
+
+      const built = buildShift4CloudTransactionRequest({
+        ...base,
+        operation: "sale",
+        purchaseCard: PURCHASE_CARD,
+      })
+      expect(built.body.transaction.purchaseCard).toEqual({
+        customerReference: "PT-10241",
+        destinationPostalCode: "606543201",
+        productDescriptors: ["Espresso", "Croissant"],
+      })
+    })
+
+    it("does not attach purchaseCard to refund, whose Cloud variant omits it", () => {
+      const refund = buildShift4CloudTransactionRequest({
+        ...base,
+        operation: "refund",
+        purchaseCard: PURCHASE_CARD,
+      })
+      expect(refund.body.transaction.purchaseCard).toBeUndefined()
+      expect(JSON.stringify(refund.body)).not.toContain("customerReference")
     })
 
     it("carries no cardholder data field of any kind", () => {
@@ -261,10 +290,15 @@ describe("Commerce Engine For Cloud contract", () => {
       }
     })
 
-    it("routes capture Host Direct, because no Cloud body variant is published", () => {
+    it("keeps capture token-addressed, because only token body variants exist", () => {
+      // Capture IS reachable over Cloud, but the published request body offers
+      // only token variants — so no device object may be invented for it.
       const capture = shift4RoutingFor("capture")
       expect(capture?.route).toBe("host_direct")
       expect(capture?.cloudRequestSchemaPublished).toBe(false)
+      expect(capture?.tokenAddressed).toBe(true)
+      expect(capture?.requiresPurchaseCard).toBe(false)
+      expect(capture?.documentedIntegrationMethods).toContain("Commerce Engine For Cloud")
     })
 
     it("treats void and invoice information as stage-dependent header operations", () => {
@@ -272,21 +306,35 @@ describe("Commerce Engine For Cloud contract", () => {
       expect(shift4RoutingFor("invoice_information")?.route).toBe("either_by_stage")
     })
 
-    it("does not claim Cloud support for manual authorization", () => {
-      // A comengcloud body variant exists, but the path's servers block lists
-      // only Host Direct and locally installed UTG. The servers block wins.
+    it("recognizes Commerce Engine For Cloud as a documented manual-authorization method", () => {
+      // The operation description publishes all four integration methods. An
+      // earlier revision read the servers block instead and wrongly called this
+      // Cloud-unsupported.
       const manual = shift4RoutingFor("manual_authorization")
-      expect(manual?.route).toBe("not_supported_for_cloud")
-      expect(manual?.cloudServerPublished).toBe(false)
-      expect(manual?.rationale).toMatch(/AMBIGUITY/)
+      expect(manual?.documentedIntegrationMethods).toEqual([
+        "Host Direct",
+        "Locally Installed UTG",
+        "Commerce Engine For On Premise",
+        "Commerce Engine For Cloud",
+      ])
+      expect(manual?.route).toBe("either_by_stage")
+      expect(manual?.cloudRequestSchemaPublished).toBe(true)
+      expect(manual?.requiresPurchaseCard).toBe(true)
+      expect(manual?.endpoint).toBe("/transactions/manualauthorization")
+    })
+
+    it("carries no unresolved-question language in the matrix", () => {
+      for (const entry of SHIFT4_OPERATION_ROUTING) {
+        expect(entry.rationale).not.toMatch(/AMBIGUITY|pending Shift4 confirmation|open question/i)
+      }
     })
 
     it("does not treat GET /devices/info as a Cloud endpoint", () => {
-      // Its servers block lists ONLY the locally installed UTG URL, so it is not
-      // a cloud terminal-listing or auto-discovery endpoint.
+      // Its published integration methods are On Premise and locally installed
+      // UTG — Commerce Engine For Cloud is absent.
       const info = shift4RoutingFor("device_information")
       expect(info?.route).toBe("not_supported_for_cloud")
-      expect(info?.cloudServerPublished).toBe(false)
+      expect(info?.documentedIntegrationMethods).not.toContain("Commerce Engine For Cloud")
       expect(info?.cloudRequestSchemaPublished).toBe(false)
     })
 

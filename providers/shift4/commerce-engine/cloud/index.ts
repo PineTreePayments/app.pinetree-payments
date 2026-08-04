@@ -11,10 +11,11 @@
 export {
   SHIFT4_CLOUD_DEVICE_MANUFACTURERS,
   SHIFT4_CLOUD_SERIAL_NUMBER_MAX_LENGTH,
-  SHIFT4_CLOUD_UNRESOLVED_REQUIRED_FIELDS,
   SHIFT4_COMMERCE_ENGINE_DEVICES,
   SHIFT4_OPERATION_ROUTING,
+  SHIFT4_PURCHASE_CARD_LIMITS,
   classifyShift4Device,
+  shift4RequiresPurchaseCard,
   shift4RoutingFor,
 } from "./contract"
 export type {
@@ -43,6 +44,7 @@ export {
   shift4CloudAmountFromMinor,
 } from "./transactionRequest"
 export type {
+  Shift4CloudPurchaseCard,
   Shift4CloudTransactionBuild,
   Shift4CloudTransactionOperation,
   Shift4CloudTransactionRequest,

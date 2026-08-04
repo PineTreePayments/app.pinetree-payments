@@ -40,7 +40,10 @@ describe("Shift4 Retail POS payment preparation", () => {
     ...overrides,
   })
 
-  function mount(rows: Record<string, unknown>[], options: { connection?: unknown } = {}) {
+  function mount(
+    rows: Record<string, unknown>[],
+    options: { connection?: unknown; merchantZip?: string | null } = {}
+  ) {
     const writes: string[] = []
     vi.doMock("@/database/merchantTerminalReaders", () => ({
       listMerchantTerminalReaders: async (merchantId: string, provider: string) =>
@@ -61,6 +64,16 @@ describe("Shift4 Retail POS payment preparation", () => {
     }))
     vi.doMock("@/database/merchants", () => ({
       getMerchantSettings: async () => ({ timezone: "America/Chicago" }),
+    }))
+    // Level 2 purchasing-card data needs a real postal code. The terminal
+    // location carries none here, so the merchant business address supplies it.
+    vi.doMock("@/database/merchantTerminalLocations", () => ({
+      getMerchantTerminalLocationById: async () => null,
+    }))
+    vi.doMock("@/database/reports", () => ({
+      getMerchantReportContext: async () => ({
+        settings: { zip: options.merchantZip === undefined ? "60654" : options.merchantZip },
+      }),
     }))
     // Any attempt or ledger write would show up here.
     vi.doMock("@/database/shift4PaymentAttempts", () => ({
@@ -133,7 +146,7 @@ describe("Shift4 Retail POS payment preparation", () => {
     expect(JSON.stringify(preparation)).not.toContain("TERM-0001")
   })
 
-  it("names the required fields it cannot supply rather than inventing them", async () => {
+  it("names only the invoice as pending, now that purchaseCard is derived", async () => {
     mount([reader()])
     const { prepareShift4RetailCardPayment } = await import("@/engine/shift4/retailPreparation")
 
@@ -142,8 +155,21 @@ describe("Shift4 Retail POS payment preparation", () => {
       readerId: READER_A,
     })
 
-    expect(preparation.plan.pendingRequiredFields).toContain("transaction.invoice")
-    expect(preparation.plan.pendingRequiredFields).toContain("transaction.purchaseCard")
+    expect(preparation.plan.pendingRequiredFields).toEqual(["transaction.invoice"])
+    // purchaseCard is derived from real merchant data, not an open question.
+    expect(preparation.plan.pendingRequiredFields).not.toContain("transaction.purchaseCard")
+    expect(preparation.plan.purchaseCardReady).toBe(true)
+  })
+
+  it("fails closed when no real postal code exists anywhere", async () => {
+    // No terminal-location postal code and no merchant business ZIP. Level 2
+    // data must not be completed with an invented value such as 00000.
+    mount([reader()], { merchantZip: null })
+    const { prepareShift4RetailCardPayment } = await import("@/engine/shift4/retailPreparation")
+
+    await expect(
+      prepareShift4RetailCardPayment({ merchantId: "merchant-a", readerId: READER_A })
+    ).rejects.toMatchObject({ code: "postal_code_unavailable" })
   })
 
   it("rejects another merchant's reader generically", async () => {

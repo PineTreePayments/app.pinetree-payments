@@ -183,19 +183,31 @@ export function classifyShift4Device(deviceType: string | null | undefined): Shi
 /**
  * Which Shift4 integration method PineTree uses for each operation.
  *
- * Derived from the `servers` block the spec publishes per path — the
- * authoritative statement of how an endpoint is reachable — cross-checked
- * against whether the request body publishes a `Commerce Engine For Cloud`
- * schema variant.
+ * ── Correction ───────────────────────────────────────────────────────────────
+ * An earlier revision read each path's `servers` block as the authoritative
+ * statement of supported integration methods. That was wrong. The authoritative
+ * statement is the operation DESCRIPTION, which publishes an explicit
+ * "**Integration Methods:**" list. `/transactions/manualauthorization` lists all
+ * four — Host Direct, Locally Installed UTG, Commerce Engine For On Premise and
+ * Commerce Engine For Cloud — while its `servers` block happens to omit the
+ * Cloud URLs. That omission is harmless and not a restriction: for every
+ * transaction path the Commerce Engine For Cloud URLs are byte-identical to the
+ * Host Direct URLs, so the entry is redundant where it does appear.
+ *
+ * Each entry below therefore records the description's integration-method list,
+ * cross-checked against which request-body variants the spec publishes — because
+ * "reachable over Cloud" and "has a device body" are different questions.
+ * Capture is reachable over Cloud yet publishes only token bodies, so it stays
+ * token-based and gains no invented device object.
  */
 export type Shift4IntegrationRoute =
   /** Card is read at the device: Commerce Engine For Cloud. */
   | "commerce_engine_cloud"
-  /** Subsequent operation on an existing transaction: Host Direct. */
+  /** Subsequent token- or invoice-addressed operation: Host Direct. */
   | "host_direct"
-  /** Documented for both; stage decides. */
+  /** Documented for both; the transaction stage decides which PineTree sends. */
   | "either_by_stage"
-  /** Not reachable from a cloud POS per the published servers block. */
+  /** Not reachable from a cloud POS at all. */
   | "not_supported_for_cloud"
 
 export type Shift4OperationRouting = Readonly<{
@@ -203,12 +215,24 @@ export type Shift4OperationRouting = Readonly<{
   endpoint: string
   method: "GET" | "POST" | "DELETE"
   route: Shift4IntegrationRoute
+  /** The description's published "Integration Methods" list, verbatim. */
+  documentedIntegrationMethods: readonly string[]
   /** Whether the spec publishes a `Commerce Engine For Cloud` body variant. */
   cloudRequestSchemaPublished: boolean
-  /** Whether the path's `servers` block lists a Commerce Engine For Cloud URL. */
-  cloudServerPublished: boolean
+  /** Whether the selected PineTree body is token-addressed rather than device-addressed. */
+  tokenAddressed: boolean
+  /** Whether the selected schema requires `transaction.purchaseCard`. */
+  requiresPurchaseCard: boolean
   rationale: string
 }>
+
+/** The four documented integration methods, as the descriptions spell them. */
+const ALL_FOUR = Object.freeze([
+  "Host Direct",
+  "Locally Installed UTG",
+  "Commerce Engine For On Premise",
+  "Commerce Engine For Cloud",
+])
 
 export const SHIFT4_OPERATION_ROUTING: readonly Shift4OperationRouting[] = Object.freeze([
   {
@@ -216,26 +240,33 @@ export const SHIFT4_OPERATION_ROUTING: readonly Shift4OperationRouting[] = Objec
     endpoint: "/transactions/authorization",
     method: "POST",
     route: "commerce_engine_cloud",
+    documentedIntegrationMethods: ALL_FOUR,
     cloudRequestSchemaPublished: true,
-    cloudServerPublished: true,
-    rationale: "Card is read at the device, so the request must route to the device.",
+    tokenAddressed: false,
+    requiresPurchaseCard: true,
+    rationale: "Initial card entry happens at the device, so the request routes to the device.",
   },
   {
     operation: "sale",
     endpoint: "/transactions/sale",
     method: "POST",
     route: "commerce_engine_cloud",
+    documentedIntegrationMethods: ALL_FOUR,
     cloudRequestSchemaPublished: true,
-    cloudServerPublished: true,
-    rationale: "Card is read at the device, so the request must route to the device.",
+    tokenAddressed: false,
+    requiresPurchaseCard: true,
+    rationale: "Initial card entry happens at the device, so the request routes to the device.",
   },
   {
     operation: "refund",
     endpoint: "/transactions/refund",
     method: "POST",
     route: "commerce_engine_cloud",
+    documentedIntegrationMethods: ALL_FOUR,
     cloudRequestSchemaPublished: true,
-    cloudServerPublished: true,
+    tokenAddressed: false,
+    // The refund Cloud variant requires `card.present`, not purchaseCard.
+    requiresPurchaseCard: false,
     rationale: "Card-present refund requires a card interaction at the device.",
   },
   {
@@ -243,18 +274,22 @@ export const SHIFT4_OPERATION_ROUTING: readonly Shift4OperationRouting[] = Objec
     endpoint: "/transactions/capture",
     method: "POST",
     route: "host_direct",
+    documentedIntegrationMethods: ALL_FOUR,
     cloudRequestSchemaPublished: false,
-    cloudServerPublished: true,
+    tokenAddressed: true,
+    requiresPurchaseCard: false,
     rationale:
-      "The published request body offers only token variants and no Commerce Engine For Cloud variant. Capture acts on an existing authorization and needs no card interaction, so it is sent Host Direct.",
+      "Reachable over Cloud, but the published request body offers ONLY token variants — there is no device variant. Capture acts on an existing authorization and needs no card interaction, so PineTree sends the documented GTV-token body Host Direct and adds no device object.",
   },
   {
     operation: "void",
     endpoint: "/transactions/invoice",
     method: "DELETE",
     route: "either_by_stage",
+    documentedIntegrationMethods: ALL_FOUR,
     cloudRequestSchemaPublished: false,
-    cloudServerPublished: true,
+    tokenAddressed: false,
+    requiresPurchaseCard: false,
     rationale:
       "Void takes no request body and is addressed by the Invoice header, so no device variant exists or is needed. PineTree sends it Host Direct against the original invoice.",
   },
@@ -263,8 +298,10 @@ export const SHIFT4_OPERATION_ROUTING: readonly Shift4OperationRouting[] = Objec
     endpoint: "/transactions/invoice",
     method: "GET",
     route: "either_by_stage",
+    documentedIntegrationMethods: ALL_FOUR,
     cloudRequestSchemaPublished: false,
-    cloudServerPublished: true,
+    tokenAddressed: false,
+    requiresPurchaseCard: false,
     rationale:
       "A read-only lookup with no request body, addressed by the Invoice header. PineTree sends it Host Direct during timeout recovery.",
   },
@@ -272,31 +309,44 @@ export const SHIFT4_OPERATION_ROUTING: readonly Shift4OperationRouting[] = Objec
     operation: "manual_authorization",
     endpoint: "/transactions/manualauthorization",
     method: "POST",
-    route: "not_supported_for_cloud",
+    route: "either_by_stage",
+    documentedIntegrationMethods: ALL_FOUR,
     cloudRequestSchemaPublished: true,
-    cloudServerPublished: false,
+    // Either variant may be selected; the GTV variant is token-addressed.
+    tokenAddressed: false,
+    requiresPurchaseCard: true,
     rationale:
-      "AMBIGUITY IN THE PUBLISHED SPEC: a Commerce Engine For Cloud body variant exists, but the path's servers block lists only Host Direct and locally installed UTG. PineTree treats the servers block as authoritative and does not route this through the cloud device until Shift4 confirms.",
+      "The operation description publishes all four integration methods, including Commerce Engine For Cloud, and a comengcloud body variant exists. PineTree selects deterministically: the GTV-token variant when the referral evidence carries a usable token (no second card read), otherwise the Commerce Engine For Cloud variant against the merchant-owned reader.",
   },
   {
     operation: "device_status",
     endpoint: "/devices/getstatus",
     method: "POST",
     route: "commerce_engine_cloud",
+    documentedIntegrationMethods: Object.freeze([
+      "Commerce Engine For On Premise",
+      "Commerce Engine For Cloud",
+    ]),
     cloudRequestSchemaPublished: true,
-    cloudServerPublished: true,
+    tokenAddressed: false,
+    requiresPurchaseCard: false,
     rationale:
-      "Published for Commerce Engine On Premise and Commerce Engine For Cloud only. There is no Host Direct server for this path.",
+      "Published for Commerce Engine On Premise and Commerce Engine For Cloud only. There is no Host Direct integration method for this path.",
   },
   {
     operation: "device_information",
     endpoint: "/devices/info",
     method: "GET",
     route: "not_supported_for_cloud",
+    documentedIntegrationMethods: Object.freeze([
+      "Commerce Engine For On Premise",
+      "Locally Installed UTG",
+    ]),
     cloudRequestSchemaPublished: false,
-    cloudServerPublished: false,
+    tokenAddressed: false,
+    requiresPurchaseCard: false,
     rationale:
-      "The servers block lists ONLY the locally installed UTG URL. It is not a cloud terminal-listing or auto-discovery endpoint and must not be used as one.",
+      "The description publishes only Commerce Engine For On Premise and Locally Installed UTG — Commerce Engine For Cloud is absent, and the servers block lists only the local UTG URL. It is not a cloud terminal-listing or auto-discovery endpoint and must not be used as one.",
   },
 ] as const)
 
@@ -305,18 +355,23 @@ export function shift4RoutingFor(operation: string): Shift4OperationRouting | nu
 }
 
 /**
- * Documented-required request fields PineTree cannot yet supply truthfully.
+ * Documented `transaction.purchaseCard` limits, transcribed.
  *
- * The published `Commerce Engine For Cloud` bodies for sale, authorization and
- * manual authorization list `transaction.purchaseCard` in `transaction.required`
- * (itself requiring `customerReference`, `destinationPostalCode` and
- * `productDescriptors`), while the spec's own retail example omits it. PineTree
- * has no truthful source for those values in an ordinary retail sale.
- *
- * Rather than fabricate them or silently drop a documented-required field, the
- * gap is named here and surfaced as a preparation blocker. Inventing a
- * `customerReference` would be inventing transaction data.
+ * An earlier revision treated this object as an unresolved question for Shift4.
+ * It is not: the spec documents each field's meaning and limit, and PineTree
+ * derives all three from its own stored merchant and payment data in
+ * `engine/shift4/purchaseCardData.ts`. It is required by the sale, authorization
+ * and manual-authorization schemas, and is NOT part of capture, refund, void or
+ * invoice information.
  */
-export const SHIFT4_CLOUD_UNRESOLVED_REQUIRED_FIELDS: readonly string[] = Object.freeze([
-  "transaction.purchaseCard",
-] as const)
+export const SHIFT4_PURCHASE_CARD_LIMITS = {
+  customerReference: 25,
+  destinationPostalCode: 9,
+  productDescriptor: 40,
+  productDescriptorCount: 4,
+} as const
+
+/** Operations whose selected PineTree schema requires `transaction.purchaseCard`. */
+export function shift4RequiresPurchaseCard(operation: string): boolean {
+  return shift4RoutingFor(operation)?.requiresPurchaseCard === true
+}

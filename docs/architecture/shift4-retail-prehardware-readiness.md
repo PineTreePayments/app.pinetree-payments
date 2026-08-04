@@ -37,7 +37,7 @@ Verifone models are never displayed as "Unsupported" (Shift4 documents them) and
 | Capture | `POST /transactions/capture` | Host Direct | No Cloud body variant — token variants only; no card interaction needed |
 | Void | `DELETE /transactions/invoice` | Either by stage → Host Direct | No body; addressed by `Invoice` header |
 | Invoice Information | `GET /transactions/invoice` | Either by stage → Host Direct | Read-only lookup, no body |
-| Manual authorization | `POST /transactions/manualauthorization` | **Not supported for Cloud** | Spec ambiguity — a `comengcloud` body variant exists, but the path's `servers` block lists only Host Direct and locally installed UTG. The servers block is treated as authoritative. **Open question for Shift4.** |
+| Manual authorization | `POST /transactions/manualauthorization` | Commerce Engine For Cloud **or** GTV token, selected server-side | The description publishes all four integration methods including Commerce Engine For Cloud, and a `comengcloud` body variant exists. Selection is deterministic: retained token → GTV variant; otherwise the Cloud variant. |
 | Device status | `POST /devices/getstatus` | Commerce Engine For Cloud | Published for On-Premise and Cloud only; no Host Direct server |
 | Device Information | `GET /devices/info` | **Not used** | `servers` lists ONLY the locally installed UTG URL |
 
@@ -74,7 +74,33 @@ The POS holds only a PineTree reader ID and sends only that. Merchant identity c
 
 Preparation revalidates ownership, provider, non-simulation, serial presence, manufacturer resolution, local-disable status, recorded provider connectivity, environment, and the merchant's own Retail credential — then stops at the gate and reports `Awaiting Retail test enablement`. It creates no payment, no attempt, and no ledger entry, and dispatches nothing.
 
-Two documented-required fields cannot be supplied yet and are reported rather than fabricated: `transaction.invoice` (requires a real payment attempt) and `transaction.purchaseCard` (the spec marks it required for sale and authorization while its own retail example omits it — **open question for Shift4**).
+One documented-required field cannot be supplied in a dry run and is reported rather than fabricated: `transaction.invoice`, which is derived from a real payment attempt.
+
+## Level 2 purchasing-card data
+
+`transaction.purchaseCard` is **required** by the sale, authorization and manual-authorization schemas — Cloud and GTV variants alike — and is **absent** from capture, refund, void and invoice information. It is built once, in `engine/shift4/purchaseCardData.ts`, and never constructed or submitted by a browser.
+
+| Field | Limit | Derivation |
+|---|---|---|
+| `customerReference` | 25 | Merchant order reference → deterministic value derived from the payment id. Stable across retries, recovery and replay comparison. |
+| `destinationPostalCode` | 9 | Shipping destination → terminal-location postal code → merchant's stored business address (`merchant_settings.zip`). Letters preserved for Canadian codes; separators stripped. |
+| `productDescriptors` | 1–4 entries, 40 each | Real line-item names → order description → documented generic fallback `Retail Purchase`. Blanks and case-insensitive duplicates removed, control characters stripped. |
+
+**Postal-code failure behaviour:** when no real postal code exists at any tier, preparation fails closed with `postal_code_unavailable`. No placeholder ZIP (`00000`, `12345`, or Shift4's `94719` example) is ever generated, because Level 2 data is something the merchant attests to.
+
+PineTree stores no merchant business-category field, so that intermediate descriptor tier is skipped rather than filled with the business *name*, which describes the merchant rather than the goods sold.
+
+## Manual Authorization and referral lineage
+
+A referral is `transaction.responseCode = R`. Voice-centre contact details arrive through Merchant Information (`merchant.cardTypes`); the clerk telephones, receives a **six alphanumeric character** code, and submits it explicitly. PineTree never runs manual authorization automatically.
+
+Everything identifying which transaction was approved is server-derived from the persisted referral attempt: merchant, provider connection, invoice, amount, card token and Level 2 data. The browser sends only a PineTree payment reference and the six characters. Codes are validated (exactly six alphanumeric, no spaces or punctuation), uppercased, kept out of general logs, and never returned to a browser.
+
+Variant selection is deterministic and server-side — a retained GTV token selects the token variant, otherwise the Commerce Engine For Cloud variant runs against the merchant-owned reader. There is no browser choice of integration method, no post-dispatch fallback, and no automatic retry. The selected variant is recorded as safe attempt metadata.
+
+### Evaluated Test 7
+
+The certification sequence is: authorization for 999998.01 through the PIN pad → Merchant Information for voice-centre details → manual authorization for the **same invoice** with code `123456` → capture using the token from the authorization. Those amounts and codes are fixture inputs only; production services stay generic and contain no certification constants.
 
 ## Gap matrix
 
@@ -88,7 +114,8 @@ Two documented-required fields cannot be supplied yet and are reported rather th
 | Void | Implemented with exact attempt/invoice evidence; fixture proven. | `engine/shift4/executeTransaction.ts`, `providers/shift4/rest/invoices/voidInvoice.ts` | `shift4EnginePhase2` | Hardware/certification. |
 | Card-present refund | Cloud contract implemented; card interaction requires a terminal. | `providers/shift4/commerce-engine/cloud/transactionRequest.ts` | `shift4CommerceEngineCloud` | Physical terminal. |
 | Token refund | Implemented at Engine/REST boundary; live execution certification-blocked. | `engine/shift4/cardOnFileVault.ts` | `shift4EnginePhase2` | Shift4-approved token lifecycle. |
-| Referral/manual authorization | Implemented for Host Direct; **not routed through Cloud** pending Shift4 confirmation. | `engine/shift4/services.ts`, `providers/shift4/rest/transactions/manualAuthorization.ts` | `shift4EnginePhase2`, `shift4CommerceEngineCloud` | Shift4 confirmation of Cloud support. |
+| Referral/manual authorization | Implemented for BOTH documented variants (Commerce Engine For Cloud and GTV token) with full referral lineage and deterministic server-side selection. | `engine/shift4/manualAuthorization.ts`, `providers/shift4/commerce-engine/cloud/transactionRequest.ts`, `providers/shift4/rest/transactions/manualAuthorization.ts`, `app/api/pos/shift4-manual-authorization/route.ts` | `shift4ManualAuthorization` | Physical device and live certification execution. |
+| Level 2 purchasing-card data | Implemented. Derived from real merchant/payment records; fails closed without a real postal code. | `engine/shift4/purchaseCardData.ts` | `shift4PurchaseCardData` | None. |
 | Partial approval | Implemented through tender evidence; fixture-only for Retail. | `engine/shift4/tenders.ts` | `shift4EnginePhase2` | Hardware/certification. |
 | Split tender | Implemented with distinct attempts and fee-once accounting. | `database/shift4TenderGroups.ts`, `engine/shift4/tenders.ts` | `shift4EnginePhase2`, `ledgerJournalFoundation` | Hardware/certification. |
 | Debit | Hardware-blocked. PineTree carries no PIN/debit encryption fields. | `engine/shift4/types.ts` | certification case `retail-evaluated-12` | Physical device and documented command. |
@@ -122,6 +149,9 @@ Production remains blocked until certification, Shift4 approval, and piloting ar
 
 ## Open questions for Shift4
 
-1. **Manual authorization over Cloud** — a `comengcloud` request body variant is published, but the path's `servers` block omits Commerce Engine For Cloud. Which is authoritative?
-2. **`transaction.purchaseCard`** — marked required for sale and authorization, yet omitted from the spec's own retail example. Is it required for an ordinary card-present retail sale?
-3. **PineTree Verifone certification scope** — Shift4 documents V660p, P630-A and UX700 as Commerce Engine devices; is PineTree's certification scope extended to them, or is it PAX-only?
+1. **PineTree Verifone certification scope** — Shift4 documents V660p, P630-A and UX700 as Commerce Engine devices; is PineTree's certification scope extended to them, or is it PAX-only?
+
+Two earlier entries are **resolved** and no longer open:
+
+- *Manual authorization over Cloud* — resolved. The operation description publishes all four integration methods including Commerce Engine For Cloud. The `servers` block's omission carries no meaning, because the Cloud URLs are byte-identical to the Host Direct URLs.
+- *`transaction.purchaseCard`* — resolved. The schema documents each field's meaning and limit, and PineTree derives all three from its own stored merchant and payment data.

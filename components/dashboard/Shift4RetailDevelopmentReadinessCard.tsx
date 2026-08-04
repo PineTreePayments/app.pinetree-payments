@@ -14,10 +14,11 @@ type ReadinessItem = {
 /**
  * Software the published Commerce Engine For Cloud contract now covers.
  *
- * Three items moved off "Blocked by documentation" because Shift4's OpenAPI
- * v1.7.58 resolved them: the Cloud request bodies, the device-status operation
- * (`POST /devices/getstatus`), and the supported Verifone device list. Claiming
- * they were still undocumented would be false.
+ * Items move off "Blocked by documentation" only when the published spec
+ * genuinely resolves them. Shift4's OpenAPI v1.7.58 resolved the Cloud request
+ * bodies, `POST /devices/getstatus`, the Verifone device list, the Manual
+ * Authorization integration methods, and the Level 2 `purchaseCard` contract.
+ * Claiming any of those were still undocumented would be false.
  */
 const SOFTWARE: readonly ReadinessItem[] = [
   { label: "Retail credential verified", state: "Complete" },
@@ -25,6 +26,9 @@ const SOFTWARE: readonly ReadinessItem[] = [
   { label: "Device status adapter (POST /devices/getstatus)", state: "Complete" },
   { label: "Device status normalization and freshness", state: "Complete" },
   { label: "Selected-reader payment preparation", state: "Complete" },
+  { label: "Manual authorization (Cloud and GTV variants)", state: "Complete" },
+  { label: "Referral lineage and code validation", state: "Complete" },
+  { label: "Level 2 purchasing-card data", state: "Complete" },
   { label: "POS routing implemented", state: "Partially complete" },
   { label: "Transaction Engine implemented", state: "Partially complete" },
   { label: "Timeout recovery implemented", state: "Complete" },
@@ -37,9 +41,8 @@ const SOFTWARE: readonly ReadinessItem[] = [
  * Genuinely external blockers. Every one of these needs a person, a device, or
  * Shift4 — none can be closed by writing more PineTree code.
  *
- * `transaction.purchaseCard` stays "Blocked by documentation" honestly: the
- * spec marks it required for sale and authorization while its own retail
- * example omits it, and PineTree will not invent the values.
+ * The merchant postal code is listed because Level 2 data fails closed without
+ * one: it is a real merchant-configuration prerequisite, not a code gap.
  */
 const EXTERNAL: readonly ReadinessItem[] = [
   { label: "Physical PAX terminal delivery", state: "Awaiting hardware" },
@@ -47,7 +50,7 @@ const EXTERNAL: readonly ReadinessItem[] = [
   { label: "Shift4 TMS terminal assignment", state: "Awaiting Shift4" },
   { label: "Commerce Engine provisioning", state: "Awaiting Shift4" },
   { label: "PineTree Verifone certification scope", state: "Awaiting Shift4" },
-  { label: "transaction.purchaseCard retail requirement", state: "Blocked by documentation" },
+  { label: "Merchant postal code recorded", state: "Awaiting hardware" },
   { label: "Live device connectivity verified", state: "Awaiting hardware" },
   { label: "Official Retail certification", state: "Not started" },
   { label: "Production approval", state: "Not started" },

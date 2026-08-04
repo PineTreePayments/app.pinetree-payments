@@ -127,13 +127,31 @@ PineTree is a cloud-based POS, so it uses **Commerce Engine For Cloud**, not On-
 | Capture | `POST /transactions/capture` | Host Direct | The published body offers only token variants — no Cloud variant. Capture needs no card interaction. |
 | Void | `DELETE /transactions/invoice` | Host Direct (either by stage) | No request body; addressed by the `Invoice` header. |
 | Invoice Information | `GET /transactions/invoice` | Host Direct (either by stage) | Read-only lookup, no body. |
-| Manual authorization | `POST /transactions/manualauthorization` | **Not used for Cloud** | Spec ambiguity: a `comengcloud` body variant exists, but the path's `servers` block lists only Host Direct and locally installed UTG. PineTree treats the servers block as authoritative pending Shift4 confirmation. |
+| Manual authorization | `POST /transactions/manualauthorization` | Commerce Engine For Cloud **or** GTV token, selected server-side | The operation description publishes all four integration methods including Commerce Engine For Cloud. PineTree uses the GTV-token variant when the referral retained a card token (no second card read), otherwise the Cloud variant against the merchant-owned reader. |
 | Device status | `POST /devices/getstatus` | Commerce Engine For Cloud | Published for On-Premise and Cloud only; there is no Host Direct server for this path. |
 | Device Information | `GET /devices/info` | **Not used** | See the limitation below. |
 
+The authoritative statement of supported integration methods is each operation's **description**, which publishes an explicit "Integration Methods" list — not the `servers` block. An earlier revision read the servers block and wrongly concluded manual authorization was Cloud-unsupported; for every transaction path the Commerce Engine For Cloud URLs are byte-identical to the Host Direct URLs, so their presence or absence in `servers` carries no meaning.
+
+#### Manual Authorization and referral lineage
+
+A referral is `transaction.responseCode = R`: the issuer will not approve without a phone call. Voice-centre contact details arrive via Merchant Information (`merchant.cardTypes`). The clerk telephones, receives a **six alphanumeric character** code, and submits it — Shift4 documents Manual Authorization and Manual Sale as the endpoints that carry it.
+
+PineTree derives everything that identifies *which* transaction was approved from the persisted referral attempt: merchant, provider connection, invoice, amount, card token and Level 2 data. The browser sends only a PineTree payment reference and the six characters. That boundary is the security model — a caller who could choose the invoice or amount could attach a genuine phone approval to a different, larger transaction.
+
+Variant selection is deterministic and server-side: a retained GTV token selects the token variant (no second card read); otherwise the Commerce Engine For Cloud variant runs against the merchant-owned reader. The browser never chooses an integration method, there is no fallback between variants after dispatch, and there is no automatic retry. The code is validated, uppercased, and kept out of general logs and browser responses.
+
+#### Level 2 purchasing-card data
+
+`transaction.purchaseCard` is **required** by the sale, authorization and manual-authorization schemas (both Cloud and GTV variants) and is **absent** from capture, refund, void and invoice information. PineTree builds it in `engine/shift4/purchaseCardData.ts` from its own records:
+
+- `customerReference` (max 25) — merchant order reference, else a deterministic value derived from the payment id. Stable across retries, recovery and replay.
+- `destinationPostalCode` (max 9) — shipping destination, else the terminal location, else the merchant's stored business address. **Fails closed** when none exists; no placeholder ZIP is ever generated.
+- `productDescriptors` (1–4 entries, max 40 each) — real line-item names, else the order description, else the documented generic fallback `Retail Purchase`. Blanks and duplicates are removed and control characters stripped.
+
 #### Device Information is not a cloud endpoint
 
-`GET /devices/info` publishes **only** the locally installed UTG URL in its `servers` block — no Host Direct, no Commerce Engine For Cloud. It is therefore not a cloud terminal-listing or auto-discovery endpoint, and PineTree does not use it as one. No terminal synchronization is invented: terminal identifiers still come from Shift4/TMS provisioning and are entered through the authorized Admin surface.
+`GET /devices/info` publishes only **Commerce Engine For On Premise** and **Locally Installed UTG** as its integration methods, and only the local UTG URL in `servers`. Commerce Engine For Cloud is absent. It is therefore not a cloud terminal-listing or auto-discovery endpoint, and PineTree does not use it as one. No terminal synchronization is invented: terminal identifiers still come from Shift4/TMS provisioning and are entered through the authorized Admin surface.
 
 #### Device status normalization and freshness
 
