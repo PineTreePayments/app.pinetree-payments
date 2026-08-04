@@ -5,6 +5,10 @@ const SAFE_KEYS = new Set([
   "providerConnectionId", "applicationId", "sessionId", "tenderGroupId", "readinessState",
   "certificationCaseId", "safeStatusReason", "onboardingStatus", "certificationComplete",
   "journalPostingExists", "additionalTenderRequired", "tokenizationStatus",
+  // Connection-verification evidence. All four are non-secret: the connection
+  // row id, the configured Shift4 environment name, Shift4's documented
+  // `server.name`, and a PineTree timestamp.
+  "connectionId", "environment", "serverName", "verifiedAt",
 ])
 
 const FORBIDDEN_KEY = /(token|secret|authorization|credential|password|guid|service.?role|pan|cardnumber|cvv|csc|track|pin|payload|body|header|tax|ssn|bank|routing|attachment|voice.?center)/i

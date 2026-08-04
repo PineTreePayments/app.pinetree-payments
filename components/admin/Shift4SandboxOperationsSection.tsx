@@ -24,6 +24,7 @@ import { useCallback, useState } from "react"
 
 import Shift4RestReadinessCard from "@/components/dashboard/Shift4RestReadinessCard"
 import Shift4RetailConnectCard from "@/components/dashboard/Shift4RetailConnectCard"
+import Shift4RetailVerificationCard from "@/components/dashboard/Shift4RetailVerificationCard"
 
 export default function Shift4SandboxOperationsSection({
   authorized,
@@ -58,6 +59,9 @@ export default function Shift4SandboxOperationsSection({
         </p>
       </div>
       <Shift4RetailConnectCard onConnectionChanged={handleConnectionChanged} />
+      {/* Read-only. Uses the credential the card above already stored; it never
+          exchanges, replaces, or clears one. */}
+      <Shift4RetailVerificationCard />
       <Shift4RestReadinessCard refreshVersion={readinessVersion} />
     </section>
   )
