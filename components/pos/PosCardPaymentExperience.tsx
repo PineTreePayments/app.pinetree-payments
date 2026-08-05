@@ -83,8 +83,14 @@ type Props = {
   onViewReceipt: () => void
   /** Session token for the signed POS terminal session. */
   sessionToken?: string
-  /** Called when the clerk cancels the Shift4 manual authorization panel. */
+  /** Called when the clerk closes the Shift4 manual authorization panel. */
   onShift4ReferralCancel?: () => void
+  /**
+   * Provided only while an unresolved Shift4 referral is outstanding. Closing
+   * the panel must not strand the clerk, so the processing screen keeps
+   * offering the way back to the voice-authorization form.
+   */
+  onReopenShift4Referral?: () => void
 }
 
 function Amount({ children }: { children: string }) {
@@ -228,7 +234,22 @@ export default function PosCardPaymentExperience(props: Props) {
   }
 
   if (props.view === "processing") {
-    return <TransactionResult state="PROCESSING" compact />
+    if (!props.onReopenShift4Referral) {
+      return <TransactionResult state="PROCESSING" compact />
+    }
+    return (
+      <section className="space-y-4">
+        <TransactionResult state="PROCESSING" compact />
+        <Button
+          variant="secondary"
+          fullWidth
+          className="h-11 rounded-xl"
+          onClick={props.onReopenShift4Referral}
+        >
+          Review voice authorization
+        </Button>
+      </section>
+    )
   }
 
   if (props.view === "approved") {

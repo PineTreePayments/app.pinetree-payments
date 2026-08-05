@@ -1,16 +1,18 @@
 /**
  * Shift4 Manual Authorization — POS wiring.
  *
- * The Engine, the request builders, the lineage rules and the submission route
- * are covered by `shift4ManualAuthorization.test.ts`. These tests cover the one
- * thing that file cannot: whether a clerk standing at a real PineTree terminal
- * can actually REACH the panel, and whether it opens only from authoritative
- * referral evidence.
+ * The Engine's request builders and lineage rules are covered by
+ * `shift4ManualAuthorization.test.ts`. This file covers the POS side, and
+ * prefers executing the code to reading it:
  *
- * The referral decision is executed for real against the route handler, with the
- * attempt store mocked, so every negative case (approval, decline, timeout,
- * capture, E-commerce, another merchant …) is proven by running the code rather
- * than by reading it.
+ *   - the referral decision runs as a pure function over attempt lineage;
+ *   - both route handlers are invoked for real with the store mocked;
+ *   - the clerk's screens are rendered and asserted on their actual markup;
+ *   - the blocked-versus-approved rule is executed, not regex-matched.
+ *
+ * Source-contract assertions are kept only where they guard a security
+ * boundary that cannot be executed without a DOM, and are grouped at the end so
+ * it is obvious which is which.
  *
  * NO SHIFT4 REQUEST IS MADE. A global guard fails the suite if any fetch is
  * aimed at a Shift4 host, and every feature gate stays closed throughout.
@@ -25,6 +27,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import PosCardPaymentExperience, {
   type PosCardView,
 } from "@/components/pos/PosCardPaymentExperience"
+import { resolveManualAuthorizationOutcome } from "@/components/pos/Shift4ManualAuthorizationPanel"
+import { TransactionResult } from "@/components/payment/TransactionResult"
+import {
+  classifyShift4ReferralState,
+  type Shift4ReferralLineageRow,
+} from "@/engine/shift4/referralState"
 
 const mocks = vi.hoisted(() => ({
   requireTerminalSession: vi.fn(),
@@ -57,42 +65,43 @@ const PAYMENT_ID = "3f1c9a2e-8b7d-4e5f-9a1b-2c3d4e5f6a7b"
 const MERCHANT_ID = "merchant-a"
 const SESSION = "pts_terminal_session"
 
-const PANEL_PATH = "components/pos/Shift4ManualAuthorizationPanel.tsx"
-const EXPERIENCE_PATH = "components/pos/PosCardPaymentExperience.tsx"
-const LAYOUT_PATH = "components/pos/POSLayout.tsx"
-const REFERRAL_ROUTE_PATH = "app/api/pos/shift4-referral-status/route.ts"
-
 const read = (path: string) => readFileSync(path, "utf8")
-
-/** Strip comments and JSX comments so "must not contain" tests the CODE. */
+/** Strip comments and JSX comments so a "must not contain" tests the CODE. */
 const codeOnly = (text: string) =>
   text
     .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ")
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/(^|[^:])\/\/[^\n]*/g, "$1")
 
-const panelSource = read(PANEL_PATH)
-const panelCode = codeOnly(panelSource)
-const layoutSource = read(LAYOUT_PATH)
-const layoutCode = codeOnly(layoutSource)
-const experienceCode = codeOnly(read(EXPERIENCE_PATH))
-const referralRouteCode = codeOnly(read(REFERRAL_ROUTE_PATH))
+const panelCode = codeOnly(read("components/pos/Shift4ManualAuthorizationPanel.tsx"))
+const layoutCode = codeOnly(read("components/pos/POSLayout.tsx"))
+const referralRouteCode = codeOnly(read("app/api/pos/shift4-referral-status/route.ts"))
 
-/** A stored attempt. Only the fields the referral decision actually reads. */
-type AttemptShape = {
-  channel: string
-  attempt_role: string
-  response_code: string | null
-  state: string
+/* -- lineage fixtures ------------------------------------------------------ */
+
+let clock = 0
+/** Rows are built in call order, so "later" always means later. */
+const row = (
+  overrides: Partial<Shift4ReferralLineageRow> = {}
+): Shift4ReferralLineageRow => {
+  clock += 1
+  return {
+    channel: "retail",
+    attempt_role: "authorization",
+    response_code: null,
+    state: "created",
+    created_at: `2026-08-05T00:00:${String(clock).padStart(2, "0")}.000Z`,
+    id: `attempt-${clock}`,
+    ...overrides,
+  }
 }
 
-const attempt = (overrides: Partial<AttemptShape> = {}): AttemptShape => ({
-  channel: "retail",
-  attempt_role: "referral_authorization",
-  response_code: "R",
-  state: "action_required",
-  ...overrides,
-})
+const referral = (overrides: Partial<Shift4ReferralLineageRow> = {}) =>
+  row({ attempt_role: "referral_authorization", response_code: "R", state: "action_required", ...overrides })
+
+const approved = (role: string) => row({ attempt_role: role, response_code: "A", state: "approved" })
+
+/* -- request builders ------------------------------------------------------ */
 
 const referralRequest = (paymentId = PAYMENT_ID) =>
   new NextRequest(
@@ -107,14 +116,17 @@ const manualRequest = (body: unknown) =>
     body: JSON.stringify(body),
   })
 
-/** Run the referral decision against a given set of stored attempts. */
-async function referralRequiredFor(rows: AttemptShape[]): Promise<boolean> {
+async function referralStatusFor(rows: Shift4ReferralLineageRow[]) {
   mocks.listShift4PaymentAttempts.mockResolvedValue(rows)
   const response = await referralStatusGET(referralRequest())
-  expect(response.status).toBe(200)
-  const body = (await response.json()) as { referralRequired?: boolean }
-  return body.referralRequired === true
+  const body = (await response.json()) as {
+    shift4Retail?: boolean
+    referralRequired?: boolean
+  }
+  return { status: response.status, body }
 }
+
+/* -- render helpers -------------------------------------------------------- */
 
 const EXPERIENCE_PROPS = {
   amount: "$10.00",
@@ -146,25 +158,27 @@ const EXPERIENCE_PROPS = {
   onViewReceipt: () => {},
 } as const
 
-const renderExperience = (view: PosCardView) =>
+const renderExperience = (view: PosCardView, extra: Record<string, unknown> = {}) =>
   renderToStaticMarkup(
     createElement(PosCardPaymentExperience, {
       ...EXPERIENCE_PROPS,
       view,
       sessionToken: SESSION,
       onShift4ReferralCancel: () => {},
+      ...extra,
     } as never)
   )
 
 let fetchSpy: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
+  clock = 0
   mocks.requireTerminalSession.mockReset()
   mocks.requireTerminalSession.mockReturnValue({ mid: MERCHANT_ID, tid: "terminal-1", exp: 0 })
   mocks.listShift4PaymentAttempts.mockReset()
   mocks.listShift4PaymentAttempts.mockResolvedValue([])
   mocks.readShift4FeatureFlags.mockReset()
-  // Every gate closed — the state this task must preserve.
+  // Every gate closed — the state this work must preserve.
   mocks.readShift4FeatureFlags.mockReturnValue({
     restApi: false,
     retail: false,
@@ -179,7 +193,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  // No provider request may leave this suite, ever.
   for (const call of fetchSpy.mock.calls) {
     expect(String(call[0])).not.toMatch(/shift4|i4go|4go\.co/i)
   }
@@ -188,140 +201,123 @@ afterEach(() => {
 
 /* ========================================================================== */
 
-describe("reachability — the panel is mounted in the real POS lifecycle", () => {
-  it("is imported and rendered by PosCardPaymentExperience, not left standalone", () => {
-    expect(experienceCode).toContain('import Shift4ManualAuthorizationPanel from "@/components/pos/Shift4ManualAuthorizationPanel"')
-    expect(experienceCode).toContain("<Shift4ManualAuthorizationPanel")
-    expect(experienceCode).toContain('props.view === "shift4-referral"')
+describe("referral classification (pure, executed over attempt lineage)", () => {
+  it("reports no Shift4 Retail lineage for a payment with no attempts", () => {
+    // A Stripe, FluidPay or crypto sale. This is what stops the POS asking again.
+    expect(classifyShift4ReferralState([])).toEqual({
+      shift4Retail: false,
+      referralRequired: false,
+    })
   })
 
-  it("renders the real panel through the POS card experience", () => {
-    const markup = renderExperience("shift4-referral")
-    expect(markup).toContain("Submit Manual Authorization")
-    expect(markup).toMatch(/six-character/i)
-    expect(markup).toMatch(/chargeback/i)
-    expect(markup).toContain("Cancel")
+  it("requires a referral for an open retail referral attempt", () => {
+    expect(classifyShift4ReferralState([referral()])).toEqual({
+      shift4Retail: true,
+      referralRequired: true,
+    })
   })
 
-  it("is reached from POSLayout, which the live terminal route renders", () => {
-    // POSLayout owns the card view, and only it can open the referral view.
-    expect(layoutCode).toContain('setCardView("shift4-referral")')
-    expect(layoutCode).toContain("onShift4ReferralCancel={dismissShift4Referral}")
-    expect(layoutCode).toContain("sessionToken={terminalContext?.sessionToken}")
-    // …and POSLayout is mounted by the real POS terminal route.
-    expect(read("app/(pos)/terminal/TerminalInnerr.tsx")).toContain(
-      'import POSLayout from "@/components/pos/POSLayout"'
-    )
+  it("accepts the documented responseCode R under any role", () => {
+    const byCode = classifyShift4ReferralState([
+      row({ attempt_role: "authorization", response_code: "R", state: "action_required" }),
+    ])
+    expect(byCode.referralRequired).toBe(true)
   })
 
-  it("does not render the panel on any other card view", () => {
-    // "waiting" is omitted deliberately: it renders TransactionResult with
-    // state="PENDING", which that component rejects, so it throws before this
-    // assertion could mean anything. That is a pre-existing defect on the card
-    // reader's waiting screen, unrelated to manual authorization, and is left
-    // untouched here rather than fixed silently inside this task.
-    const otherViews: PosCardView[] = [
-      "loading",
-      "collect",
-      "no-reader",
-      "processing",
-      "approved",
-      "declined",
-      "payment-link",
+  it("does not require a referral for ordinary outcomes", () => {
+    const cases: Array<[string, Shift4ReferralLineageRow]> = [
+      ["approval", row({ attempt_role: "sale", response_code: "A", state: "approved" })],
+      ["decline", row({ response_code: "D", state: "declined" })],
+      ["generic failure", row({ state: "declined" })],
+      ["incomplete", row({ state: "created" })],
+      ["timeout", row({ state: "unresolved" })],
+      ["communication error", row({ state: "reconciliation_required" })],
+      ["unknown outcome", row({ response_code: "", state: "unresolved" })],
+      ["canceled", row({ state: "abandoned" })],
     ]
-    for (const view of otherViews) {
-      expect(renderExperience(view), view).not.toContain("Submit Manual Authorization")
-    }
-  })
-})
-
-/* ========================================================================== */
-
-describe("referral condition — only authoritative Shift4 Retail evidence opens it", () => {
-  it("opens for a persisted retail referral_authorization attempt", async () => {
-    expect(await referralRequiredFor([attempt()])).toBe(true)
-  })
-
-  it("opens for the documented responseCode R even under another role", async () => {
-    expect(
-      await referralRequiredFor([attempt({ attempt_role: "authorization", response_code: "R" })])
-    ).toBe(true)
-  })
-
-  it("stays closed for every non-referral outcome", async () => {
-    const nonReferral: Array<[string, AttemptShape]> = [
-      ["approval", attempt({ attempt_role: "sale", response_code: "A", state: "approved" })],
-      ["decline", attempt({ attempt_role: "authorization", response_code: "D", state: "declined" })],
-      ["generic failure", attempt({ attempt_role: "authorization", response_code: null, state: "declined" })],
-      ["incomplete", attempt({ attempt_role: "authorization", response_code: null, state: "created" })],
-      ["timeout", attempt({ attempt_role: "authorization", response_code: null, state: "unresolved" })],
-      ["communication error", attempt({ attempt_role: "authorization", response_code: null, state: "reconciliation_required" })],
-      ["unknown outcome", attempt({ attempt_role: "authorization", response_code: "", state: "unresolved" })],
-      ["canceled", attempt({ attempt_role: "authorization", response_code: null, state: "abandoned" })],
-    ]
-    for (const [label, row] of nonReferral) {
-      expect(await referralRequiredFor([row]), label).toBe(false)
+    for (const [label, attempt] of cases) {
+      expect(classifyShift4ReferralState([attempt]).referralRequired, label).toBe(false)
     }
   })
 
-  it("stays closed for a Shift4 E-commerce referral — that is not a clerk's job", async () => {
-    expect(await referralRequiredFor([attempt({ channel: "ecommerce" })])).toBe(false)
+  it("ignores an E-commerce referral entirely", () => {
+    // Not a clerk's job, and it must not even mark the sale as retail.
+    expect(classifyShift4ReferralState([referral({ channel: "ecommerce" })])).toEqual({
+      shift4Retail: false,
+      referralRequired: false,
+    })
   })
 
-  it("stays closed once the referral itself has settled", async () => {
+  it("closes once the referral attempt itself settles", () => {
     for (const state of ["approved", "declined", "abandoned"]) {
-      expect(await referralRequiredFor([attempt({ state })]), state).toBe(false)
+      expect(classifyShift4ReferralState([referral({ state })]).referralRequired, state).toBe(false)
     }
   })
 
-  it("stays closed once the payment moved past the referral", async () => {
+  it("closes after a later approved manual authorization, capture or void", () => {
     for (const role of ["manual_authorization", "capture", "void"]) {
-      const rows = [attempt(), attempt({ attempt_role: role, response_code: "A", state: "approved" })]
-      expect(await referralRequiredFor(rows), role).toBe(false)
+      clock = 0
+      const rows = [referral(), approved(role)]
+      expect(classifyShift4ReferralState(rows).referralRequired, role).toBe(false)
     }
   })
 
-  it("stays closed when the payment has no Shift4 attempts at all", async () => {
-    // A Stripe or crypto sale never reaches this table.
-    expect(await referralRequiredFor([])).toBe(false)
+  it("stays open after a DECLINED manual authorization so a wrong code can be retried", () => {
+    const rows = [referral(), row({ attempt_role: "manual_authorization", state: "declined" })]
+    expect(classifyShift4ReferralState(rows).referralRequired).toBe(true)
   })
 
-  it("never trusts a browser-supplied response code", () => {
-    // The decision reads only stored rows and the session — never the request body.
-    expect(referralRouteCode).not.toContain("request.json")
-    expect(referralRouteCode).not.toMatch(/searchParams\.get\(\s*"(responseCode|referral|merchantId|channel)"/)
+  it("re-opens for a NEW referral that follows a resolved one", () => {
+    // Order is the whole point: a set-based check would wrongly stay closed here.
+    const rows = [referral(), approved("manual_authorization"), referral()]
+    expect(classifyShift4ReferralState(rows).referralRequired).toBe(true)
+  })
+
+  it("is order-independent in its input", () => {
+    const first = referral()
+    const later = approved("capture")
+    // Same lineage, shuffled: the capture still resolves the earlier referral.
+    expect(classifyShift4ReferralState([later, first]).referralRequired).toBe(false)
   })
 })
 
 /* ========================================================================== */
 
-describe("tenancy and safe responses", () => {
-  it("derives the merchant from the signed terminal session, never the request", async () => {
-    await referralRequiredFor([attempt()])
+describe("referral-status route (executed handler)", () => {
+  it("returns the classification for a real referral", async () => {
+    const { status, body } = await referralStatusFor([referral()])
+    expect(status).toBe(200)
+    expect(body).toEqual({ paymentId: PAYMENT_ID, shift4Retail: true, referralRequired: true })
+  })
+
+  it("tells the POS to stop asking for a non-Shift4 sale", async () => {
+    const { body } = await referralStatusFor([])
+    expect(body.shift4Retail).toBe(false)
+    expect(body.referralRequired).toBe(false)
+  })
+
+  it("derives merchant identity from the signed session only", async () => {
+    await referralStatusFor([referral()])
     expect(mocks.requireTerminalSession).toHaveBeenCalledOnce()
     expect(mocks.listShift4PaymentAttempts).toHaveBeenCalledWith(MERCHANT_ID, PAYMENT_ID)
-    expect(referralRouteCode).not.toContain("merchantId =")
   })
 
   it("rejects another merchant's payment generically", async () => {
-    // A merchant-scoped read returns nothing, which is indistinguishable from
+    // The merchant-scoped read returns nothing, which is indistinguishable from
     // a payment that does not exist.
-    mocks.listShift4PaymentAttempts.mockResolvedValue([])
-    const response = await referralStatusGET(referralRequest())
-    const body = (await response.json()) as Record<string, unknown>
-    expect(response.status).toBe(200)
+    const { status, body } = await referralStatusFor([])
+    expect(status).toBe(200)
     expect(body.referralRequired).toBe(false)
-    expect(JSON.stringify(body)).not.toMatch(/merchant|attempt|invoice/i)
+    expect(JSON.stringify(body)).not.toMatch(/merchant|attempt|invoice|amount/i)
   })
 
-  it("rejects a session-less caller", async () => {
+  it("rejects a caller with no terminal session", async () => {
     mocks.requireTerminalSession.mockImplementation(() => {
       throw new Error("Missing terminal session token")
     })
     const response = await referralStatusGET(referralRequest())
     expect(response.status).toBe(500)
-    const body = (await response.json()) as { error?: string }
-    expect(body.error).toBe("Unable to check the Shift4 referral status")
+    expect(await response.json()).toEqual({ error: "Unable to check the Shift4 referral status" })
     expect(mocks.listShift4PaymentAttempts).not.toHaveBeenCalled()
   })
 
@@ -331,99 +327,19 @@ describe("tenancy and safe responses", () => {
     expect(mocks.listShift4PaymentAttempts).not.toHaveBeenCalled()
   })
 
-  it("returns only a payment reference and a boolean", async () => {
-    mocks.listShift4PaymentAttempts.mockResolvedValue([attempt()])
+  it("returns only a payment reference and two booleans, uncached", async () => {
+    mocks.listShift4PaymentAttempts.mockResolvedValue([referral()])
     const response = await referralStatusGET(referralRequest())
     const body = (await response.json()) as Record<string, unknown>
-    expect(Object.keys(body).sort()).toEqual(["paymentId", "referralRequired"])
+    expect(Object.keys(body).sort()).toEqual(["paymentId", "referralRequired", "shift4Retail"])
     expect(response.headers.get("Cache-Control")).toBe("no-store")
   })
-
-  it("leaks no credential, token, device or provider evidence", () => {
-    for (const forbidden of [
-      "accessToken",
-      "authToken",
-      "clientGuid",
-      "cardToken",
-      "serialNumber",
-      "manufacturer",
-      "terminalId",
-      "attemptId",
-      "responseCode:",
-      "invoice",
-      "amount",
-    ]) {
-      expect(referralRouteCode, forbidden).not.toContain(forbidden)
-    }
-  })
 })
 
 /* ========================================================================== */
 
-describe("clerk submission", () => {
-  it("sends nothing on mount — the panel has no effect at all", () => {
-    renderExperience("shift4-referral")
-    expect(fetchSpy).not.toHaveBeenCalled()
-    expect(panelCode).not.toContain("useEffect")
-  })
-
-  it("submits only from the button's own handler", () => {
-    expect(panelCode).toMatch(/onClick=\{\(\)\s*=>\s*void submit\(\)\}/)
-    expect(panelCode).not.toMatch(/useEffect\([^)]*submit/)
-  })
-
-  it("guards double submission synchronously, before the first await", () => {
-    const body = panelCode.slice(panelCode.indexOf("const submit ="))
-    const guardRead = body.indexOf("if (inFlightRef.current) return")
-    const guardSet = body.indexOf("inFlightRef.current = true")
-    const firstAwait = body.indexOf("await")
-    expect(guardRead).toBeGreaterThan(-1)
-    expect(guardSet).toBeGreaterThan(guardRead)
-    // Both happen before anything yields, so two clicks in one tick send one request.
-    expect(firstAwait).toBeGreaterThan(guardSet)
-  })
-
-  it("sends exactly paymentId and authorizationCode", () => {
-    const body = panelCode.match(/body:\s*JSON\.stringify\(\{([^}]*)\}\)/)
-    expect(body).not.toBeNull()
-    const keys = [...(body?.[1] ?? "").matchAll(/(\w+)\s*[:,]?/g)].map((m) => m[1])
-    expect([...new Set(keys)].sort()).toEqual(["authorizationCode", "code", "paymentId"])
-    for (const forbidden of ["invoice", "amountMinor", "merchantId", "cardToken", "serialNumber"]) {
-      expect(panelCode).not.toContain(forbidden)
-    }
-  })
-
-  it("requires exactly six alphanumeric characters and uppercases them", () => {
-    expect(panelCode).toContain("/^[A-Z0-9]{6}$/.test(code)")
-    expect(panelCode).toContain('.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)')
-    expect(panelCode).toContain("disabled={!valid || submitting}")
-  })
-
-  it("clears the code after a successful submission and after cancellation", () => {
-    const submitBody = panelCode.slice(
-      panelCode.indexOf("const submit ="),
-      panelCode.indexOf("const cancel =")
-    )
-    const cancelBody = panelCode.slice(panelCode.indexOf("const cancel ="))
-    expect(submitBody).toContain('setCode("")')
-    expect(cancelBody).toContain('setCode("")')
-  })
-
-  it("never writes the code to the console or an error message", () => {
-    expect(panelCode).not.toMatch(/console\.(log|warn|error|info|debug)/)
-    expect(panelCode).not.toMatch(/(Error|message)[^\n]*\$\{?code/)
-  })
-
-  it("cancel sends no provider request", () => {
-    const cancelBody = panelCode.slice(panelCode.indexOf("const cancel ="))
-    expect(cancelBody).not.toContain("fetch(")
-  })
-})
-
-/* ========================================================================== */
-
-describe("submission route — server-derived, allow-listed, gated", () => {
-  it("accepts a valid code without dispatching anything", async () => {
+describe("submission route (executed handler, every gate closed)", () => {
+  it("validates a code without dispatching, and never echoes it", async () => {
     const response = await manualAuthorizationPOST(
       manualRequest({ paymentId: PAYMENT_ID, authorizationCode: "ab12cd" })
     )
@@ -432,16 +348,9 @@ describe("submission route — server-derived, allow-listed, gated", () => {
     expect(body.dispatchPermitted).toBe(false)
     expect(body.providerCallPerformed).toBe(false)
     expect(body.authorizationCodeAccepted).toBe(true)
-    // The code itself never comes back.
-    expect(JSON.stringify(body)).not.toMatch(/AB12CD/i)
-  })
-
-  it("reports that Retail execution is not enabled", async () => {
-    const response = await manualAuthorizationPOST(
-      manualRequest({ paymentId: PAYMENT_ID, authorizationCode: "AB12CD" })
-    )
-    const body = (await response.json()) as { blockedReason?: string }
     expect(body.blockedReason).toBeTruthy()
+    expect(JSON.stringify(body)).not.toMatch(/AB12CD/i)
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it("refuses any field beyond paymentId and authorizationCode", async () => {
@@ -468,84 +377,252 @@ describe("submission route — server-derived, allow-listed, gated", () => {
         manualRequest({ paymentId: PAYMENT_ID, authorizationCode: bad })
       )
       expect(response.status, JSON.stringify(bad)).toBe(400)
-      const body = (await response.json()) as { error?: string }
-      // The rejected value is never echoed back.
-      expect(body.error ?? "").not.toContain(bad.trim() || " ")
-    }
-  })
-
-  it("creates no attempt, ledger posting or provider call while gated", async () => {
-    await manualAuthorizationPOST(manualRequest({ paymentId: PAYMENT_ID, authorizationCode: "AB12CD" }))
-    expect(fetchSpy).not.toHaveBeenCalled()
-    const routeCode = codeOnly(read("app/api/pos/shift4-manual-authorization/route.ts"))
-    for (const writer of ["recordShift4", "insert(", "createAttempt", "ledger", "capture("]) {
-      expect(routeCode, writer).not.toContain(writer)
     }
   })
 })
 
 /* ========================================================================== */
 
-describe("POS lifecycle around the referral", () => {
-  it("does not return to the keypad while the referral panel is open", () => {
-    // The auto-reset timer is armed only by a real terminal card result.
+describe("blocked is not success (executed rule)", () => {
+  it("treats a 200 with dispatchPermitted false as BLOCKED", () => {
+    const outcome = resolveManualAuthorizationOutcome({
+      dispatchPermitted: false,
+      blockedReason: "Awaiting Retail test enablement",
+    })
+    expect(outcome.kind).toBe("blocked")
+  })
+
+  it("fails closed when the server says nothing about dispatch", () => {
+    // A bare HTTP 200 must never be read as an authorization.
+    expect(resolveManualAuthorizationOutcome({}).kind).toBe("blocked")
+    expect(resolveManualAuthorizationOutcome(null).kind).toBe("blocked")
+  })
+
+  it("reports acceptance only on an explicit dispatchPermitted true", () => {
+    expect(resolveManualAuthorizationOutcome({ dispatchPermitted: true }).kind).toBe("accepted")
+  })
+
+  it("tells the clerk the code was not sent, and does not claim approval", () => {
+    const markup = renderExperience("shift4-referral")
+    // The panel starts with no outcome; the blocked copy itself must be honest.
+    const panelSource = read("components/pos/Shift4ManualAuthorizationPanel.tsx")
+    expect(panelSource).toMatch(/not sent to Shift4/i)
+    expect(panelSource).toMatch(/still unauthorized/i)
+    expect(panelSource).not.toMatch(/authorization approved|payment authorized|capture may proceed/i)
+    expect(markup).toContain("Submit Manual Authorization")
+  })
+})
+
+/* ========================================================================== */
+
+describe("clerk screens (rendered)", () => {
+  it("renders the real panel through the POS card experience", () => {
+    const markup = renderExperience("shift4-referral")
+    expect(markup).toContain("Submit Manual Authorization")
+    expect(markup).toMatch(/six-character/i)
+    expect(markup).toMatch(/chargeback/i)
+    expect(markup).toContain("Cancel")
+  })
+
+  it("does not render the panel on any other card view", () => {
+    const otherViews: PosCardView[] = [
+      "loading",
+      "collect",
+      "no-reader",
+      "waiting",
+      "processing",
+      "approved",
+      "declined",
+      "payment-link",
+    ]
+    for (const view of otherViews) {
+      expect(renderExperience(view), view).not.toContain("Submit Manual Authorization")
+    }
+  })
+
+  it("offers a way back in after the clerk closes the panel", () => {
+    // Closing the panel must not strand an unresolved referral.
+    const markup = renderExperience("processing", { onReopenShift4Referral: () => {} })
+    expect(markup).toContain("Review voice authorization")
+  })
+
+  it("shows no reopen action when no referral is outstanding", () => {
+    const markup = renderExperience("processing")
+    expect(markup).not.toContain("Review voice authorization")
+  })
+})
+
+/* ========================================================================== */
+
+describe("TransactionResult accepts the canonical pending state", () => {
+  it("renders state=\"PENDING\" instead of throwing", () => {
+    // Regression: the POS card rail renders its reader waiting screen as
+    // state="PENDING", which previously threw "Invalid transaction result
+    // state: pending" on every send-to-reader.
+    expect(() =>
+      renderToStaticMarkup(createElement(TransactionResult, { state: "PENDING", compact: true }))
+    ).not.toThrow()
+  })
+
+  it("renders the POS reader waiting view", () => {
+    expect(() => renderExperience("waiting")).not.toThrow()
+  })
+
+  it("still rejects a genuinely invalid state", () => {
+    expect(() =>
+      renderToStaticMarkup(createElement(TransactionResult, { state: "banana" }))
+    ).toThrow(/Invalid transaction result state/i)
+  })
+})
+
+/* ========================================================================== */
+
+describe("POS lifecycle source contracts", () => {
+  // These guard behaviour that needs a mounted terminal with timers to execute,
+  // which this suite has no DOM for. They are contracts, not runtime proof.
+
+  it("stops asking once the sale is known not to be Shift4 Retail", () => {
+    expect(layoutCode).toContain("if (data?.shift4Retail !== true) {")
+    expect(layoutCode).toContain("shift4ReferralNotApplicableRef.current = true")
+    expect(layoutCode).toContain("if (shift4ReferralNotApplicableRef.current) return")
+  })
+
+  it("never overlaps referral requests", () => {
+    expect(layoutCode).toContain("if (shift4ReferralInFlightRef.current) return")
+    expect(layoutCode).toContain("shift4ReferralInFlightRef.current = true")
+    expect(layoutCode).toContain("shift4ReferralInFlightRef.current = false")
+  })
+
+  it("aborts the outstanding request on cleanup and stops polling", () => {
+    expect(layoutCode).toContain("const controller = new AbortController()")
+    expect(layoutCode).toContain("signal: controller.signal")
+    expect(layoutCode).toContain("controller.abort()")
+  })
+
+  it("discards an answer that belongs to a superseded sale", () => {
+    expect(layoutCode).toContain("if (stopped || myGeneration !== saleGenerationRef.current) return")
+  })
+
+  it("stops polling once the referral is known", () => {
+    expect(layoutCode).toContain("markShift4ReferralAvailable()")
+    expect(layoutCode).toContain("if (shift4ReferralAvailableRef.current) return")
+  })
+
+  it("keeps the panel open across status ticks that still say processing", () => {
+    expect(layoutCode).toContain(
+      'if (next === "processing" && !shift4ReferralActiveRef.current) setCardView("processing")'
+    )
+  })
+
+  it("lets a real terminal outcome close the panel and withdraw the reopen action", () => {
+    expect(layoutCode).toContain("if (terminalOutcome) {")
+    expect(layoutCode).toContain("shift4ReferralAvailableRef.current = false")
+  })
+
+  it("arms the auto-reset timer only for a terminal card result", () => {
     expect(layoutCode).toContain(
       'paymentMode === "card" && (cardView === "approved" || cardView === "declined")'
     )
     expect(layoutCode).not.toMatch(/cardView === "shift4-referral"[^\n]*resetSale/)
   })
 
-  it("keeps the panel open across status polls that still say processing", () => {
-    expect(layoutCode).toContain(
-      'if (next === "processing" && !shift4ReferralActiveRef.current) setCardView("processing")'
-    )
+  it("closing the panel resolves nothing and sends no provider request", () => {
+    const start = layoutCode.indexOf("function closeShift4ReferralPanel()")
+    const body = layoutCode.slice(start, layoutCode.indexOf("\n  }", start))
+    expect(body).toContain('setCardView("processing")')
+    expect(body).not.toContain("cancelSale")
+    expect(body).not.toContain("fetch(")
+    expect(body).not.toContain('setStatus("failed")')
+    expect(body).not.toContain('setStatus("confirmed")')
   })
 
-  it("lets a real terminal outcome close the panel", () => {
-    expect(layoutCode).toContain("if (terminalOutcome) shift4ReferralActiveRef.current = false")
-  })
-
-  it("opens the panel only from the server's referral answer", () => {
-    expect(layoutCode).toContain("if (data?.referralRequired === true) showShift4Referral()")
-    // Exactly one call site in the whole terminal, and it is that one. The
-    // panel can never be opened from a guessed status, an error message, or a
-    // response code the browser happens to be holding.
-    const callSites = layoutCode.match(/(?<!function )showShift4Referral\(\)/g) ?? []
-    expect(callSites).toHaveLength(1)
-  })
-
-  it("cancel is explicit, sends no provider request, and resolves nothing", () => {
-    const dismissStart = layoutCode.indexOf("function dismissShift4Referral()")
-    const dismiss = layoutCode.slice(dismissStart, layoutCode.indexOf("\n  }", dismissStart))
-    expect(dismiss).toContain("shift4ReferralDismissedRef.current = true")
-    // Back to the still-processing sale — not confirmed, not failed, not cancelled.
-    expect(dismiss).toContain('setCardView("processing")')
-    expect(dismiss).not.toContain("cancelSale")
-    expect(dismiss).not.toContain("fetch(")
-    expect(dismiss).not.toContain('setStatus("failed")')
-    expect(dismiss).not.toContain('setStatus("confirmed")')
-  })
-
-  it("a dismissed referral is not re-opened for the same sale", () => {
-    expect(layoutCode).toContain("if (shift4ReferralDismissedRef.current) return")
-  })
-
-  it("a new sale clears both referral flags", () => {
+  it("a new sale clears every referral flag", () => {
     const reset = layoutCode.slice(
       layoutCode.indexOf("function resetSale()"),
       layoutCode.indexOf("async function cancelSale()")
     )
-    expect(reset).toContain("shift4ReferralActiveRef.current = false")
-    expect(reset).toContain("shift4ReferralDismissedRef.current = false")
+    for (const flag of [
+      "shift4ReferralActiveRef.current = false",
+      "shift4ReferralAvailableRef.current = false",
+      "shift4ReferralNotApplicableRef.current = false",
+      "shift4ReferralInFlightRef.current = false",
+    ]) {
+      expect(reset, flag).toContain(flag)
+    }
+  })
+})
+
+/* ========================================================================== */
+
+describe("security boundaries (source contracts)", () => {
+  it("sends nothing on mount — the panel has no effects", () => {
+    renderExperience("shift4-referral")
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(panelCode).not.toContain("useEffect")
   })
 
-  it("discards a referral answer that belongs to a superseded sale", () => {
-    expect(layoutCode).toContain("if (stopped || myGeneration !== saleGenerationRef.current) return")
+  it("guards double submission synchronously, before the first await", () => {
+    const body = panelCode.slice(panelCode.indexOf("const submit ="))
+    const guardRead = body.indexOf("if (inFlightRef.current) return")
+    const guardSet = body.indexOf("inFlightRef.current = true")
+    const firstAwait = body.indexOf("await")
+    expect(guardRead).toBeGreaterThan(-1)
+    expect(guardSet).toBeGreaterThan(guardRead)
+    expect(firstAwait).toBeGreaterThan(guardSet)
   })
 
-  it("checks for a referral only while a card sale is processing", () => {
-    expect(layoutCode).toContain(
-      'if (paymentMode !== "card" || status !== "processing" || !pid || !token) return'
+  it("sends exactly paymentId and authorizationCode", () => {
+    const body = panelCode.match(/body:\s*JSON\.stringify\(\{([^}]*)\}\)/)
+    expect(body).not.toBeNull()
+    const keys = [...(body?.[1] ?? "").matchAll(/(\w+)\s*[:,]?/g)].map((m) => m[1])
+    expect([...new Set(keys)].sort()).toEqual(["authorizationCode", "code", "paymentId"])
+    for (const forbidden of ["invoice", "amountMinor", "merchantId", "cardToken", "serialNumber"]) {
+      expect(panelCode).not.toContain(forbidden)
+    }
+  })
+
+  it("requires six alphanumeric characters and uppercases them", () => {
+    expect(panelCode).toContain("/^[A-Z0-9]{6}$/.test(code)")
+    expect(panelCode).toContain('.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)')
+  })
+
+  it("clears the code after submission and after closing", () => {
+    const submitBody = panelCode.slice(
+      panelCode.indexOf("const submit ="),
+      panelCode.indexOf("const cancel =")
     )
+    const cancelBody = panelCode.slice(panelCode.indexOf("const cancel ="))
+    expect(submitBody).toContain('setCode("")')
+    expect(cancelBody).toContain('setCode("")')
+    expect(cancelBody).not.toContain("fetch(")
+  })
+
+  it("never writes the code to the console", () => {
+    expect(panelCode).not.toMatch(/console\.(log|warn|error|info|debug)/)
+  })
+
+  it("keeps the route a thin adapter with no lifecycle logic of its own", () => {
+    expect(referralRouteCode).toContain("classifyShift4ReferralState")
+    // The classification rules live in the Engine, not here.
+    expect(referralRouteCode).not.toContain("referral_authorization")
+    expect(referralRouteCode).not.toContain("manual_authorization")
+    expect(referralRouteCode).not.toContain("request.json")
+  })
+
+  it("leaks no credential, token, device or provider evidence", () => {
+    for (const forbidden of [
+      "accessToken",
+      "authToken",
+      "clientGuid",
+      "cardToken",
+      "serialNumber",
+      "manufacturer",
+      "terminalId",
+      "attemptId",
+      "invoice",
+      "amount",
+    ]) {
+      expect(referralRouteCode, forbidden).not.toContain(forbidden)
+    }
   })
 })

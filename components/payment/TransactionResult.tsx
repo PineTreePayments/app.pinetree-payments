@@ -36,6 +36,11 @@ function normalizeTransactionResultState(state: TransactionResultState | string)
   if (tone === "waiting") return "pending"
   if (tone === "canceled") return "cancelled"
   if (
+    // "pending" is a declared member of TransactionResultState and a canonical
+    // payment status, so it has to be accepted directly and not only as the
+    // normalized form of "waiting" - the POS card rail renders the reader's
+    // waiting screen as state="PENDING".
+    tone === "pending" ||
     tone === "processing" ||
     tone === "confirmed" ||
     tone === "failed" ||

@@ -458,13 +458,25 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   // -- Shift4 Retail voice authorization ---------------------------------------
   // A Shift4 referral (transaction.responseCode "R") leaves the sale genuinely
   // PROCESSING while a human telephones the issuer, which the ordinary status
-  // poll cannot tell apart from any other processing sale. These refs (rather
-  // than state) hold whether the clerk's panel is open, because the async
-  // status handler has to read the LIVE value, not the one closed over when it
-  // was created. `dismissed` is what stops the referral check re-opening a
-  // panel the clerk deliberately closed.
+  // poll cannot tell apart from any other processing sale.
+  //
+  // `active`      - the clerk's panel is on screen right now.
+  // `available`   - an unresolved referral exists, so the reopen action stays
+  //                 offered even after the clerk closes the panel.
+  // `notApplicable` - the server said this sale has no Shift4 Retail lineage
+  //                 (a Stripe sale, say), so stop asking for the rest of it.
+  // `inFlight`    - one referral request at a time; a slow one must not overlap
+  //                 the next interval tick.
+  //
+  // These are refs rather than state because the async status handler and the
+  // poll callback must read the LIVE value, not the one closed over when they
+  // were created. `available` is mirrored into state only because it drives
+  // rendering of the reopen action.
   const shift4ReferralActiveRef = useRef(false)
-  const shift4ReferralDismissedRef = useRef(false)
+  const shift4ReferralAvailableRef = useRef(false)
+  const shift4ReferralNotApplicableRef = useRef(false)
+  const shift4ReferralInFlightRef = useRef(false)
+  const [shift4ReferralAvailable, setShift4ReferralAvailable] = useState(false)
 
   // -- Sale correlation --------------------------------------------------------
   // Bumped by resetSale() (and therefore by cancelSale()/the auto-reset timer,
@@ -634,36 +646,48 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     setAvailableMethods({ cash: true, crypto: false, card: false })
     resolvedPaymentIdRef.current = ""
     shift4ReferralActiveRef.current = false
-    shift4ReferralDismissedRef.current = false
+    shift4ReferralAvailableRef.current = false
+    shift4ReferralNotApplicableRef.current = false
+    shift4ReferralInFlightRef.current = false
+    setShift4ReferralAvailable(false)
     posBaseDuplicateGuard.setResetInProgress(false)
   }
 
   /**
-   * Open the clerk's voice-authorization panel over the still-active sale.
+   * The server reported an unresolved referral on this sale.
    *
-   * Only ever called from the server's referral answer below. It does not
-   * submit anything - the clerk still has to telephone the issuer and press
-   * the button.
+   * Opens the clerk's panel and, separately, marks the referral as available so
+   * the reopen action survives the clerk closing the panel. It does not submit
+   * anything - the clerk still has to telephone the issuer and press the button.
    */
-  function showShift4Referral() {
+  function markShift4ReferralAvailable() {
+    shift4ReferralAvailableRef.current = true
+    setShift4ReferralAvailable(true)
     if (shift4ReferralActiveRef.current) return
     shift4ReferralActiveRef.current = true
     setCardView("shift4-referral")
   }
 
   /**
-   * The clerk explicitly closed the panel.
+   * The clerk closed the panel - to telephone the issuer, or to look something
+   * up - which is not a decision about the payment.
    *
    * No provider request is sent and the payment is deliberately NOT marked
-   * confirmed or failed - it is still an unresolved referral, so it stays
-   * visible as a processing sale and remains available for reconciliation.
-   * The dismissal is remembered so the referral check does not immediately
-   * re-open the panel.
+   * confirmed, failed or cancelled: it is still an unresolved referral, so it
+   * stays visible as a processing sale and remains available for
+   * reconciliation. The referral stays "available", so the processing screen
+   * keeps offering the way back in rather than stranding the clerk.
    */
-  function dismissShift4Referral() {
+  function closeShift4ReferralPanel() {
     shift4ReferralActiveRef.current = false
-    shift4ReferralDismissedRef.current = true
     setCardView("processing")
+  }
+
+  /** The clerk chose to come back to the voice-authorization form. */
+  function reopenShift4Referral() {
+    if (!shift4ReferralAvailableRef.current) return
+    shift4ReferralActiveRef.current = true
+    setCardView("shift4-referral")
   }
 
   async function cancelSale() {
@@ -751,8 +775,13 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
       const terminalOutcome =
         next === "confirmed" || next === "failed" || next === "incomplete" ||
         next === "expired" || next === "cancelled"
-      // A real terminal outcome always wins and closes the clerk's panel.
-      if (terminalOutcome) shift4ReferralActiveRef.current = false
+      // A real terminal outcome always wins: it closes the clerk's panel and
+      // withdraws the reopen action, because there is nothing left to authorize.
+      if (terminalOutcome) {
+        shift4ReferralActiveRef.current = false
+        shift4ReferralAvailableRef.current = false
+        setShift4ReferralAvailable(false)
+      }
       // A referral keeps its own view. The sale really IS still processing, so
       // without this guard the next poll tick would map it straight back to
       // "processing" and close the panel underneath a clerk mid-phone-call.
@@ -903,41 +932,76 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
      is server-validated against the persisted Shift4 attempt, so a decline, a
      timeout, a generic failure, an E-commerce attempt or another provider can
      never open the clerk's panel.
+
+     WHY THIS ASKS THE SERVER AT ALL. The terminal cannot tell which provider
+     owns the active sale: /api/payments/status is unauthenticated and returns
+     only a status, and a browser-chosen provider string would not be evidence.
+     So the first answer also says whether the payment has Shift4 Retail
+     lineage; when it does not - every Stripe card sale - this stops for the
+     rest of the sale instead of querying Shift4 every three seconds forever.
+     It also stops as soon as a referral is found, because the clerk's panel is
+     then on screen and the answer cannot change until the sale resolves.
   ========================= */
 
   useEffect(() => {
     const token = terminalContext?.sessionToken
     const pid = activePaymentId
     if (paymentMode !== "card" || status !== "processing" || !pid || !token) return
-    if (shift4ReferralDismissedRef.current) return
+    // Already established that this sale is not a Shift4 Retail payment, or the
+    // referral is already known and on screen.
+    if (shift4ReferralNotApplicableRef.current) return
+    if (shift4ReferralAvailableRef.current) return
 
     const myGeneration = saleGenerationRef.current
+    const controller = new AbortController()
     let stopped = false
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    const stopPolling = () => {
+      if (!interval) return
+      clearInterval(interval)
+      interval = null
+    }
 
     const check = async () => {
+      // One request at a time: a slow response must not overlap the next tick.
+      if (shift4ReferralInFlightRef.current) return
+      shift4ReferralInFlightRef.current = true
       try {
         const res = await fetch(
           `/api/pos/shift4-referral-status?paymentId=${encodeURIComponent(pid)}`,
-          { headers: posAuthHeaders(token), cache: "no-store" }
+          { headers: posAuthHeaders(token), cache: "no-store", signal: controller.signal }
         )
         if (!res.ok) return
-        const data = await res.json() as { referralRequired?: boolean }
+        const data = await res.json() as { shift4Retail?: boolean; referralRequired?: boolean }
         // Same staleness rule as every other async pathway here: a response
         // that lands after resetSale() belongs to a sale that is already gone.
         if (stopped || myGeneration !== saleGenerationRef.current) return
-        if (shift4ReferralDismissedRef.current) return
-        if (data?.referralRequired === true) showShift4Referral()
+
+        if (data?.shift4Retail !== true) {
+          shift4ReferralNotApplicableRef.current = true
+          stopPolling()
+          return
+        }
+        if (data.referralRequired === true) {
+          markShift4ReferralAvailable()
+          stopPolling()
+        }
       } catch {
-        // non-fatal - the ordinary status poll still owns this sale
+        // Aborts and network errors are non-fatal - the ordinary status poll
+        // still owns this sale, and the next tick simply tries again.
+      } finally {
+        shift4ReferralInFlightRef.current = false
       }
     }
 
     void check()
-    const interval = setInterval(() => void check(), 3000)
+    interval = setInterval(() => void check(), 3000)
 
     return () => {
       stopped = true
-      clearInterval(interval)
+      controller.abort()
+      stopPolling()
     }
   }, [paymentMode, status, activePaymentId, terminalContext?.sessionToken])
 
@@ -2365,7 +2429,8 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
             manualStripeAccountId={manualStripeAccountId}
             manualReturnUrl={manualReturnUrl}
             sessionToken={terminalContext?.sessionToken}
-            onShift4ReferralCancel={dismissShift4Referral}
+            onShift4ReferralCancel={closeShift4ReferralPanel}
+            onReopenShift4Referral={shift4ReferralAvailable ? reopenShift4Referral : undefined}
             onSelectReader={setSelectedCardReaderId}
             onSendToReader={() => void sendToCardReader()}
             onRefreshReaders={() => void loadCardCapabilities(true).catch(error => {

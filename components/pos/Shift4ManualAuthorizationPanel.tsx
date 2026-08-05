@@ -25,6 +25,34 @@ type Outcome =
   | { kind: "accepted" }
   | { kind: "error"; message: string; correlationId?: string }
 
+export type Shift4ManualAuthorizationResponse = {
+  dispatchPermitted?: boolean
+  blockedReason?: string
+  error?: string
+  correlationId?: string
+}
+
+/**
+ * Turn a 2xx submission response into what the clerk is told.
+ *
+ * Fails closed on purpose: only an explicit `dispatchPermitted: true` counts as
+ * having reached Shift4. A 200 on its own means the server accepted and
+ * validated the code, which is NOT an authorization — while the Retail and
+ * certification gates are closed nothing is sent, and saying "approved" there
+ * would invite a clerk to hand over goods for an unauthorized payment.
+ *
+ * Exported so this rule is executed in tests rather than read off the markup.
+ */
+export function resolveManualAuthorizationOutcome(
+  payload: Shift4ManualAuthorizationResponse | null
+): Outcome {
+  if (payload?.dispatchPermitted === true) return { kind: "accepted" }
+  return {
+    kind: "blocked",
+    reason: payload?.blockedReason || "Shift4 Retail execution is disabled",
+  }
+}
+
 export default function Shift4ManualAuthorizationPanel({
   paymentId,
   sessionToken,
@@ -63,12 +91,7 @@ export default function Shift4ManualAuthorizationPanel({
         cache: "no-store",
       })
       const payload = (await response.json().catch(() => null)) as
-        | {
-            dispatchPermitted?: boolean
-            blockedReason?: string
-            error?: string
-            correlationId?: string
-          }
+        | Shift4ManualAuthorizationResponse
         | null
 
       if (!response.ok) {
@@ -81,14 +104,10 @@ export default function Shift4ManualAuthorizationPanel({
         return
       }
 
-      // The code left the browser successfully, so it is discarded here whether
-      // the server dispatched it or reported a closed gate.
+      // Cleared for safety the moment it leaves the browser, whether or not the
+      // server dispatched it. The blocked copy below says so explicitly.
       setCode("")
-      setOutcome(
-        payload?.dispatchPermitted === false && payload?.blockedReason
-          ? { kind: "blocked", reason: payload.blockedReason }
-          : { kind: "accepted" }
-      )
+      setOutcome(resolveManualAuthorizationOutcome(payload))
     } catch {
       setOutcome({
         kind: "error",
@@ -171,15 +190,17 @@ export default function Shift4ManualAuthorizationPanel({
 
       {outcome?.kind === "accepted" ? (
         <p className="mt-3 text-xs font-semibold text-amber-900" role="status">
-          The authorization code was accepted. This sale now continues through its normal
+          The authorization code was submitted to Shift4. This sale continues through its normal
           processing.
         </p>
       ) : null}
 
       {outcome?.kind === "blocked" ? (
         <p className="mt-3 text-xs text-amber-900" role="status">
-          The authorization code was accepted, but Shift4 Retail processing is not enabled yet:{" "}
-          {outcome.reason.toLowerCase()}. This sale stays open for reconciliation.
+          The authorization code was validated locally, but it was <strong>not sent to Shift4</strong>
+          {" "}because Retail test execution is disabled ({outcome.reason.toLowerCase()}). This
+          payment is still unauthorized and stays open for reconciliation. The code was cleared for
+          safety, so it will need to be entered again once execution is enabled.
         </p>
       ) : null}
 
