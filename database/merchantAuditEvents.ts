@@ -45,8 +45,23 @@ export type SupportAuditEventType =
   | "support.admin_replied"
   | "support.status_changed"
 
+/**
+ * Bridge (by Stripe) provider-connection actions.
+ *
+ * Bridge is a separate provider connection from Stripe Connect, so its audit
+ * trail is separate too. Metadata carries Bridge identifiers and normalized
+ * statuses only - never KYB material, hosted onboarding URLs, or credentials.
+ */
+export type BridgeProviderAuditEventType =
+  | "provider.bridge_onboarding_started"
+  | "provider.bridge_status_synced"
+  | "provider.bridge_enabled"
+  | "provider.bridge_disabled"
+  | "provider.bridge_webhook_applied"
+
 export type MerchantAuditEventType =
   | "webhook.secret_regenerated"
+  | BridgeProviderAuditEventType
   | SupportAuditEventType
   | "lightning.speed_credential_revealed"
   | "lightning.sweep_retried"

@@ -140,6 +140,22 @@ PineTree passes all incoming webhooks from your provider to `verifyWebhook()` be
 | Alchemy (Solana/Base watchers) | `x-alchemy-signature` | HMAC-SHA256 |
 | Speed (Lightning) | `svix-signature`, `svix-timestamp`, `svix-id` | Svix-based HMAC |
 | Shift4 | `X-Shift4-Signature` | HMAC-SHA256 |
+| Bridge by Stripe | `X-Webhook-Signature` (`t=<ms>,v0=<base64>`) | RSA-SHA256 over `` `${timestamp}.${rawBody}` ``, PEM public key, 10-minute replay window |
+
+### Provider-connection webhooks
+
+Not every provider webhook is a payment event. **Bridge by Stripe** delivers
+merchant/provider *connection* events (`customer`, `kyc_link`) that change KYB
+and endorsement state, never payment state. Those are translated into the
+Bridge connection-event envelope by `translateProviderEvent` and applied by
+`engine/bridgeConnect.ts`; the universal `translateEvent` returns `null` so a
+KYB status change can never reach the canonical payment state machine. See
+[`docs/environment/bridge-env-checklist.md`](../environment/bridge-env-checklist.md).
+
+Bridge is owned by Stripe but is a **separate provider connection** from Stripe
+Connect: separate credentials, customer identifiers, capabilities, KYB state,
+webhooks, and operational behavior. A merchant approved by Stripe Connect is not
+approved by Bridge.
 
 ---
 
