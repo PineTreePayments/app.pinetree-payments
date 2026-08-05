@@ -2697,14 +2697,15 @@ describe("Shift4 Engine security boundaries", () => {
     expect(routeImporters.length).toBeGreaterThan(0)
 
     /**
-     * The only POS-facing routes permitted to reach the Shift4 Engine. Both are
-     * terminal-session authenticated, take at most a PineTree reader id, and
-     * dispatch nothing to Shift4.
+     * The only POS-facing routes permitted to reach the Shift4 Engine. Every
+     * one of them is terminal-session authenticated, takes at most a PineTree
+     * reader or payment id, and dispatches nothing to Shift4.
      */
     const allowedPosRoutes = new Set([
       "app/api/pos/shift4-retail-readers/route.ts",
       "app/api/pos/shift4-retail-preparation/route.ts",
       "app/api/pos/shift4-manual-authorization/route.ts",
+      "app/api/pos/shift4-referral-status/route.ts",
     ])
     expect(routeImporters.every((path) =>
       path.startsWith("app/api/internal/shift4/") ||

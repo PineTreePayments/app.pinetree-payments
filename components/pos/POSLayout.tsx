@@ -455,6 +455,17 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
   const resetTimerRef = useRef<NodeJS.Timeout | null>(null)
   const hasScheduledResetRef = useRef(false)
 
+  // -- Shift4 Retail voice authorization ---------------------------------------
+  // A Shift4 referral (transaction.responseCode "R") leaves the sale genuinely
+  // PROCESSING while a human telephones the issuer, which the ordinary status
+  // poll cannot tell apart from any other processing sale. These refs (rather
+  // than state) hold whether the clerk's panel is open, because the async
+  // status handler has to read the LIVE value, not the one closed over when it
+  // was created. `dismissed` is what stops the referral check re-opening a
+  // panel the clerk deliberately closed.
+  const shift4ReferralActiveRef = useRef(false)
+  const shift4ReferralDismissedRef = useRef(false)
+
   // -- Sale correlation --------------------------------------------------------
   // Bumped by resetSale() (and therefore by cancelSale()/the auto-reset timer,
   // which both call it) every time the terminal moves on from the current
@@ -622,7 +633,37 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     setCashRecording(false)
     setAvailableMethods({ cash: true, crypto: false, card: false })
     resolvedPaymentIdRef.current = ""
+    shift4ReferralActiveRef.current = false
+    shift4ReferralDismissedRef.current = false
     posBaseDuplicateGuard.setResetInProgress(false)
+  }
+
+  /**
+   * Open the clerk's voice-authorization panel over the still-active sale.
+   *
+   * Only ever called from the server's referral answer below. It does not
+   * submit anything - the clerk still has to telephone the issuer and press
+   * the button.
+   */
+  function showShift4Referral() {
+    if (shift4ReferralActiveRef.current) return
+    shift4ReferralActiveRef.current = true
+    setCardView("shift4-referral")
+  }
+
+  /**
+   * The clerk explicitly closed the panel.
+   *
+   * No provider request is sent and the payment is deliberately NOT marked
+   * confirmed or failed - it is still an unresolved referral, so it stays
+   * visible as a processing sale and remains available for reconciliation.
+   * The dismissal is remembered so the referral check does not immediately
+   * re-open the panel.
+   */
+  function dismissShift4Referral() {
+    shift4ReferralActiveRef.current = false
+    shift4ReferralDismissedRef.current = true
+    setCardView("processing")
   }
 
   async function cancelSale() {
@@ -707,7 +748,15 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     })
 
     if (paymentMode === "card") {
-      if (next === "processing") setCardView("processing")
+      const terminalOutcome =
+        next === "confirmed" || next === "failed" || next === "incomplete" ||
+        next === "expired" || next === "cancelled"
+      // A real terminal outcome always wins and closes the clerk's panel.
+      if (terminalOutcome) shift4ReferralActiveRef.current = false
+      // A referral keeps its own view. The sale really IS still processing, so
+      // without this guard the next poll tick would map it straight back to
+      // "processing" and close the panel underneath a clerk mid-phone-call.
+      if (next === "processing" && !shift4ReferralActiveRef.current) setCardView("processing")
       if (next === "confirmed") setCardView("approved")
       if (next === "failed" || next === "incomplete" || next === "expired" || next === "cancelled") setCardView("declined")
     }
@@ -840,6 +889,57 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
     return () => clearInterval(interval)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePaymentId, intentId, status])
+
+  /* =========================
+     SHIFT4 RETAIL VOICE AUTHORIZATION
+     A Shift4 referral leaves the sale genuinely PROCESSING while the clerk
+     telephones the issuer, so the ordinary status poll above cannot tell it
+     apart from any other processing sale. This asks the server the single
+     extra question - is THIS payment sitting on a referral - and opens the
+     existing Shift4ManualAuthorizationPanel when the answer is yes.
+
+     It is not a second payment-status system: the poll above still owns
+     whether the sale is processing, confirmed or failed. The referral answer
+     is server-validated against the persisted Shift4 attempt, so a decline, a
+     timeout, a generic failure, an E-commerce attempt or another provider can
+     never open the clerk's panel.
+  ========================= */
+
+  useEffect(() => {
+    const token = terminalContext?.sessionToken
+    const pid = activePaymentId
+    if (paymentMode !== "card" || status !== "processing" || !pid || !token) return
+    if (shift4ReferralDismissedRef.current) return
+
+    const myGeneration = saleGenerationRef.current
+    let stopped = false
+
+    const check = async () => {
+      try {
+        const res = await fetch(
+          `/api/pos/shift4-referral-status?paymentId=${encodeURIComponent(pid)}`,
+          { headers: posAuthHeaders(token), cache: "no-store" }
+        )
+        if (!res.ok) return
+        const data = await res.json() as { referralRequired?: boolean }
+        // Same staleness rule as every other async pathway here: a response
+        // that lands after resetSale() belongs to a sale that is already gone.
+        if (stopped || myGeneration !== saleGenerationRef.current) return
+        if (shift4ReferralDismissedRef.current) return
+        if (data?.referralRequired === true) showShift4Referral()
+      } catch {
+        // non-fatal - the ordinary status poll still owns this sale
+      }
+    }
+
+    void check()
+    const interval = setInterval(() => void check(), 3000)
+
+    return () => {
+      stopped = true
+      clearInterval(interval)
+    }
+  }, [paymentMode, status, activePaymentId, terminalContext?.sessionToken])
 
   /* =========================
      REALTIME: DIRECT PAYMENT
@@ -2264,6 +2364,8 @@ export default function POSLayout({ terminalContext, onLockControlVisibilityChan
             manualClientSecret={manualClientSecret}
             manualStripeAccountId={manualStripeAccountId}
             manualReturnUrl={manualReturnUrl}
+            sessionToken={terminalContext?.sessionToken}
+            onShift4ReferralCancel={dismissShift4Referral}
             onSelectReader={setSelectedCardReaderId}
             onSendToReader={() => void sendToCardReader()}
             onRefreshReaders={() => void loadCardCapabilities(true).catch(error => {

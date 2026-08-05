@@ -16,6 +16,7 @@ import {
 import Button from "@/components/ui/Button"
 import { StripeCardPayment } from "@/components/payment/StripeCardPayment"
 import { TransactionResult } from "@/components/payment/TransactionResult"
+import Shift4ManualAuthorizationPanel from "@/components/pos/Shift4ManualAuthorizationPanel"
 
 export type PosCardReader = {
   id: string
@@ -46,6 +47,7 @@ export type PosCardView =
   | "setup"
   | "register"
   | "payment-link"
+  | "shift4-referral"
 
 type Props = {
   amount: string
@@ -79,6 +81,10 @@ type Props = {
   onCancel: () => void
   onDone: () => void
   onViewReceipt: () => void
+  /** Session token for the signed POS terminal session. */
+  sessionToken?: string
+  /** Called when the clerk cancels the Shift4 manual authorization panel. */
+  onShift4ReferralCancel?: () => void
 }
 
 function Amount({ children }: { children: string }) {
@@ -248,6 +254,18 @@ export default function PosCardPaymentExperience(props: Props) {
           { label: "New Sale", onClick: props.onDone, variant: "secondary" },
         ]}
       />
+    )
+  }
+
+  if (props.view === "shift4-referral") {
+    return (
+      <section className="space-y-5">
+        <Shift4ManualAuthorizationPanel
+          paymentId={props.paymentId}
+          sessionToken={props.sessionToken}
+          onCancel={props.onShift4ReferralCancel ?? props.onCancel}
+        />
+      </section>
     )
   }
 

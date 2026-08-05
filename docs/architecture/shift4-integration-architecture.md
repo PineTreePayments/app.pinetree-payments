@@ -141,6 +141,18 @@ PineTree derives everything that identifies *which* transaction was approved fro
 
 Variant selection is deterministic and server-side: a retained GTV token selects the token variant (no second card read); otherwise the Commerce Engine For Cloud variant runs against the merchant-owned reader. The browser never chooses an integration method, there is no fallback between variants after dispatch, and there is no automatic retry. The code is validated, uppercased, and kept out of general logs and browser responses.
 
+##### The clerk's path through the POS
+
+Authorization referral → clerk receives the voice authorization code → explicit Manual Authorization submission → the existing capture/reconciliation lifecycle. Nothing in that chain is new: the referral is ordinary persisted attempt evidence, and the submission re-enters the Engine at `POST /api/pos/shift4-manual-authorization`.
+
+A referral leaves the sale genuinely PROCESSING while a human telephones the issuer, which the POS status poll cannot distinguish from any other processing sale. `POSLayout` therefore asks one extra, narrowly scoped question — `GET /api/pos/shift4-referral-status` — and opens `Shift4ManualAuthorizationPanel` inside the existing card view (`PosCardView` gains `shift4-referral`) when the server says yes. This is not a second payment-status system: the existing poll still owns whether the sale is processing, confirmed or failed.
+
+- **The panel appears only from authoritative referral evidence.** The condition is the Engine's own referral test (`attempt_role = referral_authorization` or `responseCode = R`), server-validated, merchant-scoped, and restricted to `channel = retail`. A decline, a generic failure, an incomplete or timed-out attempt, a communication error, an unknown outcome, a cancelled attempt, an already-captured payment, a Shift4 E-commerce attempt and any non-Shift4 provider all leave it closed.
+- **The browser sends `paymentId` and `authorizationCode` only.** All Shift4 identity, invoice, amount, token, device and Level 2 data are server-derived from the persisted referral attempt; the panel never sees them.
+- **Submission is always deliberate.** The panel has no effects, so nothing runs on mount or merely because a referral appeared. A synchronous in-flight ref means one click is one request, and there is no automatic retry. The typed code is cleared from browser state on success and on cancel, and never reaches a log.
+- **The sale stays put.** The POS does not return to the keypad while the panel is open — the auto-reset timer arms only on a real terminal card result — and a status tick that still says "processing" cannot close the panel underneath a clerk mid-call. Cancelling is an explicit clerk action that sends no provider request and marks the payment neither confirmed nor failed: it stays an unresolved referral, visible and available for reconciliation.
+- **Live execution remains gated.** With the Retail, certification, Commerce Engine and production gates off, the route validates the code and reports `dispatchPermitted: false` with a safe reason; no provider request, attempt, capture, fee or ledger posting is created. Hardware delivery, TMS assignment, Commerce Engine provisioning and certification remain the blockers.
+
 #### Level 2 purchasing-card data
 
 `transaction.purchaseCard` is **required** by the sale, authorization and manual-authorization schemas (both Cloud and GTV variants) and is **absent** from capture, refund, void and invoice information. PineTree builds it in `engine/shift4/purchaseCardData.ts` from its own records:
