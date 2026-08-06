@@ -1,4 +1,4 @@
-# Stripe Terminal Phase 2
+# Stripe Terminal Integration Contract
 
 PineTree keeps the existing boundary: UI → authenticated API → Engine → Stripe provider adapter → Stripe → verified webhook → event processor and ledger. Terminal Locations and Readers are provider objects synchronized into service-role-only PineTree tables; POS `terminals` remain PineTree device/PIN/tax records.
 

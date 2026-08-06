@@ -361,7 +361,18 @@ const RETIRED_DOCUMENTS = [
   "docs/api/platform-readiness-report.md",
   "docs/architecture/canonical-transaction-read-audit.md",
   "docs/architecture/shift4-phase-2-implementation-report.md",
-  "docs/architecture/shift4-retail-prehardware-readiness.md"
+  "docs/architecture/shift4-retail-prehardware-readiness.md",
+  // Renamed to docs/providers/stripe-terminal.md — the contract is active, only
+  // its historical-looking filename was retired.
+  "docs/stripe-terminal-phase-2.md",
+  // Consolidated into docs/api/index.md, the sole API entry point.
+  "docs/api/overview.md"
+]
+
+/** Documents that must exist because a retired path was folded into them. */
+const CONSOLIDATED_SUCCESSORS = [
+  "docs/providers/stripe-terminal.md",
+  "docs/api/index.md"
 ]
 
 // Only an actionable POINTER is a defect. Explaining in prose that a file was
@@ -394,6 +405,61 @@ const RETIRED_DOCUMENTS = [
 
   if (offenders.length) for (const o of offenders) fail("retired documentation stays retired", o)
   else pass(`retired documentation stays retired (${RETIRED_DOCUMENTS.length} paths)`)
+}
+
+// ─── 7d. Consolidated successors exist and are indexed ────────────────────────
+
+{
+  const index = exists("docs/INDEX.md") ? read("docs/INDEX.md") : ""
+  const problems = []
+  for (const successor of CONSOLIDATED_SUCCESSORS) {
+    if (!exists(successor)) problems.push(`${successor} is missing`)
+    else if (!index.includes(successor.replace(/^docs\//, ""))) {
+      problems.push(`${successor} is not listed in docs/INDEX.md`)
+    }
+  }
+  if (problems.length) for (const p of problems) fail("consolidated successors present", p)
+  else pass(`consolidated successors present (${CONSOLIDATED_SUCCESSORS.length})`)
+}
+
+// ─── 7e. documentation-governance routing exists and resolves ─────────────────
+
+if (map) {
+  const domain = map.domains?.["documentation-governance"]
+  const problems = []
+
+  if (!domain) {
+    problems.push("task-map has no documentation-governance domain")
+  } else {
+    if (!(domain.documents ?? []).includes("docs/standards/06-roadmap-documentation-governance.md")) {
+      problems.push("documentation-governance does not require Standard 06")
+    }
+    // Broad single words would drag this domain into unrelated application work.
+    const tooBroad = (domain.keywords ?? []).filter((k) => ["docs", "document", "file", "markdown"].includes(k))
+    if (tooBroad.length) problems.push(`over-broad keywords: ${tooBroad.join(", ")}`)
+  }
+
+  // The documentation-system paths must actually route to the domain.
+  const routedGlobs = new Set(
+    (map.paths ?? [])
+      .filter((entry) => (entry.domains ?? []).includes("documentation-governance"))
+      .map((entry) => entry.glob)
+  )
+  for (const required of [
+    "docs/**",
+    ".ai/**",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    "scripts/ai-preflight.mjs",
+    "scripts/ai-governance-check.mjs",
+    "__tests__/aiGovernance.test.ts"
+  ]) {
+    if (!routedGlobs.has(required)) problems.push(`${required} does not route documentation-governance`)
+  }
+
+  if (problems.length) for (const p of problems) fail("documentation-governance routing", p)
+  else pass("documentation-governance routing")
 }
 
 // ─── 8. package.json wiring ───────────────────────────────────────────────────

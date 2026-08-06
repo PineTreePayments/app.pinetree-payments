@@ -38,14 +38,19 @@ type PreflightResult = {
 
 const preflightCache = new Map<string, PreflightResult>()
 
+/** Always spawns a fresh process — use when asserting determinism. */
+function preflightUncached(task: string, paths: string[] = []): PreflightResult {
+  const args = [PREFLIGHT, "--task", task, "--json"]
+  for (const path of paths) args.push("--path", path)
+  const stdout = execFileSync(process.execPath, args, { cwd: root, encoding: "utf8" })
+  return JSON.parse(stdout) as PreflightResult
+}
+
 function preflight(task: string, paths: string[] = []): PreflightResult {
   const key = JSON.stringify([task, paths])
   const cached = preflightCache.get(key)
   if (cached) return cached
-  const args = [PREFLIGHT, "--task", task, "--json"]
-  for (const path of paths) args.push("--path", path)
-  const stdout = execFileSync(process.execPath, args, { cwd: root, encoding: "utf8" })
-  const result = JSON.parse(stdout) as PreflightResult
+  const result = preflightUncached(task, paths)
   preflightCache.set(key, result)
   return result
 }
@@ -224,6 +229,11 @@ const RETIRED_DOCUMENTS = [
   "docs/architecture/canonical-transaction-read-audit.md",
   "docs/architecture/shift4-phase-2-implementation-report.md",
   "docs/architecture/shift4-retail-prehardware-readiness.md",
+  // Renamed to docs/providers/stripe-terminal.md — the contract stayed active,
+  // only its historical-looking filename was retired.
+  "docs/stripe-terminal-phase-2.md",
+  // Consolidated into docs/api/index.md, the sole API entry point.
+  "docs/api/overview.md",
 ] as const
 
 /** Every Markdown file under a repo-relative directory. */
@@ -308,6 +318,122 @@ describe("AI governance: retired documentation stays retired", () => {
     expect(adr).toMatch(/Status:\*\*\s*Accepted/)
     expect(adr).toContain("engine/canonicalTransactions.ts")
     expect(adr).toContain("adjustmentStatus")
+  })
+})
+
+describe("AI governance: documentation-governance routing", () => {
+  const STANDARD_06 = "docs/standards/06-roadmap-documentation-governance.md"
+
+  it("declares documentation-governance as a domain requiring Standard 06", () => {
+    const domain = taskMap.domains["documentation-governance"]
+    expect(domain).toBeDefined()
+    expect(domain.documents).toContain(STANDARD_06)
+  })
+
+  it("keeps its keywords phrase-scoped so broad words cannot over-route", () => {
+    const keywords = taskMap.domains["documentation-governance"].keywords ?? []
+    expect(keywords.length).toBeGreaterThan(4)
+    for (const broad of ["docs", "document", "file", "markdown", "update"]) {
+      expect(keywords, `"${broad}" is too broad to be a keyword`).not.toContain(broad)
+    }
+  })
+
+  const DOC_SYSTEM_PATHS: Array<[string, string]> = [
+    ["docs/INDEX.md", "the documentation index"],
+    ["docs/api/index.md", "a file under docs/"],
+    [".ai/task-map.json", "the routing map"],
+    ["scripts/ai-preflight.mjs", "the preflight resolver"],
+    ["scripts/ai-governance-check.mjs", "the governance check"],
+    ["__tests__/aiGovernance.test.ts", "the governance tests"],
+    ["AGENTS.md", "the root contract"],
+    ["CLAUDE.md", "the Claude pointer"],
+    ["README.md", "the root README"],
+  ]
+
+  for (const [path, label] of DOC_SYSTEM_PATHS) {
+    it(`resolves documentation-governance and Standard 06 when editing ${label}`, () => {
+      const result = preflight("Adjust engineering documentation structure", [path])
+      expect(result.domains, `${path} must route documentation-governance`).toContain(
+        "documentation-governance"
+      )
+      expect(result.required).toContain(STANDARD_06)
+      expect(result.missing).toEqual([])
+      expect(result.excludedHits).toEqual([])
+      expect(result.ambiguous).toBe(false)
+      expect(result.required.some((doc) => doc.startsWith("docs/skills/"))).toBe(false)
+      expect(
+        result.required.filter((doc) => (RETIRED_DOCUMENTS as readonly string[]).includes(doc))
+      ).toEqual([])
+    })
+  }
+
+  it("does not attach documentation-governance to an application-only task", () => {
+    // Generic words like "update" and "file" must not pull the domain in.
+    for (const task of [
+      "Fix POS keypad layout behavior",
+      "Update a file in the POS component",
+      "Change POS payment state presentation",
+    ]) {
+      const result = preflight(task, ["components/pos/POSLayout.tsx"])
+      expect(result.domains, `"${task}" over-routed`).not.toContain("documentation-governance")
+      expect(result.required).not.toContain(STANDARD_06)
+    }
+  })
+
+  it("resolves documentation-governance from a documentation keyword with no path", () => {
+    const result = preflight("Rework the documentation index and task routing")
+    expect(result.domains).toContain("documentation-governance")
+    expect(result.required).toContain(STANDARD_06)
+  })
+
+  it("is deterministic across repeated runs", () => {
+    const a = preflightUncached("Update documentation governance", ["docs/INDEX.md"])
+    const b = preflightUncached("Update documentation governance", ["docs/INDEX.md"])
+    expect(a).toEqual(b)
+  })
+})
+
+describe("AI governance: renamed and consolidated paths route correctly", () => {
+  it("routes the Stripe Terminal contract at its new path, never the old one", () => {
+    const result = preflight("Update Stripe Terminal direct-charge and manual-entry behavior", [
+      "providers/stripe/terminalAdapter.ts",
+      "docs/providers/stripe-terminal.md",
+    ])
+    const all = [...result.required, ...result.optional]
+    expect(all).toContain("docs/providers/stripe-terminal.md")
+    expect(all).not.toContain("docs/stripe-terminal-phase-2.md")
+    expect(result.domains).toContain("documentation-governance")
+    expect(result.missing).toEqual([])
+    expect(result.ambiguous).toBe(false)
+  })
+
+  it("routes API documentation work to the single entry point", () => {
+    const result = preflight("Update the PineTree API documentation entry point", [
+      "docs/api/index.md",
+    ])
+    expect(result.domains).toContain("documentation-governance")
+    expect(result.domains).toContain("api-sdk")
+    expect([...result.required, ...result.optional]).not.toContain("docs/api/overview.md")
+    expect(result.missing).toEqual([])
+    expect(result.ambiguous).toBe(false)
+  })
+
+  it("keeps the renamed Stripe Terminal contract intact", () => {
+    const contract = read("docs/providers/stripe-terminal.md")
+    expect(contract).toMatch(/^# Stripe Terminal Integration Contract/m)
+    expect(contract).not.toContain("Phase 2")
+    // Active requirements that must survive the rename.
+    for (const requirement of [
+      "PINE_TREE_STRIPE_CHARGE_MODEL=direct",
+      "Stripe-Account",
+      "native_app_required",
+      "Tap to Pay",
+      "STRIPE_APPLICATION_FEE_ENABLED",
+      "PINETREE_NATIVE_CLIENT_SECRET",
+      "private/no-store",
+    ]) {
+      expect(contract, `rename must preserve: ${requirement}`).toContain(requirement)
+    }
   })
 })
 

@@ -55,8 +55,7 @@ decision holds.
 | Document | Authority | Purpose | Read it when |
 |---|---|---|---|
 | [`api/openapi.yaml`](./api/openapi.yaml) | **Executable truth** (level 4) | The public REST contract. Test-enforced. | Changing any public endpoint |
-| [`api/index.md`](./api/index.md) | Active | API reference entry point. Test-enforced. | Orienting in the public API |
-| [`api/overview.md`](./api/overview.md) | Active | Route inventory by classification, including which webhook routes exist. Test-enforced. | Deciding whether a route is public, internal, or retired |
+| [`api/index.md`](./api/index.md) | **Active — sole API entry point** | Navigation map, public API scope with scopes, and the public-versus-internal route boundary. Test-enforced. | Orienting in the API, or deciding whether a route is public, internal, or retired |
 | [`api/quickstart.md`](./api/quickstart.md) | Active | Shortest path to a working integration. Test-enforced. | Onboarding an integrator |
 | [`api/authentication.md`](./api/authentication.md) | Active | API authentication. Test-enforced. | Touching API auth |
 | [`api/api-keys.md`](./api/api-keys.md) | Active | Key lifecycle and scopes | Touching keys |
@@ -118,9 +117,9 @@ they must not define payment finality, ledger, provider, or security behavior.
 | [`architecture/shift4-integration-architecture.md`](./architecture/shift4-integration-architecture.md) | Active contract | Shift4 boundary, credential model, Commerce Engine For Cloud deployment, pinned OpenAPI version. Test-enforced. | Any Shift4 work |
 | [`architecture/shift4-route-matrix.md`](./architecture/shift4-route-matrix.md) | Active contract | Shift4 route inventory. Test-enforced. | Adding a Shift4 route |
 | [`architecture/shift4-reachability-inventory.md`](./architecture/shift4-reachability-inventory.md) | Active contract | Which Shift4 paths are reachable. Test-enforced. | Verifying Shift4 surface area |
+| [`providers/stripe-terminal.md`](./providers/stripe-terminal.md) | Active contract | Stripe Terminal boundary, direct-charge connected-account context, charge-model constraints, manual-entry requirements, browser/native boundary and Tap to Pay limits | Stripe Terminal or POS card work |
 | [`providers/fluidpay-provider-contract-checklist.md`](./providers/fluidpay-provider-contract-checklist.md) | Approved contract | FluidPay adapter requirements. Retained pre-launch as the approved integration contract. | FluidPay work |
 | [`../integrations/shopify/SETUP.md`](../integrations/shopify/SETUP.md) | Active | Shopify connector setup | Shopify work |
-| [`stripe-terminal-phase-2.md`](./stripe-terminal-phase-2.md) | Active contract | Stripe Terminal charge model, connected-account context for manual entry, native-app boundary | Stripe Terminal or POS card work |
 | [`onboarding/business-verification.md`](./onboarding/business-verification.md) | Active contract | PineTree business verification and the Bridge consent boundary | Onboarding or Bridge work |
 
 ## 8. Environment and deployment

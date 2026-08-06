@@ -136,9 +136,78 @@
       "domains": [],
       "documents": ["docs/standards/06-roadmap-documentation-governance.md"],
       "note": "Definition of done, incl. that affected tests and docs change in the same commit."
+    },
+    {
+      "glob": "docs/**",
+      "domains": ["documentation-governance"],
+      "note": "Editing engineering documentation is governed by Standard 06."
+    },
+    {
+      "glob": ".ai/**",
+      "domains": ["documentation-governance"],
+      "note": "Agent routing and workflows. Changing routing changes what every future task reads."
+    },
+    {
+      "glob": "AGENTS.md",
+      "domains": ["documentation-governance"],
+      "note": "The root engineering contract."
+    },
+    {
+      "glob": "CLAUDE.md",
+      "domains": ["documentation-governance"],
+      "note": "Pointer to AGENTS.md. Keep it a pointer, not a second copy."
+    },
+    {
+      "glob": "README.md",
+      "domains": ["documentation-governance"],
+      "note": "Must keep pointing at AGENTS.md, the preflight, and docs/INDEX.md."
+    },
+    {
+      "glob": "scripts/ai-preflight.mjs",
+      "domains": ["documentation-governance"],
+      "note": "Resolves the task map. Read-only and offline by contract."
+    },
+    {
+      "glob": "scripts/ai-governance-check.mjs",
+      "domains": ["documentation-governance"],
+      "note": "Enforces that routed and indexed paths resolve and retired documents stay retired."
+    },
+    {
+      "glob": "__tests__/aiGovernance.test.ts",
+      "domains": ["documentation-governance"],
+      "note": "Governance wiring tests. Do not weaken them to make a rename pass."
+    },
+    {
+      "glob": "__tests__/apiDocsReference.test.ts",
+      "domains": ["documentation-governance"],
+      "note": "Documentation source-contract tests that pin API doc prose."
     }
   ],
   "domains": {
+    "documentation-governance": {
+      "label": "Documentation governance",
+      "keywords": [
+        "documentation governance",
+        "documentation structure",
+        "documentation index",
+        "documentation map",
+        "docs cleanup",
+        "documentation cleanup",
+        "task map",
+        "task-map",
+        "task routing",
+        "preflight routing",
+        "agent routing",
+        "canonical documentation",
+        "engineering guidance",
+        "standards metadata",
+        "broken documentation links",
+        "superseded document",
+        "historical report"
+      ],
+      "documents": ["docs/standards/06-roadmap-documentation-governance.md"],
+      "note": "Standard 06 governs documentation changes: it owns the documentation hierarchy, the definition of done, and change control. docs/INDEX.md is the human-readable map; .ai/task-map.json is the agent-routing map, and a document must be reachable from both to be authority. Do not introduce duplicate, superseded, historical, or unindexed guidance — move a unique decision into a standard, an ADR, or an active contract, then delete the source. Keywords are deliberately phrase-scoped: a bare word like 'docs' or 'file' must not pull this domain into unrelated application work."
+    },
     "payments": {
       "label": "Payments",
       "keywords": ["payment", "payments", "pay", "sale", "charge", "intent", "fee", "platform fee"],
@@ -199,13 +268,13 @@
       "label": "POS terminal",
       "keywords": ["pos", "terminal", "reader", "cashier", "till", "point of sale"],
       "documents": ["docs/standards/01-platform-architecture.md", "docs/standards/02-lifecycle-and-merchant-status.md"],
-      "optional": ["docs/stripe-terminal-phase-2.md"]
+      "optional": ["docs/providers/stripe-terminal.md"]
     },
     "stripe": {
       "label": "Stripe",
       "keywords": ["stripe", "stripe connect", "stripe terminal", "account session"],
       "documents": ["docs/standards/05-provider-connectors-events.md"],
-      "optional": ["docs/stripe-terminal-phase-2.md"]
+      "optional": ["docs/providers/stripe-terminal.md"]
     },
     "stripe-bridge": {
       "label": "Stripe Bridge",

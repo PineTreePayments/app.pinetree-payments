@@ -54,7 +54,6 @@ describe("API reference documentation", () => {
   it("uses professional API naming without V1 branding", () => {
     const files = [
       "docs/api/index.md",
-      "docs/api/overview.md",
       "docs/api/authentication.md",
       "docs/api/quickstart.md",
       "docs/api/webhooks.md",
@@ -155,5 +154,101 @@ describe("API reference documentation", () => {
     expect(squarespace).toContain("<td><code>bitcoin_lightning</code></td><td>BTC</td>")
     expect(squarespace).toContain("<td><code>shift4</code></td><td>Card / USD</td>")
     expect(squarespace).not.toMatch(/\b(?:solana_usdc|base_usdc|base_eth|usdc_base)\b/)
+  })
+})
+
+/* ══ Single API entry point ═════════════════════════════════════════════════ */
+
+describe("API documentation has one entry point", () => {
+  const INDEX = "docs/api/index.md"
+  const RETIRED_OVERVIEW = "docs/api/overview.md"
+
+  it("keeps docs/api/index.md as the entry point and no overview.md beside it", () => {
+    expect(fs.existsSync(path.join(process.cwd(), INDEX))).toBe(true)
+    expect(fs.existsSync(path.join(process.cwd(), RETIRED_OVERVIEW))).toBe(false)
+  })
+
+  it("has no Markdown link anywhere pointing at the retired overview", () => {
+    const markdown = fs
+      .readdirSync(path.join(process.cwd(), "docs"), { recursive: true, encoding: "utf8" })
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => `docs/${name.replace(/\\/g, "/")}`)
+
+    const offenders = [...markdown, "README.md", "AGENTS.md"]
+      .filter((file) => fs.existsSync(path.join(process.cwd(), file)))
+      .filter((file) => /\]\([^)]*api\/overview\.md/.test(read(file)) || /\]\(\.\/overview\.md\)/.test(read(file)))
+
+    expect(offenders).toEqual([])
+  })
+
+  it("has no task-map entry pointing at the retired overview", () => {
+    const taskMap = read(".ai/task-map.json")
+    expect(taskMap).not.toContain(RETIRED_OVERVIEW)
+  })
+
+  it("links to every active core API contract", () => {
+    const copy = read(INDEX)
+    for (const contract of [
+      "authentication.md",
+      "api-keys.md",
+      "errors.md",
+      "idempotency.md",
+      "payments.md",
+      "payment-states.md",
+      "checkout-sessions.md",
+      "webhooks.md",
+      "webhook-events.md",
+      "webhook-deliveries.md",
+      "sdks.md",
+      "openapi.yaml",
+    ]) {
+      expect(copy, `index must link ${contract}`).toContain(`(./${contract})`)
+    }
+  })
+
+  it("distinguishes public API contracts from internal and provider-webhook routes", () => {
+    const copy = read(INDEX)
+    expect(copy).toContain("Public API scope")
+    expect(copy).toMatch(/Public versus internal routes/i)
+    expect(copy).toMatch(/Provider webhook intake/i)
+    // The boundary must be stated, not merely implied by two tables. Markdown
+    // wraps prose, so match across a line break.
+    expect(copy.replace(/\s+/g, " ")).toMatch(/internal application API/i)
+    expect(copy.replace(/\s+/g, " ")).toMatch(/must not be integrated against/i)
+  })
+
+  it("does not present the retired generic provider webhook route as active", () => {
+    const copy = read(INDEX)
+    if (copy.includes("/api/webhooks/provider")) {
+      const line = copy.split("\n").find((l) => l.includes("/api/webhooks/provider")) ?? ""
+      const context = copy.slice(Math.max(0, copy.indexOf(line) - 200), copy.indexOf(line) + line.length + 200)
+      expect(context).toMatch(/retired/i)
+      expect(context).toContain("410")
+    }
+  })
+
+  it("carries no hard-coded route count that will go stale", () => {
+    const copy = read(INDEX)
+    expect(copy).not.toMatch(/\(\s*\d{2,}\s*total\s*\)/i)
+    expect(copy).not.toMatch(/\b\d{2,}\s+(?:routes|endpoints)\b/i)
+  })
+
+  it("resolves every relative link in the API index", () => {
+    const copy = read(INDEX)
+    const broken: string[] = []
+    for (const match of copy.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+      const raw = match[1]
+      if (/^(https?:|mailto:|#)/.test(raw)) continue
+      const target = raw.split("#")[0]
+      if (!target) continue
+      if (!fs.existsSync(path.join(process.cwd(), "docs", "api", target))) broken.push(raw)
+    }
+    expect(broken).toEqual([])
+  })
+
+  it("is listed as the API entry point in docs/INDEX.md, which no longer lists overview", () => {
+    const index = read("docs/INDEX.md")
+    expect(index).toContain("api/index.md")
+    expect(index).not.toContain("api/overview.md")
   })
 })
