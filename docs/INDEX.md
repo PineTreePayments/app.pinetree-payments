@@ -104,7 +104,7 @@ they must not define payment finality, ledger, provider, or security behavior.
 
 | Document | Authority | Purpose | Read it when |
 |---|---|---|---|
-| [`security/route-auth-matrix.md`](./security/route-auth-matrix.md) | **Executable truth** (level 4) | Authentication class per API route. Test-enforced. | Adding a route or changing its auth |
+| [`security/route-auth-matrix.md`](./security/route-auth-matrix.md) | **Executable truth** (level 4) | Authentication *and* authorization for every `app/api/**/route.ts` method, plus the global proxy boundary, the shared auth helpers, and open findings. Complete inventory; test-enforced. | Adding a route or an HTTP method, changing an auth helper, or reviewing a trust boundary |
 | [`security/webhook-verification-fail-closed.md`](./security/webhook-verification-fail-closed.md) | **Security decision record** (level 3) | Why webhook verification fails closed, why the generic provider route is retired, Coinbase retirement, constant-time Alchemy comparison | Touching any webhook verification path |
 | [`security/dependency-risk-register.md`](./security/dependency-risk-register.md) | Active register | Known dependency risks and their status | Adding or upgrading a dependency |
 | [`auth/supabase-email-templates.md`](./auth/supabase-email-templates.md) | Active | Supabase auth email templates. Test-enforced. | Touching auth emails or recovery |
