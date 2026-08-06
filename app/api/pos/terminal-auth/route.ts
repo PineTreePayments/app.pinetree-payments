@@ -1,78 +1,47 @@
-import { NextRequest, NextResponse } from "next/server"
-import { verifyPosTerminalPinEngine } from "@/engine/posTerminalSession"
-import { makeRateLimiter } from "@/lib/api/rateLimit"
+import { NextResponse } from "next/server"
 
 /**
- * POST /api/pos/terminal-auth
+ * RETIRED — PIN-for-credential terminal login.
  *
- * Verifies the entered PIN server-side and issues a terminal session token only
- * on success. This is the only route that produces a terminal session token;
- * the GET /api/pos/terminal-session route intentionally never returns one.
+ * This route used to verify a terminal PIN and return a signed 24-hour `pts_`
+ * terminal session. It existed because the PIN was treated as an *entry* gate.
  *
- * Rate limiting: 5 attempts per terminal per 15 minutes.
- * Keyed by terminalId so a lockout is device-specific, not IP-bypassable.
- * On incorrect PIN the attempt is counted; on missing/bad terminalId it is not
- * (no terminal to lock out). Correct PIN resets the counter for that terminal.
+ * PineTree's terminal contract is the opposite: launching a configured terminal
+ * opens the POS immediately, and the PIN guards *leaving* it. The two routes
+ * that replace this one are:
+ *
+ *   GET  /api/pos/terminal-session    — authenticated merchant launch. Verifies
+ *                                       the merchant session and that the
+ *                                       merchant owns the terminal, then issues
+ *                                       the scoped `pts_` credential.
+ *   POST /api/pos/terminal-exit-auth  — verifies the PIN to authorize leaving the
+ *                                       active terminal. Issues no credential.
+ *
+ * It is retired rather than left in place because it was the last endpoint that
+ * minted a merchant-scoped credential from an unauthenticated request holding
+ * only a terminal id and a 4-digit secret — the surface audit finding RA-1 was
+ * about. Nothing calls it: no source import, no test, and no frontend reference.
+ *
+ * See docs/security/route-auth-matrix.md (RA-1).
  */
 
-// 5 wrong attempts per terminal per 15 minutes before the endpoint starts
-// returning 429.  A physical cashier entering a PIN 5 times is unlikely in
-// normal operation; an automated brute-force will be stopped immediately.
-const pinLimiter = makeRateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 5 })
+const RETIRED_BODY = {
+  error: "Gone",
+  message:
+    "Terminal PIN login has been retired. A terminal session is issued by the authenticated launch route; the PIN now authorizes leaving the terminal.",
+} as const
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = (await req.json()) as {
-      terminalId?: string
-      pin?: string
-    }
+function retired() {
+  return NextResponse.json(RETIRED_BODY, {
+    status: 410,
+    headers: { "Cache-Control": "no-store" },
+  })
+}
 
-    const terminalId = String(body.terminalId || "").trim()
-    const pin = String(body.pin || "").trim()
+export async function POST() {
+  return retired()
+}
 
-    if (!terminalId) {
-      return NextResponse.json({ error: "Missing terminalId" }, { status: 400 })
-    }
-
-    if (!pin || pin.length !== 4 || !/^\d{4}$/.test(pin)) {
-      return NextResponse.json({ error: "PIN must be 4 digits" }, { status: 400 })
-    }
-
-    // Check rate limit before hitting the database
-    const limit = pinLimiter.check(terminalId)
-    if (!limit.allowed) {
-      const retryAfterSec = Math.ceil(limit.retryAfterMs / 1000)
-      console.warn("[terminal-auth] rate limit hit", { terminalId: terminalId.slice(0, 8) })
-      return NextResponse.json(
-        { error: "Too many PIN attempts. Please wait before trying again." },
-        { status: 429, headers: { "Retry-After": String(retryAfterSec) } }
-      )
-    }
-
-    const verified = await verifyPosTerminalPinEngine(terminalId, pin)
-
-    // Successful auth — reset the failure counter so a cashier who mistyped
-    // 3 times and then entered the correct PIN doesn't get locked out on their
-    // next shift login within the same 15-minute window.
-    pinLimiter.reset(terminalId)
-
-    // The merchant/terminal identity ships with the credential it was verified
-    // against, so the POS client never derives its tenant binding from the
-    // unauthenticated bootstrap route.
-    return NextResponse.json(
-      {
-        sessionToken: verified.sessionToken,
-        merchantId: verified.merchantId,
-        terminalId: verified.terminalId,
-      },
-      { headers: { "Cache-Control": "private, no-store, max-age=0" } }
-    )
-  } catch (error: unknown) {
-    const status =
-      typeof error === "object" && error !== null && "status" in error
-        ? Number((error as { status?: number }).status) || 500
-        : 500
-    const message = error instanceof Error ? error.message : "PIN verification failed"
-    return NextResponse.json({ error: message }, { status })
-  }
+export async function GET() {
+  return retired()
 }

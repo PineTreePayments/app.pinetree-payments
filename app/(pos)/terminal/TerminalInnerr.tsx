@@ -1,7 +1,9 @@
 "use client"
 
 import { useCallback, useState, useEffect } from "react"
-import { useSearchParams } from "next/navigation"
+import Link from "next/link"
+import { useRouter, useSearchParams } from "next/navigation"
+import { supabase } from "@/lib/supabaseClient"
 import POSLayout from "@/components/pos/POSLayout"
 import Keypad from "@/components/pos/Keypad"
 import Button from "@/components/ui/Button"
@@ -13,9 +15,9 @@ type Toast = {
 }
 
 /**
- * Fields served by the unauthenticated bootstrap route. It deliberately carries
- * no `merchant_id` and no session token — the tenant binding and the credential
- * both arrive from POST /api/pos/terminal-auth after PIN verification.
+ * Terminal display fields returned by the authenticated launch route. The
+ * merchant binding and the `pts_` credential arrive alongside these, from the
+ * same server-verified launch — never from client input.
  */
 type Terminal = {
   id: string
@@ -47,6 +49,7 @@ function normalizeTerminalId(value: string | null): string {
 
 export default function TerminalInner() {
 
+  const router = useRouter()
   const params = useSearchParams()
 
   const terminalId = normalizeTerminalId(params.get("tid"))
@@ -64,8 +67,8 @@ export default function TerminalInner() {
   const [shiftStarted, setShiftStarted] = useState(false)
   const [shiftStarting, setShiftStarting] = useState(false)
   const [drawerSession, setDrawerSession] = useState<DrawerSession | null>(null)
-  const [pendingProvider, setPendingProvider] = useState<string>("solana")
   const [showUnlockControl, setShowUnlockControl] = useState(false)
+  const [launchError, setLaunchError] = useState<string | null>(null)
 
   const handleLockControlVisibilityChange = useCallback((visible: boolean) => {
     setShowUnlockControl(visible)
@@ -87,18 +90,47 @@ export default function TerminalInner() {
 
   useEffect(()=>{
 
-    async function loadTerminal(){
+    /**
+     * Authenticated terminal launch.
+     *
+     * The `/terminal` page is proxy-protected, so a merchant session already
+     * exists; it is forwarded as a bearer token the same way the dashboard
+     * calls its own APIs. The server derives the merchant from that session and
+     * refuses a terminal the merchant does not own, so the POS can open
+     * immediately — no PIN is involved in entering the terminal.
+     *
+     * This also makes refresh work: re-running this launch restores the POS for
+     * as long as the merchant session is valid.
+     */
+    async function launchTerminal(){
 
-      if(!terminalId) return
+      if(!terminalId){
+        setLaunchError("Missing terminal id.")
+        return
+      }
+
+      const { data: { session } } = await supabase.auth.getSession()
+      const accessToken = session?.access_token
+
+      if (!accessToken) {
+        // No merchant session: do NOT fall back to a terminal-id-only request.
+        setLaunchError("Your session has expired. Sign in again to open this terminal.")
+        return
+      }
 
       const res = await fetch(`/api/pos/terminal-session?tid=${encodeURIComponent(terminalId)}`, {
-        cache: "no-store"
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${accessToken}` },
       })
 
       const payload = await res.json().catch(() => null)
 
-      if (!res.ok || !payload?.terminal) {
-        console.error(payload?.error || "Failed to load terminal session")
+      if (!res.ok || !payload?.terminal || !payload?.sessionToken) {
+        setLaunchError(
+          res.status === 401
+            ? "Your session has expired. Sign in again to open this terminal."
+            : String(payload?.error || "This terminal could not be opened.")
+        )
         return
       }
 
@@ -108,15 +140,20 @@ export default function TerminalInner() {
       setDrawerSession(drawer)
       setShiftStarted(Boolean(drawer?.active) || Number(terminalData.drawer_starting_amount ?? 0) === 0)
       const provider = String(payload.provider || "solana")
-      setPendingProvider(provider)
 
-      // No terminal context is established here. This response carries no
-      // credential, so the POS stays locked until the cashier's PIN is verified
-      // by POST /api/pos/terminal-auth.
+      // The credential and its tenant binding both come from this verified
+      // launch. The POS opens as soon as this is set.
+      setTerminalContext({
+        terminalId: terminalData.id,
+        merchantId: String(payload.merchantId),
+        provider,
+        sessionToken: String(payload.sessionToken),
+      })
+      setLaunchError(null)
 
     }
 
-    loadTerminal()
+    launchTerminal()
 
   },[terminalId])
 
@@ -132,6 +169,14 @@ export default function TerminalInner() {
     return () => window.removeEventListener("popstate", handlePopState)
   }, [unlockMode])
 
+  /**
+   * Exit-PIN entry. The PIN authorizes LEAVING the terminal, never entering it.
+   *
+   * The active `pts_` session is sent so the server can only ever be asked about
+   * the terminal that is currently open. The token is kept until the server
+   * confirms the PIN — a wrong PIN must leave the cashier inside the terminal
+   * with a working session.
+   */
   async function handleDigitsChange(next: string | ((prev: string) => string)) {
     const resolved = typeof next === "function" ? next(digits) : next
 
@@ -140,53 +185,46 @@ export default function TerminalInner() {
       return
     }
 
+    const activeToken = terminalContext?.sessionToken
+    if (!activeToken) {
+      setDigits("")
+      showToast("Terminal session unavailable", "error")
+      return
+    }
+
     // 4 digits entered — verify server-side; never compare PIN in the browser
     setDigits(resolved)
     setIsRedirecting(true)
 
     try {
-      const res = await fetch("/api/pos/terminal-auth", {
+      const res = await fetch("/api/pos/terminal-exit-auth", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ terminalId: terminal.id, pin: resolved })
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${activeToken}`,
+        },
+        body: JSON.stringify({ pin: resolved })
       })
-
-      const data = await res.json().catch(() => null) as {
-        sessionToken?: string
-        merchantId?: string
-        terminalId?: string
-      } | null
 
       if (!res.ok) {
+        // Stay inside the terminal. The session is deliberately untouched.
         setIsRedirecting(false)
-        showToast("Incorrect PIN", "error")
+        const message = res.status === 429
+          ? "Too many attempts. Please wait before trying again."
+          : "Incorrect PIN"
+        showToast(message, "error")
         setDigits("")
         return
       }
 
-      // Both the credential and the tenant binding come from this verified
-      // response. Without them the POS cannot be unlocked at all.
-      if (!data?.sessionToken || !data.merchantId) {
-        setIsRedirecting(false)
-        showToast("Could not start terminal session", "error")
-        setDigits("")
-        return
-      }
-
-      setTerminalContext({
-        terminalId: String(data.terminalId || terminal.id),
-        merchantId: String(data.merchantId),
-        provider: pendingProvider,
-        sessionToken: String(data.sessionToken)
-      })
-
-      // Unlock in place. Navigating away here would discard the freshly issued
-      // token and leave the POS unable to authenticate.
-      setUnlockMode(false)
+      // Exit authorized. Drop the credential from client state before leaving so
+      // it cannot be reused by whatever renders next, then return to the
+      // dashboard. No replacement token is issued.
+      setTerminalContext(null)
       setShowRecovery(false)
       setDigits("")
-      setIsRedirecting(false)
-      showToast("Terminal unlocked", "success")
+      showToast("Terminal locked", "success")
+      router.push("/dashboard/pos")
     } catch {
       setIsRedirecting(false)
       showToast("Incorrect PIN", "error")
@@ -194,12 +232,14 @@ export default function TerminalInner() {
     }
   }
 
+  /** Opens the exit-PIN dialog over the active POS. */
   function requestUnlock(){
     setUnlockMode(true)
     setDigits("")
     setShowRecovery(false)
   }
 
+  /** Dismisses the exit dialog and returns to the POS with the session intact. */
   function cancelUnlock(){
     setUnlockMode(false)
     setDigits("")
@@ -284,14 +324,30 @@ export default function TerminalInner() {
     }
   }
 
-  // The POS is gated on actually holding a verified terminal session, not merely
-  // on the lock flag. Cancelling the PIN pad therefore cannot drop the cashier
-  // into a POS with no credential, and a page reload re-locks the terminal
-  // because the token lives only in memory.
+  // The session comes from the authenticated launch, so it is present as soon as
+  // the terminal loads. It gates the POS only so that nothing renders before the
+  // launch succeeds — it is NOT an entry-authentication gate, and it is never
+  // satisfied by entering a PIN. `unlockMode` is the exit dialog and nothing else.
   const hasTerminalSession = Boolean(terminalContext?.sessionToken)
-  const needsPin = unlockMode || !hasTerminalSession
 
-  if (!terminal) {
+  if (launchError) {
+    return (
+      <div className="flex h-[100dvh] w-full items-center justify-center bg-gray-100 px-6">
+        <div className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-6 text-center shadow-xl">
+          <div className="text-lg font-semibold text-gray-900">Terminal unavailable</div>
+          <p className="text-sm text-gray-600">{launchError}</p>
+          <Link
+            href="/dashboard/pos"
+            className="inline-flex h-10 w-full items-center justify-center rounded-md bg-[#0052FF] px-4 text-sm font-semibold text-white"
+          >
+            Back to Point of Sale
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  if (!terminal || !hasTerminalSession) {
     return (
       <div className="flex h-[100dvh] w-full items-center justify-center bg-gray-100">
         <div className="text-sm font-medium text-gray-500">
@@ -305,7 +361,7 @@ export default function TerminalInner() {
 
     <div className="relative flex h-[100dvh] w-full items-center justify-center overflow-hidden overscroll-none bg-gray-100 px-[max(0.75rem,env(safe-area-inset-left))] py-[calc(env(safe-area-inset-top)+0.75rem)] pb-[calc(env(safe-area-inset-bottom)+0.75rem)] touch-manipulation">
 
-      {terminal && needsPin && (
+      {terminal && unlockMode && (
 
         <div className="absolute left-1/2 top-[calc(env(safe-area-inset-top)+1rem)] -translate-x-1/2 text-center">
 
@@ -334,7 +390,7 @@ export default function TerminalInner() {
 
       </div>
 
-      {!needsPin && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && showUnlockControl ? (
+      {!unlockMode && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && showUnlockControl ? (
         <button
           onClick={requestUnlock}
           className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[calc(env(safe-area-inset-top)+3rem)] touch-manipulation transition hover:scale-110"
@@ -356,7 +412,7 @@ export default function TerminalInner() {
         </button>
       ) : null}
 
-      {!needsPin && terminal && !shiftStarted && Number(terminal.drawer_starting_amount ?? 0) > 0 && (
+      {!unlockMode && terminal && !shiftStarted && Number(terminal.drawer_starting_amount ?? 0) > 0 && (
         <div className="max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] space-y-5 overflow-y-auto rounded-2xl bg-white p-6 text-center shadow-xl sm:p-8">
           <div>
             <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">{terminal.name}</p>
@@ -395,7 +451,7 @@ export default function TerminalInner() {
         </div>
       )}
 
-      {!needsPin && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && (
+      {!unlockMode && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && (
         <POSLayout
           locked={false}
           terminalContext={terminalContext}
@@ -403,7 +459,7 @@ export default function TerminalInner() {
         />
       )}
 
-      {needsPin && (
+      {unlockMode && (
 
         <div className="max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] overflow-y-auto rounded-2xl bg-white p-5 shadow-xl sm:p-10">
 
@@ -425,17 +481,14 @@ export default function TerminalInner() {
             maxLength={4}
           />
 
-          {/* Cancel only returns to an already-unlocked POS. With no verified
-              session there is nothing to return to, so the control is omitted
-              rather than left inert. */}
-          {hasTerminalSession && (
-            <button
-              onClick={cancelUnlock}
-              className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 hover:border-gray-300 hover:shadow-md active:bg-gray-100"
-            >
-              Cancel
-            </button>
-          )}
+          {/* Dismissing the exit dialog returns to the active POS with the
+              terminal session untouched. */}
+          <button
+            onClick={cancelUnlock}
+            className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 hover:border-gray-300 hover:shadow-md active:bg-gray-100"
+          >
+            Cancel
+          </button>
 
           {!showRecovery ? (
             <button

@@ -4,13 +4,15 @@
 
 - **Audit date:** 2026-08-06
 - **Commit audited:** `7653b08` (`main`)
-- **Route files:** 253 tracked `app/api/**/route.ts`
-- **Exported method handlers:** 308
+- **Route files:** 254 `app/api/**/route.ts`
+- **Exported method handlers:** 310
 - **Coverage:** every tracked `app/api/**/route.ts` file and every exported HTTP
   method appears in [§5](#5-complete-route-matrix) exactly once.
-- **Remediated since the audit:** **RA-1** (2026-08-06) — `GET
-  /api/pos/terminal-session` no longer mints a terminal session. Its §5 row and
-  its §6 entry both reflect the current contract.
+- **Remediated since the audit:** **RA-1** (2026-08-06) — terminal sessions are
+  now issued only to a verified merchant who owns the terminal. `POST
+  /api/pos/terminal-auth` is retired and `POST /api/pos/terminal-exit-auth`
+  replaces it as the PIN boundary. The affected §5 rows and the §6 entry reflect
+  the current contract.
 
 This audit replaces the 2026-05-19 partial audit, which covered only the 88
 routes existing at that date and carried a coverage warning. That warning is
@@ -76,7 +78,8 @@ when it is not. Every `RA-n` reference in this table resolves in §6.
 | `verifyCheckoutSession` | [`lib/api/checkoutAuth.ts:50`](../../lib/api/checkoutAuth.ts#L50) | HMAC `pco_` token, 24h TTL, `timingSafeEqual` | `claims.iid` must equal the path intent | Yes |
 | `requireStripeCardMerchant` | [`lib/api/stripeTerminalAuth.ts:6`](../../lib/api/stripeTerminalAuth.ts#L6) | `pts_` token **or** merchant auth | Returns `{merchantId, terminalId}`; caller must scope | Yes |
 | `requireTrustedNativeMerchant` / `isTrustedNativeRequest` | [`lib/api/stripeTerminalAuth.ts:26`](../../lib/api/stripeTerminalAuth.ts#L26) | `PINETREE_NATIVE_CLIENT_SECRET` compared with `timingSafeEqual`, plus merchant/terminal auth | Delegates | Yes — 403 when unset |
-| `verifyPosTerminalPinEngine` | [`engine/posTerminalSession.ts:82`](../../engine/posTerminalSession.ts#L82) | 4-digit PIN vs stored PIN | Issues a `pts_` for that terminal only | n/a |
+| `launchPosTerminalEngine` | [`engine/posTerminalSession.ts`](../../engine/posTerminalSession.ts) | Caller must already be an authenticated merchant | **The only `pts_` minting site.** Requires `terminal.merchant_id` to equal the session-derived merchant id before signing; foreign terminal → 404 | Yes — no merchant id, no signing |
+| `verifyPosTerminalExitPinEngine` | [`engine/posTerminalSession.ts`](../../engine/posTerminalSession.ts) | 4-digit PIN vs stored PIN | Authorizes the exit action only; re-checks that the terminal belongs to the session's merchant and **issues no credential** | n/a |
 | `verifyHexHmac` | [`lib/webhooks/verifyHexHmac.ts`](../../lib/webhooks/verifyHexHmac.ts) | Validates hex, rejects empty/odd-length, then `timingSafeEqual` | n/a | n/a |
 | `processWebhook` verification gate | [`engine/eventProcessor.ts:318`](../../engine/eventProcessor.ts#L318) | Requires the adapter to define `verifyWebhook` and to return **strictly `true`**; a throw is a rejection | Rail correlation after verification | Yes — refuses providers without a verifier |
 | `verifyBridgeWebhookSignature` | [`providers/bridge/verifyWebhook.ts:99`](../../providers/bridge/verifyWebhook.ts#L99) | RSA-SHA256 over `timestamp.rawBody`, 10-min tolerance | Owner from stored Bridge ids | Yes — `missing_public_key` |
@@ -290,8 +293,10 @@ whether the handler can write PineTree state.
 | `/api/pos/shift4-retail-preparation` | POST | TERMINAL_SESSION | `requireTerminalSession` (HMAC `pts_`, 24h TTL, `timingSafeEqual`) | Merchant + terminal from the signed claims | Yes | [`app/api/pos/shift4-retail-preparation/route.ts:33`](../../app/api/pos/shift4-retail-preparation/route.ts#L33) | VERIFIED |
 | `/api/pos/shift4-retail-readers` | GET | TERMINAL_SESSION | `requireTerminalSession` (HMAC `pts_`, 24h TTL, `timingSafeEqual`) | Merchant + terminal from the signed claims | No | [`app/api/pos/shift4-retail-readers/route.ts:15`](../../app/api/pos/shift4-retail-readers/route.ts#L15) | VERIFIED |
 | `/api/pos/shift4-retail-readers` | POST | TERMINAL_SESSION | `requireTerminalSession` (HMAC `pts_`, 24h TTL, `timingSafeEqual`) | Merchant + terminal from the signed claims | Yes | [`app/api/pos/shift4-retail-readers/route.ts:28`](../../app/api/pos/shift4-retail-readers/route.ts#L28) | VERIFIED |
-| `/api/pos/terminal-auth` | POST | PUBLIC | 4-digit PIN verified server-side; 5-per-15-min limiter keyed on terminal id | Issues a `pts_` scoped to the verified terminal only | Yes | [`app/api/pos/terminal-auth/route.ts:23`](../../app/api/pos/terminal-auth/route.ts#L23) | VERIFIED_PUBLIC |
-| `/api/pos/terminal-session` | GET | PUBLIC | None — unauthenticated bootstrap for the terminal/PIN screen | Terminal id possession; returns display data only (name, id, autolock, starting-cash config, drawer-shift state, rail label). Issues **no credential**: no session token, no PIN, no recovery phrase, no merchant binding | No | [`app/api/pos/terminal-session/route.ts:29`](../../app/api/pos/terminal-session/route.ts#L29) | VERIFIED_PUBLIC RA-1 |
+| `/api/pos/terminal-auth` | POST | RETIRED | None — returns 410 Gone | n/a | No | [`app/api/pos/terminal-auth/route.ts:41`](../../app/api/pos/terminal-auth/route.ts#L41) | VERIFIED_RETIRED RA-1 |
+| `/api/pos/terminal-auth` | GET | RETIRED | None — returns 410 Gone | n/a | No | [`app/api/pos/terminal-auth/route.ts:45`](../../app/api/pos/terminal-auth/route.ts#L45) | VERIFIED_RETIRED RA-1 |
+| `/api/pos/terminal-exit-auth` | POST | TERMINAL_SESSION | `requireTerminalSession` (`pts_`) **then** the 4-digit PIN verified server-side; 5-per-15-min limiter keyed on the terminal id from the signed claims | Merchant and terminal both come from the signed claims — there is no `terminalId` in the request. Authorizes the exit action only and **issues no credential** | No | [`app/api/pos/terminal-exit-auth/route.ts:30`](../../app/api/pos/terminal-exit-auth/route.ts#L30) | VERIFIED RA-1 |
+| `/api/pos/terminal-session` | GET | DASHBOARD_SESSION | `requireMerchantIdFromRequest` — a verified merchant session is required; the `/terminal` page is itself proxy-protected | Merchant id from the verified session, never from query or body; the Engine requires `terminal.merchant_id` to equal it before signing, and reports a foreign terminal as 404. Issues the scoped `pts_` credential so launch needs no PIN | Yes | [`app/api/pos/terminal-session/route.ts:37`](../../app/api/pos/terminal-session/route.ts#L37) | VERIFIED RA-1 |
 | `/api/pos/terminal-session` | POST | PUBLIC | Recovery phrase verified server-side (`resetPosTerminalPinWithRecoveryEngine`) | Recovery-phrase possession authorizes a PIN reset on that terminal only; issues no session token. **No rate limiter on this path** | Yes | [`app/api/pos/terminal-session/route.ts:54`](../../app/api/pos/terminal-session/route.ts#L54) | VERIFIED_PUBLIC RA-9 |
 | `/api/pos/terminals` | GET | DASHBOARD_SESSION | `requireMerchantIdFromRequest` (Supabase JWT or `pt_live_` key) | Merchant id from the verified token; never from the body | No | [`app/api/pos/terminals/route.ts:18`](../../app/api/pos/terminals/route.ts#L18) | VERIFIED |
 | `/api/pos/terminals` | POST | DASHBOARD_SESSION | `requireMerchantIdFromRequest` (Supabase JWT or `pt_live_` key) | Merchant id from the verified token; never from the body | Yes | [`app/api/pos/terminals/route.ts:39`](../../app/api/pos/terminals/route.ts#L39) | VERIFIED |
@@ -498,52 +503,67 @@ maps a `pts_` token to `{merchantId: claims.mid}`, so on those routes the token
 carries **merchant-level** authority. The response additionally discloses
 `merchant_id`, drawer balance, tax configuration, and terminal name.
 
-**Runtime evidence required:** no. The chain is complete in source.
+**Runtime evidence required:** no. The chain was complete in source.
 
-**Recommended remediation (separate task).** Stop returning `sessionToken` from
-the unauthenticated display path. Split the route: an unauthenticated
-`GET` may return non-sensitive display fields only, and the `pts_` token must be
-issued exclusively by the PIN-verified path. Alternatively require merchant
-session auth on the `GET`. Do not merely rate-limit it — the defect is credential
-issuance without authentication, not brute force.
+> The remediation originally sketched here proposed issuing the token from the
+> PIN-verified path. That was implemented and then corrected: it made the PIN an
+> *entry* gate, which contradicts PineTree's terminal product contract. The
+> **Resolution** below is the authoritative account — the defect was credential
+> issuance without *authentication and ownership*, and that is what was fixed.
 
 **Resolution — 2026-08-06**
 
-Credential issuance was removed from the unauthenticated path entirely; it was
-not hidden at the route after being generated.
+What closes RA-1 is a **verified merchant session plus a server-side ownership
+check**, not a PIN prompt. Terminal id possession is not authorization; a
+credential is minted only for a caller PineTree has already authenticated and
+that provably owns the terminal.
 
-- The display projection became
-  [`getPosTerminalBootstrapEngine`](../../engine/posTerminalSession.ts), whose
-  `PosTerminalBootstrap` type has no `sessionToken` field, no `merchant_id`, and
-  no `drawer.balance`. It does not call `signTerminalSession`.
-- `signTerminalSession` remains imported by that module because
-  `verifyPosTerminalPinEngine` needs it, so unreachability is proven
-  behaviorally: the regression suite spies on the real signer and asserts it is
-  never invoked on the GET path.
-- [`verifyPosTerminalPinEngine`](../../engine/posTerminalSession.ts) is now the
-  single minting site and returns `{ sessionToken, merchantId, terminalId }`, so
-  the tenant binding travels with the verified credential instead of being read
-  from an unauthenticated bootstrap.
-- `POST /api/pos/terminal-auth` is unchanged as the PIN boundary: 4-digit format
-  check, the 5-per-15-minute limiter keyed on terminal id, server-side PIN
-  verification, and the same 24-hour token contract.
-- The POS client no longer accepts a bootstrap token. It gates the POS surface on
-  `needsPin = unlockMode || !hasTerminalSession`, so no protected POS request can
-  fire before PIN success, and a reload re-locks the terminal because the token
-  lives only in memory.
+The PIN is unchanged in strength but changed in role: it is the **exit** gate.
+Launching a configured terminal opens the POS immediately, which is PineTree's
+intended terminal behavior — a cashier does not authenticate to start selling.
 
-**Behavior change accepted with the fix.** Launching a terminal now requires the
-cashier to enter the PIN before the POS renders. Previously the POS was usable
-immediately on load, which is precisely what made the PIN gate ineffective.
+- **Launch.** `GET /api/pos/terminal-session` requires
+  `requireMerchantIdFromRequest`. The `/terminal` page is proxy-protected
+  ([`proxy.ts:10-11`](../../proxy.ts#L10)), so the cashier's browser already holds
+  a merchant session, which the client forwards as a bearer token.
+- **Ownership.** [`launchPosTerminalEngine`](../../engine/posTerminalSession.ts)
+  loads the terminal by id and requires `terminal.merchant_id` to equal the
+  session-derived merchant id **before** signing. A terminal owned by another
+  merchant returns 404, so the route cannot enumerate terminal ids. `db` is the
+  service-role client, so this comparison — not row-level security — is what
+  enforces tenancy. No `merchantId` from query or body is consulted.
+- **Single minting site.** `signTerminalSession` is called in exactly one place,
+  inside that ownership-checked function. The token keeps its `mid`/`tid` claims
+  and 24-hour TTL.
+- **Exit.** [`POST /api/pos/terminal-exit-auth`](../../app/api/pos/terminal-exit-auth/route.ts)
+  requires the active `pts_` session **and then** the PIN: 4-digit format check,
+  server-side verification, and a 5-per-15-minute limiter keyed on the terminal id
+  from the signed claims. Because identity comes from those claims, a PIN can only
+  exit the terminal it was issued for, and the route cannot be used to test PINs
+  against arbitrary terminal ids. It returns `{ exitAuthorized: true }` and
+  **never** a credential — a successful exit check can never become a
+  replacement session.
+- **Retired.** `POST /api/pos/terminal-auth` returns 410. It was the last endpoint
+  that minted a merchant-scoped credential from an unauthenticated request holding
+  only a terminal id and a 4-digit secret, and after this change nothing called it.
+- **Client.** The POS renders as soon as the authenticated launch succeeds, and
+  nothing renders before it. A failed launch shows an error rather than retrying
+  without credentials. The exit PIN dialog opens only from the lock/exit control,
+  the credential is retained on a wrong PIN, and it is cleared only after the
+  server authorizes the exit.
+- **Refresh.** Re-running the authenticated launch restores the POS for as long as
+  the merchant session is valid; there is no manual unlock step.
 
 **Verified by**
 [`__tests__/posTerminalCredentialIssuance.test.ts`](../../__tests__/posTerminalCredentialIssuance.test.ts):
-the bootstrap returns no `sessionToken` and no `pts_` string anywhere, never calls
-the signer, and rejects a missing or unknown terminal; a correct PIN issues a
-token whose claims carry the verified merchant and terminal; incorrect, malformed
-and rate-limited attempts issue none; a protected POS route (`/api/pos/breakdown`)
-rejects a missing or forged token, rejects **every** string the bootstrap returns
-when replayed as a bearer token, and accepts the PIN-issued token.
+an unauthenticated launch returns 401 with no token and never reaches the signer;
+an authenticated owner launch returns a `pts_` whose claims carry the verified
+merchant and terminal, with no PIN anywhere in the exchange; a foreign terminal is
+refused 404 with nothing signed, including when `merchantId` is supplied in the
+query; refresh re-launches successfully; the launched token is accepted by a
+protected POS route while a merchant JWT is not; the exit route rejects a missing
+or forged session, a wrong PIN, and malformed PINs, stays rate-limited, and on
+success returns no credential; and the retired route answers 410.
 
 ---
 

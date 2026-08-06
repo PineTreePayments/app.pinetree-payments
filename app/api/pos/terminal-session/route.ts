@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getPosTerminalBootstrapEngine } from "@/engine/posTerminalSession"
+import { launchPosTerminalEngine } from "@/engine/posTerminalSession"
 import { resetPosTerminalPinWithRecoveryEngine } from "@/engine/posTerminals"
+import { requireMerchantIdFromRequest, getRouteErrorStatus } from "@/lib/api/merchantAuth"
+
+const PRIVATE_NO_STORE = { "Cache-Control": "private, no-store, max-age=0" } as const
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
@@ -14,35 +17,44 @@ function getErrorStatus(error: unknown) {
 }
 
 /**
- * GET - unauthenticated bootstrap for the terminal/PIN screen.
+ * GET - authenticated terminal launch.
  *
- * Returns display data only: terminal name and id, autolock, drawer-shift
- * state, starting cash configuration, and the rail label. It issues NO
- * credential — no terminal session token, no PIN, no recovery phrase, no
- * merchant binding, no provider secret.
+ * Requires a verified merchant session (the `/terminal` page itself is
+ * proxy-protected, so the cashier's browser already holds one). The merchant id
+ * is taken from that verified session — never from the query string or body —
+ * and the Engine refuses to open a terminal owned by another merchant.
  *
- * A terminal session is obtained solely from `POST /api/pos/terminal-auth`
- * after the PIN is verified server-side. This route previously returned a
- * signed 24-hour `pts_` token to any caller holding a terminal id, which
- * bypassed the PIN gate entirely (audit finding RA-1).
+ * On success this returns the terminal's display data **and** its scoped `pts_`
+ * session credential, so launching a configured terminal opens the POS
+ * immediately. The PIN is not an entry gate; it guards leaving the terminal via
+ * `POST /api/pos/terminal-exit-auth`.
+ *
+ * Audit finding RA-1 was that this route signed a token for anyone who knew a
+ * terminal id. What closes it is the verified merchant session plus the
+ * server-side ownership check, not a PIN prompt: terminal id possession alone
+ * mints nothing.
  */
 export async function GET(req: NextRequest) {
   try {
+    const merchantId = await requireMerchantIdFromRequest(req)
     const terminalId = req.nextUrl.searchParams.get("tid") || ""
 
     if (!terminalId) {
-      return NextResponse.json({ error: "Missing terminal id" }, { status: 400 })
+      return NextResponse.json(
+        { error: "Missing terminal id" },
+        { status: 400, headers: PRIVATE_NO_STORE }
+      )
     }
 
-    const data = await getPosTerminalBootstrapEngine(terminalId)
-    return NextResponse.json(
-      { success: true, ...data },
-      { headers: { "Cache-Control": "private, no-store, max-age=0" } }
-    )
+    const data = await launchPosTerminalEngine({ merchantId, terminalId })
+    return NextResponse.json({ success: true, ...data }, { headers: PRIVATE_NO_STORE })
   } catch (error: unknown) {
+    // Missing or invalid merchant auth surfaces as 401 from the auth helper;
+    // a foreign or unknown terminal surfaces as 404 from the Engine. Neither
+    // path returns a credential.
     return NextResponse.json(
       { error: getErrorMessage(error, "Failed to load terminal session") },
-      { status: getErrorStatus(error) }
+      { status: getRouteErrorStatus(error, getErrorStatus(error)), headers: PRIVATE_NO_STORE }
     )
   }
 }
