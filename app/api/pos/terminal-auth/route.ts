@@ -49,14 +49,24 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const sessionToken = await verifyPosTerminalPinEngine(terminalId, pin)
+    const verified = await verifyPosTerminalPinEngine(terminalId, pin)
 
     // Successful auth — reset the failure counter so a cashier who mistyped
     // 3 times and then entered the correct PIN doesn't get locked out on their
     // next shift login within the same 15-minute window.
     pinLimiter.reset(terminalId)
 
-    return NextResponse.json({ sessionToken })
+    // The merchant/terminal identity ships with the credential it was verified
+    // against, so the POS client never derives its tenant binding from the
+    // unauthenticated bootstrap route.
+    return NextResponse.json(
+      {
+        sessionToken: verified.sessionToken,
+        merchantId: verified.merchantId,
+        terminalId: verified.terminalId,
+      },
+      { headers: { "Cache-Control": "private, no-store, max-age=0" } }
+    )
   } catch (error: unknown) {
     const status =
       typeof error === "object" && error !== null && "status" in error

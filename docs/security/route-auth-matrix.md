@@ -8,6 +8,9 @@
 - **Exported method handlers:** 308
 - **Coverage:** every tracked `app/api/**/route.ts` file and every exported HTTP
   method appears in [§5](#5-complete-route-matrix) exactly once.
+- **Remediated since the audit:** **RA-1** (2026-08-06) — `GET
+  /api/pos/terminal-session` no longer mints a terminal session. Its §5 row and
+  its §6 entry both reflect the current contract.
 
 This audit replaces the 2026-05-19 partial audit, which covered only the 88
 routes existing at that date and carried a coverage warning. That warning is
@@ -288,8 +291,8 @@ whether the handler can write PineTree state.
 | `/api/pos/shift4-retail-readers` | GET | TERMINAL_SESSION | `requireTerminalSession` (HMAC `pts_`, 24h TTL, `timingSafeEqual`) | Merchant + terminal from the signed claims | No | [`app/api/pos/shift4-retail-readers/route.ts:15`](../../app/api/pos/shift4-retail-readers/route.ts#L15) | VERIFIED |
 | `/api/pos/shift4-retail-readers` | POST | TERMINAL_SESSION | `requireTerminalSession` (HMAC `pts_`, 24h TTL, `timingSafeEqual`) | Merchant + terminal from the signed claims | Yes | [`app/api/pos/shift4-retail-readers/route.ts:28`](../../app/api/pos/shift4-retail-readers/route.ts#L28) | VERIFIED |
 | `/api/pos/terminal-auth` | POST | PUBLIC | 4-digit PIN verified server-side; 5-per-15-min limiter keyed on terminal id | Issues a `pts_` scoped to the verified terminal only | Yes | [`app/api/pos/terminal-auth/route.ts:23`](../../app/api/pos/terminal-auth/route.ts#L23) | VERIFIED_PUBLIC |
-| `/api/pos/terminal-session` | GET | PUBLIC | **None** | **None** — returns a valid 24h `pts_` terminal session for any terminal id | No | [`app/api/pos/terminal-session/route.ts:20`](../../app/api/pos/terminal-session/route.ts#L20) | FINDING RA-1 |
-| `/api/pos/terminal-session` | POST | PUBLIC | Recovery phrase verified server-side (`resetPosTerminalPinWithRecoveryEngine`) | Recovery-phrase possession authorizes a PIN reset on that terminal only; issues no session token. **No rate limiter on this path** | Yes | [`app/api/pos/terminal-session/route.ts:42`](../../app/api/pos/terminal-session/route.ts#L42) | VERIFIED_PUBLIC RA-9 |
+| `/api/pos/terminal-session` | GET | PUBLIC | None — unauthenticated bootstrap for the terminal/PIN screen | Terminal id possession; returns display data only (name, id, autolock, starting-cash config, drawer-shift state, rail label). Issues **no credential**: no session token, no PIN, no recovery phrase, no merchant binding | No | [`app/api/pos/terminal-session/route.ts:29`](../../app/api/pos/terminal-session/route.ts#L29) | VERIFIED_PUBLIC RA-1 |
+| `/api/pos/terminal-session` | POST | PUBLIC | Recovery phrase verified server-side (`resetPosTerminalPinWithRecoveryEngine`) | Recovery-phrase possession authorizes a PIN reset on that terminal only; issues no session token. **No rate limiter on this path** | Yes | [`app/api/pos/terminal-session/route.ts:54`](../../app/api/pos/terminal-session/route.ts#L54) | VERIFIED_PUBLIC RA-9 |
 | `/api/pos/terminals` | GET | DASHBOARD_SESSION | `requireMerchantIdFromRequest` (Supabase JWT or `pt_live_` key) | Merchant id from the verified token; never from the body | No | [`app/api/pos/terminals/route.ts:18`](../../app/api/pos/terminals/route.ts#L18) | VERIFIED |
 | `/api/pos/terminals` | POST | DASHBOARD_SESSION | `requireMerchantIdFromRequest` (Supabase JWT or `pt_live_` key) | Merchant id from the verified token; never from the body | Yes | [`app/api/pos/terminals/route.ts:39`](../../app/api/pos/terminals/route.ts#L39) | VERIFIED |
 | `/api/pos/terminals` | DELETE | DASHBOARD_SESSION | `requireMerchantIdFromRequest` (Supabase JWT or `pt_live_` key) | Merchant id from the verified token; never from the body | Yes | [`app/api/pos/terminals/route.ts:102`](../../app/api/pos/terminals/route.ts#L102) | VERIFIED |
@@ -431,36 +434,43 @@ whether the handler can write PineTree state.
 | `/api/woocommerce/plugin/download` | GET | DASHBOARD_SESSION | `requireMerchantIdFromRequest` (Supabase JWT or `pt_live_` key) | Merchant id from the verified token; never from the body | No | [`app/api/woocommerce/plugin/download/route.ts:13`](../../app/api/woocommerce/plugin/download/route.ts#L13) | VERIFIED |
 ## 6. Findings
 
-Eleven findings. **None has been remediated** — this is an audit-only document, and
-each item is prioritized for a separate surgical task. No claim is made that any
-of these was exploited; each states its preconditions.
+Eleven findings, **one remediated (RA-1, 2026-08-06)**. The rest remain open and
+each is prioritized for a separate surgical task. No claim is made that any of
+these was exploited; each states its preconditions.
 
-| ID | Severity | Route(s) | Defect |
-|---|---|---|---|
-| RA-1 | **CRITICAL** | `GET /api/pos/terminal-session` | Mints a 24h terminal session with no authentication |
-| RA-2 | **HIGH** | `POST /api/shopify/session` | Unauthenticated, unsigned; the caller selects the merchant |
-| RA-4 | **HIGH** | `POST /api/pos/base-session/[intentId]` | Terminal-session claims discarded; cross-merchant service-role write |
-| RA-3 | MEDIUM | `GET /api/payment-intents/[intentId]` | Discloses the whole intent row, including `pinetree_fee` and `merchant_id` |
-| RA-7 | MEDIUM | `POST /api/webhooks/lightning` | Returns 200 after a post-verification failure, suppressing provider retry |
-| RA-11 | MEDIUM | `POST /api/wallet-connect-session` | Unauthenticated mutation (previously accepted risk; re-stated, not re-decided) |
-| RA-5 | LOW | `POST /api/debug/{base,lightning,solana,solflare}` | Deny-list environment guard |
-| RA-9 | LOW | `POST /api/pos/terminal-session` | PIN-recovery path has no rate limiter |
-| RA-6 | LOW | `POST /api/webhooks/speed` | Parses and queries the database before verification |
-| RA-8 | LOW | cron + internal routes | Non-constant-time secret comparison; `CRON_SECRET` doubles as `INTERNAL_API_SECRET` |
-| RA-10 | LOW | `GET /api/payments/status` | 500 path echoes the internal error message |
+A resolved finding keeps its entry rather than being deleted: the row it came
+from still references the id so the decision stays traceable from the matrix.
+
+| ID | Severity | Status | Route(s) | Defect |
+|---|---|---|---|---|
+| RA-1 | **CRITICAL** | **Resolved 2026-08-06** | `GET /api/pos/terminal-session` | Minted a 24h terminal session with no authentication |
+| RA-2 | **HIGH** | Open | `POST /api/shopify/session` | Unauthenticated, unsigned; the caller selects the merchant |
+| RA-4 | **HIGH** | Open | `POST /api/pos/base-session/[intentId]` | Terminal-session claims discarded; cross-merchant service-role write |
+| RA-3 | MEDIUM | Open | `GET /api/payment-intents/[intentId]` | Discloses the whole intent row, including `pinetree_fee` and `merchant_id` |
+| RA-7 | MEDIUM | Open | `POST /api/webhooks/lightning` | Returns 200 after a post-verification failure, suppressing provider retry |
+| RA-11 | MEDIUM | Open | `POST /api/wallet-connect-session` | Unauthenticated mutation (previously accepted risk; re-stated, not re-decided) |
+| RA-5 | LOW | Open | `POST /api/debug/{base,lightning,solana,solflare}` | Deny-list environment guard |
+| RA-9 | LOW | Open | `POST /api/pos/terminal-session` | PIN-recovery path has no rate limiter |
+| RA-6 | LOW | Open | `POST /api/webhooks/speed` | Parses and queries the database before verification |
+| RA-8 | LOW | Open | cron + internal routes | Non-constant-time secret comparison; `CRON_SECRET` doubles as `INTERNAL_API_SECRET` |
+| RA-10 | LOW | Open | `GET /api/payments/status` | 500 path echoes the internal error message |
 
 ---
 
-### RA-1 — CRITICAL — unauthenticated terminal-session minting
+### RA-1 — CRITICAL — unauthenticated terminal-session minting — **RESOLVED 2026-08-06**
 
 **Route:** `GET /api/pos/terminal-session?tid=<terminalId>`
 
-**Execution chain**
+The defect and its remediation are both recorded here. The narrative below is in
+the past tense because the behavior no longer exists; see **Resolution** at the
+end of this entry for the current contract.
 
-1. [`proxy.ts:15-25`](../../proxy.ts#L15) — `/api/pos/` is not in `isProtectedApi`, so the request is not challenged globally.
-2. [`app/api/pos/terminal-session/route.ts:20-35`](../../app/api/pos/terminal-session/route.ts#L20) — the handler reads `tid` and calls the engine. There is **no** authentication, authorization, rate limit, or PIN check.
-3. [`engine/posTerminalSession.ts:53`](../../engine/posTerminalSession.ts#L53) — `signTerminalSession(terminal.merchant_id, terminal.id)`.
-4. [`engine/posTerminalSession.ts:68`](../../engine/posTerminalSession.ts#L68) — the token is returned in the response body as `sessionToken`.
+**Execution chain (before the fix)**
+
+1. [`proxy.ts:15-25`](../../proxy.ts#L15) — `/api/pos/` is not in `isProtectedApi`, so the request was not challenged globally. *(Still true; the route now needs no global challenge because it issues nothing.)*
+2. `app/api/pos/terminal-session/route.ts` — the handler read `tid` and called the display engine with **no** authentication, authorization, rate limit, or PIN check.
+3. `engine/posTerminalSession.ts` — the display projection called `signTerminalSession(terminal.merchant_id, terminal.id)`.
+4. The signed token was returned in the response body as `sessionToken`.
 5. [`lib/api/terminalAuth.ts:38-47`](../../lib/api/terminalAuth.ts#L38) — that token is a valid `pts_` credential with a **24-hour** TTL, exactly what `requireTerminalSession` accepts.
 
 **Preconditions.** Knowledge of one terminal UUID. It is not publicly
@@ -497,13 +507,43 @@ issued exclusively by the PIN-verified path. Alternatively require merchant
 session auth on the `GET`. Do not merely rate-limit it — the defect is credential
 issuance without authentication, not brute force.
 
-**Tests the remediation must add**
+**Resolution — 2026-08-06**
 
-- `GET /api/pos/terminal-session` with a valid `tid` and no credential returns no `pts_` token (assert on the response shape, not just the status).
-- A token obtainable from that route (if any remains) is rejected by `requireTerminalSession`.
-- `POST /api/pos/terminal-auth` with the correct PIN still issues a working token (no regression).
-- An incorrect PIN still yields 401 and the limiter still returns 429 on the 6th attempt.
-- The unauthenticated response contains no `merchant_id` and no drawer balance.
+Credential issuance was removed from the unauthenticated path entirely; it was
+not hidden at the route after being generated.
+
+- The display projection became
+  [`getPosTerminalBootstrapEngine`](../../engine/posTerminalSession.ts), whose
+  `PosTerminalBootstrap` type has no `sessionToken` field, no `merchant_id`, and
+  no `drawer.balance`. It does not call `signTerminalSession`.
+- `signTerminalSession` remains imported by that module because
+  `verifyPosTerminalPinEngine` needs it, so unreachability is proven
+  behaviorally: the regression suite spies on the real signer and asserts it is
+  never invoked on the GET path.
+- [`verifyPosTerminalPinEngine`](../../engine/posTerminalSession.ts) is now the
+  single minting site and returns `{ sessionToken, merchantId, terminalId }`, so
+  the tenant binding travels with the verified credential instead of being read
+  from an unauthenticated bootstrap.
+- `POST /api/pos/terminal-auth` is unchanged as the PIN boundary: 4-digit format
+  check, the 5-per-15-minute limiter keyed on terminal id, server-side PIN
+  verification, and the same 24-hour token contract.
+- The POS client no longer accepts a bootstrap token. It gates the POS surface on
+  `needsPin = unlockMode || !hasTerminalSession`, so no protected POS request can
+  fire before PIN success, and a reload re-locks the terminal because the token
+  lives only in memory.
+
+**Behavior change accepted with the fix.** Launching a terminal now requires the
+cashier to enter the PIN before the POS renders. Previously the POS was usable
+immediately on load, which is precisely what made the PIN gate ineffective.
+
+**Verified by**
+[`__tests__/posTerminalCredentialIssuance.test.ts`](../../__tests__/posTerminalCredentialIssuance.test.ts):
+the bootstrap returns no `sessionToken` and no `pts_` string anywhere, never calls
+the signer, and rejects a missing or unknown terminal; a correct PIN issues a
+token whose claims carry the verified merchant and terminal; incorrect, malformed
+and rate-limited attempts issue none; a protected POS route (`/api/pos/breakdown`)
+rejects a missing or forged token, rejects **every** string the bootstrap returns
+when replayed as a bearer token, and accepts the PIN-issued token.
 
 ---
 
@@ -693,7 +733,7 @@ value.
 ### RA-9 — LOW — no rate limiter on the PIN-recovery path
 
 `POST /api/pos/terminal-session` resets a terminal PIN after verifying a recovery
-phrase ([`app/api/pos/terminal-session/route.ts:42-68`](../../app/api/pos/terminal-session/route.ts#L42)
+phrase ([`app/api/pos/terminal-session/route.ts:54-80`](../../app/api/pos/terminal-session/route.ts#L54)
 → `resetPosTerminalPinWithRecoveryEngine`,
 [`engine/posTerminals.ts:100`](../../engine/posTerminals.ts#L100)). Unlike the PIN
 login path — which uses a 5-per-15-minute limiter
@@ -770,7 +810,7 @@ The 2026-05-19 document contained claims this audit disproves:
 |---|---|
 | `/api/cron/update-balances` — "dev backdoor when no secret set" | **Fails closed.** A missing `CRON_SECRET` is logged and the request is rejected 401 ([`route.ts:8-21`](../../app/api/cron/update-balances/route.ts#L8)). |
 | `GET /api/payment-intents/[intentId]` — "no internal sensitive data" | False — spreads the whole row (finding RA-3). |
-| `GET /api/pos/terminal-session` — "Returns safe display info only (terminal name/state)" | False — also returns a valid 24h `pts_` session token (finding RA-1). |
+| `GET /api/pos/terminal-session` — "Returns safe display info only (terminal name/state)" | Was false at audit time — it also returned a valid 24h `pts_` session token (finding RA-1). The claim became true on 2026-08-06 when RA-1 was fixed. |
 | `/api/debug/lightning-balance` listed as MERCHANT | Route no longer exists. |
 | 88 routes, "not a complete inventory" | 253 files / 308 handlers, now complete. `/api/cron/cleanup-api-idempotency` and ~165 other routes were absent. |
 

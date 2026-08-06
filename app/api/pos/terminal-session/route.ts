@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getPosTerminalDisplayEngine } from "@/engine/posTerminalSession"
+import { getPosTerminalBootstrapEngine } from "@/engine/posTerminalSession"
 import { resetPosTerminalPinWithRecoveryEngine } from "@/engine/posTerminals"
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -14,8 +14,17 @@ function getErrorStatus(error: unknown) {
 }
 
 /**
- * GET - returns safe terminal display info (name, drawer state, provider) and
- * a scoped terminal session token. Never returns the terminal PIN.
+ * GET - unauthenticated bootstrap for the terminal/PIN screen.
+ *
+ * Returns display data only: terminal name and id, autolock, drawer-shift
+ * state, starting cash configuration, and the rail label. It issues NO
+ * credential — no terminal session token, no PIN, no recovery phrase, no
+ * merchant binding, no provider secret.
+ *
+ * A terminal session is obtained solely from `POST /api/pos/terminal-auth`
+ * after the PIN is verified server-side. This route previously returned a
+ * signed 24-hour `pts_` token to any caller holding a terminal id, which
+ * bypassed the PIN gate entirely (audit finding RA-1).
  */
 export async function GET(req: NextRequest) {
   try {
@@ -25,8 +34,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Missing terminal id" }, { status: 400 })
     }
 
-    const data = await getPosTerminalDisplayEngine(terminalId)
-    return NextResponse.json({ success: true, ...data })
+    const data = await getPosTerminalBootstrapEngine(terminalId)
+    return NextResponse.json(
+      { success: true, ...data },
+      { headers: { "Cache-Control": "private, no-store, max-age=0" } }
+    )
   } catch (error: unknown) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Failed to load terminal session") },

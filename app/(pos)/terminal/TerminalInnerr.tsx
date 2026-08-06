@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useState, useEffect } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import POSLayout from "@/components/pos/POSLayout"
 import Keypad from "@/components/pos/Keypad"
 import Button from "@/components/ui/Button"
@@ -12,11 +12,15 @@ type Toast = {
   type: "success" | "error"
 }
 
+/**
+ * Fields served by the unauthenticated bootstrap route. It deliberately carries
+ * no `merchant_id` and no session token — the tenant binding and the credential
+ * both arrive from POST /api/pos/terminal-auth after PIN verification.
+ */
 type Terminal = {
   id: string
   name: string
   autolock: string
-  merchant_id?: string
   drawer_starting_amount?: number
 }
 
@@ -43,7 +47,6 @@ function normalizeTerminalId(value: string | null): string {
 
 export default function TerminalInner() {
 
-  const router = useRouter()
   const params = useSearchParams()
 
   const terminalId = normalizeTerminalId(params.get("tid"))
@@ -107,14 +110,9 @@ export default function TerminalInner() {
       const provider = String(payload.provider || "solana")
       setPendingProvider(provider)
 
-      if (payload.sessionToken && terminalData.merchant_id) {
-        setTerminalContext({
-          terminalId: terminalData.id,
-          merchantId: terminalData.merchant_id,
-          provider,
-          sessionToken: String(payload.sessionToken)
-        })
-      }
+      // No terminal context is established here. This response carries no
+      // credential, so the POS stays locked until the cashier's PIN is verified
+      // by POST /api/pos/terminal-auth.
 
     }
 
@@ -153,7 +151,11 @@ export default function TerminalInner() {
         body: JSON.stringify({ terminalId: terminal.id, pin: resolved })
       })
 
-      const data = await res.json().catch(() => null) as { sessionToken?: string } | null
+      const data = await res.json().catch(() => null) as {
+        sessionToken?: string
+        merchantId?: string
+        terminalId?: string
+      } | null
 
       if (!res.ok) {
         setIsRedirecting(false)
@@ -162,19 +164,29 @@ export default function TerminalInner() {
         return
       }
 
-      if (data?.sessionToken && terminal.merchant_id) {
-        setTerminalContext({
-          terminalId: terminal.id,
-          merchantId: terminal.merchant_id,
-          provider: pendingProvider,
-          sessionToken: String(data.sessionToken)
-        })
+      // Both the credential and the tenant binding come from this verified
+      // response. Without them the POS cannot be unlocked at all.
+      if (!data?.sessionToken || !data.merchantId) {
+        setIsRedirecting(false)
+        showToast("Could not start terminal session", "error")
+        setDigits("")
+        return
       }
 
+      setTerminalContext({
+        terminalId: String(data.terminalId || terminal.id),
+        merchantId: String(data.merchantId),
+        provider: pendingProvider,
+        sessionToken: String(data.sessionToken)
+      })
+
+      // Unlock in place. Navigating away here would discard the freshly issued
+      // token and leave the POS unable to authenticate.
+      setUnlockMode(false)
+      setShowRecovery(false)
+      setDigits("")
+      setIsRedirecting(false)
       showToast("Terminal unlocked", "success")
-      setTimeout(() => {
-        router.push("/dashboard/pos")
-      }, 700)
     } catch {
       setIsRedirecting(false)
       showToast("Incorrect PIN", "error")
@@ -272,6 +284,13 @@ export default function TerminalInner() {
     }
   }
 
+  // The POS is gated on actually holding a verified terminal session, not merely
+  // on the lock flag. Cancelling the PIN pad therefore cannot drop the cashier
+  // into a POS with no credential, and a page reload re-locks the terminal
+  // because the token lives only in memory.
+  const hasTerminalSession = Boolean(terminalContext?.sessionToken)
+  const needsPin = unlockMode || !hasTerminalSession
+
   if (!terminal) {
     return (
       <div className="flex h-[100dvh] w-full items-center justify-center bg-gray-100">
@@ -286,7 +305,7 @@ export default function TerminalInner() {
 
     <div className="relative flex h-[100dvh] w-full items-center justify-center overflow-hidden overscroll-none bg-gray-100 px-[max(0.75rem,env(safe-area-inset-left))] py-[calc(env(safe-area-inset-top)+0.75rem)] pb-[calc(env(safe-area-inset-bottom)+0.75rem)] touch-manipulation">
 
-      {terminal && unlockMode && (
+      {terminal && needsPin && (
 
         <div className="absolute left-1/2 top-[calc(env(safe-area-inset-top)+1rem)] -translate-x-1/2 text-center">
 
@@ -315,7 +334,7 @@ export default function TerminalInner() {
 
       </div>
 
-      {!unlockMode && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && showUnlockControl ? (
+      {!needsPin && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && showUnlockControl ? (
         <button
           onClick={requestUnlock}
           className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[calc(env(safe-area-inset-top)+3rem)] touch-manipulation transition hover:scale-110"
@@ -337,7 +356,7 @@ export default function TerminalInner() {
         </button>
       ) : null}
 
-      {!unlockMode && terminal && !shiftStarted && Number(terminal.drawer_starting_amount ?? 0) > 0 && (
+      {!needsPin && terminal && !shiftStarted && Number(terminal.drawer_starting_amount ?? 0) > 0 && (
         <div className="max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] space-y-5 overflow-y-auto rounded-2xl bg-white p-6 text-center shadow-xl sm:p-8">
           <div>
             <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">{terminal.name}</p>
@@ -376,7 +395,7 @@ export default function TerminalInner() {
         </div>
       )}
 
-      {!unlockMode && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && (
+      {!needsPin && (shiftStarted || Number(terminal.drawer_starting_amount ?? 0) === 0) && (
         <POSLayout
           locked={false}
           terminalContext={terminalContext}
@@ -384,7 +403,7 @@ export default function TerminalInner() {
         />
       )}
 
-      {unlockMode && (
+      {needsPin && (
 
         <div className="max-h-[calc(100dvh_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)_-_1.5rem)] w-full max-w-[420px] overflow-y-auto rounded-2xl bg-white p-5 shadow-xl sm:p-10">
 
@@ -406,12 +425,17 @@ export default function TerminalInner() {
             maxLength={4}
           />
 
-          <button
-            onClick={cancelUnlock}
-            className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 hover:border-gray-300 hover:shadow-md active:bg-gray-100"
-          >
-            Cancel
-          </button>
+          {/* Cancel only returns to an already-unlocked POS. With no verified
+              session there is nothing to return to, so the control is omitted
+              rather than left inert. */}
+          {hasTerminalSession && (
+            <button
+              onClick={cancelUnlock}
+              className="mt-6 inline-flex h-10 w-full items-center justify-center rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 hover:border-gray-300 hover:shadow-md active:bg-gray-100"
+            >
+              Cancel
+            </button>
+          )}
 
           {!showRecovery ? (
             <button
