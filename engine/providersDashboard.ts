@@ -4,6 +4,7 @@ import { loadProviders } from "./loadProviders"
 import { getProviderMetadata } from "@/providers/registry"
 import { getLightningNwcReadiness, SPEED_PROVIDER_NAME } from "@/database/merchantProviders"
 import { SHIFT4_REST_PROVIDER_NAME } from "@/database/merchantShift4RestConnections"
+import { BRIDGE_PROVIDER_NAME } from "@/database/merchantBridgeConnections"
 import { getPineTreeWalletProfile } from "@/database/pineTreeWalletProfiles"
 import { getPineTreeSpeedConfigStatus } from "@/providers/lightning/speedClient"
 import {
@@ -329,7 +330,14 @@ function decorateProviderRows(rows: ProviderRow[]): ProviderRow[] {
         // The Shift4 REST connection row carries the encrypted access-token
         // envelope in its credentials JSONB. It has no merchant-facing card yet,
         // and its credentials must never reach the browser.
-        row.provider !== SHIFT4_REST_PROVIDER_NAME
+        row.provider !== SHIFT4_REST_PROVIDER_NAME &&
+        // Wallet / stablecoin-conversion / settlement infrastructure is NOT a
+        // provider merchants connect or manage. PineTree configures it during
+        // one unified onboarding and presents its readiness as PineTree
+        // business verification on the Wallet page. Excluding it here keeps it
+        // out of every merchant provider list, and keeps its provider
+        // identifiers and KYB state out of the browser entirely.
+        row.provider !== BRIDGE_PROVIDER_NAME
     )
     .map((row) => {
       if (row.provider === "stripe") {

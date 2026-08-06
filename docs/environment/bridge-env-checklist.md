@@ -9,6 +9,14 @@ webhook signing.
 > Bridge.** The two provider connections are stored, synchronized, and enabled
 > independently. Nothing in the Bridge integration reads Stripe state.
 
+> **Bridge is internal infrastructure, not a merchant-facing provider.**
+> Merchants never connect, enable, disable, or manage Bridge, and it does not
+> appear on the Providers page. Merchants complete one PineTree onboarding;
+> PineTree submits automatically after consent and presents the result as
+> PineTree business verification. See
+> [`docs/onboarding/business-verification.md`](../onboarding/business-verification.md).
+> This document is for **operators** configuring the deployment.
+
 This phase implements the **onboarding and connection foundation only**. Bridge
 payment creation is deliberately not enabled — `createPayment` fails closed.
 
@@ -25,8 +33,9 @@ real value, and never return one to a browser.
 | `BRIDGE_API_KEY` | Yes | Sent in Bridge's documented `Api-Key` header. |
 | `BRIDGE_BASE_URL` | No | Explicit host override. Must be https and must match the selected environment. |
 | `BRIDGE_WEBHOOK_PUBLIC_KEY` | Yes (for webhooks) | PEM public key that verifies `X-Webhook-Signature`. |
-| `BRIDGE_KYC_REDIRECT_URL` | Yes | Where Bridge returns the merchant's browser after hosted KYB. |
+| `BRIDGE_KYC_REDIRECT_URL` | Yes | Where Bridge returns the merchant's browser after hosted KYB. Point at a PineTree route (e.g. `/dashboard/wallet-setup?verification=returned`). |
 | `BRIDGE_TIMEOUT_MS` | No | Request timeout, default `20000`. |
+| `BRIDGE_CAPABILITY_ROLLOUT_ENABLED` | No | Set to exactly `false` to hold automatic capability activation back deployment-wide during a controlled rollout. Absent = enabled. |
 
 ### Environment selection is explicit and fails closed
 
@@ -49,17 +58,20 @@ startup of the Bridge boundary throws rather than "correcting" the mismatch.
 
 ---
 
-## 2. Database migration
+## 2. Database migrations
 
-`database/migrations/20260805120000_create_bridge_provider_connections.sql`
-
-**Must be run manually.** It is forward-only and preserves every existing
-provider row.
+Both are forward-only, preserve every existing row, and **must be run manually**
+in order.
 
 ```bash
 # Supabase SQL editor, or:
 psql "$SUPABASE_DB_URL" -f database/migrations/20260805120000_create_bridge_provider_connections.sql
+psql "$SUPABASE_DB_URL" -f database/migrations/20260806120000_create_service_terms_acceptances.sql
 ```
+
+`20260806120000_create_service_terms_acceptances.sql` adds the append-only
+consent table that gates all provider submission. It creates new objects only —
+it never backfills consent, and it never mass-creates provider customers.
 
 What it does:
 
@@ -128,14 +140,18 @@ genuine delivery; PineTree returns `500` only when it could not durably store a
 `BRIDGE_KYC_REDIRECT_URL` only returns the merchant to PineTree. Approval is
 established exclusively by:
 
-- `POST /api/providers/bridge/sync` (a Bridge status lookup), or
+- `POST /api/onboarding/business-verification/refresh` (a Bridge status lookup), or
 - a signature-verified Bridge webhook.
 
-A merchant may enable Bridge only once **all three** hold:
+The Bridge-backed capability activates **automatically** — there is no merchant
+enable step — once **all three** hold:
 
 1. KYB cleared (customer `active` / KYC link `approved`),
 2. Bridge terms accepted (`tos_status = approved`), and
 3. the **`base`** endorsement is `approved`.
+
+...and PineTree adds no administrator hold and the rollout flag is not
+disabled. A merchant can neither activate early nor deactivate.
 
 ---
 
@@ -154,9 +170,13 @@ A merchant may enable Bridge only once **all three** hold:
 
 - [ ] `BRIDGE_ENVIRONMENT` set explicitly in every deployment target
 - [ ] `BRIDGE_API_KEY` set (production key ≠ sandbox key)
-- [ ] `BRIDGE_KYC_REDIRECT_URL` points at the deployed providers page over https
+- [ ] `BRIDGE_KYC_REDIRECT_URL` points at the PineTree wallet return route over https
+      (`/dashboard/wallet-setup?verification=returned`) — never at the Providers page
 - [ ] Migration `20260805120000_create_bridge_provider_connections.sql` applied
+- [ ] Migration `20260806120000_create_service_terms_acceptances.sql` applied
 - [ ] Bridge Dashboard webhook endpoint created for this environment
 - [ ] `BRIDGE_WEBHOOK_PUBLIC_KEY` copied from **that** endpoint
+- [ ] `BRIDGE_CAPABILITY_ROLLOUT_ENABLED` set only if holding activation back
 - [ ] Bridge developer account approved for production
+- [ ] Confirmed no Bridge card appears on the merchant Providers page
 - [ ] Sandbox merchant onboarded end to end (see the manual test checklist)

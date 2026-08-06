@@ -13,6 +13,7 @@ import Link from "next/link"
 import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { PrimaryActionButton } from "@/components/ui/PrimaryActionButton"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
+import ServiceTermsConsentCard from "@/components/dashboard/ServiceTermsConsentCard"
 import {
   BUSINESS_PROFILE_COUNTRIES,
   US_STATES
@@ -701,19 +702,28 @@ export default function SettingsPage() {
       ) : null}
 
       <DashboardSection title="Business Profile" titleTone="blue">
-        <div id="business-profile" className="rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-3.5">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-gray-950">Business Profile</p>
-              <ProviderStatusPill label={profileStatusLabel(profileStatus)} tone={profileStatusTone(profileStatus)} className="shrink-0" />
+        <div className="space-y-3">
+          <div id="business-profile" className="rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-3.5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-gray-950">Business Profile</p>
+                <ProviderStatusPill label={profileStatusLabel(profileStatus)} tone={profileStatusTone(profileStatus)} className="shrink-0" />
+              </div>
+              <p className="text-sm leading-5 text-gray-600">
+                Business and owner details required for payment activation.
+              </p>
+              <PrimaryActionButton onClick={() => setBusinessProfileOpen(true)}>
+                {profileActionLabel(profileStatus)}
+              </PrimaryActionButton>
             </div>
-            <p className="text-sm leading-5 text-gray-600">
-              Business and owner details required for payment activation.
-            </p>
-            <PrimaryActionButton onClick={() => setBusinessProfileOpen(true)}>
-              {profileActionLabel(profileStatus)}
-            </PrimaryActionButton>
           </div>
+
+          {/*
+            Final step of PineTree onboarding: review and consent. It renders
+            only while the profile is complete and consent is still
+            outstanding, then disappears - it is a step, not a setting.
+          */}
+          <ServiceTermsConsentCard key={profileStatus} />
         </div>
       </DashboardSection>
 

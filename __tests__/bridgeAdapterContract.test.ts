@@ -133,25 +133,28 @@ describe("Bridge source boundaries", () => {
       expect(source).not.toMatch(/process\.env\.NEXT_PUBLIC_/)
       expect(source).not.toMatch(/process\.env\[\s*["'`]NEXT_PUBLIC_/)
     }
-    // The client component reaches Bridge only through PineTree API routes.
-    const card = read("components/dashboard/BridgeProviderCard.tsx")
-    expect(card).not.toContain("api.bridge.xyz")
-    expect(card).not.toContain("BRIDGE_API_KEY")
-    expect(card).toContain("/api/providers/bridge/")
+    // The merchant-facing verification surface reaches PineTree only.
+    const panel = read("components/dashboard/BusinessVerificationPanel.tsx")
+    expect(panel).not.toContain("api.bridge.xyz")
+    expect(panel).not.toContain("BRIDGE_API_KEY")
+    expect(panel).toContain("/api/onboarding/business-verification")
   })
 
-  it("presents only PineTree status vocabulary in the Bridge card", () => {
-    const card = read("components/dashboard/BridgeProviderCard.tsx")
-    // Labels come from the Engine-supplied stateLabel, never hardcoded here.
-    expect(card).toContain("connection?.stateLabel")
-    expect(card).not.toMatch(/["']Available["']/)
-    // No approval-timing promise.
-    expect(card).not.toMatch(/instant approval|approved instantly|guaranteed/i)
+  it("presents only PineTree status vocabulary on the merchant surface", () => {
+    const panel = read("components/dashboard/BusinessVerificationPanel.tsx")
+    // Labels come from the Engine-supplied statusLabel, never hardcoded here.
+    expect(panel).toContain("verification?.statusLabel")
+    expect(panel).not.toMatch(/["']Available["']/)
+    // No approval-timing promise, and no claim that PineTree approves.
+    expect(panel).not.toMatch(/instant approval|approved instantly|guaranteed/i)
   })
 
-  it("renders the Bridge card on the providers page", () => {
+  it("does not render Bridge as a provider merchants connect", () => {
+    // Bridge is infrastructure. The Providers page is reserved for providers a
+    // merchant consciously connects and manages.
     const page = read("app/dashboard/providers/page.tsx")
-    expect(page).toContain("BridgeProviderCard")
+    expect(page).not.toContain("BridgeProviderCard")
+    expect(page.toLowerCase()).not.toContain("bridge by stripe")
   })
 
   it("ships the forward-only Bridge migration", () => {

@@ -1,0 +1,298 @@
+{
+  "version": 1,
+  "description": "Routes a PineTree task to the governance documents that must be read before planning or editing. Data only.",
+  "enforcement": "This file loads nothing by itself. Enforcement is scripts/ai-preflight.mjs (which resolves this map) plus AGENTS.md (which requires agents to run it and read the result). Treat this file as a lookup table, not a runtime.",
+  "globalRequired": [
+    "AGENTS.md",
+    "docs/INDEX.md",
+    "docs/standards/README.md",
+    "docs/standards/01-platform-architecture.md"
+  ],
+  "workflows": {
+    "implement": ".ai/workflows/implement.md",
+    "debug": ".ai/workflows/debug.md",
+    "review": ".ai/workflows/review.md",
+    "refactor": ".ai/workflows/refactor.md"
+  },
+  "workflowKeywords": {
+    "debug": ["debug", "investigate", "root cause", "stuck", "broken", "regression", "reproduce", "traceback", "failing", "diagnose", "why is"],
+    "review": ["review", "audit", "assess", "evaluate", "inspect for", "check compliance", "verify against"],
+    "refactor": ["refactor", "clean up", "cleanup", "simplify", "deduplicate", "consolidate", "extract", "rename", "restructure"],
+    "implement": ["implement", "add", "create", "build", "wire", "support", "introduce", "new", "enable", "extend", "integrate"]
+  },
+  "defaultWorkflow": "implement",
+  "paths": [
+    {
+      "glob": "app/**",
+      "domains": ["lifecycle"],
+      "documents": ["docs/standards/02-lifecycle-and-merchant-status.md", "docs/architecture.md"],
+      "note": "Interface layer. Presentation only; never decides finality."
+    },
+    {
+      "glob": "components/**",
+      "domains": ["lifecycle"],
+      "documents": ["docs/standards/02-lifecycle-and-merchant-status.md"],
+      "note": "Interface layer. Merchant status labels come from the shared presentation contract."
+    },
+    {
+      "glob": "app/api/**",
+      "domains": ["api-sdk"],
+      "documents": ["docs/standards/01-platform-architecture.md", "docs/security/route-auth-matrix.md"],
+      "optional": ["docs/api/openapi.yaml", "docs/api/idempotency.md"],
+      "note": "Thin wrappers: auth, validation, envelope, idempotency entry. No business logic."
+    },
+    {
+      "glob": "app/checkout/**",
+      "domains": ["checkout", "lifecycle"],
+      "documents": ["docs/standards/02-lifecycle-and-merchant-status.md", "docs/api/checkout-sessions.md"],
+      "note": "Hosted checkout. Wallet return is not confirmation."
+    },
+    {
+      "glob": "app/(pos)/**",
+      "domains": ["pos", "lifecycle"],
+      "documents": ["docs/standards/02-lifecycle-and-merchant-status.md"],
+      "note": "POS terminal surface."
+    },
+    {
+      "glob": "engine/**",
+      "domains": ["payments", "lifecycle", "ledger"],
+      "documents": [
+        "docs/standards/01-platform-architecture.md",
+        "docs/standards/02-lifecycle-and-merchant-status.md",
+        "docs/standards/03-financial-ledger-money-reconciliation.md",
+        "docs/architecture.md"
+      ],
+      "note": "Canonical authority. Only the Engine transitions state and posts fees."
+    },
+    {
+      "glob": "providers/**",
+      "domains": ["providers"],
+      "documents": ["docs/standards/05-provider-connectors-events.md", "docs/api/provider-integration.md"],
+      "note": "Adapters translate only. No DB writes, no merchant labels, no SDK leakage."
+    },
+    {
+      "glob": "database/**",
+      "domains": ["database-security", "ledger"],
+      "documents": [
+        "docs/standards/03-financial-ledger-money-reconciliation.md",
+        "docs/standards/04-database-identity-security.md"
+      ],
+      "optional": ["docs/architecture/adr-0001-ledger-journal-entries.md"],
+      "note": "Tenancy, RLS, append-only accounting, integer money."
+    },
+    {
+      "glob": "database/migrations/**",
+      "domains": ["database-security"],
+      "documents": ["docs/standards/04-database-identity-security.md"],
+      "optional": ["docs/architecture/adr-0001-ledger-journal-entries.md"],
+      "note": "Do not author or execute migrations unless the task explicitly asks."
+    },
+    {
+      "glob": "lib/webhooks/**",
+      "domains": ["webhooks"],
+      "documents": ["docs/standards/05-provider-connectors-events.md", "docs/api/webhook-events.md"],
+      "optional": ["docs/api/webhook-deliveries.md"],
+      "note": "Verify signature against raw bytes before parsing. Exactly-once effect."
+    },
+    {
+      "glob": "lib/wallets/**",
+      "domains": ["wallet"],
+      "documents": ["docs/standards/01-platform-architecture.md", "docs/domains/solana-wallet-routing.md"],
+      "note": "Per-wallet strategy registry lives here. Read the domain doc before changing routing."
+    },
+    {
+      "glob": "docs/api/**",
+      "domains": ["api-sdk"],
+      "documents": ["docs/api/openapi.yaml"],
+      "optional": ["docs/api/authentication.md", "docs/api/errors.md"],
+      "note": "Several of these docs are pinned by __tests__/apiDocsReference.test.ts. Editing prose can break tests."
+    },
+    {
+      "glob": "packages/**",
+      "domains": ["api-sdk"],
+      "documents": ["docs/api/sdks.md"],
+      "optional": ["docs/api/node-sdk.md", "docs/api/browser-sdk.md", "docs/api/react-sdk.md"],
+      "note": "Published SDK workspaces. CI runs build + release-candidate."
+    },
+    {
+      "glob": "plugins/**",
+      "domains": ["woocommerce"],
+      "documents": ["docs/standards/05-provider-connectors-events.md"],
+      "optional": ["docs/environment/woocommerce-test-checklist.md"]
+    },
+    {
+      "glob": "integrations/**",
+      "domains": ["shopify"],
+      "documents": ["docs/standards/05-provider-connectors-events.md"],
+      "optional": ["docs/environment/shopify-env-checklist.md"]
+    },
+    {
+      "glob": "lib/pos/**",
+      "domains": ["pos"],
+      "documents": ["docs/standards/02-lifecycle-and-merchant-status.md"]
+    },
+    {
+      "glob": "__tests__/**",
+      "domains": [],
+      "documents": ["docs/standards/06-roadmap-documentation-governance.md"],
+      "note": "Definition of done, incl. that affected tests and docs change in the same commit."
+    }
+  ],
+  "domains": {
+    "payments": {
+      "label": "Payments",
+      "keywords": ["payment", "payments", "pay", "sale", "charge", "intent", "fee", "platform fee"],
+      "documents": [
+        "docs/standards/02-lifecycle-and-merchant-status.md",
+        "docs/standards/03-financial-ledger-money-reconciliation.md",
+        "docs/architecture.md"
+      ]
+    },
+    "lifecycle": {
+      "label": "Lifecycle and merchant status",
+      "keywords": ["lifecycle", "status", "state machine", "transition", "confirmed", "pending", "processing", "incomplete", "expired", "canceled", "cancelled", "failed"],
+      "documents": ["docs/standards/02-lifecycle-and-merchant-status.md", "docs/api/payment-states.md"]
+    },
+    "ledger": {
+      "label": "Ledger, money, reconciliation",
+      "keywords": ["ledger", "accounting", "journal", "posting", "double entry", "reconcile", "reconciliation", "balance", "settlement", "money", "minor units", "denomination"],
+      "documents": ["docs/standards/03-financial-ledger-money-reconciliation.md"],
+      "optional": ["docs/architecture/adr-0001-ledger-journal-entries.md"]
+    },
+    "database-security": {
+      "label": "Database, identity, security",
+      "keywords": ["database", "schema", "migration", "rls", "row level security", "tenancy", "merchant_id", "auth", "authorization", "api key", "secret", "audit", "index", "supabase"],
+      "documents": ["docs/standards/04-database-identity-security.md"],
+      "optional": ["docs/security/route-auth-matrix.md"]
+    },
+    "providers": {
+      "label": "Provider connectors",
+      "keywords": ["provider", "adapter", "connector", "rail", "maturity"],
+      "documents": ["docs/standards/05-provider-connectors-events.md", "docs/api/provider-integration.md"]
+    },
+    "webhooks": {
+      "label": "Webhooks and event processing",
+      "keywords": ["webhook", "webhooks", "event", "events", "signature", "idempotency", "idempotent", "inbox", "outbox", "replay"],
+      "documents": ["docs/standards/05-provider-connectors-events.md", "docs/api/webhook-events.md"],
+      "optional": ["docs/api/webhooks.md", "docs/api/webhook-deliveries.md"]
+    },
+    "wallet": {
+      "label": "Merchant wallet",
+      "keywords": ["wallet", "wallets", "pinetree wallet", "balance snapshot", "address book", "destination"],
+      "documents": ["docs/standards/01-platform-architecture.md", "docs/standards/03-financial-ledger-money-reconciliation.md"],
+      "optional": ["docs/environment/lightning-sweep-env-checklist.md"]
+    },
+    "withdrawals": {
+      "label": "Withdrawals",
+      "keywords": ["withdrawal", "withdrawals", "withdraw", "payout", "payouts", "instant send", "sweep"],
+      "documents": [
+        "docs/standards/02-lifecycle-and-merchant-status.md",
+        "docs/standards/03-financial-ledger-money-reconciliation.md"
+      ]
+    },
+    "checkout": {
+      "label": "Hosted checkout",
+      "keywords": ["checkout", "hosted checkout", "checkout session", "payment link", "payment links"],
+      "documents": ["docs/standards/02-lifecycle-and-merchant-status.md", "docs/api/checkout-sessions.md"]
+    },
+    "pos": {
+      "label": "POS terminal",
+      "keywords": ["pos", "terminal", "reader", "cashier", "till", "point of sale"],
+      "documents": ["docs/standards/01-platform-architecture.md", "docs/standards/02-lifecycle-and-merchant-status.md"],
+      "optional": ["docs/stripe-terminal-phase-2.md"]
+    },
+    "stripe": {
+      "label": "Stripe",
+      "keywords": ["stripe", "stripe connect", "stripe terminal", "account session"],
+      "documents": ["docs/standards/05-provider-connectors-events.md"],
+      "optional": ["docs/stripe-terminal-phase-2.md"]
+    },
+    "stripe-bridge": {
+      "label": "Stripe Bridge",
+      "keywords": ["bridge", "stripe bridge", "bridge by stripe"],
+      "documents": ["docs/standards/05-provider-connectors-events.md"],
+      "optional": ["docs/environment/bridge-env-checklist.md"]
+    },
+    "shift4": {
+      "label": "Shift4",
+      "keywords": ["shift4", "commerce engine", "i4go", "utg"],
+      "documents": ["docs/standards/05-provider-connectors-events.md", "docs/architecture/shift4-integration-architecture.md"],
+      "optional": ["docs/architecture/shift4-route-matrix.md", "docs/environment/shift4-rest-env-checklist.md"]
+    },
+    "fluidpay": {
+      "label": "FluidPay",
+      "keywords": ["fluidpay", "fluid pay"],
+      "documents": ["docs/standards/05-provider-connectors-events.md"],
+      "optional": ["docs/providers/fluidpay-provider-contract-checklist.md"]
+    },
+    "lightning-speed": {
+      "label": "Speed / Bitcoin Lightning",
+      "keywords": ["lightning", "speed", "tryspeed", "bolt11", "sats", "bitcoin", "btc", "nwc", "invoice"],
+      "documents": ["docs/standards/05-provider-connectors-events.md"],
+      "optional": ["docs/environment/lightning-sweep-env-checklist.md", "docs/environment/bitcoin-fee-settlement.md"]
+    },
+    "base": {
+      "label": "Base (ETH / USDC)",
+      "keywords": ["base", "base pay", "usdc", "eth", "erc-20", "erc20", "walletconnect", "eip-3009", "split contract"],
+      "documents": ["docs/standards/05-provider-connectors-events.md", "docs/standards/02-lifecycle-and-merchant-status.md"],
+      "note": "An approval hash is never the payment hash."
+    },
+    "solana": {
+      "label": "Solana (SOL / USDC)",
+      "keywords": ["solana", "sol", "phantom", "solflare", "solana pay", "spl"],
+      "documents": ["docs/standards/05-provider-connectors-events.md", "docs/domains/solana-wallet-routing.md"]
+    },
+    "api-sdk": {
+      "label": "Public API and SDKs",
+      "keywords": ["api", "rest", "sdk", "openapi", "endpoint", "public api", "npm package", "api v1"],
+      "documents": ["docs/api/openapi.yaml"],
+      "optional": ["docs/api/authentication.md", "docs/api/idempotency.md", "docs/api/errors.md", "docs/api/sdks.md"]
+    },
+    "reporting": {
+      "label": "Reporting",
+      "keywords": ["report", "reporting", "reports", "export", "csv", "pdf", "totals", "analytics", "receipt", "receipts"],
+      "documents": ["docs/standards/03-financial-ledger-money-reconciliation.md"],
+      "optional": ["docs/api/transactions.md", "docs/api/receipts.md"]
+    },
+    "admin-support": {
+      "label": "Admin and support",
+      "keywords": ["admin", "support", "ticket", "diagnostics", "impersonate", "privileged", "back office"],
+      "documents": ["docs/standards/04-database-identity-security.md", "docs/security/route-auth-matrix.md"]
+    },
+    "shopify": {
+      "label": "Shopify",
+      "keywords": ["shopify"],
+      "documents": ["docs/standards/05-provider-connectors-events.md"],
+      "optional": ["docs/environment/shopify-env-checklist.md"]
+    },
+    "woocommerce": {
+      "label": "WooCommerce",
+      "keywords": ["woocommerce", "woo", "wordpress"],
+      "documents": ["docs/standards/05-provider-connectors-events.md"],
+      "optional": ["docs/environment/woocommerce-test-checklist.md"]
+    }
+  },
+  "exclusions": {
+    "reason": "Never routed as current authority. Retained in the repository for history; see docs/INDEX.md for each document's classification.",
+    "never": [
+      "docs/skills/api.md",
+      "docs/skills/database.md",
+      "docs/skills/engine.md",
+      "docs/skills/providers.md",
+      "docs/skills/watcher.md",
+      "docs/skills/webhook.md",
+      "docs/skills/solana-pay.md",
+      "docs/skills/solana-wallet-signing.md",
+      "docs/api/node-sdk-contract.md",
+      "docs/api/provider-integrations.md",
+      "docs/architecture/shift4-phase-2-implementation-report.md",
+      "docs/architecture/shift4-retail-prehardware-readiness.md",
+      "docs/architecture/canonical-transaction-read-audit.md"
+    ],
+    "neverGlobs": [
+      "docs/skills/**",
+      "docs/archive/**",
+      "artifacts/**"
+    ]
+  }
+}

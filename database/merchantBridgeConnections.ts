@@ -45,8 +45,24 @@ export type BridgeCredentials = {
   bridge_action_required?: { headline: string; detail: string } | null
   connection_status?: string
   onboarding_requested_at?: string
-  /** When the merchant last explicitly chose to enable or disable Bridge. */
-  enablement_decision_at?: string
+  /**
+   * When PineTree AUTOMATICALLY activated the Bridge-backed wallet capability
+   * after approval. There is no merchant-facing enable/disable decision:
+   * activation is a consequence of approval plus rollout eligibility.
+   */
+  auto_activated_at?: string
+  /**
+   * Set by a PineTree administrator to hold activation back during a
+   * controlled rollout. Admin-only and audited; never merchant-settable.
+   */
+  admin_activation_blocked_at?: string
+  /**
+   * Evidence of the consent that authorized creating this Bridge customer.
+   * Recorded on the connection so an auditor can see which terms version
+   * permitted the submission without joining another table.
+   */
+  consent_terms_version?: string
+  consent_accepted_at?: string
   last_synced_at?: string
   provider_created_at?: string
   provider_updated_at?: string
@@ -86,7 +102,10 @@ const ALLOWED_CREDENTIAL_KEYS: readonly (keyof BridgeCredentials)[] = [
   "bridge_action_required",
   "connection_status",
   "onboarding_requested_at",
-  "enablement_decision_at",
+  "auto_activated_at",
+  "admin_activation_blocked_at",
+  "consent_terms_version",
+  "consent_accepted_at",
   "last_synced_at",
   "provider_created_at",
   "provider_updated_at",

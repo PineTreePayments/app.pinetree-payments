@@ -379,13 +379,50 @@ describe("Bridge webhook Engine ingestion", () => {
 
     expect(result).toMatchObject({ ok: true, applied: true })
     expect(mocks.upsertMerchantBridgeConnection).toHaveBeenCalledTimes(1)
-    expect(mocks.insertMerchantAuditEvent).toHaveBeenCalledTimes(1)
+
+    const auditedTypes = mocks.insertMerchantAuditEvent.mock.calls.map(
+      (call) => (call[0] as { eventType: string }).eventType
+    )
+
+    // The state change is audited exactly once...
+    expect(auditedTypes.filter((type) => type === "provider.bridge_webhook_applied")).toHaveLength(1)
+    // ...and because this fixture is approved, automatic capability activation
+    // is audited exactly once alongside it. There is no merchant enable action
+    // to record.
+    expect(
+      auditedTypes.filter((type) => type === "provider.bridge_capability_auto_activated")
+    ).toHaveLength(1)
+
     expect(mocks.insertMerchantAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         merchantId: "merchant_alpha",
         eventType: "provider.bridge_webhook_applied",
       })
     )
+  })
+
+  it("does not re-audit activation for an already-activated merchant", async () => {
+    mocks.findMerchantByBridgeIdentifiers.mockResolvedValue(
+      ownerRow({
+        enabled: true,
+        credentials: {
+          bridge_customer_id: FAKE_CUSTOMER_ID,
+          bridge_kyc_link_id: FAKE_KYC_LINK_ID,
+          auto_activated_at: "2026-08-01T00:00:00.000Z",
+        },
+      })
+    )
+
+    await ingestBridgeWebhookEventEngine({
+      rawBody,
+      headers: asHeaders(signBridgeBody(rawBody, NOW_MS)),
+      nowMs: NOW_MS,
+    })
+
+    const auditedTypes = mocks.insertMerchantAuditEvent.mock.calls.map(
+      (call) => (call[0] as { eventType: string }).eventType
+    )
+    expect(auditedTypes).not.toContain("provider.bridge_capability_auto_activated")
   })
 
   it("re-reads Bridge state instead of trusting the event payload", async () => {

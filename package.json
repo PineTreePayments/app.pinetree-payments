@@ -12,6 +12,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "ai:preflight": "node scripts/ai-preflight.mjs",
+    "ai:governance:check": "node scripts/ai-governance-check.mjs",
     "check:env": "node scripts/check-environment.mjs",
     "check:env:strict": "node scripts/check-environment.mjs --strict",
     "check:env:production": "node scripts/check-environment.mjs --strict --process-only",

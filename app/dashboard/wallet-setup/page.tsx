@@ -43,6 +43,7 @@ import {
 } from "@/components/dashboard/DashboardPrimitives"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
+import BusinessVerificationPanel from "@/components/dashboard/BusinessVerificationPanel"
 import { presentWithdrawalError as presentWithdrawalErrorClient } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import type { WalletApiErrorCode } from "@/engine/wallet/walletErrors"
 import AddressBookTab from "@/components/dashboard/AddressBookTab"
@@ -11011,6 +11012,16 @@ function PineTreeWalletRuntime() {
           />
         </div>
       ) : null}
+
+      {/*
+        PineTree business verification and wallet readiness. Compact and
+        PineTree-branded: it never names or exposes the underlying regulated
+        infrastructure, and it sits above the wallet card without obscuring
+        balances, wallet actions, withdrawals, or mobile authorization.
+      */}
+      <div className="mb-3">
+        <BusinessVerificationPanel />
+      </div>
       {showWalletSetupCard ? (
       <article className="max-w-2xl min-h-[15rem] flex flex-col rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:min-h-[16rem] sm:p-7">
         <h2 className="min-w-0 text-base font-semibold text-gray-950">PineTree Wallet</h2>

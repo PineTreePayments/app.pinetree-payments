@@ -55,13 +55,27 @@ export type SupportAuditEventType =
 export type BridgeProviderAuditEventType =
   | "provider.bridge_onboarding_started"
   | "provider.bridge_status_synced"
+  | "provider.bridge_webhook_applied"
+  // Activation is automatic after Bridge approval; it is audited once, when it
+  // first happens. There is no merchant enable/disable action to record.
+  | "provider.bridge_capability_auto_activated"
+  // Administrator-only rollout hold. Never merchant-triggered.
+  | "provider.bridge_admin_hold_applied"
+  | "provider.bridge_admin_hold_released"
+  // Legacy values retained so historical rows written by the removed
+  // merchant-facing enable/disable controls remain readable. Never emitted.
   | "provider.bridge_enabled"
   | "provider.bridge_disabled"
-  | "provider.bridge_webhook_applied"
+
+/** PineTree-branded merchant onboarding and verification consent. */
+export type BusinessVerificationAuditEventType =
+  | "onboarding.service_terms_accepted"
+  | "onboarding.business_verification_submitted"
 
 export type MerchantAuditEventType =
   | "webhook.secret_regenerated"
   | BridgeProviderAuditEventType
+  | BusinessVerificationAuditEventType
   | SupportAuditEventType
   | "lightning.speed_credential_revealed"
   | "lightning.sweep_retried"

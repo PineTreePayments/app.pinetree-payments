@@ -157,6 +157,15 @@ Connect: separate credentials, customer identifiers, capabilities, KYB state,
 webhooks, and operational behavior. A merchant approved by Stripe Connect is not
 approved by Bridge.
 
+> **Bridge is internal infrastructure, not a merchant-facing provider.**
+> Merchants never connect, enable, disable, or manage Bridge. It does not appear
+> on the Providers page, which is reserved for providers a merchant consciously
+> connects and manages. Merchants complete one PineTree onboarding; PineTree
+> submits the permitted information automatically and presents the result as
+> **PineTree business verification** on the Wallet page. Bridge is named only in
+> the required consent disclosure and in administrator diagnostics. See
+> [`docs/onboarding/business-verification.md`](../onboarding/business-verification.md).
+
 ---
 
 ## Event normalization

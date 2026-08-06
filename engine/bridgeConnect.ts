@@ -115,13 +115,21 @@ function stateFromRow(row: MerchantBridgeConnectionRow | null): BridgeConnection
   const credentials = row?.credentials || {}
   const connection = connectionFromCredentials(credentials)
 
+  // Activation is re-derived rather than read from the row, so a stale
+  // `enabled` flag can never present a capability as live after approval was
+  // withdrawn or an administrator hold was applied.
+  const activation = resolveBridgeActivation({
+    approved: isBridgeApproved(connection),
+    credentials,
+  })
+
   return buildBridgeConnectionState({
     configured: isBridgeConfigured(),
     environment: currentEnvironment(),
     onboardingRequested: Boolean(credentials.onboarding_requested_at),
     connection,
-    enabled: row?.enabled === true,
-    enablementDecisionMade: Boolean(credentials.enablement_decision_at),
+    enabled: activation.active && row?.enabled === true,
+    enablementDecisionMade: activation.decided,
     lastSyncedAt: credentials.last_synced_at || null,
   })
 }
@@ -173,25 +181,91 @@ function connectionFromCredentials(credentials: BridgeCredentials): NormalizedBr
 }
 
 /** Persist a normalized connection and return the resulting safe state. */
+/**
+ * PineTree rollout control for the Bridge-backed wallet capability.
+ *
+ * Set to exactly "false" to hold activation back across the whole deployment
+ * during a controlled rollout. Absent or any other value leaves activation
+ * enabled, so a normal deployment needs no flag.
+ */
+export function isBridgeCapabilityRolloutEnabled(): boolean {
+  return String(process.env.BRIDGE_CAPABILITY_ROLLOUT_ENABLED || "").trim().toLowerCase() !== "false"
+}
+
+export type BridgeActivationDecision = {
+  /** True when the Bridge-backed wallet capability is live for this merchant. */
+  active: boolean
+  /** True when PineTree has made an activation decision at all. */
+  decided: boolean
+  /** Set the first time activation happens; never cleared once set. */
+  autoActivatedAt: string | undefined
+  /** Why activation has not happened, for diagnostics only. */
+  blockedReason: "not_approved" | "administrator_hold" | "rollout_disabled" | null
+}
+
+/**
+ * Decide whether the Bridge-backed capability is active.
+ *
+ * There is NO merchant input here. Activation is a pure consequence of:
+ * Bridge approval + no administrator hold + rollout eligibility. A merchant
+ * can neither turn it on early nor turn it off, which is what keeps approval
+ * authority with Bridge rather than with the browser.
+ */
+export function resolveBridgeActivation(input: {
+  approved: boolean
+  credentials: BridgeCredentials
+  now?: string
+}): BridgeActivationDecision {
+  const adminBlocked = Boolean(input.credentials.admin_activation_blocked_at)
+  const rolloutEnabled = isBridgeCapabilityRolloutEnabled()
+  const previouslyActivatedAt = input.credentials.auto_activated_at
+
+  if (!input.approved) {
+    return { active: false, decided: false, autoActivatedAt: previouslyActivatedAt, blockedReason: "not_approved" }
+  }
+  if (adminBlocked) {
+    return { active: false, decided: true, autoActivatedAt: previouslyActivatedAt, blockedReason: "administrator_hold" }
+  }
+  if (!rolloutEnabled) {
+    return { active: false, decided: true, autoActivatedAt: previouslyActivatedAt, blockedReason: "rollout_disabled" }
+  }
+
+  return {
+    active: true,
+    decided: true,
+    // The first activation timestamp is retained so an auditor can see when
+    // the capability went live, even across later re-syncs.
+    autoActivatedAt: previouslyActivatedAt || input.now || new Date().toISOString(),
+    blockedReason: null,
+  }
+}
+
 async function persistConnection(input: {
   merchantId: string
   existing: BridgeCredentials
   connection: NormalizedBridgeConnection
-  enabled: boolean
-  enablementDecisionMade: boolean
   onboardingRequestedAt?: string
   extraCredentials?: Partial<BridgeCredentials>
-}): Promise<BridgeConnectionState> {
+}): Promise<{ state: BridgeConnectionState; activation: BridgeActivationDecision }> {
   const syncedAt = new Date().toISOString()
   const approved = isBridgeApproved(input.connection)
   const onboardingRequestedAt = input.onboardingRequestedAt || input.existing.onboarding_requested_at
+
+  // Merge any caller-supplied credential patch BEFORE deciding activation, so
+  // an administrator hold applied in the same call takes effect immediately.
+  const pendingCredentials: BridgeCredentials = { ...input.existing, ...(input.extraCredentials || {}) }
+  const activation = resolveBridgeActivation({
+    approved,
+    credentials: pendingCredentials,
+    now: syncedAt,
+  })
 
   const state = resolveBridgeProviderState({
     configured: isBridgeConfigured(),
     onboardingRequested: Boolean(onboardingRequestedAt),
     connection: input.connection,
-    enabled: input.enabled,
-    enablementDecisionMade: input.enablementDecisionMade,
+    enabled: activation.active,
+    enablementDecisionMade: activation.decided,
   })
 
   const credentials = sanitizeBridgeCredentials({
@@ -205,9 +279,10 @@ async function persistConnection(input: {
     }),
     ...(onboardingRequestedAt ? { onboarding_requested_at: onboardingRequestedAt } : {}),
     ...(input.extraCredentials || {}),
+    ...(activation.autoActivatedAt ? { auto_activated_at: activation.autoActivatedAt } : {}),
   })
 
-  const row = rowStateForProviderState(state, approved, input.enabled)
+  const row = rowStateForProviderState(state, approved, activation.active)
   await upsertMerchantBridgeConnection({
     merchantId: input.merchantId,
     status: row.status,
@@ -215,15 +290,18 @@ async function persistConnection(input: {
     credentials,
   })
 
-  return buildBridgeConnectionState({
-    configured: isBridgeConfigured(),
-    environment: currentEnvironment(),
-    onboardingRequested: Boolean(onboardingRequestedAt),
-    connection: input.connection,
-    enabled: row.enabled,
-    enablementDecisionMade: input.enablementDecisionMade,
-    lastSyncedAt: syncedAt,
-  })
+  return {
+    state: buildBridgeConnectionState({
+      configured: isBridgeConfigured(),
+      environment: currentEnvironment(),
+      onboardingRequested: Boolean(onboardingRequestedAt),
+      connection: input.connection,
+      enabled: row.enabled,
+      enablementDecisionMade: activation.decided,
+      lastSyncedAt: syncedAt,
+    }),
+    activation,
+  }
 }
 
 // ─── Read ────────────────────────────────────────────────────────────────────
@@ -263,25 +341,40 @@ export type StartBridgeOnboardingResult = {
 }
 
 /**
- * Start (or resume) Bridge onboarding for a merchant.
+ * Ensure the merchant has Bridge onboarding, creating it only when every
+ * precondition holds. This is INTERNAL Engine plumbing: it is driven by
+ * `engine/businessVerification.ts` as part of one unified PineTree onboarding,
+ * never by a merchant-facing "Connect Bridge" action.
  *
- * Preconditions enforced here rather than in the route:
+ * Preconditions enforced here rather than by the caller, so no future call
+ * site can bypass them:
  *   - Bridge must be configured for this deployment.
+ *   - CONSENT: the merchant must have accepted the terms version that
+ *     disclosed Bridge. Without that evidence no customer is created.
  *   - The merchant must have a legal business name and an owner email; Bridge
  *     requires both and PineTree will not invent either.
- *
- * A Bridge customer is created ONLY on this path - that is, only when the
- * merchant has actively selected Bridge-backed settlement. Merchants who have
- * not asked for Bridge never get a Bridge customer.
  */
-export async function startBridgeOnboardingEngine(args: {
+export async function ensureBridgeOnboardingEngine(args: {
   merchantId: string
+  /** Terms version whose acceptance authorizes this submission. Required. */
+  consentTermsVersion: string
+  consentAcceptedAt: string
   actorId?: string | null
 }): Promise<StartBridgeOnboardingResult | BridgeEngineFailure> {
   const correlationId = randomUUID()
 
   if (!isBridgeConfigured()) {
     return failure("Bridge is not available yet.", correlationId)
+  }
+
+  // Consent is a hard gate on customer creation, not a UI nicety. An empty
+  // version means no verified acceptance reached this call.
+  if (!String(args.consentTermsVersion || "").trim()) {
+    console.warn("[bridge] onboarding_blocked_without_consent", {
+      correlationId,
+      merchantId: args.merchantId,
+    })
+    return failure("Accept the PineTree service terms before verification can begin.", correlationId)
   }
 
   let row: MerchantBridgeConnectionRow | null
@@ -305,12 +398,10 @@ export async function startBridgeOnboardingEngine(args: {
         context: { correlationId, merchantId: args.merchantId },
       })
 
-      const state = await persistConnection({
+      const { state } = await persistConnection({
         merchantId: args.merchantId,
         existing,
         connection,
-        enabled: row?.enabled === true,
-        enablementDecisionMade: Boolean(existing.enablement_decision_at),
         onboardingRequestedAt: existing.onboarding_requested_at || now,
       })
 
@@ -367,7 +458,7 @@ export async function startBridgeOnboardingEngine(args: {
 
   if (!legalBusinessName || !ownerEmail) {
     return failure(
-      "Add your legal business name and account owner email in Business Profile before starting Bridge onboarding.",
+      "Add your legal business name and account owner email to your PineTree business profile to continue verification.",
       correlationId
     )
   }
@@ -380,13 +471,18 @@ export async function startBridgeOnboardingEngine(args: {
       context: { correlationId, merchantId: args.merchantId },
     })
 
-    const state = await persistConnection({
+    const { state } = await persistConnection({
       merchantId: args.merchantId,
       existing,
       connection: result.connection,
-      enabled: false,
-      enablementDecisionMade: false,
       onboardingRequestedAt: now,
+      // The consent that authorized this submission is recorded on the
+      // connection itself, so the authorization is auditable alongside the
+      // customer it created.
+      extraCredentials: {
+        consent_terms_version: args.consentTermsVersion,
+        consent_accepted_at: args.consentAcceptedAt,
+      },
     })
 
     await insertMerchantAuditEvent({
@@ -398,6 +494,7 @@ export async function startBridgeOnboardingEngine(args: {
         provider_model: BRIDGE_PROVIDER_MODEL,
         bridge_kyc_link_id: result.kycLinkId,
         bridge_customer_id: result.customerId,
+        consent_terms_version: args.consentTermsVersion,
         correlation_id: correlationId,
       },
     })
@@ -474,9 +571,10 @@ async function reissueHostedLinks(input: {
 /**
  * Re-read Bridge and synchronize PineTree's stored state.
  *
- * This is the authoritative approval check. It is what the merchant's "Refresh
- * status" action calls, and what a post-redirect page uses instead of trusting
- * the redirect.
+ * This is the authoritative approval check, and the point at which an approved
+ * merchant's capability is AUTOMATICALLY activated. It is what the PineTree
+ * verification refresh calls, and what a post-redirect page uses instead of
+ * trusting the redirect.
  */
 export async function syncBridgeConnectionEngine(args: {
   merchantId: string
@@ -508,12 +606,11 @@ export async function syncBridgeConnectionEngine(args: {
       context: { correlationId, merchantId: args.merchantId },
     })
 
-    const state = await persistConnection({
+    const alreadyActivated = Boolean(existing.auto_activated_at)
+    const { state, activation } = await persistConnection({
       merchantId: args.merchantId,
       existing,
       connection,
-      enabled: row?.enabled === true,
-      enablementDecisionMade: Boolean(existing.enablement_decision_at),
     })
 
     await insertMerchantAuditEvent({
@@ -526,6 +623,20 @@ export async function syncBridgeConnectionEngine(args: {
         correlation_id: correlationId,
       },
     })
+
+    // Capability activation is automatic and audited once, the first time it
+    // happens - there is no merchant action to record.
+    if (activation.active && !alreadyActivated) {
+      await insertMerchantAuditEvent({
+        merchantId: args.merchantId,
+        eventType: "provider.bridge_capability_auto_activated",
+        metadata: {
+          provider: BRIDGE_PROVIDER_NAME,
+          activated_at: activation.autoActivatedAt ?? null,
+          correlation_id: correlationId,
+        },
+      })
+    }
 
     return { ok: true, connection: state }
   } catch (error) {
@@ -543,53 +654,61 @@ export async function syncBridgeConnectionEngine(args: {
 /**
  * Record the merchant's explicit acceptance decision.
  *
- * Enabling is BLOCKED until Bridge has approved KYB, terms, and the required
- * endorsement. The stored state is re-derived from the connection rather than
- * trusted from the request, so a client cannot enable Bridge by asserting it.
+ * There is deliberately NO merchant-facing enable/disable entry point. A
+ * merchant cannot turn the capability on before Bridge approves, and cannot
+ * turn it off afterwards - approval authority stays with Bridge and activation
+ * stays with PineTree Engine.
+ *
+ * This ADMINISTRATOR-ONLY hold exists solely for controlled rollout and
+ * incident response. It is audited and merchant-scoped, and it never appears
+ * as a merchant setup step.
  */
-export async function setBridgeEnabledEngine(args: {
+export async function setBridgeAdministrativeHoldEngine(args: {
   merchantId: string
-  enabled: boolean
-  actorId?: string | null
+  /** True to hold activation back; false to release the hold. */
+  held: boolean
+  /** The acting PineTree administrator. Required for the audit record. */
+  adminId: string
 }): Promise<{ ok: true; connection: BridgeConnectionState } | BridgeEngineFailure> {
   const correlationId = randomUUID()
+
+  if (!String(args.adminId || "").trim()) {
+    return failure("An administrator identity is required.", correlationId)
+  }
 
   let row: MerchantBridgeConnectionRow | null
   try {
     row = await getMerchantBridgeConnection(args.merchantId)
   } catch (error) {
-    console.error("[bridge] enablement_read_failed", { correlationId, ...describeBridgeError(error) })
-    return failure("Unable to update Bridge right now.", correlationId, true)
+    console.error("[bridge] admin_hold_read_failed", { correlationId, ...describeBridgeError(error) })
+    return failure("Unable to update this merchant right now.", correlationId, true)
   }
 
   if (!row) {
-    return failure("Start Bridge onboarding before enabling Bridge.", correlationId)
+    return failure("This merchant has no Bridge connection.", correlationId)
   }
 
   const existing = row.credentials || {}
   const connection = connectionFromCredentials(existing)
 
-  if (args.enabled && !isBridgeApproved(connection)) {
-    return failure(
-      "Bridge has not approved this business yet. Finish onboarding and refresh status before enabling Bridge.",
-      correlationId
-    )
-  }
-
   try {
-    const state = await persistConnection({
+    const { state } = await persistConnection({
       merchantId: args.merchantId,
       existing,
       connection,
-      enabled: args.enabled,
-      enablementDecisionMade: true,
-      extraCredentials: { enablement_decision_at: new Date().toISOString() },
+      extraCredentials: {
+        // Releasing the hold clears the marker so the normal automatic
+        // activation path can run on the next evaluation.
+        admin_activation_blocked_at: args.held ? new Date().toISOString() : undefined,
+      },
     })
 
     await insertMerchantAuditEvent({
       merchantId: args.merchantId,
-      eventType: args.enabled ? "provider.bridge_enabled" : "provider.bridge_disabled",
-      actorId: args.actorId ?? null,
+      eventType: args.held
+        ? "provider.bridge_admin_hold_applied"
+        : "provider.bridge_admin_hold_released",
+      actorId: args.adminId,
       metadata: {
         provider: BRIDGE_PROVIDER_NAME,
         connection_status: state.state,
@@ -599,11 +718,11 @@ export async function setBridgeEnabledEngine(args: {
 
     return { ok: true, connection: state }
   } catch (error) {
-    console.error("[bridge] enablement_write_failed", {
+    console.error("[bridge] admin_hold_write_failed", {
       correlationId,
       ...describeBridgeError(error),
     })
-    return failure("Unable to update Bridge right now.", correlationId, true)
+    return failure("Unable to update this merchant right now.", correlationId, true)
   }
 }
 
@@ -794,12 +913,11 @@ async function applyBridgeEventToConnection(input: {
     return { applied: false, reason: "state_reread_failed" }
   }
 
-  const state = await persistConnection({
+  const alreadyActivated = Boolean(existing.auto_activated_at)
+  const { state, activation } = await persistConnection({
     merchantId: input.owner.merchantId,
     existing,
     connection,
-    enabled: input.owner.enabled === true,
-    enablementDecisionMade: Boolean(existing.enablement_decision_at),
     extraCredentials: {
       ...(input.event.occurredAt ? { last_applied_event_at: input.event.occurredAt } : {}),
       last_applied_event_id: input.event.eventId,
@@ -818,6 +936,21 @@ async function applyBridgeEventToConnection(input: {
       correlation_id: input.correlationId,
     },
   })
+
+  // A verified approval webhook is one of the two authoritative paths that can
+  // activate the capability, so activation is audited here too - once.
+  if (activation.active && !alreadyActivated) {
+    await insertMerchantAuditEvent({
+      merchantId: input.owner.merchantId,
+      eventType: "provider.bridge_capability_auto_activated",
+      metadata: {
+        provider: BRIDGE_PROVIDER_NAME,
+        activated_at: activation.autoActivatedAt ?? null,
+        source: "provider_webhook",
+        correlation_id: input.correlationId,
+      },
+    })
+  }
 
   return { applied: true, reason: "applied" }
 }

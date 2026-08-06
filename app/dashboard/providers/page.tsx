@@ -17,7 +17,6 @@ import {
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
 import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
-import BridgeProviderCard from "@/components/dashboard/BridgeProviderCard"
 import StripeConnectOnboarding from "@/components/dashboard/StripeConnectOnboarding"
 import StripeTerminalSettings from "@/components/dashboard/StripeTerminalSettings"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
@@ -1174,14 +1173,13 @@ export default function ProvidersPage() {
           description="Connect your Coinbase Business account."
         />
 
-        {/* Bridge is a separate provider connection from Stripe: its own
-            credentials, KYB, and approval. It owns its state entirely and
-            reads nothing from the surrounding provider dashboard payload. */}
-        <BridgeProviderCard
-          businessProfileComplete={
-            !businessProfileStatus || businessProfileStatus.profile_status === "complete"
-          }
-        />
+        {/*
+          This page is reserved for providers a merchant consciously connects
+          and manages. Wallet, stablecoin-conversion, and settlement
+          infrastructure is NOT surfaced here: PineTree configures it as part
+          of one unified onboarding, and its readiness is presented as PineTree
+          business verification on the Wallet page.
+        */}
 
         {/* Bitcoin Lightning legacy fallback; canonical wallet mode renders the managed rail above. */}
         {!canonicalWalletMode && (() => {
