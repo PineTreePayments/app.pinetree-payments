@@ -69,7 +69,29 @@ Verifies that an incoming webhook request is authentic. Called by the engine bef
 
 Returns: `boolean` — `true` if the signature is valid.
 
-**Important:** The base class default returns `true` (no verification). In production, all providers must override this method with real HMAC or signature verification.
+**Verification fails closed.** The engine treats anything other than a literal
+`true` as a rejection, and refuses the request outright when an adapter does not
+define `verifyWebhook` at all. `BaseProviderAdapter.verifyWebhook` **throws** by
+default, so an adapter that forgets to override it cannot silently accept
+unsigned webhooks.
+
+Required behavior for a new adapter:
+
+- Verify an HMAC/signature over the **raw request body**, not the parsed object.
+- Reject when the signature, timestamp, or secret is missing. **A missing secret
+  is a misconfiguration, never a reason to trust a webhook.**
+- Never `return true` as a placeholder while an integration is unfinished —
+  return `false` (see `providers/fluidpay/verifyWebhook.ts`).
+- If the provider has **no** webhook contract, `throw` to declare that
+  explicitly and rely on polling or a dedicated verified route (see
+  `providers/lightning/nwcAdapter.ts`, `providers/solana.ts`,
+  `providers/basePay.ts`).
+
+Base and Solana confirmations do **not** use an adapter webhook: they arrive at
+`POST /api/webhooks/base` and `POST /api/webhooks/solana`, which verify the
+Alchemy HMAC against the raw body and then call `processAlchemyWebhook`.
+
+See [`docs/security/webhook-verification-fail-closed.md`](../security/webhook-verification-fail-closed.md).
 
 ---
 

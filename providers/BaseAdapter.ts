@@ -90,13 +90,20 @@ export abstract class BaseProviderAdapter implements ProviderAdapter {
   }
 
   /**
-   * Verify webhook signature authenticity
+   * Verify webhook signature authenticity.
+   *
+   * Fails closed. This previously returned `true`, so any adapter that did not
+   * override it silently accepted unsigned webhooks. A subclass must either
+   * implement a real signature check against the raw request bytes, or throw to
+   * declare that it has no webhook contract at all.
    */
   verifyWebhook(payload: unknown, signature?: string, rawBody?: string): boolean {
     void payload
     void signature
     void rawBody
-    return true
+    throw new Error(
+      `[${this.providerId}] webhook verification is not implemented; refusing to process webhook`
+    )
   }
 
   /**

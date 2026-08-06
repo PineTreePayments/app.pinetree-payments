@@ -195,7 +195,7 @@ HMAC-signed state cookie pattern (mirrors Shopify OAuth). The start route is bro
 | `/api/webhooks/solana` | POST | WEBHOOK (Alchemy HMAC `x-alchemy-signature`) | Do not change per Phase 3C constraints |
 | `/api/webhooks/lightning` | POST | WEBHOOK (Speed HMAC via adapter `verifyWebhook`) | Do not change per Phase 3C constraints |
 | `/api/webhooks/moonpay/off-ramp` | POST | PUBLIC_PROVIDER_WEBHOOK (MoonPay `Moonpay-Signature-V2`) | Off-ramp status intake only; no wallet signing, crypto broadcast, or fund movement. |
-| `/api/webhooks/provider` | POST | WEBHOOK (delegates to `processWebhook` → adapter `verifyWebhook`) | No explicit route-level sig check; security depends on engine |
+| `/api/webhooks/provider` | ALL | **RETIRED — returns 410 Gone** | Formerly selected an arbitrary adapter from the caller's `x-provider` header with no route-level signature check. Combined with adapters whose `verifyWebhook` returned `true`, an unauthenticated caller could forge a payment confirmation. No provider ever used it; every provider posts to a dedicated route that pins its provider identity. See [`webhook-verification-fail-closed.md`](./webhook-verification-fail-closed.md). |
 | `/api/cron/check-payments` | GET | CRON (`CRON_SECRET` bearer) | Scheduled cron **removed from vercel.json** (Phase 3C). Route kept for manual use. Rejects if `CRON_SECRET` not set. |
 | `/api/cron/sweep-stale-payments` | POST | CRON (`CRON_SECRET` bearer) | Sole production recurring schedule target; see [Background Jobs](../architecture.md#background-jobs-authoritative). |
 | `/api/cron/update-balances` | GET | CRON (`CRON_SECRET` bearer) | Not scheduled; dev backdoor when no secret set |

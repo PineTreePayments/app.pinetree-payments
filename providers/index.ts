@@ -1,5 +1,9 @@
 // PineTree payment adapters — central export
 
+// Coinbase Commerce is RETIRED per Standard 06 §7. Importing the module no
+// longer registers it: registration is gated on PINETREE_ENABLE_COINBASE_COMMERCE
+// (default off) inside ./coinbase, so getProvider("coinbase") throws unless it is
+// deliberately re-enabled. The import is kept only so the export below resolves.
 import "./coinbase"
 import "./solana"
 import "./shift4"

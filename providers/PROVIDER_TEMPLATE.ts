@@ -75,13 +75,23 @@ class ProviderNameAdapter extends BaseProviderAdapter {
   }
 
   /**
-   * Verify webhook signature
+   * Verify webhook signature.
+   *
+   * MUST fail closed. Verify an HMAC/signature over the RAW request body using
+   * a constant-time comparison (`crypto.timingSafeEqual`), and reject when the
+   * signature, timestamp, or secret is missing. Never `return true` as a
+   * placeholder: an adapter that returns true accepts forged webhooks, and the
+   * engine treats a truthy result as proof of authenticity.
+   *
+   * If this provider has no webhook contract, throw here instead and rely on
+   * polling or a dedicated verified route.
    */
   verifyWebhook(payload: unknown, signature?: string): boolean {
     void payload
     void signature
-    // Implement signature verification
-    return true
+    throw new Error(
+      `[${this.providerId}] webhook verification is not implemented; refusing to process webhook`
+    )
   }
 
   /**

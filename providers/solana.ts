@@ -105,16 +105,24 @@ export const solanaAdapter: ProviderAdapter = {
 
   /* --------------------------------
      VERIFY WEBHOOK
-     Solana Pay doesn't use webhooks
-     Returns true by default
+     Solana has no adapter-level webhook contract — reject.
   -------------------------------- */
 
-  verifyWebhook(payload: unknown, signature?: string, rawBody?: string) {
+  verifyWebhook(payload: unknown, signature?: string, rawBody?: string): boolean {
     void payload
     void signature
     void rawBody
-    // Solana Pay uses blockchain confirmations, not webhooks
-    return true
+    // Solana confirmation comes from chain evidence, never from an adapter
+    // webhook. The real intake is POST /api/webhooks/solana, which verifies the
+    // Alchemy HMAC against the raw request body and then calls
+    // processAlchemyWebhook — it never reaches this method.
+    //
+    // This previously returned `true`, which let a forged payload
+    // ({"reference": "<paymentId>", "confirmed": true}) confirm a payment
+    // through the generic webhook route. Reject explicitly instead.
+    throw new Error(
+      "Solana has no adapter webhook contract; use POST /api/webhooks/solana (Alchemy HMAC over the raw body)"
+    )
   },
 
   /* --------------------------------

@@ -1,58 +1,66 @@
-import { NextRequest, NextResponse } from "next/server"
-import { processWebhook } from "@/engine/eventProcessor"
+import { NextResponse } from "next/server"
 
-export async function POST(req: NextRequest) {
-  try {
-    const provider = String(req.headers.get("x-provider") || "").trim().toLowerCase()
-    if (!provider) {
-      return NextResponse.json(
-        { error: "Missing x-provider header" },
-        { status: 400 }
-      )
-    }
+/**
+ * RETIRED — generic provider webhook intake.
+ *
+ * This route used to read the provider name from the caller's `x-provider`
+ * header and hand the request to `processWebhook`, which selected an arbitrary
+ * registered adapter. Combined with adapters whose `verifyWebhook` returned
+ * `true`, that let an unauthenticated caller forge a payment confirmation:
+ *
+ *   POST /api/webhooks/provider
+ *   x-provider: solana
+ *   {"reference":"<paymentId>","confirmed":true,"feeCaptureValidated":true}
+ *
+ * No provider ever used this route. Every integrated provider posts to a
+ * dedicated route that pins its own provider identity and runs a real
+ * signature check before the engine is called:
+ *
+ *   Stripe   -> /api/webhooks/stripe
+ *   Shift4   -> /api/webhooks/shift4
+ *   Speed    -> /api/webhooks/speed  (and legacy /api/webhooks/lightning)
+ *   Bridge   -> /api/webhooks/bridge
+ *   Base     -> /api/webhooks/base    (Alchemy HMAC)
+ *   Solana   -> /api/webhooks/solana  (Alchemy HMAC)
+ *   MoonPay  -> /api/webhooks/moonpay/off-ramp
+ *
+ * A provider-selecting envelope is not a safe abstraction: the request cannot
+ * be allowed to choose which verification contract applies to it. Rather than
+ * keep it behind an allowlist that no caller needs, the route is retired and
+ * answers 410 Gone.
+ *
+ * See docs/security/webhook-verification-fail-closed.md.
+ */
 
-    const rawBody = await req.text()
-    let payload: unknown = null
+const RETIRED_BODY = {
+  error: "Gone",
+  message:
+    "The generic provider webhook endpoint has been retired. Use the dedicated route for your provider.",
+} as const
 
-    try {
-      payload = rawBody ? JSON.parse(rawBody) : {}
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid webhook payload" },
-        { status: 400 }
-      )
-    }
+function retired() {
+  return NextResponse.json(RETIRED_BODY, {
+    status: 410,
+    headers: { "Cache-Control": "no-store" },
+  })
+}
 
-    const headers = Object.fromEntries(req.headers)
+export async function POST() {
+  return retired()
+}
 
-    await processWebhook({
-      provider,
-      payload,
-      headers,
-      rawBody
-    })
+export async function GET() {
+  return retired()
+}
 
-    return NextResponse.json({ received: true })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Webhook processing failed"
+export async function PUT() {
+  return retired()
+}
 
-    // Return semantically correct status codes so callers know why delivery failed.
-    // The engine throws with known messages for auth/registry failures.
-    if (
-      message === "Webhook verification failed" ||
-      message.startsWith("Invalid") ||
-      message.startsWith("Signature")
-    ) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-    if (
-      message.startsWith("Unknown provider") ||
-      message.startsWith("Provider not registered")
-    ) {
-      return NextResponse.json({ error: "Unknown provider" }, { status: 400 })
-    }
+export async function PATCH() {
+  return retired()
+}
 
-    console.error("[webhook:provider] processing error", { provider: "unknown", message })
-    return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 })
-  }
+export async function DELETE() {
+  return retired()
 }

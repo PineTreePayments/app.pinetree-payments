@@ -37,7 +37,8 @@ Public developer API routes are under `/api/v1`. Dashboard, POS, provider webhoo
 | `/api/merchant/public-keys`, `/api/merchant/public-keys/{id}` | Internal dashboard | Dashboard merchant session | Browser public key management. |
 | `/api/merchant/webhooks`, `/api/merchant/webhooks/test`, `/api/merchant/webhook-deliveries` | Internal dashboard | Dashboard merchant session | Webhook settings, test send, delivery log. |
 | `/api/pos/...` | Internal POS | Terminal auth/session | POS methods, payments, drawer, terminal session, base session. |
-| `/api/webhooks/base`, `/api/webhooks/lightning`, `/api/webhooks/moonpay/off-ramp`, `/api/webhooks/provider`, `/api/webhooks/solana`, `/api/webhooks/speed` | Provider webhook | Provider signatures/secrets per integration | Provider-to-PineTree callbacks. Not merchant webhook endpoints. |
+| `/api/webhooks/base`, `/api/webhooks/bridge`, `/api/webhooks/lightning`, `/api/webhooks/moonpay/off-ramp`, `/api/webhooks/shift4`, `/api/webhooks/solana`, `/api/webhooks/speed`, `/api/webhooks/stripe` | Provider webhook | Provider signatures/secrets per integration | Provider-to-PineTree callbacks. Each route pins its own provider identity and verifies a signature over the raw body. Not merchant webhook endpoints. |
+| `/api/webhooks/provider` | Retired | — | Returns 410 Gone. The generic provider-selecting endpoint was retired; use the dedicated route for your provider. |
 | `/api/admin/...` | Admin | Admin auth | Reporting, transactions, stale payments, support. |
 | `/api/reports/...` | Internal dashboard/reporting | Dashboard session | Report generation, PDF, email, download. |
 | `/api/inventory/...`, `/api/shopify/...`, `/api/woocommerce/...` | Internal commerce integration | Dashboard/session/provider auth | Inventory and commerce integration flows. |

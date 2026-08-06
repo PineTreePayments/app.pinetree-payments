@@ -10,7 +10,12 @@ import { updatePaymentStatus } from "./updatePaymentStatus"
 import { getPaymentById, getPaymentByProviderReference, upsertLedgerEntry } from "@/database"
 import { repairTerminalPaymentForReconciliation } from "./paymentReconciliation"
 import { PaymentStatus, normalizeToStrictPaymentStatus } from "./paymentStateMachine"
-import { StoredPaymentSplitMetadata } from "@/types/payment"
+import {
+  StoredPaymentSplitMetadata,
+  adapterSupportsNetwork,
+  normalizePaymentAdapter,
+  normalizePaymentNetwork
+} from "@/types/payment"
 import {
   getTransactionByPaymentId,
   getTransactionByProviderReference,
@@ -249,8 +254,31 @@ export async function advancePaymentToTargetStatus(
   await updatePaymentStatus(paymentId, targetStatus, resolvedMetadata)
 }
 
+/**
+ * PineTree-internal trust flags that must never be honoured when they arrive
+ * inside a provider payload. `feeCaptureValidated` is set only by on-chain
+ * watchers (engine/paymentWatcher.ts), the NWC check, and Speed reconciliation
+ * after they have verified both split legs themselves. A provider never sends
+ * it, so a payload carrying it is either malformed or forged — either way it
+ * must not satisfy the CONFIRMED fee-capture gate in updatePaymentStatus.
+ */
+const INTERNAL_TRUST_FIELDS = new Set(["feecapturevalidated"])
+
+function stripInternalTrustFields(payload: unknown): unknown {
+  const visit = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(visit)
+    if (!value || typeof value !== "object") return value
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !INTERNAL_TRUST_FIELDS.has(key.toLowerCase()))
+      .map(([key, child]) => [key, visit(child)]))
+  }
+  return visit(payload)
+}
+
 function sanitizeProviderPayload(provider: string, payload: unknown): unknown {
-  if (provider !== "stripe") return payload
+  // Internal trust flags are stripped for every provider, not just Stripe.
+  const withoutTrustFields = stripInternalTrustFields(payload)
+  if (provider !== "stripe") return withoutTrustFields
   const blocked = new Set(["client_secret", "cvc", "number", "registration_code", "connection_token"])
   const visit = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(visit)
@@ -259,7 +287,7 @@ function sanitizeProviderPayload(provider: string, payload: unknown): unknown {
       .filter(([key]) => !blocked.has(key.toLowerCase()))
       .map(([key, child]) => [key, visit(child)]))
   }
-  return visit(payload)
+  return visit(withoutTrustFields)
 }
 
 export async function processWebhook({
@@ -283,10 +311,28 @@ export async function processWebhook({
     headers?.["webhook-signature"] ||
     ""
 
-  let verified = true
+  // Fail closed. An adapter that does not implement verification, or whose
+  // verification throws, must never be treated as verified: this initialised as
+  // `true` and accepted any adapter that returned `true` as a placeholder, which
+  // allowed a forged confirmation through the retired generic webhook route.
+  if (typeof adapter.verifyWebhook !== "function") {
+    throw new Error(
+      `Signature verification unsupported for provider "${provider}": webhook processing refused`
+    )
+  }
 
-  if (adapter.verifyWebhook) {
-    verified = adapter.verifyWebhook(payload, signature, rawBody, headers)
+  let verified = false
+  try {
+    verified = adapter.verifyWebhook(payload, signature, rawBody, headers) === true
+  } catch (verificationError) {
+    // Adapters for providers that have no webhook contract (NWC Lightning)
+    // throw here by design. Classify rather than swallow: the request is
+    // rejected, and the reason is logged without the payload or the signature.
+    console.warn("[eventProcessor] webhook verification rejected", {
+      provider,
+      reason: verificationError instanceof Error ? verificationError.message : "verification_threw",
+    })
+    throw new Error("Webhook verification failed")
   }
 
   if (!verified) {
@@ -341,6 +387,33 @@ export async function processWebhook({
   if (!payment) {
     console.warn("Payment not found for webhook:", paymentId)
     return
+  }
+
+  // ── Provider/payment correlation ───────────────────────────────────────────
+  // A translated payment id comes from an external payload. Even after the
+  // signature check, one provider's event must not be able to advance a payment
+  // that belongs to a different rail — otherwise possession of a PineTree UUID
+  // is enough to cross rails. Enforced through the existing adapter/network
+  // contract in types/payment.ts; no new schema field is introduced.
+  //
+  // Only a positively determined mismatch rejects. Providers outside the payment
+  // adapter set (Bridge connection events, MoonPay off-ramp) normalize to
+  // undefined and are unaffected, as are payments with no stored network.
+  const eventAdapter = normalizePaymentAdapter(provider)
+  const paymentNetwork = normalizePaymentNetwork(payment.network || "")
+  if (eventAdapter && paymentNetwork && !adapterSupportsNetwork(eventAdapter, paymentNetwork)) {
+    console.warn("[eventProcessor] webhook provider does not own payment rail", {
+      provider,
+      eventAdapter,
+      paymentId,
+      paymentNetwork,
+    })
+    throw Object.assign(
+      new Error(
+        `Webhook provider "${provider}" does not own payment network "${paymentNetwork}"`
+      ),
+      { status: 403 }
+    )
   }
 
   if (provider === "stripe") {

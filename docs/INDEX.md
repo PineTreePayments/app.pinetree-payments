@@ -38,6 +38,7 @@ Authority order is in [`docs/standards/README.md`](./standards/README.md).
 | [`architecture/adr-0001-ledger-journal-entries.md`](./architecture/adr-0001-ledger-journal-entries.md) | Level 3. Only accepted ADR. Test-enforced. Records a deliberate divergence from Standard 03. |
 | [`api/openapi.yaml`](./api/openapi.yaml) | Level 4. Executable public contract. Test-enforced. |
 | [`security/route-auth-matrix.md`](./security/route-auth-matrix.md) | Level 4. Route authentication truth. Test-enforced. |
+| [`security/webhook-verification-fail-closed.md`](./security/webhook-verification-fail-closed.md) | Level 3 (security decision note). Records the retirement of the generic provider webhook route and the fail-closed verification contract. Closes audit findings F-1/F-2. |
 
 ## Scoped active
 

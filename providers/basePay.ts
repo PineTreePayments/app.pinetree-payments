@@ -64,8 +64,17 @@ export const basePayAdapter: ProviderAdapter = {
     }
   },
 
-  verifyWebhook() {
-    return true
+  verifyWebhook(): boolean {
+    // Base confirmation comes from chain evidence, never from an adapter
+    // webhook. The real intake is POST /api/webhooks/base, which verifies the
+    // Alchemy HMAC against the raw request body and then calls
+    // processAlchemyWebhook — it never reaches this method.
+    //
+    // This previously returned `true`, so the generic webhook route could
+    // accept an unsigned Base payload. Reject explicitly instead.
+    throw new Error(
+      "Base has no adapter webhook contract; use POST /api/webhooks/base (Alchemy HMAC over the raw body)"
+    )
   },
 
   translateEvent(payload: { paymentId?: string; reference?: string }) {

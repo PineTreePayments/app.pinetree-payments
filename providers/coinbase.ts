@@ -181,8 +181,14 @@ export const coinbaseAdapter: ProviderAdapter = {
   verifyWebhook(payload: unknown, signature?: string, rawBody?: string) {
     const secret = String(process.env.COINBASE_WEBHOOK_SHARED_SECRET || "").trim()
 
-    // Open in dev / if secret not configured (consistent with Helius behaviour)
-    if (!secret) return true
+    // Fail closed when no secret is configured. This previously returned `true`,
+    // which meant a retired provider with no configured secret accepted any
+    // unsigned payload — the second vector of the forged-confirmation issue.
+    // A missing secret is a misconfiguration, never a reason to trust a webhook.
+    if (!secret) {
+      console.warn("[coinbase] webhook rejected: COINBASE_WEBHOOK_SHARED_SECRET is not configured")
+      return false
+    }
 
     const provided = String(signature || "").trim()
     if (!provided) return false
@@ -272,5 +278,21 @@ function coinbaseStatusToPineTree(status: CoinbaseStatus) {
   }
 }
 
-// Register the adapter
-registerProvider("coinbase", coinbaseAdapter)
+// ─── Runtime registration — RETIRED, default off ─────────────────────────────
+//
+// Standard 06 §7 retires Coinbase Commerce: "Coinbase Commerce is not a current
+// production provider." Registration is therefore opt-in. While unregistered,
+// `getProvider("coinbase")` throws "Provider not registered", so no webhook
+// route, payment router, or provider selector can reach this adapter.
+//
+// The module itself stays importable so historical behavior remains inspectable
+// and testable; retirement removes runtime reachability, not the code.
+//
+// Enabling this requires COINBASE_WEBHOOK_SHARED_SECRET to be configured —
+// verifyWebhook below fails closed without it.
+export const COINBASE_COMMERCE_ENABLED =
+  String(process.env.PINETREE_ENABLE_COINBASE_COMMERCE || "").trim().toLowerCase() === "true"
+
+if (COINBASE_COMMERCE_ENABLED) {
+  registerProvider("coinbase", coinbaseAdapter)
+}
