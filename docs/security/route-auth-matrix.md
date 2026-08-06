@@ -1,6 +1,14 @@
 # PineTree API Route Auth Matrix
 
-Audited 2026-05-19. Updated 2026-05-19 (Phase 3D). All routes under `app/api/**/route.ts` (88 total).
+Last full audit 2026-05-19 (Phase 3D), which covered the 88 routes existing at that
+date. Individual rows have been corrected since — most recently the retired generic
+provider webhook and the Alchemy routes on 2026-08-06.
+
+> **Coverage warning.** `app/api/**/route.ts` has grown well beyond the audited set,
+> so this matrix is **not** a complete route inventory. Treat a listed row as
+> authoritative and an absent route as **unaudited, not unprotected** — verify its
+> auth at the route itself. Re-auditing the full surface is tracked separately; do
+> not infer coverage from this document's length.
 
 **Auth categories:**
 

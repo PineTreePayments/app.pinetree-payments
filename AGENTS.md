@@ -120,14 +120,17 @@ Governance loaded:
 
 If you did not run the preflight, say so explicitly. A silent skip is a defect.
 
-## 8. Legacy content that is not authority
+## 8. Only indexed documents are authority
 
-- [`docs/skills/`](docs/skills/) is **legacy and disconnected**. It is not loaded
-  by anything, is frozen since April 2026, and its two Solana files contradict
-  each other and current code. See [`docs/skills/README.md`](docs/skills/README.md).
-- Document classification — canonical, scoped, operational, historical,
-  superseded — is in [`docs/INDEX.md`](docs/INDEX.md). Check a document's class
-  before treating it as current.
+[`docs/INDEX.md`](docs/INDEX.md) is the complete map of engineering documentation
+and states each document's authority. **A document that is not listed there and
+not routed by the preflight is not engineering authority** — do not implement from
+it. If you find such a file, report it rather than following it.
+
+The legacy `docs/skills/` prompt folder was removed once its rules were absorbed
+into the six standards and [`docs/domains/`](docs/domains/). Do not recreate a
+parallel skills or prompt directory; extend the standards or add a domain document
+instead.
 
 ## 9. Validate
 

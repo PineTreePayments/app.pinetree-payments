@@ -111,7 +111,14 @@ Retail uses the existing `merchant_terminal_locations` and `merchant_terminal_re
 
 ### Commerce Engine For Cloud
 
-PineTree is a cloud-based POS, so it uses **Commerce Engine For Cloud**, not On-Premise. Both deployments share the hosted Shift4 URLs already used by Host Direct — test `https://api.shift4test.com/api/rest/v1`, production `https://api.shift4api.net/api/rest/v1` — and the same documented headers (`InterfaceVersion`, `InterfaceName`, `CompanyName`, `AccessToken`). There is deliberately no second HTTP stack: `providers/shift4/commerce-engine/cloud/` is pure request construction and response reading, and transport stays in `providers/shift4/rest/client.ts`.
+PineTree is a cloud-based POS, so it uses **Commerce Engine For Cloud**, not On-Premise. Both deployments share the hosted Shift4 URLs already used by Host Direct — test `https://api.shift4test.com/api/rest/v1`, production `https://api.shift4api.net/api/rest/v1` — and the same documented headers (`InterfaceVersion`, `InterfaceName`, `CompanyName`, `AccessToken`).
+
+The authoritative source for every Shift4 contract statement in this document is
+the Shift4 Payment API OpenAPI 3.1 spec, version **1.7.58**, published at
+`https://docs.shift4.com/_bundle/apis/payments-platform-rest/openapi.yaml`, plus
+the Commerce Engine guide at
+`https://docs.shift4.com/guides/device-functionality/commerce-engine`. Re-check
+the pinned version before treating any endpoint shape here as current. There is deliberately no second HTTP stack: `providers/shift4/commerce-engine/cloud/` is pure request construction and response reading, and transport stays in `providers/shift4/rest/client.ts`.
 
 **A Cloud request addresses the device by manufacturer and serial number, not by terminal ID.** The published `device` object is `{ cloud: true, manufacturer, serialNumber }`, where `manufacturer` is the enum `Ingenico | Innowi | PAX | Verifone | Castles | Miura` and `serialNumber` is at most 64 characters. The On-Premise variant of `/devices/getstatus` carries **no** `device` object at all (it is addressed by the local network URL), so the two bodies are not interchangeable. PineTree's stored `provider_reader_id` remains the Shift4-side terminal binding and PineTree's evidence key, but it is not a field in the Cloud request body.
 

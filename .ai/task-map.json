@@ -209,9 +209,13 @@
     },
     "stripe-bridge": {
       "label": "Stripe Bridge",
-      "keywords": ["bridge", "stripe bridge", "bridge by stripe"],
-      "documents": ["docs/standards/05-provider-connectors-events.md"],
-      "optional": ["docs/environment/bridge-env-checklist.md"]
+      "keywords": ["bridge", "stripe bridge", "bridge by stripe", "business verification", "kyb"],
+      "documents": [
+        "docs/standards/05-provider-connectors-events.md",
+        "docs/onboarding/business-verification.md"
+      ],
+      "optional": ["docs/environment/bridge-env-checklist.md"],
+      "note": "Bridge is internal infrastructure, never a merchant-facing provider. Merchants see PineTree business verification."
     },
     "shift4": {
       "label": "Shift4",
@@ -273,25 +277,10 @@
     }
   },
   "exclusions": {
-    "reason": "Never routed as current authority. Retained in the repository for history; see docs/INDEX.md for each document's classification.",
-    "never": [
-      "docs/skills/api.md",
-      "docs/skills/database.md",
-      "docs/skills/engine.md",
-      "docs/skills/providers.md",
-      "docs/skills/watcher.md",
-      "docs/skills/webhook.md",
-      "docs/skills/solana-pay.md",
-      "docs/skills/solana-wallet-signing.md",
-      "docs/api/node-sdk-contract.md",
-      "docs/api/provider-integrations.md",
-      "docs/architecture/shift4-phase-2-implementation-report.md",
-      "docs/architecture/shift4-retail-prehardware-readiness.md",
-      "docs/architecture/canonical-transaction-read-audit.md"
-    ],
+    "reason": "Never routed as current authority. The superseded, historical, and conflicting documents this list used to name were deleted in the 2026-08-06 documentation consolidation, so there is nothing left to exclude by name. These globs stay as a standing rule: generated artifacts are never engineering authority, and a reintroduced prompt/skills directory must not become one. See docs/INDEX.md for every active document's authority.",
+    "never": [],
     "neverGlobs": [
       "docs/skills/**",
-      "docs/archive/**",
       "artifacts/**"
     ]
   }

@@ -15,7 +15,7 @@ before planning or editing PineTree.
 
 `task-map.json` is **data**. It has no runtime, no hooks, and no ability to
 inject context into any model. Saying otherwise would be the same mistake this
-system was built to fix — the previous `docs/skills/` folder looked like agent
+system was built to fix — the removed `docs/skills/` folder looked like agent
 context but was never loaded by anything.
 
 Enforcement is exactly two things:
@@ -78,5 +78,6 @@ routing. Narrow the task or pass paths, then run it again.
 1. Add the path glob or domain to `task-map.json`.
 2. Reference only documents that exist — `npm run ai:governance:check` fails on a
    missing target.
-3. Never reference anything in `exclusions`, `docs/archive/`, or `docs/skills/`.
+3. Never route anything listed in `exclusions`, and never route a historical
+   report or a superseded document.
 4. Run `npm run ai:governance:check` and `npm test`.

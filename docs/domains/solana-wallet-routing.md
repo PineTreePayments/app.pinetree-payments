@@ -9,21 +9,18 @@ change it.
 
 ## Why this document exists
 
-Two legacy files in [`docs/skills/`](../skills/) each describe a *different*
-Solana flow as the only correct one, and each forbids the other's live code path:
+Two earlier prompt files each described a *different* Solana flow as the only
+correct one, and each forbade the other's live code path — one required the
+`solana:` URI and forbade wallet deeplinks, the other required
+`phantom://browse/<url>` and forbade the `solana:` URI. Both have been removed.
 
-| Legacy file | Requires | Forbids |
-|---|---|---|
-| `docs/skills/solana-pay.md` | `solana:` URI is "REQUIRED for mobile checkout" | "NEVER use wallet-specific deep links"; lists Phantom/Solflare deeplinks under "Forbidden" |
-| `docs/skills/solana-wallet-signing.md` | `phantom://browse/<url>` | "Forbidden: Solana Pay `solana:` URI for wallet-specific checkout" |
+Neither was right, because the implementation is neither of them exclusively: it
+is a **per-wallet strategy registry** in which the `solana:` URI and the wallet
+deeplinks coexist, each owning a different situation. Acting on either instruction
+in isolation would have deleted a working path.
 
-Both are stale. The implementation is neither of them exclusively: it is a
-**per-wallet strategy registry** in which the `solana:` URI and the wallet
-deeplinks coexist, each owning a different situation. An agent acting on either
-skill file in isolation would delete a working path.
-
-This document records the actual design so that no future reader has to
-adjudicate between the two.
+This document is now the single authority for Solana wallet routing, so no future
+reader has to adjudicate between competing instructions.
 
 ## Source of truth
 
@@ -81,9 +78,10 @@ legacy skill file captures.
   protocol in `lib/wallets/phantomDeeplink.ts`, used by the wallet-approval flow
   at `app/wallet-approval/[sessionId]/page.tsx`.
 
-`docs/skills/solana-wallet-signing.md` lists `phantom://ul/v1/signTransaction`
-under "Forbidden". The repository implements the `https://phantom.app/ul/v1/*`
-equivalent and depends on it. Another reason not to treat that file as authority.
+One of the removed prompt files listed `phantom://ul/v1/signTransaction` under
+"Forbidden". The repository implements the `https://phantom.app/ul/v1/*`
+equivalent and depends on it — a concrete example of why that file could not be
+treated as authority.
 
 ## Consistency checks that already exist
 
@@ -104,9 +102,8 @@ If you change routing, run these and keep them passing.
 2. **Keep strategy and capability flags consistent.** A `phantom_browser` or
    `wallet_deep_link` strategy implies `mobileInAppBrowserSolanaSupport: true`;
    the debug routes assert this.
-3. **Do not delete the `solana:` URI paths** to satisfy
-   `docs/skills/solana-wallet-signing.md`, and **do not delete the wallet
-   deeplinks** to satisfy `docs/skills/solana-pay.md`. Both are live.
+3. **Both the `solana:` URI paths and the wallet deeplinks are live.** Do not
+   delete either one to satisfy a rule that mentions only the other.
 4. Confirmation still requires
    [Standard 05 §6](../standards/05-provider-connectors-events.md#6-rail-specific-confirmation-evidence)
    evidence: a confirmed/finalized signature with the expected recipient, mint,
@@ -120,5 +117,4 @@ If you change routing, run these and keep them passing.
 
 - [Standard 05 — Provider Connector and Event Processing](../standards/05-provider-connectors-events.md)
 - [Standard 02 — Lifecycle and Merchant Status](../standards/02-lifecycle-and-merchant-status.md)
-- [`docs/skills/README.md`](../skills/README.md) — why the legacy skills are retained but not authoritative
 - [`docs/api/rails-and-assets.md`](../api/rails-and-assets.md) — supported rails and assets

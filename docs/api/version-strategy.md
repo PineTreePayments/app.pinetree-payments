@@ -58,8 +58,9 @@ All three conditions must be met:
    two consecutive minor releases without breaking changes.
 2. **Integration test coverage** — the integration test suite passes against a
    staging deployment with real payment rails.
-3. **Platform readiness** — `docs/api/platform-readiness-report.md` is
-   marked complete and sign-off from the PineTree team has been recorded.
+3. **Platform readiness** — every item in
+   [`docs/api/go-live-checklist.md`](./go-live-checklist.md) is complete and
+   sign-off from the PineTree team has been recorded.
 
 ---
 

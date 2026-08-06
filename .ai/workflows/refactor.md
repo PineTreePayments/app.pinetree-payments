@@ -42,10 +42,11 @@ needs the [implement](./implement.md) workflow and an explicit decision.
   [`docs/standards/README.md`](../../docs/standards/README.md).
 - **Do not delete or rewrite a legacy document** to tidy the tree. Classification
   lives in [`docs/INDEX.md`](../../docs/INDEX.md); retention is deliberate.
-- **Do not act on `docs/skills/`.** Those files are disconnected and mutually
-  contradictory; two of them forbid live production code paths. Changing code to
-  satisfy one of them would break the other. See
-  [`docs/skills/README.md`](../../docs/skills/README.md).
+- **Do not implement from an unindexed document.** If a file is not listed in
+  [`docs/INDEX.md`](../../docs/INDEX.md) and not routed by the preflight, it is not
+  authority — report it instead of acting on it. The legacy `docs/skills/` folder
+  was removed for exactly this reason: two of its files forbade live production
+  code paths, so satisfying one would have broken the other.
 - Do not bundle dependency upgrades, formatting sweeps, or renames the task did
   not ask for.
 - Do not create a new abstraction with a single caller.

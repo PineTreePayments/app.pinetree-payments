@@ -14,11 +14,27 @@
  * Exit codes: 0 all checks pass, 1 one or more failures.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { dirname, resolve, posix } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+
+/** Every Markdown file under a directory, repo-relative, POSIX separators. */
+function markdownUnder(relativeDir) {
+  const root = resolve(repoRoot, relativeDir)
+  if (!existsSync(root)) return []
+  const out = []
+  const walk = (dir, prefix) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name
+      if (entry.isDirectory()) walk(resolve(dir, entry.name), rel)
+      else if (entry.name.endsWith(".md")) out.push(`${relativeDir}/${rel}`)
+    }
+  }
+  walk(root, "")
+  return out.sort()
+}
 
 const STANDARDS = [
   "docs/standards/01-platform-architecture.md",
@@ -29,19 +45,15 @@ const STANDARDS = [
   "docs/standards/06-roadmap-documentation-governance.md"
 ]
 
+// Every relative Markdown link in ACTIVE documentation must resolve — not just in
+// the governance core. A dangling link in any indexed document sends an engineer
+// or an agent to a file that is not there.
 const GOVERNANCE_LINK_FILES = [
   "AGENTS.md",
   "CLAUDE.md",
-  "docs/INDEX.md",
-  "docs/standards/README.md",
-  ".ai/README.md",
-  ".ai/workflows/implement.md",
-  ".ai/workflows/debug.md",
-  ".ai/workflows/review.md",
-  ".ai/workflows/refactor.md",
-  "docs/skills/README.md",
-  "docs/domains/solana-wallet-routing.md",
-  ...STANDARDS
+  "README.md",
+  ...markdownUnder(".ai"),
+  ...markdownUnder("docs")
 ]
 
 const failures = []
@@ -261,17 +273,31 @@ if (map) {
   }
 }
 
-// ─── 6. Legacy skills are signposted and never routed ─────────────────────────
+// ─── 6. The legacy skills directory stays deleted ─────────────────────────────
 
-if (!exists("docs/skills/README.md")) {
-  fail("legacy skills signposted", "docs/skills/README.md not found")
+// docs/skills/ was a prompt folder that looked like agent context but was loaded
+// by nothing, and two of its files forbade live production code paths. It was
+// removed once its rules were absorbed into the standards and docs/domains/.
+// Assert it does not come back rather than asserting a signpost file survives.
+if (existsSync(abs("docs/skills"))) {
+  fail(
+    "legacy skills directory absent",
+    "docs/skills/ exists again — extend the standards or add a docs/domains/ document instead of a prompt directory"
+  )
 } else {
-  const text = read("docs/skills/README.md").toLowerCase()
-  const hasDisclaimer = /not authoritative|legacy|superseded|disconnected/.test(text)
-  const pointsOnward = /agents\.md/.test(text) && /docs\/standards/.test(text)
-  if (!hasDisclaimer) fail("legacy skills signposted", "README does not state the folder is legacy/not authoritative")
-  else if (!pointsOnward) fail("legacy skills signposted", "README does not point to AGENTS.md and docs/standards/")
-  else pass("legacy skills signposted")
+  pass("legacy skills directory absent")
+}
+
+// ─── 6b. Every docs/INDEX.md link resolves ────────────────────────────────────
+// INDEX.md is the human entry point; a dangling row sends an engineer to a file
+// that is not there. Link resolution is checked generically in section 7, so this
+// only asserts the index exists and is non-trivial.
+if (!exists("docs/INDEX.md")) {
+  fail("documentation index present", "docs/INDEX.md not found")
+} else if (read("docs/INDEX.md").length < 500) {
+  fail("documentation index present", "docs/INDEX.md is too small to be a real index")
+} else {
+  pass("documentation index present")
 }
 
 // ─── 7. Relative Markdown links inside governance files resolve ───────────────
@@ -303,6 +329,72 @@ for (const file of GOVERNANCE_LINK_FILES) {
 }
 if (linkFailures.length) for (const f of linkFailures) fail("governance links resolve", f)
 else pass(`governance links resolve (${linksChecked} links)`)
+
+// ─── 7b. Root README points engineers at the entry points ─────────────────────
+
+if (!exists("README.md")) {
+  fail("README points to the entry points", "README.md not found")
+} else {
+  const readme = read("README.md")
+  const missingPointers = []
+  if (!/AGENTS\.md/.test(readme)) missingPointers.push("AGENTS.md")
+  if (!/docs\/INDEX\.md/.test(readme)) missingPointers.push("docs/INDEX.md")
+  if (!/ai:preflight/.test(readme)) missingPointers.push("npm run ai:preflight")
+  if (!/docs\/standards/.test(readme)) missingPointers.push("docs/standards/")
+  if (missingPointers.length) {
+    fail("README points to the entry points", `README.md does not mention ${missingPointers.join(", ")}`)
+  } else {
+    pass("README points to the entry points")
+  }
+}
+
+// ─── 7c. Deleted documentation does not come back by reference ────────────────
+//
+// Documents removed in the 2026-08-06 consolidation. Each was superseded,
+// duplicated, historical, or actively misleading, and its authority now lives in
+// the file named alongside it. A reference to one of these paths means either the
+// file returned or a stale pointer survived.
+const RETIRED_DOCUMENTS = [
+  "docs/skills/",
+  "docs/api/node-sdk-contract.md",
+  "docs/api/provider-integrations.md",
+  "docs/api/platform-readiness-report.md",
+  "docs/architecture/canonical-transaction-read-audit.md",
+  "docs/architecture/shift4-phase-2-implementation-report.md",
+  "docs/architecture/shift4-retail-prehardware-readiness.md"
+]
+
+// Only an actionable POINTER is a defect. Explaining in prose that a file was
+// removed is legitimate and useful history; so is naming a superseded document in
+// an ADR's provenance, and so is the standing `docs/skills/**` exclusion glob.
+// What must never survive is a Markdown link that sends a reader to a deleted file.
+{
+  const scanned = [...markdownUnder(".ai"), ...markdownUnder("docs"), "AGENTS.md", "CLAUDE.md", "README.md"]
+    .filter((f) => exists(f))
+
+  const offenders = []
+
+  for (const retired of RETIRED_DOCUMENTS) {
+    if (exists(retired)) offenders.push(`${retired} exists again`)
+  }
+
+  for (const file of scanned) {
+    const dir = posix.dirname(file.replace(/\\/g, "/"))
+    for (const match of read(file).matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+      const raw = match[1]
+      if (/^(https?:|mailto:|#)/.test(raw)) continue
+      const target = raw.split("#")[0]
+      if (!target) continue
+      const resolved = posix.normalize(posix.join(dir, target))
+      if (RETIRED_DOCUMENTS.some((r) => resolved === r || resolved.startsWith(r))) {
+        offenders.push(`${file} links to retired ${resolved}`)
+      }
+    }
+  }
+
+  if (offenders.length) for (const o of offenders) fail("retired documentation stays retired", o)
+  else pass(`retired documentation stays retired (${RETIRED_DOCUMENTS.length} paths)`)
+}
 
 // ─── 8. package.json wiring ───────────────────────────────────────────────────
 

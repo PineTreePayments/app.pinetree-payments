@@ -1,5 +1,40 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Engineering documentation — start here
+
+PineTree is a live payment platform. Before any engineering work:
+
+1. **Read [`AGENTS.md`](AGENTS.md)** — the engineering contract for humans and
+   coding agents: architectural boundaries, invariants, and scope rules.
+2. **Run the preflight before planning or editing.** It resolves the documents
+   that govern your specific task:
+
+   ```bash
+   npm run ai:preflight -- --task "<what you are doing>" --path <files you expect to touch>
+   ```
+
+3. **Browse [`docs/INDEX.md`](docs/INDEX.md)** — the human map of engineering
+   documentation. Every active document is listed there with its authority and
+   when to read it.
+
+Authority order (full version in [`docs/standards/README.md`](docs/standards/README.md)):
+
+- **[`docs/standards/`](docs/standards/) 01–06 are canonical.** Standard 01 is the
+  system-wide authority; 02–06 are the domain standards.
+- **Accepted ADRs** in [`docs/architecture/`](docs/architecture/) override
+  subordinate summaries where they apply.
+- Executable truth — `docs/api/openapi.yaml`, `database/migrations/`, provider
+  contracts — beats prose describing it.
+- **A document that is not listed in `docs/INDEX.md` and not routed by the
+  preflight is not engineering authority.** Do not implement from it; report it.
+
+When code and a standard disagree, report the disagreement rather than silently
+picking a side — see the divergence register in `docs/standards/README.md`.
+
+```bash
+npm run ai:governance:check   # verify the documentation system is intact
+```
+
 ## Getting Started
 
 First, run the development server:

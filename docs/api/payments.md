@@ -125,7 +125,7 @@ PineTree charges a flat **$0.15 per transaction** fee. This fee is deducted from
 | `atomic_split` | Fee split at the Solana transaction level for SOL on Solana and USDC on Solana |
 | `contract_split` | Fee split via Base ETH smart contract |
 | `v7_eip3009_relayer` | Fee split via Base USDC EIP-3009 relayer |
-| `invoice_split` | Fee included in the payment invoice (Shift4, Coinbase, Speed) |
+| `invoice_split` | Fee included in the payment invoice (Shift4, Speed) |
 | `post_payment_nwc` | Fee collected via separate NWC `pay_invoice` after payment |
 
 The fee is embedded in the payment amount — your gross settlement equals `amount - $0.15`.

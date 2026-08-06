@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { join, posix } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 
 /**
@@ -203,8 +203,85 @@ describe("AI governance: preflight routing", () => {
   })
 })
 
-describe("AI governance: legacy skills are not authority", () => {
-  it("never routes any docs/skills file", () => {
+/**
+ * Documents removed in the 2026-08-06 consolidation. Each was superseded,
+ * duplicated, historical, or actively misleading. These assertions exist so a
+ * deleted file cannot quietly return, and so no stale pointer survives.
+ */
+const RETIRED_DOCUMENTS = [
+  "docs/skills/api.md",
+  "docs/skills/database.md",
+  "docs/skills/engine.md",
+  "docs/skills/providers.md",
+  "docs/skills/watcher.md",
+  "docs/skills/webhook.md",
+  "docs/skills/solana-pay.md",
+  "docs/skills/solana-wallet-signing.md",
+  "docs/skills/README.md",
+  "docs/api/node-sdk-contract.md",
+  "docs/api/provider-integrations.md",
+  "docs/api/platform-readiness-report.md",
+  "docs/architecture/canonical-transaction-read-audit.md",
+  "docs/architecture/shift4-phase-2-implementation-report.md",
+  "docs/architecture/shift4-retail-prehardware-readiness.md",
+] as const
+
+/** Every Markdown file under a repo-relative directory. */
+function markdownUnder(relativeDir: string): string[] {
+  const start = join(root, relativeDir)
+  if (!existsSync(start)) return []
+  const out: string[] = []
+  const walk = (dir: string, prefix: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name
+      if (entry.isDirectory()) walk(join(dir, entry.name), rel)
+      else if (entry.name.endsWith(".md")) out.push(`${relativeDir}/${rel}`)
+    }
+  }
+  walk(start, "")
+  return out.sort()
+}
+
+describe("AI governance: retired documentation stays retired", () => {
+  it("has removed the legacy docs/skills directory entirely", () => {
+    expect(existsSync(join(root, "docs/skills"))).toBe(false)
+  })
+
+  it("has deleted every retired document", () => {
+    const survivors = RETIRED_DOCUMENTS.filter((doc) => existsSync(join(root, doc)))
+    expect(survivors).toEqual([])
+  })
+
+  it("leaves no link pointing at a retired document", () => {
+    // Prose noting that a file was removed is legitimate history, and an ADR may
+    // name what it supersedes. What must not survive is an actionable link that
+    // sends a reader to a deleted file.
+    const scanned = [
+      "AGENTS.md",
+      "CLAUDE.md",
+      "README.md",
+      ...markdownUnder(".ai"),
+      ...markdownUnder("docs"),
+    ].filter((f) => existsSync(join(root, f)))
+
+    const offenders: string[] = []
+    for (const file of scanned) {
+      const dir = posix.dirname(file.replace(/\\/g, "/"))
+      for (const match of read(file).matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+        const raw = match[1]
+        if (/^(https?:|mailto:|#)/.test(raw)) continue
+        const target = raw.split("#")[0]
+        if (!target) continue
+        const resolved = posix.normalize(posix.join(dir, target))
+        if ((RETIRED_DOCUMENTS as readonly string[]).some((r) => resolved === r || resolved.startsWith(r))) {
+          offenders.push(`${file} -> ${resolved}`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it("routes no retired document and no docs/skills path", () => {
     const routed: string[] = [...taskMap.globalRequired, ...Object.values(taskMap.workflows)]
     for (const entry of taskMap.paths) {
       routed.push(...(entry.documents ?? []), ...(entry.optional ?? []))
@@ -213,46 +290,61 @@ describe("AI governance: legacy skills are not authority", () => {
       routed.push(...(domain.documents ?? []), ...(domain.optional ?? []))
     }
     expect(routed.filter((doc) => doc.startsWith("docs/skills/"))).toEqual([])
+    expect(routed.filter((doc) => (RETIRED_DOCUMENTS as readonly string[]).includes(doc))).toEqual([])
   })
 
-  it("excludes both conflicting Solana skill files by name", () => {
-    expect(taskMap.exclusions.never).toContain("docs/skills/solana-pay.md")
-    expect(taskMap.exclusions.never).toContain("docs/skills/solana-wallet-signing.md")
-  })
-
-  it("excludes the whole legacy skills folder by glob", () => {
+  it("keeps a standing glob so a prompt directory cannot become authority again", () => {
     expect(taskMap.exclusions.neverGlobs).toContain("docs/skills/**")
   })
 
-  it("marks the legacy folder as non-authoritative in its README", () => {
-    const readme = read("docs/skills/README.md")
-    expect(readme).toMatch(/NOT AUTHORITATIVE/i)
-    expect(readme).toContain("AGENTS.md")
-    expect(readme).toContain("docs/standards")
+  it("preserves the Solana routing authority that replaced the conflicting skills", () => {
+    expect(existsSync(join(root, "docs/domains/solana-wallet-routing.md"))).toBe(true)
+    expect(read("docs/INDEX.md")).toContain("domains/solana-wallet-routing.md")
   })
 
-  it("classifies both Solana skills as superseded in the index", () => {
+  it("preserves the canonical-read decision as an accepted ADR", () => {
+    // The deleted audit report carried an in-force decision; it had to survive.
+    const adr = read("docs/architecture/adr-0002-canonical-transaction-reads.md")
+    expect(adr).toMatch(/Status:\*\*\s*Accepted/)
+    expect(adr).toContain("engine/canonicalTransactions.ts")
+    expect(adr).toContain("adjustmentStatus")
+  })
+})
+
+describe("AI governance: docs/INDEX.md is a complete, resolving map", () => {
+  it("resolves every relative link in the index", () => {
     const index = read("docs/INDEX.md")
-    // INDEX.md lives in docs/, so its links are docs-relative.
-    expect(index).toContain("skills/solana-pay.md")
-    expect(index).toContain("skills/solana-wallet-signing.md")
-    expect(index).toContain("domains/solana-wallet-routing.md")
+    const broken: string[] = []
+    for (const match of index.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+      const raw = match[1]
+      if (/^(https?:|mailto:|#)/.test(raw)) continue
+      const target = raw.split("#")[0]
+      if (!target) continue
+      const resolved = join(root, "docs", target)
+      if (!existsSync(resolved)) broken.push(raw)
+    }
+    expect(broken).toEqual([])
   })
 
-  it("leaves the legacy skill files in place", () => {
-    // Governance classifies; it never deletes.
-    for (const file of [
-      "docs/skills/api.md",
-      "docs/skills/database.md",
-      "docs/skills/engine.md",
-      "docs/skills/providers.md",
-      "docs/skills/watcher.md",
-      "docs/skills/webhook.md",
-      "docs/skills/solana-pay.md",
-      "docs/skills/solana-wallet-signing.md",
-    ]) {
-      expect(existsSync(join(root, file)), `${file} must be retained`).toBe(true)
+  it("lists every canonical standard and both accepted ADRs", () => {
+    const index = read("docs/INDEX.md")
+    for (const n of ["01-platform-architecture", "02-lifecycle-and-merchant-status",
+      "03-financial-ledger-money-reconciliation", "04-database-identity-security",
+      "05-provider-connectors-events", "06-roadmap-documentation-governance"]) {
+      expect(index, `index must list ${n}`).toContain(n)
     }
+    expect(index).toContain("adr-0001-ledger-journal-entries.md")
+    expect(index).toContain("adr-0002-canonical-transaction-reads.md")
+  })
+
+  it("indexes every active document under docs/", () => {
+    // A document that exists but is not indexed is unreachable authority.
+    const index = read("docs/INDEX.md")
+    const unindexed = markdownUnder("docs")
+      .map((p) => p.replace(/^docs\//, ""))
+      .filter((rel) => rel !== "INDEX.md")
+      .filter((rel) => !index.includes(rel))
+    expect(unindexed).toEqual([])
   })
 })
 
