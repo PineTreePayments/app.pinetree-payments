@@ -25,6 +25,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createHmac } from "crypto"
 import { processAlchemyWebhook } from "@/engine/alchemyWebhookProcessor"
+import { verifyHexHmac } from "@/lib/webhooks/verifyHexHmac"
 
 // ─── Signature verification ───────────────────────────────────────────────────
 
@@ -39,7 +40,11 @@ function verifyAlchemySignature(
   }
   if (!signatureHeader) return false
   const expected = createHmac("sha256", signingKey).update(rawBody).digest("hex")
-  return signatureHeader === expected
+  // Constant-time comparison. This was `signatureHeader === expected`, which
+  // short-circuits on the first differing character and leaks how much of a
+  // guessed signature is correct. The HMAC construction above is unchanged:
+  // same signing key, same raw body, same SHA-256, same lowercase hex digest.
+  return verifyHexHmac(expected, signatureHeader)
 }
 
 // ─── Payload types ────────────────────────────────────────────────────────────

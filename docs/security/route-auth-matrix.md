@@ -191,8 +191,8 @@ HMAC-signed state cookie pattern (mirrors Shopify OAuth). The start route is bro
 
 | Route | Methods | Auth | Notes |
 |-------|---------|------|-------|
-| `/api/webhooks/base` | POST | WEBHOOK (Alchemy HMAC `x-alchemy-signature`) | Do not change per Phase 3C constraints |
-| `/api/webhooks/solana` | POST | WEBHOOK (Alchemy HMAC `x-alchemy-signature`) | Do not change per Phase 3C constraints |
+| `/api/webhooks/base` | POST | WEBHOOK (Alchemy HMAC `x-alchemy-signature`) | HMAC-SHA256 over the raw request body, compared in constant time via `lib/webhooks/verifyHexHmac.ts`. Rejects a missing/empty/malformed/odd-length/truncated/extended signature and a missing signing key with 401. Phase 3C constraints otherwise still apply to this route's flow. |
+| `/api/webhooks/solana` | POST | WEBHOOK (Alchemy HMAC `x-alchemy-signature`) | Same verification contract as `/api/webhooks/base`, keyed by `ALCHEMY_WEBHOOK_SIGNING_KEY_SOLANA`. Phase 3C constraints otherwise still apply to this route's flow. |
 | `/api/webhooks/lightning` | POST | WEBHOOK (Speed HMAC via adapter `verifyWebhook`) | Do not change per Phase 3C constraints |
 | `/api/webhooks/moonpay/off-ramp` | POST | PUBLIC_PROVIDER_WEBHOOK (MoonPay `Moonpay-Signature-V2`) | Off-ramp status intake only; no wallet signing, crypto broadcast, or fund movement. |
 | `/api/webhooks/provider` | ALL | **RETIRED — returns 410 Gone** | Formerly selected an arbitrary adapter from the caller's `x-provider` header with no route-level signature check. Combined with adapters whose `verifyWebhook` returned `true`, an unauthenticated caller could forge a payment confirmation. No provider ever used it; every provider posts to a dedicated route that pins its provider identity. See [`webhook-verification-fail-closed.md`](./webhook-verification-fail-closed.md). |

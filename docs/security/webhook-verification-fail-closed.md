@@ -145,12 +145,24 @@ state change, no ledger write, no payment event, and no outbound merchant
 webhook. PineTree does **not** return 200 for an unsigned event to suppress
 provider retries: an unauthenticated request has not earned an acknowledgement.
 
+## Resolved since
+
+- **Audit finding F-4 — closed 2026-08-06.** The Alchemy routes for Base and
+  Solana compared the HMAC with `===`, which short-circuits on the first
+  differing character. Both now compare through
+  [`lib/webhooks/verifyHexHmac.ts`](../../lib/webhooks/verifyHexHmac.ts), which
+  validates hex, rejects empty and odd-length digests, checks length, and then
+  uses `crypto.timingSafeEqual`. The HMAC construction is unchanged: same signing
+  key, same raw body, same SHA-256, same lowercase hex digest.
+
+  The explicit hex validation is load-bearing, not cosmetic.
+  `Buffer.from(value, "hex")` silently truncates at the first non-hex character,
+  so a signature of `<correct digest>zz` decodes to the correct bytes and would
+  verify under a naive byte comparison. Rejecting non-hex input up front is what
+  prevents that.
+
 ## Known residual items (not addressed here — out of this task's scope)
 
-- `app/api/webhooks/base/route.ts:42` and `app/api/webhooks/solana/route.ts:36`
-  compare the Alchemy signature with `===` rather than `timingSafeEqual`
-  (audit finding **F-4**). The route-auth matrix marks these routes
-  "Do not change per Phase 3C constraints", so this needs owner sign-off.
 - `providers/shift4/verifyWebhook.ts:15` retains a test seam gated on
   **both** `NODE_ENV !== "production"` **and** `SHIFT4_WEBHOOK_TEST_BYPASS === "true"`.
   It cannot affect production and is asserted by
@@ -166,3 +178,9 @@ provider retries: an unauthenticated request has not earned an acknowledgement.
   a registry-wide contract over every actively registered adapter, Coinbase
   non-registration, and proof that a correctly signed Stripe webhook is still
   accepted while a tampered body is not.
+- `__tests__/alchemyWebhookSignatureVerification.test.ts` — the hex-HMAC helper
+  contract and, for both the Base and Solana routes, that a valid signature is
+  accepted and calls the engine exactly once with the right network, while a
+  missing, empty, invalid, malformed, odd-length, truncated, extended,
+  wrong-body, or wrong-key signature is rejected with 401 and never reaches
+  `processAlchemyWebhook`.
