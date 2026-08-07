@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireTerminalSession } from "@/lib/api/terminalAuth"
-import { getPaymentIntentById } from "@/database"
+import { getPaymentIntentById, getPaymentIntentForMerchant } from "@/database"
 import { supabaseAdmin } from "@/database/supabase"
 import { getRouteErrorStatus } from "@/lib/api/merchantAuth"
 
@@ -59,20 +59,54 @@ export async function GET(_req: NextRequest, { params }: Params) {
   }
 }
 
-// POST — POS terminal writes or updates the session state.
-// Requires terminal session auth (same as other POS routes).
+/**
+ * POST — the POS terminal writes or updates the session state.
+ *
+ * Requires a terminal session, and the verified claims from that session are the
+ * only source of merchant and terminal identity. Audit finding RA-4 was that this
+ * handler called `requireTerminalSession` but discarded its return value, then
+ * loaded and updated the intent by id alone through the service-role client — so
+ * any terminal session could overwrite any merchant's intent, including
+ * substituting the `pairingUri` that the public GET mirror serves to the paying
+ * customer.
+ *
+ * Ownership is now enforced three ways, deliberately overlapping:
+ *   1. the read is merchant-scoped in the query;
+ *   2. an explicit invariant re-checks merchant and terminal before any write;
+ *   3. both service-role updates carry `merchant_id` in the query.
+ */
 export async function POST(req: NextRequest, { params }: Params) {
   try {
     const { intentId } = await params
-    requireTerminalSession(req)
+    const { mid: merchantId, tid: terminalId } = requireTerminalSession(req)
 
     const id = String(intentId || "").trim()
     if (!id) {
       return NextResponse.json({ error: "Missing intentId" }, { status: 400 })
     }
 
-    const intent = await getPaymentIntentById(id)
+    // Merchant-scoped read: RLS cannot help here because the client is
+    // service-role, so merchant_id is part of the query. A foreign or unknown
+    // intent is indistinguishable — both are 404.
+    const intent = await getPaymentIntentForMerchant(id, merchantId)
     if (!intent) {
+      return NextResponse.json({ error: "Payment intent not found" }, { status: 404 })
+    }
+
+    // Defence in depth: the query above already scoped by merchant, but assert it
+    // so a future refactor that widens the read cannot silently widen access.
+    if (String(intent.merchant_id) !== merchantId) {
+      return NextResponse.json({ error: "Payment intent not found" }, { status: 404 })
+    }
+
+    // Terminal binding. POS-created intents carry the creating terminal
+    // (engine/paymentIntents.ts sets terminal_id from the terminal claims), so a
+    // populated value must match exactly — one terminal may not drive another
+    // terminal's sale. Intents created outside the POS (hosted checkout, public
+    // API) have terminal_id null; those stay merchant-scoped only, because there
+    // is no terminal binding to enforce and refusing them would break the
+    // legitimate flow where a terminal presents a non-POS intent.
+    if (intent.terminal_id && String(intent.terminal_id) !== terminalId) {
       return NextResponse.json({ error: "Payment intent not found" }, { status: 404 })
     }
 
@@ -94,6 +128,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         .from("payment_intents")
         .update({ metadata: restMetadata, updated_at: new Date().toISOString() })
         .eq("id", id)
+        .eq("merchant_id", merchantId)
 
       if (error) {
         throw new Error(`DB update failed: ${error.message}`)
@@ -121,6 +156,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       .from("payment_intents")
       .update({ metadata: updatedMetadata, updated_at: new Date().toISOString() })
       .eq("id", id)
+      .eq("merchant_id", merchantId)
 
     if (error) {
       throw new Error(`DB update failed: ${error.message}`)

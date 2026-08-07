@@ -8,11 +8,17 @@
 - **Exported method handlers:** 310
 - **Coverage:** every tracked `app/api/**/route.ts` file and every exported HTTP
   method appears in [§5](#5-complete-route-matrix) exactly once.
-- **Remediated since the audit:** **RA-1** (2026-08-06) — terminal sessions are
-  now issued only to a verified merchant who owns the terminal. `POST
-  /api/pos/terminal-auth` is retired and `POST /api/pos/terminal-exit-auth`
-  replaces it as the PIN boundary. The affected §5 rows and the §6 entry reflect
-  the current contract.
+- **Remediated since the audit** (all §5 rows and §6 entries reflect the current
+  contract):
+  - **RA-1** (2026-08-06, Critical) — terminal sessions are issued only to a
+    verified merchant who owns the terminal. `POST /api/pos/terminal-auth` is
+    retired; `POST /api/pos/terminal-exit-auth` is the PIN boundary.
+  - **RA-4** (2026-08-06, High) — the Base POS session route retains its terminal
+    claims and enforces merchant and terminal ownership before any service-role
+    write.
+  - **RA-2** (2026-08-06, High) — `POST /api/shopify/session` is **retired**
+    (410). A store-identity signature alone could not make a caller-controlled
+    order payload safe, and no storefront extension calls the route.
 
 This audit replaces the 2026-05-19 partial audit, which covered only the 88
 routes existing at that date and carried a coverage warning. That warning is
@@ -83,7 +89,8 @@ when it is not. Every `RA-n` reference in this table resolves in §6.
 | `verifyHexHmac` | [`lib/webhooks/verifyHexHmac.ts`](../../lib/webhooks/verifyHexHmac.ts) | Validates hex, rejects empty/odd-length, then `timingSafeEqual` | n/a | n/a |
 | `processWebhook` verification gate | [`engine/eventProcessor.ts:318`](../../engine/eventProcessor.ts#L318) | Requires the adapter to define `verifyWebhook` and to return **strictly `true`**; a throw is a rejection | Rail correlation after verification | Yes — refuses providers without a verifier |
 | `verifyBridgeWebhookSignature` | [`providers/bridge/verifyWebhook.ts:99`](../../providers/bridge/verifyWebhook.ts#L99) | RSA-SHA256 over `timestamp.rawBody`, 10-min tolerance | Owner from stored Bridge ids | Yes — `missing_public_key` |
-| `verifyShopifyWebhook` / `verifyShopifyOAuthCallback` | [`integrations/shopify/lib/hmac.ts:31`](../../integrations/shopify/lib/hmac.ts#L31) | HMAC-SHA256, `timingSafeEqual` inside try/catch | Shop from the verified payload | Yes |
+| `verifyShopifyWebhook` / `verifyShopifyOAuthCallback` | [`integrations/shopify/lib/hmac.ts`](../../integrations/shopify/lib/hmac.ts) | HMAC-SHA256, `timingSafeEqual` inside try/catch | Shop from the verified payload | Yes |
+| `getPaymentIntentForMerchant` | [`database/paymentIntents.ts`](../../database/paymentIntents.ts) | n/a | Puts `merchant_id` in the query because the service-role client bypasses RLS; returns null for both a missing and a foreign intent so the id cannot probe existence | n/a |
 | `verifyCoinbaseOAuthContext` / `verifyOAuthContext` | `integrations/shopify/lib/oauth.ts`, `lib/oauth/coinbase.ts` | HMAC-signed cookie + `state` equality | Merchant id from the cookie | Yes |
 | Internal / cron secret guards | e.g. [`app/api/cron/check-payments/route.ts:4`](../../app/api/cron/check-payments/route.ts#L4) | `Bearer ${CRON_SECRET}` or `${INTERNAL_API_SECRET}` | None beyond the secret | Yes — **all** fail closed when unset (see finding RA-8 on comparison and key separation) |
 
@@ -97,7 +104,8 @@ Two negative results worth recording:
   `merchantId` from a body or query string; every one is admin-guarded,
   internal-secret-guarded, or uses it only for diagnostics while acting on a
   server-resolved id ([`app/api/wallets/pinetree-profile/route.ts:159`](../../app/api/wallets/pinetree-profile/route.ts#L159)).
-  The single exception is finding **RA-2**.
+  The one exception, finding **RA-2**, selected a merchant from `body.shop`; that
+  route is now retired, so no live handler does this.
 
 ## 4. Global proxy behavior
 
@@ -279,7 +287,7 @@ whether the handler can write PineTree state.
 | `/api/payments/stripe/terminal/[paymentId]` | GET | TERMINAL_SESSION | `requireStripeCardMerchant` (`pts_` token or merchant auth) | Merchant id from the token claims | No | [`app/api/payments/stripe/terminal/[paymentId]/route.ts:6`](../../app/api/payments/stripe/terminal/[paymentId]/route.ts#L6) | VERIFIED |
 | `/api/payments/stripe/terminal/[paymentId]/cancel` | POST | TERMINAL_SESSION | `requireStripeCardMerchant` (`pts_` token or merchant auth) | Merchant id from the token claims | Yes | [`app/api/payments/stripe/terminal/[paymentId]/cancel/route.ts:6`](../../app/api/payments/stripe/terminal/[paymentId]/cancel/route.ts#L6) | VERIFIED |
 | `/api/pos/base-session/[intentId]` | GET | PUBLIC | None — documented public mirror for hosted checkout | Intent id possession; returns only safe mirror fields (pairing URI, step, masked address) — no keys, no signatures, no full address | No | [`app/api/pos/base-session/[intentId]/route.ts:21`](../../app/api/pos/base-session/[intentId]/route.ts#L21) | VERIFIED_PUBLIC |
-| `/api/pos/base-session/[intentId]` | POST | TERMINAL_SESSION | `requireTerminalSession` — but **the returned claims are discarded** | **None** — the service-role write is scoped by intent id only, so any terminal session can write any merchant's intent | Yes | [`app/api/pos/base-session/[intentId]/route.ts:64`](../../app/api/pos/base-session/[intentId]/route.ts#L64) | FINDING RA-4 |
+| `/api/pos/base-session/[intentId]` | POST | TERMINAL_SESSION | `requireTerminalSession`; the `mid`/`tid` claims are retained and are the only identity source | Merchant-scoped read (`getPaymentIntentForMerchant`), an explicit `merchant_id` invariant, exact `terminal_id` match when the intent is terminal-bound, and both service-role updates carry `merchant_id`. Foreign or unknown intent → 404 | Yes | [`app/api/pos/base-session/[intentId]/route.ts:78`](../../app/api/pos/base-session/[intentId]/route.ts#L78) | VERIFIED RA-4 |
 | `/api/pos/breakdown` | GET | TERMINAL_SESSION | `requireTerminalSession` (HMAC `pts_`, 24h TTL, `timingSafeEqual`) | Merchant + terminal from the signed claims | No | [`app/api/pos/breakdown/route.ts:6`](../../app/api/pos/breakdown/route.ts#L6) | VERIFIED |
 | `/api/pos/card/payment-link` | POST | TERMINAL_SESSION | `requireTerminalSession` (HMAC `pts_`, 24h TTL, `timingSafeEqual`) | Merchant + terminal from the signed claims | Yes | [`app/api/pos/card/payment-link/route.ts:10`](../../app/api/pos/card/payment-link/route.ts#L10) | VERIFIED |
 | `/api/pos/drawer/balance` | GET | TERMINAL_SESSION | `requireTerminalSession` (`pts_`) **or** `requireMerchantIdFromRequest` — either is sufficient | Merchant id from whichever credential was presented; never from the body | No | [`app/api/pos/drawer/balance/route.ts:7`](../../app/api/pos/drawer/balance/route.ts#L7) | VERIFIED |
@@ -335,7 +343,7 @@ whether the handler can write PineTree state.
 | `/api/shopify/auth` | POST | DASHBOARD_SESSION | `requireMerchantIdFromRequest` (Supabase JWT or `pt_live_` key) | Merchant id from the verified token; never from the body | Yes | [`app/api/shopify/auth/route.ts:81`](../../app/api/shopify/auth/route.ts#L81) | VERIFIED |
 | `/api/shopify/auth/callback` | GET | OAUTH_CALLBACK | Signed context cookie + `state` match + Shopify HMAC over all query params | Merchant id from the signed cookie; shop domain validated; token exchanged server-side and encrypted at rest | Yes | [`app/api/shopify/auth/callback/route.ts:13`](../../app/api/shopify/auth/callback/route.ts#L13) | VERIFIED |
 | `/api/shopify/disconnect` | POST | DASHBOARD_SESSION | `requireMerchantIdFromRequest` (Supabase JWT or `pt_live_` key) | Merchant id from the verified token; never from the body | Yes | [`app/api/shopify/disconnect/route.ts:11`](../../app/api/shopify/disconnect/route.ts#L11) | VERIFIED |
-| `/api/shopify/session` | POST | PUBLIC | **None** — no Shopify HMAC, no proxy signature, no merchant auth | **Merchant selected by the caller** via `ctx.shop` → `getActiveShopifyConnection` | Yes | [`app/api/shopify/session/route.ts:18`](../../app/api/shopify/session/route.ts#L18) | FINDING RA-2 |
+| `/api/shopify/session` | POST | RETIRED | None — returns 410 Gone. No signature parsing, no body read | n/a — no connection lookup, no order validation, no database access, no session creation | No | [`app/api/shopify/session/route.ts:57`](../../app/api/shopify/session/route.ts#L57) | VERIFIED_RETIRED RA-2 |
 | `/api/shopify/status` | GET | DASHBOARD_SESSION | `requireMerchantIdFromRequest` (Supabase JWT or `pt_live_` key) | Merchant id from the verified token; never from the body | No | [`app/api/shopify/status/route.ts:12`](../../app/api/shopify/status/route.ts#L12) | VERIFIED |
 | `/api/shopify/webhooks` | POST | PROVIDER_WEBHOOK | `verifyShopifyWebhook` HMAC-SHA256 over the raw body; 401 on mismatch | Shop resolved from the verified payload | Yes | [`app/api/shopify/webhooks/route.ts:10`](../../app/api/shopify/webhooks/route.ts#L10) | VERIFIED |
 | `/api/solana-pay/transaction` | GET | PUBLIC | None — Solana Pay protocol; the proxy explicitly bypasses it (wallets send no cookies) | Payment reference possession | No | [`app/api/solana-pay/transaction/route.ts:15`](../../app/api/solana-pay/transaction/route.ts#L15) | VERIFIED_PUBLIC |
@@ -449,8 +457,8 @@ from still references the id so the decision stays traceable from the matrix.
 | ID | Severity | Status | Route(s) | Defect |
 |---|---|---|---|---|
 | RA-1 | **CRITICAL** | **Resolved 2026-08-06** | `GET /api/pos/terminal-session` | Minted a 24h terminal session with no authentication |
-| RA-2 | **HIGH** | Open | `POST /api/shopify/session` | Unauthenticated, unsigned; the caller selects the merchant |
-| RA-4 | **HIGH** | Open | `POST /api/pos/base-session/[intentId]` | Terminal-session claims discarded; cross-merchant service-role write |
+| RA-2 | **HIGH** | **Resolved 2026-08-06 — route retired** | `POST /api/shopify/session` | Was unauthenticated and unsigned; the caller selected the merchant *and* supplied the order payload |
+| RA-4 | **HIGH** | **Resolved 2026-08-06** | `POST /api/pos/base-session/[intentId]` | Terminal-session claims were discarded; cross-merchant service-role write |
 | RA-3 | MEDIUM | Open | `GET /api/payment-intents/[intentId]` | Discloses the whole intent row, including `pinetree_fee` and `merchant_id` |
 | RA-7 | MEDIUM | Open | `POST /api/webhooks/lightning` | Returns 200 after a post-verification failure, suppressing provider retry |
 | RA-11 | MEDIUM | Open | `POST /api/wallet-connect-session` | Unauthenticated mutation (previously accepted risk; re-stated, not re-decided) |
@@ -567,16 +575,19 @@ success returns no credential; and the retired route answers 410.
 
 ---
 
-### RA-2 — HIGH — unauthenticated Shopify session creation with caller-selected merchant
+### RA-2 — HIGH — unauthenticated Shopify session creation with caller-selected merchant — **RESOLVED 2026-08-06 (route retired)**
 
 **Route:** `POST /api/shopify/session`
 
-**Execution chain**
+The narrative below is in the past tense; see **Resolution** for the current
+contract.
 
-1. [`proxy.ts:15-25`](../../proxy.ts#L15) — `/api/shopify/` is not protected globally.
-2. [`app/api/shopify/session/route.ts:18-31`](../../app/api/shopify/session/route.ts#L18) — the body is parsed and shape-validated. There is **no** Shopify HMAC check, no app-proxy signature check, and no merchant authentication anywhere in the file.
-3. [`app/api/shopify/session/route.ts:44`](../../app/api/shopify/session/route.ts#L44) — `getActiveShopifyConnection(ctx.shop)` resolves the merchant **from the request body**.
-4. [`app/api/shopify/session/route.ts:46-55`](../../app/api/shopify/session/route.ts#L46) — `createCheckoutSessionEngine` is called with that merchant id and the caller's `amount`, `currency`, `orderId`, `customerEmail`, `successUrl`, `cancelUrl`, and `metadata`.
+**Execution chain (before the fix)**
+
+1. [`proxy.ts:15-25`](../../proxy.ts#L15) — `/api/shopify/` is not protected globally. *(Still true; the route now answers 410 before doing anything.)*
+2. The body was parsed and shape-validated. There was **no** Shopify HMAC check, no app-proxy signature check, and no merchant authentication anywhere in the file.
+3. `getActiveShopifyConnection(ctx.shop)` resolved the merchant **from the request body**.
+4. `createCheckoutSessionEngine` was called with that merchant id and the caller's `amount`, `currency`, `orderId`, `customerEmail`, `successUrl`, `cancelUrl`, and `metadata`.
 
 **Preconditions.** Knowledge of a connected store's `myshopify.com` domain,
 which is public information.
@@ -596,33 +607,83 @@ calls `verifyShopifyOAuthCallback`. The helper exists and is simply not applied 
 
 **Runtime evidence required:** no.
 
-**Recommended remediation.** Require a verified Shopify signature (app-proxy
-signature or HMAC over the raw body) using the existing helper, and resolve the
-shop from the *verified* parameters. Constrain `successUrl`/`cancelUrl` to the
-connected shop's domain.
+**Resolution — 2026-08-06: the route is retired (410 Gone).**
 
-**Tests the remediation must add**
+**Why a signature was not enough.** An App Proxy signature check was implemented
+first and did close merchant selection. It was rejected as a resolution because it
+verifies the wrong half of the request. Shopify signs the proxied **query string
+only** — it does not sign app-proxy request bodies — so `totalPrice`, `currency`,
+order identity, customer email, and `successUrl`/`cancelUrl` all remained fully
+caller-controlled, and the signed `timestamp` carries no nonce, so a request could
+be replayed inside its freshness window. A verified store identity over an
+unverified financial payload is not an acceptable contract for a route that
+creates checkout sessions, and marking it resolved would have overstated the
+protection. The store-identity fix is retained in history, not in the runtime.
 
-- Unsigned request → 401; no checkout session row is created.
-- Tampered body with a valid signature for different bytes → 401.
-- Valid signature for shop A cannot create a session for shop B's merchant.
-- `successUrl` outside the connected shop's domain is rejected.
-- A correctly signed request still succeeds (no regression).
+**Current behavior.** [`app/api/shopify/session/route.ts`](../../app/api/shopify/session/route.ts)
+exports only `POST`, which returns **410** with a fixed body and `Cache-Control:
+no-store`. It performs no work at all: no signature parsing, no body read, no
+`getActiveShopifyConnection`, no `validateShopifyOrderContext` /
+`buildPineTreeSessionParams`, no database access, and no
+`createCheckoutSessionEngine` call. Retirement does not depend on configuration —
+there is no 503 path and no 401 path left, so no request shape can reach the
+engine. The response contains no secret, signature, order, shop, or merchant
+information.
+
+**Dead code removed.** `verifyShopifyAppProxySignature` was deleted from
+[`integrations/shopify/lib/hmac.ts`](../../integrations/shopify/lib/hmac.ts)
+along with the route that was its only caller, rather than kept as dead security
+code that a future reader might mistake for an active boundary. A comment records
+why it is absent and what the construction was. `verifyShopifyWebhook` and
+`verifyShopifyOAuthCallback` are **unchanged**, and the corresponding class
+`PLATFORM_SIGNED` is removed from §2 because no route now uses it.
+
+**Nothing was broken.** No in-repo caller exists — the storefront/payment
+extension is documented in
+[`integrations/shopify/README.md`](../../integrations/shopify/README.md) as not
+built or published from this repository. Shopify OAuth install, callback,
+disconnect, status, and webhook behavior are unchanged and continue to verify as
+before.
+
+**Requirements for reactivation.** Verifying the shop is necessary but not
+sufficient. A future implementation must also obtain the authoritative order
+amount, currency, order identity, and customer information **server-side** — by
+retrieving the order from Shopify's Admin API with the stored access token, or
+through another equally trusted server-side contract. Storefront-supplied body
+values must never carry financial, merchant, or redirect authority.
+
+**Verified by**
+[`__tests__/shopifySessionVerification.test.ts`](../../__tests__/shopifySessionVerification.test.ts):
+unsigned, correctly signed app-proxy-style, wrong-secret, malformed-body, and
+missing-configuration requests all return 410; the original exploit shape (signed
+shop A with `body.shop` = shop B) returns 410; no Shopify connection lookup, order
+validation, database call, or checkout-session creation occurs on any path; the
+response leaks no secret, signature, shop, amount, or customer email and is
+`no-store`; only `POST` is exported; and `verifyShopifyAppProxySignature` is no
+longer exported while the webhook and OAuth verifiers still are.
+[`__tests__/shopifyWiringRoutes.test.ts`](../../__tests__/shopifyWiringRoutes.test.ts)
+asserts a storefront-supplied order body creates nothing, and
+[`__tests__/routeAuthMatrixCoverage.test.ts`](../../__tests__/routeAuthMatrixCoverage.test.ts)
+pins this row as the route's only row, `RETIRED` / `VERIFIED_RETIRED`, and greps
+the handler to confirm it still calls none of the removed work.
 
 ---
 
-### RA-4 — HIGH — cross-merchant write on the POS Base session
+### RA-4 — HIGH — cross-merchant write on the POS Base session — **RESOLVED 2026-08-06**
 
 **Route:** `POST /api/pos/base-session/[intentId]`
 
-**Execution chain**
+The narrative below is in the past tense; see **Resolution** for the current
+contract.
 
-1. [`app/api/pos/base-session/[intentId]/route.ts:67`](../../app/api/pos/base-session/[intentId]/route.ts#L67) — `requireTerminalSession(req)` is called **and its return value is discarded**. The claims (`mid`, `tid`) are never bound to anything.
-2. [`…:74`](../../app/api/pos/base-session/[intentId]/route.ts#L74) — the intent is loaded by id alone.
-3. [`…:93-96`](../../app/api/pos/base-session/[intentId]/route.ts#L93) and [`…:120-123`](../../app/api/pos/base-session/[intentId]/route.ts#L120) — the write uses `supabaseAdmin` (service role, so row-level security cannot compensate) scoped `.eq("id", id)` only.
+**Execution chain (before the fix)**
 
-The file contains **zero** references to `merchantId`, `merchant_id`, or
-`claims`, which is the direct evidence that no ownership comparison exists.
+1. `requireTerminalSession(req)` was called **and its return value discarded**. The claims (`mid`, `tid`) were never bound to anything.
+2. The intent was loaded by id alone.
+3. Both writes used `supabaseAdmin` (service role, so row-level security cannot compensate) scoped `.eq("id", id)` only.
+
+The file contained **zero** references to `merchantId`, `merchant_id`, or
+`claims`, which was the direct evidence that no ownership comparison existed.
 
 **Preconditions.** Any valid `pts_` terminal session (from any merchant — and
 per RA-1 obtainable without a PIN) plus knowledge of a target intent UUID.
@@ -640,16 +701,51 @@ sale, or disrupt sales by clearing the session mid-payment, or display a false
 
 **Runtime evidence required:** no.
 
-**Recommended remediation.** Capture the claims and require
-`claims.mid === intent.merchant_id` before any write; add `.eq("merchant_id", claims.mid)`
-to both service-role updates as defense in depth.
+**Resolution — 2026-08-06**
 
-**Tests the remediation must add**
+The claims are retained and are the only identity source:
+`const { mid: merchantId, tid: terminalId } = requireTerminalSession(req)`. No
+merchant or terminal id is read from the body, the query, or intent metadata.
 
-- A terminal session for merchant A writing merchant B's intent → 403; the row is unchanged.
-- `clear: true` from a foreign terminal → 403.
-- The owning terminal can still write and clear its own intent (no regression).
-- The public `GET` still returns only the documented safe mirror fields.
+Ownership is enforced at three deliberately overlapping layers, because the route
+uses the service-role client and so cannot rely on row-level security:
+
+1. **Merchant-scoped read.** `getPaymentIntentForMerchant(id, merchantId)`
+   ([`database/paymentIntents.ts`](../../database/paymentIntents.ts)) puts
+   `merchant_id` in the query and returns null for both a missing and a foreign
+   intent, so the response is an indistinguishable 404 either way and the id
+   cannot be used to probe existence.
+2. **Explicit invariant.** `String(intent.merchant_id) !== merchantId` → 404,
+   asserted after the read so a future refactor that widens the query cannot
+   silently widen access.
+3. **Scoped writes.** Both `supabaseAdmin` updates now carry
+   `.eq("merchant_id", merchantId)` alongside `.eq("id", id)`.
+
+**Terminal binding.** POS-created intents record the creating terminal
+(`engine/paymentIntents.ts` sets `terminal_id` from the terminal claims), so a
+populated `terminal_id` must equal `claims.tid` — one terminal cannot drive
+another terminal's sale. Intents created outside the POS (hosted checkout, public
+API) have `terminal_id` null; those remain merchant-scoped only, because there is
+no binding to enforce and refusing them would break the legitimate flow where a
+terminal presents a non-POS intent. Both branches are tested.
+
+All checks run **before** any write, so an ownership failure performs no database
+mutation. `GET` is unchanged: it is an intentionally public mirror for the
+customer's hosted checkout with a safe-field allowlist, and RA-4 concerned `POST`.
+Base transaction construction, WalletConnect behavior, amounts, network
+selection, fee capture, and state-machine semantics are untouched.
+
+**Verified by**
+[`__tests__/posBaseSessionOwnership.test.ts`](../../__tests__/posBaseSessionOwnership.test.ts)
+(20 tests): a missing or forged token is refused with no write; a foreign intent
+is refused 404 **even when its `terminal_id` matches the caller's**, which
+isolates the merchant guard from the terminal guard; `clear: true` cannot wipe a
+foreign intent; a same-merchant intent bound to another terminal is refused; a
+null-`terminal_id` intent is allowed for the owning merchant and refused for
+another; both writes are asserted to carry `{ id, merchant_id }`; body-supplied
+`merchant_id`/`terminal_id` are ignored; and the valid same-merchant flow still
+merges onto the existing session and preserves unrelated metadata. Removing the
+two merchant guards fails 4 of those tests.
 
 ---
 

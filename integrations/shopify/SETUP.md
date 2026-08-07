@@ -41,7 +41,8 @@ ${SHOPIFY_APP_URL}/api/shopify/webhooks
 Register:
 
 Do not request `read_checkouts`: Shopify retired the legacy Checkout APIs in
-2025, and PineTree creates its own checkout sessions.
+2025. PineTree would create its own checkout sessions, and any future
+reactivation reads authoritative order data with `read_orders`.
 
 - `orders/paid`
 - `orders/cancelled`
@@ -67,7 +68,10 @@ connection status.
 4. Select Connect Shopify.
 5. Approve the Shopify app installation.
 6. Confirm that PineTree shows the store as Connected.
-7. Run checkout and webhook tests through the Shopify storefront integration.
+7. Run webhook tests against the connected store.
 
-The Shopify Partner app and storefront or payment extension must be configured
-before this test can complete.
+The Shopify Partner app must be configured before this test can complete.
+
+Checkout cannot be tested: `POST /api/shopify/session` is retired and returns 410
+until order data is verified server-side against Shopify. See
+[README.md](./README.md#checkout-session-creation-is-disabled).

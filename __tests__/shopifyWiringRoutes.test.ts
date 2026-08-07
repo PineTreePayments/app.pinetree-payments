@@ -167,13 +167,19 @@ describe("Shopify database-backed route wiring", () => {
     vi.unstubAllGlobals()
   })
 
-  it("creates checkout internally for the connected merchant", async () => {
+  it("does not create checkout from a storefront-supplied order body", async () => {
+    // Audit finding RA-2: this route used to resolve the merchant from
+    // `body.shop` and create a session with the caller's amount and redirect
+    // URLs. It is retired (410) because a Shopify app-proxy signature verifies
+    // the query string only — never the body — so the order payload would stay
+    // caller-controlled. Full coverage lives in
+    // __tests__/shopifySessionVerification.test.ts.
     mocks.getActiveConnection.mockResolvedValue({ merchant_id: "merchant_1", status: "active" })
-    mocks.createSession.mockResolvedValue({
-      sessionId: "cs_shopify_1",
-      checkoutUrl: "https://app.test/checkout/shopify-1",
-    })
-    const response = await createSession(new NextRequest("https://app.test/api/shopify/session", {
+
+    // The retired handler declares no parameters, so it cannot read the request
+    // even in principle; Next.js still passes one, which is the shape sent here.
+    const retiredPost = createSession as unknown as (req: NextRequest) => Promise<Response>
+    const response = await retiredPost(new NextRequest("https://app.test/api/shopify/session", {
       method: "POST",
       body: JSON.stringify({
         shop: "pine-store.myshopify.com",
@@ -186,15 +192,10 @@ describe("Shopify database-backed route wiring", () => {
         cancelUrl: "https://store.test/cancel",
       }),
     }))
-    await expect(response.json()).resolves.toEqual({
-      sessionId: "cs_shopify_1",
-      checkoutUrl: "https://app.test/checkout/shopify-1",
-    })
-    expect(mocks.createSession).toHaveBeenCalledWith(expect.objectContaining({
-      merchantId: "merchant_1",
-      amount: 49.99,
-      orderId: "#1042",
-    }))
+
+    expect(response.status).toBe(410)
+    expect(mocks.getActiveConnection).not.toHaveBeenCalled()
+    expect(mocks.createSession).not.toHaveBeenCalled()
   })
 
   it("disconnects only the authenticated merchant connection", async () => {

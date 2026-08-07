@@ -71,6 +71,32 @@ export async function getPaymentIntentById(intentId: string) {
   return data as PaymentIntent
 }
 
+/**
+ * Merchant-scoped intent read.
+ *
+ * `db` is the service-role client, which bypasses row-level security, so a route
+ * acting for one merchant must put `merchant_id` in the query rather than
+ * filtering after the fact. Returns null both when the intent does not exist and
+ * when it belongs to another merchant — callers cannot tell the two apart, which
+ * is deliberate: it stops the id from being used to probe for existence.
+ */
+export async function getPaymentIntentForMerchant(
+  intentId: string,
+  merchantId: string
+): Promise<PaymentIntent | null> {
+  if (!intentId || !merchantId) return null
+
+  const { data, error } = await db
+    .from("payment_intents")
+    .select("*")
+    .eq("id", intentId)
+    .eq("merchant_id", merchantId)
+    .single()
+
+  if (error) return null
+  return data as PaymentIntent
+}
+
 export async function expirePaymentIntent(intentId: string): Promise<void> {
   const { error } = await db
     .from("payment_intents")

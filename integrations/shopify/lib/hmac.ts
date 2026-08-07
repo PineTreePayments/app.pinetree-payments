@@ -23,6 +23,19 @@ export function verifyShopifyWebhook(
   }
 }
 
+// There is deliberately no Shopify App Proxy verifier here.
+//
+// One was added for audit finding RA-2 and then removed with the route it
+// served. An app-proxy signature covers the query string only — Shopify does not
+// sign app-proxy request bodies — so it can establish which store is calling but
+// cannot authenticate an order amount. `POST /api/shopify/session` is retired
+// (410) until order data is retrieved server-side from Shopify, and no other
+// caller needs this construction. It is not kept as dead security code; see
+// docs/security/route-auth-matrix.md (RA-2). If app proxies are ever used, note
+// that the message is built by removing `signature`, comma-joining repeated
+// values, sorting keys, and concatenating `key=value` pairs with NO separator,
+// hex-encoded — neither verifier in this file implements that.
+
 // Verify the HMAC on OAuth callback query parameters.
 //
 // Shopify signs all query params (excluding `hmac` itself), sorted

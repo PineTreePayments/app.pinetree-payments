@@ -297,6 +297,33 @@ describe("route-auth matrix class invariants", () => {
     expect(fs.readFileSync(file, "utf8")).toContain("410")
   })
 
+  it("lists the retired Shopify session route exactly once, as retired", () => {
+    // Audit finding RA-2 was resolved by retiring this route rather than by
+    // signing it: a Shopify app-proxy signature covers the query string only, so
+    // the order payload would have stayed caller-controlled. The row must not
+    // drift back to an active classification.
+    const retired = rows.filter((r) => r.url === "/api/shopify/session")
+    expect(retired.map(rowKey)).toEqual(["POST /api/shopify/session"])
+    expect(retired[0].cls).toBe("RETIRED")
+    expect(retired[0].result).toBe("VERIFIED_RETIRED")
+
+    // The 410 handler must still exist — a retired row may not point at nothing.
+    const file = path.join(ROOT, "app/api/shopify/session/route.ts")
+    expect(fs.existsSync(file)).toBe(true)
+    const source = fs.readFileSync(file, "utf8")
+    expect(source).toContain("410")
+    // And it must do no work: no lookup, no validation, no session creation.
+    for (const forbidden of [
+      "getActiveShopifyConnection",
+      "validateShopifyOrderContext",
+      "createCheckoutSessionEngine",
+      "verifyShopifyAppProxySignature",
+      "req.json",
+    ]) {
+      expect(source, `retired route must not call ${forbidden}`).not.toContain(forbidden)
+    }
+  })
+
   it("does not classify an /api/admin route as a plain merchant session without justification", () => {
     // /api/admin/me is legitimately a merchant-scoped "who am I" surface. Any
     // such row must say so in its authorization cell rather than pass silently.
