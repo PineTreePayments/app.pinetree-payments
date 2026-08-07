@@ -16,7 +16,6 @@ import {
   dashboardPageTitleClass,
   dashboardSectionLabelClass
 } from "@/components/dashboard/DashboardPrimitives"
-import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import StripeConnectOnboarding from "@/components/dashboard/StripeConnectOnboarding"
 import StripeTerminalSettings from "@/components/dashboard/StripeTerminalSettings"
 import type { PineTreeRailReadinessMap } from "@/lib/pinetreeRailReadiness"
@@ -1052,14 +1051,9 @@ export default function ProvidersPage() {
         title="View connected payment providers and manage your payment infrastructure."
       />
 
+      {/* The Business Profile warning is mounted once in the dashboard shell
+          (app/dashboard/layout.tsx); rendering it here too would duplicate it. */}
       <div className="space-y-2">
-        {businessProfileStatus && businessProfileStatus.profile_status !== "complete" ? (
-          <BusinessProfileRequirementBanner
-            message="Complete Business Profile Before Continuing"
-            returnDestination="providers"
-            compact
-          />
-        ) : null}
         <p className={dashboardSectionLabelClass}>Payment Providers</p>
         <SegmentedButtons
           ariaLabel="Payment provider category"

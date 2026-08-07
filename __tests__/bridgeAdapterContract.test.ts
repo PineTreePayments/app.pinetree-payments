@@ -133,30 +133,33 @@ describe("Bridge source boundaries", () => {
       expect(source).not.toMatch(/process\.env\.NEXT_PUBLIC_/)
       expect(source).not.toMatch(/process\.env\[\s*["'`]NEXT_PUBLIC_/)
     }
-    // Both merchant-facing verification surfaces reach PineTree only.
+    // The merchant-facing business-identity surfaces reach PineTree only, and
+    // read the canonical Business Profile rather than the Bridge-backed
+    // verification projection.
     for (const file of [
-      "components/dashboard/BusinessVerificationPanel.tsx",
-      "components/dashboard/BusinessVerificationWarning.tsx",
+      "components/dashboard/BusinessProfileWarning.tsx",
+      "components/dashboard/BusinessProfileRequirementBanner.tsx",
     ]) {
       const surface = read(file)
       expect(surface, file).not.toContain("api.bridge.xyz")
       expect(surface, file).not.toContain("BRIDGE_API_KEY")
-      expect(surface, file).toContain("/api/onboarding/business-verification")
     }
+    expect(read("components/dashboard/BusinessProfileWarning.tsx")).toContain(
+      "/api/merchant/business-profile"
+    )
   })
 
-  it("presents only PineTree status vocabulary on the merchant surface", () => {
-    const panel = read("components/dashboard/BusinessVerificationPanel.tsx")
-    // Labels come from the Engine-supplied statusLabel, never hardcoded here.
-    expect(panel).toContain("verification.statusLabel")
+  it("presents only PineTree Business Profile vocabulary on the merchant surface", () => {
     for (const file of [
-      "components/dashboard/BusinessVerificationPanel.tsx",
-      "components/dashboard/BusinessVerificationWarning.tsx",
+      "components/dashboard/BusinessProfileWarning.tsx",
+      "components/dashboard/BusinessProfileRequirementBanner.tsx",
     ]) {
       const surface = read(file)
       expect(surface, file).not.toMatch(/["']Available["']/)
       // No approval-timing promise, and no claim that PineTree approves.
       expect(surface, file).not.toMatch(/instant approval|approved instantly|guaranteed/i)
+      // No second merchant-facing verification vocabulary.
+      expect(surface, file).not.toMatch(/business verification|KYB verification/i)
     }
   })
 

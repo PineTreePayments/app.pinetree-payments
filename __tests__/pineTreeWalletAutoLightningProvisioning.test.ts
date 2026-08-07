@@ -61,13 +61,12 @@ describe("No manual 'Set up Bitcoin' CTA competes with automatic provisioning", 
     expect(page).not.toContain("Enable Lightning")
   })
 
-  it("does not render a second Business Profile banner inside the wallet modal", () => {
-    const modalOverview = page.slice(
-      page.indexOf("{activeView === null ? ("),
-      page.indexOf('{activeView === "base-details" ? (')
-    )
-    expect(page).toContain("BusinessProfileRequirementBanner")
-    expect(modalOverview).not.toContain("BusinessProfileRequirementBanner")
+  it("does not render a Business Profile banner anywhere on the wallet page", () => {
+    // The one warning is mounted in the shared dashboard shell
+    // (app/dashboard/layout.tsx), so the wallet page renders none of its own -
+    // neither on the page nor inside the modal.
+    expect(page).not.toContain("BusinessProfileRequirementBanner")
+    expect(read("app/dashboard/layout.tsx")).toContain("<BusinessProfileWarning />")
   })
 })
 

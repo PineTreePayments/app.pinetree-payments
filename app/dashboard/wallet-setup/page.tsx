@@ -42,7 +42,6 @@ import {
   dashboardSectionLabelClass,
 } from "@/components/dashboard/DashboardPrimitives"
 import { getPaymentDisplayStatus } from "@/lib/utils/paymentStatus"
-import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import { presentWithdrawalError as presentWithdrawalErrorClient } from "@/engine/withdrawals/withdrawalErrorPresentation"
 import type { WalletApiErrorCode } from "@/engine/wallet/walletErrors"
 import AddressBookTab from "@/components/dashboard/AddressBookTab"
@@ -10989,15 +10988,10 @@ function PineTreeWalletRuntime() {
 
   return (
     <>
-      {businessProfileGateBlocking ? (
-        <div className="mb-3 max-w-2xl">
-          <BusinessProfileRequirementBanner
-            message="Complete Business Profile Before Continuing"
-            returnDestination="wallet"
-            compact
-          />
-        </div>
-      ) : null}
+      {/* The Business Profile warning is mounted once in the dashboard shell
+          (app/dashboard/layout.tsx); rendering it here too would duplicate it.
+          `businessProfileGateBlocking` still gates wallet creation below - that
+          is a functional gate, not a second banner. */}
 
       {showWalletSetupCard ? (
       <article className="max-w-2xl min-h-[15rem] flex flex-col rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_38%),linear-gradient(135deg,rgba(255,255,255,0.98),rgba(247,251,255,0.96))] p-6 shadow-[0_20px_55px_rgba(37,99,235,0.12)] backdrop-blur sm:min-h-[16rem] sm:p-7">

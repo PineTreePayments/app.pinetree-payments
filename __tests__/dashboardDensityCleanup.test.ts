@@ -35,7 +35,9 @@ const transactions = read("app/dashboard/transactions/page.tsx")
 const reports = read("app/dashboard/reports/page.tsx")
 const reportsCode = stripComments(reports)
 const wallet = read("app/dashboard/wallet-setup/page.tsx")
-const verificationWarning = read("components/dashboard/BusinessVerificationWarning.tsx")
+const profileWarning = read("components/dashboard/BusinessProfileWarning.tsx")
+const requirementBanner = read("components/dashboard/BusinessProfileRequirementBanner.tsx")
+const settings = read("app/dashboard/settings/page.tsx")
 const dashboardLayout = read("app/dashboard/layout.tsx")
 const providers = read("app/dashboard/providers/page.tsx")
 const help = read("app/dashboard/help/page.tsx")
@@ -345,124 +347,117 @@ describe("Reports status breakdown", () => {
 
 /* ── 6-7. Wallet ───────────────────────────────────────────────────────────── */
 
-describe("Wallet business verification notice", () => {
-  it("is a compact horizontal warning, not a floating feature card", () => {
-    expect(verificationWarning).toContain('className="mb-4 flex w-full flex-wrap items-center')
-    expect(verificationWarning).toContain("border-red-200 bg-red-50/70")
-    // The card treatment it replaced is gone.
-    expect(verificationWarning).not.toContain("rounded-2xl border border-gray-200 bg-white p-4")
-    expect(verificationWarning).not.toContain("shadow-[0_10px_30px_rgba(15,23,42,0.05)]")
-    // No hard max-width constraint: it spans the full dashboard content column.
-    expect(verificationWarning).not.toContain("max-w-2xl")
+describe("Business Profile warning", () => {
+  it("is a compact full-width red banner, not a floating card", () => {
+    expect(profileWarning).toContain("mb-4 w-full")
+    expect(requirementBanner).toContain("border-red-200")
+    expect(requirementBanner).toContain("bg-red-50/70")
+    // No card treatment and no hard max-width: it spans the content column.
+    expect(profileWarning).not.toContain("rounded-2xl border border-gray-200 bg-white p-4")
+    expect(profileWarning).not.toContain("shadow-[0_10px_30px_rgba(15,23,42,0.05)]")
+    expect(profileWarning).not.toContain("max-w-2xl")
   })
 
-  it("renders on one line when there is room and wraps when there is not", () => {
-    expect(verificationWarning).toContain("flex-wrap")
-    expect(verificationWarning).toContain("items-center")
-    // The message takes the remaining width, so the action stays on the same
-    // line until there is genuinely no room for it.
-    expect(verificationWarning).toContain("flex-1")
-  })
-
-  it("uses a red-tinted treatment only where the merchant must act", () => {
-    expect(verificationWarning).toContain("border-red-200 bg-red-50/70")
-    // The Engine's `primaryAction` is documented as the single next action a
-    // merchant can take, so `none` is the complete, canonical test for "nothing
-    // is owed" — submitted, processing, under review, verified, and
-    // temporarily unavailable all project to it.
-    expect(verificationWarning).toContain('verification.primaryAction.kind !== "none"')
-    // Work already underway is not an alert, and the warning never restates
-    // the status vocabulary it would then have to keep in sync.
-    expect(verificationWarning).not.toContain("border-amber-200 bg-amber-50")
-    expect(verificationWarning).not.toContain("under_review")
-    expect(verificationWarning).not.toContain("in_progress")
-  })
-
-  it("shows for every action the merchant owes, including consent", () => {
-    for (const kind of ["complete_profile", "review_and_consent", "continue_verification"]) {
-      expect(verificationWarning, kind).toContain(kind)
-    }
-  })
-
-  it("contains no status pill and no Not-started pill", () => {
-    // Asserted against the code, not the docstring: the comment explaining the
-    // old "Not started" defect must not itself fail the test.
-    const markup = stripComments(verificationWarning)
+  it("renders no status pill of any kind", () => {
+    const markup = stripComments(profileWarning)
     expect(markup).not.toContain("ProviderStatusPill")
     expect(markup).not.toMatch(/["']Not started["']/)
     expect(markup).not.toContain("statusLabel")
   })
 
-  it("changes no verification logic or status detection", () => {
-    // Same Engine endpoint, read-only.
-    expect(verificationWarning).toContain("/api/onboarding/business-verification")
-    // No provider calls, no refresh, no continue from this operational surface.
-    expect(verificationWarning).not.toContain("/refresh")
-    expect(verificationWarning).not.toContain("/continue")
+  it("is driven by canonical Business Profile completeness only", () => {
+    // The canonical source is engine/businessProfile.ts via its own route.
+    expect(profileWarning).toContain("/api/merchant/business-profile")
+    // Never the verification projection, and never provider/KYB state.
+    expect(profileWarning).not.toContain("/api/onboarding/business-verification")
+    expect(profileWarning).not.toContain("primaryAction")
+    expect(profileWarning).not.toContain("not_started")
+    expect(profileWarning).not.toContain("under_review")
   })
 
-  it("is mounted once in the shared dashboard shell across normal pages", () => {
-    // The shared merchant dashboard layout owns the warning, not individual pages.
-    expect(dashboardLayout).toContain("<BusinessVerificationWarning />")
-    expect(dashboardLayout).toContain("BusinessVerificationWarning")
+  it("hides for a complete profile and shows for the two incomplete states", () => {
+    expect(profileWarning).toContain('profileStatus === "complete"')
+    expect(profileWarning).toContain('"incomplete" | "complete" | "needs_attention"')
+  })
+
+  it("treats an unknown or failed read as not-an-alert", () => {
+    // A transient failure must never turn a completed profile back into an
+    // incomplete merchant state.
+    expect(profileWarning).toContain("profileStatus === null")
+    expect(profileWarning).not.toContain('?? "not_started"')
+    expect(profileWarning).not.toContain('?? "incomplete"')
+  })
+
+  it("links to the existing Business Profile destination", () => {
+    expect(requirementBanner).toContain(
+      "/dashboard/settings?section=business-profile&return=${returnDestination}"
+    )
+    expect(profileWarning).toContain("BusinessProfileRequirementBanner")
+  })
+
+  it("is mounted once in the shared dashboard shell, never per page", () => {
+    expect(dashboardLayout).toContain("<BusinessProfileWarning />")
     for (const page of [
       "app/dashboard/page.tsx",
       "app/dashboard/pos/page.tsx",
       "app/dashboard/providers/page.tsx",
       "app/dashboard/wallet-setup/page.tsx",
       "app/dashboard/reports/page.tsx",
+      "app/dashboard/settings/page.tsx",
     ]) {
-      expect(stripComments(read(page)), page).not.toContain("BusinessVerificationWarning")
+      const source = stripComments(read(page))
+      expect(source, page).not.toContain("BusinessProfileWarning")
+      expect(source, page).not.toContain("BusinessProfileRequirementBanner")
     }
   })
 
   it("is excluded from the Admin area", () => {
     expect(dashboardLayout).toContain('pathname.startsWith("/dashboard/admin")')
-    expect(dashboardLayout).toContain("<BusinessVerificationWarning />")
-  })
-
-  it("never fabricates a status when the read fails", () => {
-    // The original defect: the panel fell back to `status ?? "not_started"`, so
-    // a failed fetch rendered a red "complete your business profile" alert to a
-    // merchant whose profile was already complete.
-    expect(verificationWarning).not.toContain('?? "not_started"')
-    expect(verificationWarning).toContain("requiresMerchantAction(verification)")
-    const panel = read("components/dashboard/BusinessVerificationPanel.tsx")
-    expect(panel).not.toContain('?? "not_started"')
-    expect(panel).toContain('"Unavailable"')
+    expect(dashboardLayout).toContain("<BusinessProfileWarning />")
   })
 })
 
-describe("Settings is the verification status home", () => {
-  const settings = read("app/dashboard/settings/page.tsx")
-  const panel = read("components/dashboard/BusinessVerificationPanel.tsx")
-
-  it("mounts the detailed panel in Settings", () => {
-    expect(settings).toContain("<BusinessVerificationPanel />")
-    expect(settings).toContain(
-      'import BusinessVerificationPanel from "@/components/dashboard/BusinessVerificationPanel"'
-    )
+describe("Exactly one merchant-facing business identity surface", () => {
+  it("keeps Business Profile as the only Settings identity card", () => {
+    expect(settings).toContain('<DashboardSection title="Business Profile"')
+    expect(settings).toContain("profileActionLabel(profileStatus)")
+    // A complete profile reads Complete through the existing canonical mapping.
+    expect(settings).toContain('if (status === "complete") return "Complete"')
+    expect(settings).toContain('if (status === "complete") return "Edit Profile"')
   })
 
-  it("keeps the states the operational warning deliberately hides", () => {
-    // Settings must still show progress the merchant cannot act on.
-    for (const state of ["under_review", "in_progress", "verified"]) {
-      expect(panel, state).toContain(state)
+  it("renders no second verification card in Settings", () => {
+    expect(settings).not.toContain("BusinessVerificationPanel")
+    expect(settings).not.toMatch(/PineTree business verification/i)
+    expect(settings).not.toMatch(/Business verification/i)
+  })
+
+  it("deletes the duplicate merchant-facing verification components", () => {
+    for (const removed of [
+      "components/dashboard/BusinessVerificationPanel.tsx",
+      "components/dashboard/BusinessVerificationWarning.tsx",
+    ]) {
+      expect(fs.existsSync(path.join(process.cwd(), removed)), removed).toBe(false)
     }
-    expect(panel).toContain("verification.statusLabel")
-    expect(panel).toContain("ProviderStatusPill")
   })
 
-  it("keeps the merchant action and the status check", () => {
-    expect(panel).toContain("handlePrimaryAction()")
-    expect(panel).toContain("handleCheckStatus()")
-    expect(panel).toContain('callApi("/refresh", "POST")')
-    expect(panel).toContain('callApi("/continue", "POST")')
+  it("leaves no merchant-facing verification vocabulary anywhere in the dashboard", () => {
+    for (const page of [
+      "app/dashboard/layout.tsx",
+      "app/dashboard/page.tsx",
+      "app/dashboard/settings/page.tsx",
+      "app/dashboard/wallet-setup/page.tsx",
+      "app/dashboard/providers/page.tsx",
+    ]) {
+      const source = stripComments(read(page))
+      expect(source, page).not.toContain("BusinessVerificationPanel")
+      expect(source, page).not.toContain("BusinessVerificationWarning")
+    }
   })
 
   it("names no infrastructure provider to the merchant", () => {
-    expect(panel.toLowerCase()).not.toContain("bridge")
-    expect(verificationWarning.toLowerCase()).not.toContain("bridge")
+    expect(profileWarning.toLowerCase()).not.toContain("bridge")
+    expect(requirementBanner.toLowerCase()).not.toContain("bridge")
     expect(settings.toLowerCase()).not.toContain("bridge")
   })
 })
@@ -544,7 +539,7 @@ describe("shared card system is preserved", () => {
     for (const [name, markup] of [
       ["channel mix", channelMix],
       ["status breakdown", statusBreakdown],
-      ["verification warning", verificationWarning],
+      ["business profile warning", profileWarning],
     ] as const) {
       expect(markup, name).not.toMatch(/\bmin-h-\[|\bh-\[\d/)
     }

@@ -7,19 +7,16 @@ function read(relativePath: string) {
 }
 
 describe("Business Profile onboarding UI", () => {
-  it("keeps compact red onboarding copy where the gate blocks payments", () => {
-    const dashboard = read("app/dashboard/page.tsx")
-    const providers = read("app/dashboard/providers/page.tsx")
+  it("keeps compact red onboarding copy in the one shared warning", () => {
+    const warning = read("components/dashboard/BusinessProfileWarning.tsx")
     const sharedBanner = read("components/dashboard/BusinessProfileRequirementBanner.tsx")
 
-    for (const source of [dashboard, providers]) {
-      expect(source).toContain("Complete Business Profile Before Continuing")
-      expect(source).not.toContain("Complete Business Profile before continuing")
-      expect(source).toContain("BusinessProfileRequirementBanner")
-      expect(source).not.toContain("Business Profile Required")
-      expect(source).not.toContain("Complete your Business Profile to activate wallets, providers, and live payments.")
-      expect(source).not.toContain("Complete your Business Profile to activate payments.")
-    }
+    expect(warning).toContain("Complete Business Profile Before Continuing")
+    expect(warning).not.toContain("Complete Business Profile before continuing")
+    expect(warning).toContain("BusinessProfileRequirementBanner")
+    expect(warning).not.toContain("Business Profile Required")
+    expect(warning).not.toContain("Complete your Business Profile to activate wallets, providers, and live payments.")
+    expect(warning).not.toContain("Complete your Business Profile to activate payments.")
 
     expect(sharedBanner).toContain("bg-red-50/70")
     expect(sharedBanner).toContain("border-red-200")
@@ -27,17 +24,44 @@ describe("Business Profile onboarding UI", () => {
     expect(sharedBanner).toContain("/dashboard/settings?section=business-profile&return=${returnDestination}")
     expect(sharedBanner).not.toContain("bg-red-600")
     expect(sharedBanner).not.toContain("Complete Business Profile</Link>")
-    expect(dashboard).toContain('returnDestination="overview"')
-    expect(providers).toContain('returnDestination="providers"')
+    // The return destination follows the page the merchant was on.
+    expect(warning).toContain('return "wallet"')
+    expect(warning).toContain('return "providers"')
+    expect(warning).toContain('return "overview"')
 
-    const businessProfileSections = [dashboard, providers]
-      .map((source) => source.slice(source.indexOf("BusinessProfileRequirementBanner") - 600, source.indexOf("BusinessProfileRequirementBanner") + 1200))
+    expect(warning).not.toContain("bg-amber-50")
+    expect(warning).not.toContain("text-amber")
+    expect(warning).not.toContain("border-amber")
+  })
 
-    for (const section of businessProfileSections) {
-      expect(section).not.toContain("bg-amber-50")
-      expect(section).not.toContain("text-amber")
-      expect(section).not.toContain("border-amber")
+  it("mounts the Business Profile warning exactly once, in the dashboard shell", () => {
+    const layout = read("app/dashboard/layout.tsx")
+    expect(layout).toContain("<BusinessProfileWarning />")
+    expect(layout).toContain('pathname.startsWith("/dashboard/admin")')
+
+    // No page renders its own copy - that is what showed the same red banner
+    // twice on Overview, Wallet, and Providers.
+    for (const page of [
+      "app/dashboard/page.tsx",
+      "app/dashboard/providers/page.tsx",
+      "app/dashboard/wallet-setup/page.tsx",
+      "app/dashboard/settings/page.tsx",
+    ]) {
+      expect(read(page), page).not.toContain("<BusinessProfileRequirementBanner")
+      expect(read(page), page).not.toContain("<BusinessProfileWarning")
     }
+  })
+
+  it("drives the warning from canonical Business Profile completeness only", () => {
+    const warning = read("components/dashboard/BusinessProfileWarning.tsx")
+    // The canonical source, not the verification projection.
+    expect(warning).toContain("/api/merchant/business-profile")
+    expect(warning).not.toContain("business-verification")
+    // Shown for incomplete and needs_attention; hidden for complete.
+    expect(warning).toContain('profileStatus === "complete"')
+    // An unknown status (not loaded, or a failed read) is never an alert: a
+    // transient failure must not turn a completed profile back into incomplete.
+    expect(warning).toContain("profileStatus === null")
   })
 
   it("settings page uses a Business Profile entry card and modal, not an inline full form", () => {
@@ -241,10 +265,13 @@ describe("Business Profile onboarding UI", () => {
     const sharedBanner = read("components/dashboard/BusinessProfileRequirementBanner.tsx")
     const settings = read("app/dashboard/settings/page.tsx")
 
-    expect(wallet).toContain("Complete Business Profile Before Continuing")
-    expect(wallet).not.toContain("Complete Business Profile before continuing")
+    // The warning copy and its wallet return destination now live in the one
+    // shell-mounted warning, not on the wallet page.
+    const warning = read("components/dashboard/BusinessProfileWarning.tsx")
+    expect(warning).toContain("Complete Business Profile Before Continuing")
+    expect(warning).not.toContain("Complete Business Profile before continuing")
     expect(sharedBanner).toContain("/dashboard/settings?section=business-profile&return=${returnDestination}")
-    expect(wallet).toContain('returnDestination="wallet"')
+    expect(warning).toContain('return "wallet"')
     expect(wallet).toContain(">PineTree Wallet</h2>")
     expect(wallet).toContain("<h1 className={dashboardPageTitleClass}>PineTree Wallet</h1>")
     expect(wallet).not.toContain("Create and open your merchant wallet.")

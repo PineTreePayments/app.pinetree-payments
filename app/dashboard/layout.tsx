@@ -8,7 +8,7 @@ import { supabase } from "@/lib/supabaseClient"
 import { Toaster } from "sonner"
 import PineTreeDynamicProvider from "@/components/providers/PineTreeDynamicProvider"
 import NotificationBadge from "@/components/ui/NotificationBadge"
-import BusinessVerificationWarning from "@/components/dashboard/BusinessVerificationWarning"
+import BusinessProfileWarning from "@/components/dashboard/BusinessProfileWarning"
 import { useMerchantSupportUnread } from "@/hooks/useMerchantSupportUnread"
 
 export default function DashboardLayout({
@@ -296,12 +296,12 @@ export default function DashboardLayout({
           {/* PAGE CONTENT */}
           <main className="flex-1 overflow-x-hidden px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:pt-6 lg:p-10">
             <div className="mx-auto w-full max-w-6xl">
-              {/* The merchant-facing business-verification warning is mounted
-                  ONCE here in the shared merchant dashboard shell, so every
-                  normal operational page sees it without duplicating a fetch.
-                  It is deliberately excluded from the Admin area, which is an
+              {/* The Business Profile warning is mounted ONCE here in the shared
+                  merchant dashboard shell, so every normal operational page
+                  shows it without duplicating a fetch or a banner. It is
+                  deliberately excluded from the Admin area, which is an
                   internal operator surface, not a normal merchant page. */}
-              {!pathname.startsWith("/dashboard/admin") ? <BusinessVerificationWarning /> : null}
+              {!pathname.startsWith("/dashboard/admin") ? <BusinessProfileWarning /> : null}
               {children}
             </div>
           </main>

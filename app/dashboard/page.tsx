@@ -27,7 +27,6 @@ import TransactionVolumeChart from "@/components/dashboard/TransactionVolumeChar
 import { SegmentedButtons } from "@/components/ui/SegmentedButtons"
 import { ExpandIconButton } from "@/components/ui/ExpandIconButton"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
-import BusinessProfileRequirementBanner from "@/components/dashboard/BusinessProfileRequirementBanner"
 import {
   ChartCard,
   DashboardSection,
@@ -114,7 +113,6 @@ export default function DashboardPage() {
     failed: 0
   })
   const [railReadiness, setRailReadiness] = useState<NonNullable<DashboardOverviewResponse["railReadiness"]>>([])
-  const [businessProfileStatus, setBusinessProfileStatus] = useState<DashboardOverviewResponse["businessProfile"] | null>(null)
   const [chartRange, setChartRange] = useState<ChartRange>("30D")
   const [chartExpanded, setChartExpanded] = useState(false)
 
@@ -153,7 +151,6 @@ export default function DashboardPage() {
     setTimeZone(payload.timeZone || "UTC")
     if (payload.today) setToday(payload.today)
     setRailReadiness(payload.railReadiness || [])
-    setBusinessProfileStatus(payload.businessProfile || null)
   }, [])
 
   const loadOverview = useCallback(async () => {
@@ -254,13 +251,10 @@ export default function DashboardPage() {
 
       <h1 className={dashboardPageTitleClass}>Overview</h1>
 
-      {businessProfileStatus && businessProfileStatus.profile_status !== "complete" ? (
-        <BusinessProfileRequirementBanner
-          message="Complete Business Profile Before Continuing"
-          returnDestination="overview"
-          compact
-        />
-      ) : null}
+      {/* The Business Profile warning is mounted once in the dashboard shell
+          (app/dashboard/layout.tsx) and appears above this page's content.
+          Rendering it here too would show the merchant the same red banner
+          twice. */}
 
       {/* 1 — Today's Successful Sales */}
       <div className="relative overflow-hidden rounded-2xl border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.13),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] px-4 py-3 shadow-[0_10px_28px_rgba(37,99,235,0.09)] sm:px-5 sm:py-3.5">

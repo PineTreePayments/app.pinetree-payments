@@ -300,7 +300,7 @@
         "docs/onboarding/business-verification.md"
       ],
       "optional": ["docs/environment/bridge-env-checklist.md"],
-      "note": "Bridge is internal infrastructure, never a merchant-facing provider. Merchants see PineTree business verification."
+      "note": "Bridge is internal infrastructure, never a merchant-facing provider. Merchants see exactly one business identity concept: the PineTree Business Profile. Verification/KYB state is internal and must never become a second merchant-facing card, status surface, or vocabulary."
     },
     "shift4": {
       "label": "Shift4",

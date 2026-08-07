@@ -27,10 +27,17 @@ the Providers page.
 
 ### Merchant-facing status vocabulary
 
-Only these labels are ever shown. Raw provider statuses (`kyc_pending`,
-`under_review`, endorsement names) are never displayed.
+The merchant sees **Business Profile** status only — `Incomplete`,
+`Needs attention`, or `Complete` (`engine/businessProfileFields.ts`,
+`engine/businessProfile.ts`).
 
-| Status | Meaning |
+The verification vocabulary below is **internal**. It is the projection
+`engine/businessVerification.ts` produces for onboarding orchestration and
+administrator diagnostics. It is **not** rendered on any merchant surface, and
+raw provider statuses (`kyc_pending`, `under_review`, endorsement names) are
+never displayed anywhere:
+
+| Internal status | Meaning |
 |---|---|
 | Not started | No business information entered yet. |
 | In progress | Profile or consent still outstanding, or submission underway. |
@@ -47,37 +54,48 @@ provider, and provider evidence is authoritative.
 
 ## Where it appears
 
+**There is exactly ONE merchant-facing business identity concept: the PineTree
+Business Profile.** Provider verification/KYB is infrastructure state. It is
+never presented to merchants as a second application, card, status surface, or
+vocabulary.
+
 | Surface | What it shows |
 |---|---|
-| **Settings → Business Profile** | The **status home**. The profile form, the review-and-consent step, and `BusinessVerificationPanel`: status, one primary action, and a low-emphasis "Check status" only while something is outstanding. Every state is visible here, including the ones needing nothing from the merchant. |
-| **Every normal merchant dashboard page** | `BusinessVerificationWarning`, mounted once in the shared shell (`app/dashboard/layout.tsx`). A compact red alert spanning the content column, shown **only** while the merchant owes an action. |
+| **Settings → Business Profile** | The **one** merchant-facing card: the profile entry card (status pill, Edit/Complete Profile), the profile modal, and the review-and-consent step. Nothing else. |
+| **Every normal merchant dashboard page** | `BusinessProfileWarning`, mounted once in the shared shell (`app/dashboard/layout.tsx`). It renders the shared `BusinessProfileRequirementBanner` — compact, red, full content width — **only** while the Business Profile is not `complete`. |
 | **Providers page** | **Nothing.** Reserved for providers merchants consciously connect. |
 | **Admin** (`/api/admin/business-verification`) | Full technical diagnostics, including the underlying provider. The merchant warning is not mounted in `/dashboard/admin/**`. |
 
 The warning never obscures balances, wallet actions, withdrawals, or mobile
 authorization controls.
 
-### When the operational warning shows
+### When the warning shows
 
-`primaryAction.kind` is the single authoritative signal. The Engine already
-computes it as "the single next action a merchant can take. Never more than
-one", so the Interface never re-derives the answer from status values:
+The authority is `profile_status` from `engine/businessProfile.ts`, computed
+from `BUSINESS_PROFILE_REQUIRED_FIELDS` and read through
+`GET /api/merchant/business-profile`:
 
-| `primaryAction.kind` | Meaning | Warning |
-|---|---|---|
-| `complete_profile` | Required PineTree profile fields are missing | **Shown** |
-| `review_and_consent` | Terms not yet accepted | **Shown** |
-| `continue_verification` | Additional merchant information required | **Shown** |
-| `none` | Submitted, processing, under review, verified, or temporarily unavailable | Hidden |
+| `profile_status` | Warning |
+|---|---|
+| `incomplete` — required fields missing | **Shown** |
+| `needs_attention` — merchant input explicitly required | **Shown** |
+| `complete` | Hidden |
+| not yet loaded, or the read failed | Hidden |
 
-Two rules follow, and both are load-bearing:
+Three rules follow, and all are load-bearing:
 
-- **A provider/KYB state that has not started is never sufficient on its own.**
-  Once the profile and consent are in, the Engine reports `none` and the warning
-  disappears, even though no provider record exists yet.
-- **A failed read is not an alert.** The warning renders nothing when the status
-  cannot be loaded. Projecting a fallback status in the Interface layer once
-  caused fully-onboarded merchants to see "complete your business profile".
+- **Provider/KYB state is never an input.** Whether an infrastructure partner
+  has started, is reviewing, or has approved the merchant does not change
+  whether the merchant finished their PineTree Business Profile.
+- **A failed read is not an alert.** An unknown status is never treated as
+  incomplete. A transient read failure can never turn a completed Business
+  Profile back into an incomplete merchant state.
+- **It is mounted once.** Individual pages do not render their own copy. A
+  previous revision had per-page banners *and* a shell-mounted warning, which
+  showed the same red message twice.
+
+`BusinessProfileRequirementBanner` remains the presentational banner and is
+still the single place its markup and deep link live.
 
 ---
 

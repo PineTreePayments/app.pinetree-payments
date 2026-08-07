@@ -135,35 +135,32 @@ describe("Infrastructure is never merchant-facing", () => {
     expect(dashboard).toContain("row.provider !== BRIDGE_PROVIDER_NAME")
   })
 
-  it("keeps merchant-facing verification UI free of provider naming and extra controls", () => {
-    // BOTH merchant verification surfaces: the Settings status panel and the
-    // compact operational warning mounted in the dashboard shell.
+  it("keeps merchant-facing business-profile UI free of provider naming and extra controls", () => {
+    // The merchant-facing surfaces are the Business Profile warning and the
+    // banner it renders. There is no merchant "verification" surface at all.
     for (const file of [
-      "components/dashboard/BusinessVerificationPanel.tsx",
-      "components/dashboard/BusinessVerificationWarning.tsx",
+      "components/dashboard/BusinessProfileWarning.tsx",
+      "components/dashboard/BusinessProfileRequirementBanner.tsx",
     ]) {
       const surface = read(file)
-      expect(surface.toLowerCase(), file).not.toContain("bridge by stripe")
+      expect(surface.toLowerCase(), file).not.toContain("bridge")
       expect(surface, file).not.toMatch(/Connect Bridge|Enable Bridge|Disable Bridge/i)
-      // Merchant surfaces call PineTree-domain endpoints only.
-      expect(surface, file).toContain("/api/onboarding/business-verification")
       expect(surface, file).not.toContain("/api/providers/bridge")
     }
 
-    // Status text is Engine-authored on the surface that shows status...
-    expect(read("components/dashboard/BusinessVerificationPanel.tsx")).toContain(
-      "verification.statusLabel"
-    )
-    // ...and the operational warning shows no status at all.
-    expect(read("components/dashboard/BusinessVerificationWarning.tsx")).not.toContain(
-      "statusLabel"
-    )
+    // The warning reads the canonical Business Profile, never the verification
+    // projection: provider/KYB state must not decide whether the merchant
+    // finished their PineTree profile.
+    const warning = read("components/dashboard/BusinessProfileWarning.tsx")
+    expect(warning).toContain("/api/merchant/business-profile")
+    expect(warning).not.toContain("/api/onboarding/business-verification")
+    expect(warning).not.toContain("statusLabel")
   })
 
   it("does not import provider internals into browser-facing code", () => {
     for (const file of [
-      "components/dashboard/BusinessVerificationPanel.tsx",
-      "components/dashboard/BusinessVerificationWarning.tsx",
+      "components/dashboard/BusinessProfileWarning.tsx",
+      "components/dashboard/BusinessProfileRequirementBanner.tsx",
       "components/dashboard/ServiceTermsConsentCard.tsx",
       "app/dashboard/providers/page.tsx",
     ]) {
@@ -295,12 +292,15 @@ describe("Unrelated provider behavior is untouched", () => {
   it("keeps the wallet page provisioning flow intact", () => {
     const page = read("app/dashboard/wallet-setup/page.tsx")
 
-    // The old per-page panel is gone; the shared dashboard shell owns the
-    // warning now.
+    // The per-page panel and the per-page banner are both gone; the shared
+    // dashboard shell owns the one warning now.
     expect(page).not.toContain("BusinessVerificationPanel")
+    expect(page).not.toContain("BusinessProfileRequirementBanner")
     // Automatic Dynamic + Bitcoin provisioning must remain.
     expect(page).toContain("PineTree Wallet")
-    expect(page).toContain("BusinessProfileRequirementBanner")
+    // The profile gate still blocks wallet creation - a functional gate, not a
+    // banner, and unaffected by where the warning is rendered.
+    expect(page).toContain("businessProfileGateBlocking")
   })
 })
 
