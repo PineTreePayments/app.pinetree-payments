@@ -21,6 +21,20 @@
  * will, when every precondition holds, idempotently create the provider
  * onboarding and activate an approved capability. That keeps the merchant on
  * one continuous PineTree journey with no "connect" step.
+ *
+ * PREFILL CONTRACT (not yet implemented): PineTree already holds a complete
+ * business profile before any provider submission happens. When provider KYB is
+ * built out, it must submit and prefill from that profile wherever the provider
+ * API allows - legal name, DBA, address, phone, business type, tax details,
+ * owners/controllers, and contacts are never re-collected. Only material
+ * PineTree genuinely does not hold (identity documents and similar sensitive
+ * compliance data) may prompt the merchant again, and that is collected on the
+ * provider-hosted page. See docs/onboarding/business-verification.md.
+ *
+ * PRESENTATION CONTRACT: `primaryAction.kind` is what merchant surfaces switch
+ * on. `none` means PineTree is waiting on itself or on a provider, never on the
+ * merchant, so the operational warning must not render. Interface code must not
+ * substitute its own status when a read fails.
  */
 
 import { randomUUID } from "node:crypto"

@@ -16,10 +16,15 @@
  * verification step. A single low-emphasis "Check status" affordance exists
  * only while verification is genuinely outstanding.
  *
- * PRESENTATION: a compact one-line notice, not a dashboard feature card. It
- * renders on normal merchant surfaces (Wallet) above balances and withdrawals,
- * so it stays a banner-height alert that states the status and offers the one
- * action. Detailed verification diagnostics belong to the admin surface.
+ * PLACEMENT: Settings is the status home. This panel is the ONE merchant
+ * surface that shows verification state in full - including the states that
+ * need nothing from the merchant (submitted, in progress, under review,
+ * verified). Normal operational pages carry only the compact red
+ * `BusinessVerificationWarning`, which appears solely when the merchant owes an
+ * action and disappears otherwise.
+ *
+ * A read that fails has no status. It renders "Unavailable" and never
+ * back-fills a projection the Engine did not return.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -73,50 +78,12 @@ function statusTone(status: VerificationStatus): "default" | "blue" | "amber" {
   return "default"
 }
 
-/**
- * Banner treatment per status.
- *
- * This is a single-line notice, not a dashboard feature card: on Wallet it sits
- * above balances, withdrawals, and the mobile authorization control, so it must
- * never grow into a block that pushes them down the page. Red is reserved for
- * the two states where the merchant genuinely has to act; work already underway
- * reads amber, and an approved account is a quiet confirmation rather than an
- * alert.
- */
-const BANNER_TONE: Record<
-  VerificationStatus,
-  { container: string; accent: string; text: string }
-> = {
-  not_started: {
-    container: "border-red-200 bg-red-50/70",
-    accent: "bg-red-500",
-    text: "text-red-950",
-  },
-  action_required: {
-    container: "border-red-200 bg-red-50/70",
-    accent: "bg-red-500",
-    text: "text-red-950",
-  },
-  in_progress: {
-    container: "border-amber-200 bg-amber-50/70",
-    accent: "bg-amber-500",
-    text: "text-amber-950",
-  },
-  under_review: {
-    container: "border-amber-200 bg-amber-50/70",
-    accent: "bg-amber-500",
-    text: "text-amber-950",
-  },
-  temporarily_unavailable: {
-    container: "border-amber-200 bg-amber-50/70",
-    accent: "bg-amber-500",
-    text: "text-amber-950",
-  },
-  verified: {
-    container: "border-emerald-200 bg-emerald-50/60",
-    accent: "bg-emerald-500",
-    text: "text-emerald-950",
-  },
+/** Accent for the status dot. Presentation only; the label is Engine-authored. */
+function statusAccent(status: VerificationStatus): string {
+  if (status === "verified") return "bg-emerald-500"
+  if (status === "action_required") return "bg-red-500"
+  if (status === "under_review" || status === "in_progress") return "bg-amber-500"
+  return "bg-gray-300"
 }
 
 export default function BusinessVerificationPanel() {
@@ -227,65 +194,60 @@ export default function BusinessVerificationPanel() {
     setBusy(false)
   }
 
-  const status = verification?.status ?? "not_started"
   const action = verification?.primaryAction
   const showAction = Boolean(action && action.kind !== "none" && action.label)
   // Offered only while something is genuinely outstanding - never as a way to
   // "manage" infrastructure.
   const showCheckStatus =
-    status === "under_review" || status === "in_progress" || status === "action_required"
+    verification?.status === "under_review" ||
+    verification?.status === "in_progress" ||
+    verification?.status === "action_required"
 
-  const tone = BANNER_TONE[status]
-  const headline = verification?.headline || "Business verification required"
-  const detail = loading
-    ? "Checking your verification status..."
-    : verification?.detail ||
-      "Complete your business profile to activate wallet and settlement capabilities."
+  /**
+   * A read that has not succeeded has NO status. It is never projected as
+   * "Not started" - that fabricates a canonical state the Engine did not
+   * report, and it is exactly what made a fully-onboarded merchant see a
+   * "complete your business profile" alert.
+   */
+  const statusLabel = loading
+    ? "Checking"
+    : verification
+      ? verification.statusLabel
+      : "Unavailable"
 
   return (
     <section
       aria-label="Business verification"
-      className={`rounded-lg border px-3 py-2 text-sm shadow-none ${tone.container}`}
+      className="rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-3.5"
     >
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-        <span className={`h-4 w-1 shrink-0 rounded-full ${tone.accent}`} />
-
-        <p className={`min-w-0 flex-1 basis-full font-semibold leading-5 sm:basis-0 ${tone.text}`}>
-          {headline}
-          <span className="font-normal opacity-90"> — {detail}</span>
-        </p>
-
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden="true"
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+              verification ? statusAccent(verification.status) : "bg-gray-300"
+            }`}
+          />
+          <p className="min-w-0 text-sm font-semibold text-gray-950">
+            {verification?.headline || "PineTree business verification"}
+          </p>
+        </div>
         <ProviderStatusPill
-          label={loading ? "Checking" : verification?.statusLabel || "Not started"}
-          tone={statusTone(status)}
+          label={statusLabel}
+          tone={verification ? statusTone(verification.status) : "default"}
           className="shrink-0"
         />
-
-        {showAction ? (
-          <button
-            type="button"
-            onClick={() => void handlePrimaryAction()}
-            disabled={busy}
-            className={`${primaryActionButtonClass} !h-8 !px-3 !text-xs whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60`}
-          >
-            {busy ? "Working..." : action?.label}
-          </button>
-        ) : null}
-
-        {showCheckStatus ? (
-          <button
-            type="button"
-            onClick={() => void handleCheckStatus()}
-            disabled={busy}
-            className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg px-2 text-xs font-semibold text-gray-600 transition hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Check status
-          </button>
-        ) : null}
       </div>
 
+      <p className="mt-1.5 text-sm leading-5 text-gray-600">
+        {loading
+          ? "Checking your verification status..."
+          : verification?.detail ||
+            "Verification status is unavailable right now. Your information is saved."}
+      </p>
+
       {verification && !verification.profileComplete && verification.missingProfileFields.length > 0 ? (
-        <p className="mt-1 pl-3.5 text-xs leading-5 text-gray-600">
+        <p className="mt-1.5 text-xs leading-5 text-gray-500">
           Still needed: {verification.missingProfileFields.slice(0, 4).join(", ")}
           {verification.missingProfileFields.length > 4
             ? ` +${verification.missingProfileFields.length - 4} more`
@@ -294,9 +256,35 @@ export default function BusinessVerificationPanel() {
       ) : null}
 
       {errorMessage ? (
-        <p role="alert" className="mt-1 pl-3.5 text-xs font-medium text-amber-700">
+        <p role="alert" className="mt-1.5 text-xs font-medium text-amber-700">
           {errorMessage}
         </p>
+      ) : null}
+
+      {showAction || showCheckStatus ? (
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          {showAction ? (
+            <button
+              type="button"
+              onClick={() => void handlePrimaryAction()}
+              disabled={busy}
+              className={`${primaryActionButtonClass} whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              {busy ? "Working..." : action?.label}
+            </button>
+          ) : null}
+
+          {showCheckStatus ? (
+            <button
+              type="button"
+              onClick={() => void handleCheckStatus()}
+              disabled={busy}
+              className="inline-flex h-9 items-center justify-center rounded-lg px-2 text-xs font-semibold text-gray-600 transition hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Check status
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </section>
   )

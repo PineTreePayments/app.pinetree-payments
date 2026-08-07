@@ -84,7 +84,7 @@ function Group({ title, items }: { title: string; items: readonly ReadinessItem[
  * runtime eligibility, and the sentence below says so.
  */
 export default function Shift4RetailDevelopmentReadinessCard() {
-  return <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+  return <section className="min-w-0 rounded-xl border border-gray-200 bg-white p-4">
     <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Pre-hardware status</p>
     <h3 className="mt-1 text-sm font-semibold text-gray-950">Shift4 Retail Development Readiness</h3>
     <p className="mt-1 text-xs text-gray-600">This explains the disabled runtime gates; it does not change Retail, certification, or production eligibility.</p>

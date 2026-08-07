@@ -49,13 +49,35 @@ provider, and provider evidence is authoritative.
 
 | Surface | What it shows |
 |---|---|
-| **Settings → Business Profile** | The profile form, then the review-and-consent step. The consent card disappears once accepted — it is a step, not a setting. |
-| **Wallet** (`/dashboard/wallet-setup`) | Compact `BusinessVerificationPanel`: status, one primary action, and a low-emphasis "Check status" only while something is outstanding. |
+| **Settings → Business Profile** | The **status home**. The profile form, the review-and-consent step, and `BusinessVerificationPanel`: status, one primary action, and a low-emphasis "Check status" only while something is outstanding. Every state is visible here, including the ones needing nothing from the merchant. |
+| **Every normal merchant dashboard page** | `BusinessVerificationWarning`, mounted once in the shared shell (`app/dashboard/layout.tsx`). A compact red alert spanning the content column, shown **only** while the merchant owes an action. |
 | **Providers page** | **Nothing.** Reserved for providers merchants consciously connect. |
-| **Admin** (`/api/admin/business-verification`) | Full technical diagnostics, including the underlying provider. |
+| **Admin** (`/api/admin/business-verification`) | Full technical diagnostics, including the underlying provider. The merchant warning is not mounted in `/dashboard/admin/**`. |
 
-The Wallet panel never obscures balances, wallet actions, withdrawals, or
-mobile authorization controls.
+The warning never obscures balances, wallet actions, withdrawals, or mobile
+authorization controls.
+
+### When the operational warning shows
+
+`primaryAction.kind` is the single authoritative signal. The Engine already
+computes it as "the single next action a merchant can take. Never more than
+one", so the Interface never re-derives the answer from status values:
+
+| `primaryAction.kind` | Meaning | Warning |
+|---|---|---|
+| `complete_profile` | Required PineTree profile fields are missing | **Shown** |
+| `review_and_consent` | Terms not yet accepted | **Shown** |
+| `continue_verification` | Additional merchant information required | **Shown** |
+| `none` | Submitted, processing, under review, verified, or temporarily unavailable | Hidden |
+
+Two rules follow, and both are load-bearing:
+
+- **A provider/KYB state that has not started is never sufficient on its own.**
+  Once the profile and consent are in, the Engine reports `none` and the warning
+  disappears, even though no provider record exists yet.
+- **A failed read is not an alert.** The warning renders nothing when the status
+  cannot be loaded. Projecting a fallback status in the Interface layer once
+  caused fully-onboarded merchants to see "complete your business profile".
 
 ---
 
@@ -146,6 +168,32 @@ PineTree does **not** embed it — it performs a same-window handoff with a
 PineTree return route and automatic status synchronization.
 
 ---
+
+## Reuse the profile PineTree already has (KYB prefill contract)
+
+**Not yet implemented.** Recorded here so the boundary is unambiguous before the
+provider KYB integration is built.
+
+PineTree already collects a complete merchant business profile
+(`engine/businessProfile.ts`, **Settings → Business Profile**). When provider
+KYB is implemented, PineTree **submits the data it already holds** and prefills
+wherever the provider's API permits. A merchant must never be asked to re-enter:
+
+- legal business name, DBA
+- business address, phone, website
+- business type and tax/registration information
+- owner / controller / authorized-representative details
+- contact details
+
+Only information the provider genuinely requires and PineTree does **not**
+already hold — typically identity documents and other sensitive compliance
+material — may prompt additional merchant input, and that is collected on the
+provider-hosted page, never by PineTree.
+
+This is a submission contract, not a new data model: the required-field set
+stays owned by `BUSINESS_PROFILE_REQUIRED_FIELDS`, and the provider remains
+internal infrastructure that is never named to merchants outside the consent
+disclosure.
 
 ## Existing merchants
 

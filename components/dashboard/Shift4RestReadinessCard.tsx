@@ -89,7 +89,7 @@ export default function Shift4RestReadinessCard({
   if (!readiness) return null
 
   return (
-    <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 sm:p-5">
+    <div className="min-w-0 rounded-xl border border-gray-200 bg-white p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-gray-950">Shift4 REST readiness</p>
@@ -139,7 +139,7 @@ export default function Shift4RestReadinessCard({
           const item = readiness.capabilities[name]
           if (!item) return null
           return (
-            <div key={name} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+            <div key={name} className="min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-2">
               <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                 {name.replaceAll("_", " ")}
               </dt>

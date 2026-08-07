@@ -242,7 +242,7 @@ export default function Shift4RetailTerminalCard() {
   ]
 
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+    <section className="min-w-0 rounded-xl border border-gray-200 bg-white p-4">
       <div className="min-w-0">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">
           Terminal setup

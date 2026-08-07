@@ -27,7 +27,7 @@
  * convenience, never the security boundary.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 
 import Shift4RestReadinessCard from "@/components/dashboard/Shift4RestReadinessCard"
 import Shift4RetailConnectCard from "@/components/dashboard/Shift4RetailConnectCard"
@@ -96,6 +96,25 @@ function summaryToneClass(ready: boolean | null): string {
   if (ready === true) return "text-emerald-700"
   if (ready === false) return "text-amber-700"
   return "text-gray-500"
+}
+
+/**
+ * One labeled area inside the dialog.
+ *
+ * The tools were built as five independent cards, so dropping them into a
+ * window read as five unrelated panels. The label is PineTree's subtle blue
+ * section treatment and groups by what an operator is actually doing; the cards
+ * themselves are unchanged and keep their own specific titles.
+ */
+function OperatorToolGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="min-w-0 space-y-2.5">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0052FF]">
+        {title}
+      </p>
+      {children}
+    </section>
+  )
 }
 
 export default function Shift4SandboxOperationsSection({
@@ -194,11 +213,15 @@ export default function Shift4SandboxOperationsSection({
           className="pinetree-modal-backdrop fixed inset-0 z-50 flex items-start justify-center p-3 sm:items-center"
           onMouseDown={() => setToolsOpen(false)}
         >
+          {/* Wider than the old 880px so the cards' own two- and three-column
+              grids have room at laptop widths instead of forcing the dialog to
+              scroll sideways. Still `w-full` under that, so a narrow screen
+              gets a single column rather than a clipped one. */}
           <div
             role="dialog"
             aria-modal="true"
             aria-label="Shift4 operator tools"
-            className="relative flex max-h-[92vh] w-full max-w-[880px] flex-col rounded-2xl bg-white shadow-lg"
+            className="relative flex max-h-[92vh] w-full max-w-5xl min-w-0 flex-col overflow-hidden rounded-2xl bg-white shadow-lg"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex flex-none items-start justify-between gap-4 border-b border-gray-100 p-4 sm:p-5">
@@ -235,18 +258,34 @@ export default function Shift4SandboxOperationsSection({
               </button>
             </div>
 
-            {/* The tools themselves scroll inside the dialog, so the Admin page
-                behind it stays where the operator left it. */}
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
-              <Shift4RetailConnectCard onConnectionChanged={handleConnectionChanged} />
-              {/* Read-only. Uses the credential the card above already stored; it never
-                  exchanges, replaces, or clears one. */}
-              <Shift4RetailVerificationCard />
-              {/* Terminal identifiers only. Configuring one activates no device and
-                  enables no processing; it never contacts Shift4. */}
-              <Shift4RetailTerminalCard />
-              <Shift4RestReadinessCard refreshVersion={readinessVersion} />
-              <Shift4RetailDevelopmentReadinessCard />
+            {/* The tools themselves scroll VERTICALLY inside the dialog, so the
+                Admin page behind it stays where the operator left it. `min-w-0`
+                runs down the whole chain — dialog, body, group, card, and the
+                evidence tiles inside each card — because a grid or flex child
+                defaults to min-width:auto and a long fingerprint or correlation
+                id would otherwise push the dialog wider than the viewport
+                instead of wrapping. Nothing is clipped and nothing is hidden. */}
+            <div className="min-h-0 min-w-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
+              <OperatorToolGroup title="Retail connection">
+                <Shift4RetailConnectCard onConnectionChanged={handleConnectionChanged} />
+                {/* Read-only. Uses the credential the card above already stored; it never
+                    exchanges, replaces, or clears one. */}
+                <Shift4RetailVerificationCard />
+              </OperatorToolGroup>
+
+              <OperatorToolGroup title="Terminal setup">
+                {/* Terminal identifiers only. Configuring one activates no device and
+                    enables no processing; it never contacts Shift4. */}
+                <Shift4RetailTerminalCard />
+              </OperatorToolGroup>
+
+              <OperatorToolGroup title="REST readiness">
+                <Shift4RestReadinessCard refreshVersion={readinessVersion} />
+              </OperatorToolGroup>
+
+              <OperatorToolGroup title="Development readiness">
+                <Shift4RetailDevelopmentReadinessCard />
+              </OperatorToolGroup>
             </div>
           </div>
         </div>

@@ -35,7 +35,8 @@ const transactions = read("app/dashboard/transactions/page.tsx")
 const reports = read("app/dashboard/reports/page.tsx")
 const reportsCode = stripComments(reports)
 const wallet = read("app/dashboard/wallet-setup/page.tsx")
-const verificationPanel = read("components/dashboard/BusinessVerificationPanel.tsx")
+const verificationWarning = read("components/dashboard/BusinessVerificationWarning.tsx")
+const dashboardLayout = read("app/dashboard/layout.tsx")
 const providers = read("app/dashboard/providers/page.tsx")
 const help = read("app/dashboard/help/page.tsx")
 const primitives = read("components/dashboard/DashboardPrimitives.tsx")
@@ -94,6 +95,59 @@ describe("Admin internal operator tools", () => {
   it("scrolls the tools inside the dialog so Admin itself stays compact", () => {
     expect(operatorCode).toContain("overflow-y-auto")
     expect(operatorCode).toContain("max-h-[92vh]")
+  })
+
+  it("does not require horizontal scrolling at laptop widths", () => {
+    // The dialog is wide enough for the cards' own multi-column grids...
+    expect(operatorCode).toContain("max-w-5xl")
+    expect(operatorCode).not.toContain("max-w-[880px]")
+    // ...and min-w-0 runs the whole chain, so a long fingerprint or correlation
+    // id wraps instead of widening the dialog. A grid/flex child defaults to
+    // min-width:auto, which is what produced the sideways scrollbar.
+    expect(operatorCode).toMatch(/className="min-h-0 min-w-0 flex-1[^"]*overflow-y-auto/)
+    expect(operatorCode).toContain("max-w-5xl min-w-0")
+    for (const card of [
+      "components/dashboard/Shift4RetailConnectCard.tsx",
+      "components/dashboard/Shift4RetailVerificationCard.tsx",
+      "components/dashboard/Shift4RetailTerminalCard.tsx",
+      "components/dashboard/Shift4RestReadinessCard.tsx",
+      "components/dashboard/Shift4RetailDevelopmentReadinessCard.tsx",
+    ]) {
+      expect(read(card), card).toContain("min-w-0 rounded-xl border border-gray-200 bg-white p-4")
+    }
+    // Nothing is hidden to achieve it.
+    expect(operatorCode).not.toContain("overflow-x-hidden")
+  })
+
+  it("groups the tools under PineTree blue section labels", () => {
+    expect(operatorCode).toContain("function OperatorToolGroup")
+    for (const group of [
+      "Retail connection",
+      "Terminal setup",
+      "REST readiness",
+      "Development readiness",
+    ]) {
+      expect(operatorCode, group).toContain(`<OperatorToolGroup title="${group}">`)
+    }
+    expect(operatorCode).toContain('tracking-[0.16em] text-[#0052FF]')
+  })
+
+  it("gives every card the same padding, border, and radius", () => {
+    // The mixed blue-tinted / white-with-shadow shells are gone, which is what
+    // made the dialog read as separate old cards dropped into a window.
+    for (const card of [
+      "components/dashboard/Shift4RetailConnectCard.tsx",
+      "components/dashboard/Shift4RestReadinessCard.tsx",
+    ]) {
+      expect(read(card), card).not.toContain("rounded-2xl border border-blue-100 bg-blue-50/40")
+    }
+    for (const card of [
+      "components/dashboard/Shift4RetailVerificationCard.tsx",
+      "components/dashboard/Shift4RetailTerminalCard.tsx",
+      "components/dashboard/Shift4RetailDevelopmentReadinessCard.tsx",
+    ]) {
+      expect(read(card), card).not.toContain("bg-white p-4 shadow-sm")
+    }
   })
 
   it("preserves every existing operator card and its wiring", () => {
@@ -292,55 +346,124 @@ describe("Reports status breakdown", () => {
 /* ── 6-7. Wallet ───────────────────────────────────────────────────────────── */
 
 describe("Wallet business verification notice", () => {
-  it("is a compact banner, not a floating feature card", () => {
-    expect(verificationPanel).toContain('className={`rounded-lg border px-3 py-2 text-sm')
-    // The card treatment it replaced.
-    expect(verificationPanel).not.toContain("rounded-2xl border border-gray-200 bg-white p-4")
-    expect(verificationPanel).not.toContain("shadow-[0_10px_30px_rgba(15,23,42,0.05)]")
+  it("is a compact horizontal warning, not a floating feature card", () => {
+    expect(verificationWarning).toContain('className="mb-4 flex w-full flex-wrap items-center')
+    expect(verificationWarning).toContain("border-red-200 bg-red-50/70")
+    // The card treatment it replaced is gone.
+    expect(verificationWarning).not.toContain("rounded-2xl border border-gray-200 bg-white p-4")
+    expect(verificationWarning).not.toContain("shadow-[0_10px_30px_rgba(15,23,42,0.05)]")
+    // No hard max-width constraint: it spans the full dashboard content column.
+    expect(verificationWarning).not.toContain("max-w-2xl")
   })
 
   it("renders on one line when there is room and wraps when there is not", () => {
-    expect(verificationPanel).toContain("flex flex-wrap items-center")
-    // Message takes a full row of its own on narrow screens, then shares the
-    // row with the status and action once there is width for it.
-    expect(verificationPanel).toContain("basis-full")
-    expect(verificationPanel).toContain("sm:basis-0")
+    expect(verificationWarning).toContain("flex-wrap")
+    expect(verificationWarning).toContain("items-center")
+    // The message takes the remaining width, so the action stays on the same
+    // line until there is genuinely no room for it.
+    expect(verificationWarning).toContain("flex-1")
   })
 
-  it("uses a red-tinted treatment where the merchant must act", () => {
-    expect(verificationPanel).toContain("not_started")
-    expect(verificationPanel).toContain("action_required")
-    expect(verificationPanel).toContain('container: "border-red-200 bg-red-50/70"')
-    // Work already underway is not an alert.
-    expect(verificationPanel).toContain('container: "border-amber-200 bg-amber-50/70"')
+  it("uses a red-tinted treatment only where the merchant must act", () => {
+    expect(verificationWarning).toContain("border-red-200 bg-red-50/70")
+    // The Engine's `primaryAction` is documented as the single next action a
+    // merchant can take, so `none` is the complete, canonical test for "nothing
+    // is owed" — submitted, processing, under review, verified, and
+    // temporarily unavailable all project to it.
+    expect(verificationWarning).toContain('verification.primaryAction.kind !== "none"')
+    // Work already underway is not an alert, and the warning never restates
+    // the status vocabulary it would then have to keep in sync.
+    expect(verificationWarning).not.toContain("border-amber-200 bg-amber-50")
+    expect(verificationWarning).not.toContain("under_review")
+    expect(verificationWarning).not.toContain("in_progress")
   })
 
-  it("keeps the status, the one primary action, and Check status", () => {
-    expect(verificationPanel).toContain("verification?.statusLabel")
-    expect(verificationPanel).toContain("handlePrimaryAction()")
-    expect(verificationPanel).toContain("Check status")
-    expect(verificationPanel).toContain("handleCheckStatus()")
+  it("shows for every action the merchant owes, including consent", () => {
+    for (const kind of ["complete_profile", "review_and_consent", "continue_verification"]) {
+      expect(verificationWarning, kind).toContain(kind)
+    }
+  })
+
+  it("contains no status pill and no Not-started pill", () => {
+    // Asserted against the code, not the docstring: the comment explaining the
+    // old "Not started" defect must not itself fail the test.
+    const markup = stripComments(verificationWarning)
+    expect(markup).not.toContain("ProviderStatusPill")
+    expect(markup).not.toMatch(/["']Not started["']/)
+    expect(markup).not.toContain("statusLabel")
   })
 
   it("changes no verification logic or status detection", () => {
-    // Same Engine endpoints, same authoritative-refresh-on-return rule.
-    expect(verificationPanel).toContain("/api/onboarding/business-verification")
-    expect(verificationPanel).toContain('callApi("/refresh", "POST")')
-    expect(verificationPanel).toContain('callApi("/continue", "POST")')
-    expect(verificationPanel).toContain("VERIFICATION_RETURN_PARAM")
+    // Same Engine endpoint, read-only.
+    expect(verificationWarning).toContain("/api/onboarding/business-verification")
+    // No provider calls, no refresh, no continue from this operational surface.
+    expect(verificationWarning).not.toContain("/refresh")
+    expect(verificationWarning).not.toContain("/continue")
   })
 
-  it("is the only business-verification surface on normal dashboard pages", () => {
-    // Wallet renders the banner; no dashboard page renders a large panel of its
-    // own. Admin diagnostics stay on their own route.
-    expect(wallet).toContain("<BusinessVerificationPanel />")
+  it("is mounted once in the shared dashboard shell across normal pages", () => {
+    // The shared merchant dashboard layout owns the warning, not individual pages.
+    expect(dashboardLayout).toContain("<BusinessVerificationWarning />")
+    expect(dashboardLayout).toContain("BusinessVerificationWarning")
     for (const page of [
       "app/dashboard/page.tsx",
       "app/dashboard/pos/page.tsx",
       "app/dashboard/providers/page.tsx",
+      "app/dashboard/wallet-setup/page.tsx",
+      "app/dashboard/reports/page.tsx",
     ]) {
-      expect(stripComments(read(page)), page).not.toContain("BusinessVerificationPanel")
+      expect(stripComments(read(page)), page).not.toContain("BusinessVerificationWarning")
     }
+  })
+
+  it("is excluded from the Admin area", () => {
+    expect(dashboardLayout).toContain('pathname.startsWith("/dashboard/admin")')
+    expect(dashboardLayout).toContain("<BusinessVerificationWarning />")
+  })
+
+  it("never fabricates a status when the read fails", () => {
+    // The original defect: the panel fell back to `status ?? "not_started"`, so
+    // a failed fetch rendered a red "complete your business profile" alert to a
+    // merchant whose profile was already complete.
+    expect(verificationWarning).not.toContain('?? "not_started"')
+    expect(verificationWarning).toContain("requiresMerchantAction(verification)")
+    const panel = read("components/dashboard/BusinessVerificationPanel.tsx")
+    expect(panel).not.toContain('?? "not_started"')
+    expect(panel).toContain('"Unavailable"')
+  })
+})
+
+describe("Settings is the verification status home", () => {
+  const settings = read("app/dashboard/settings/page.tsx")
+  const panel = read("components/dashboard/BusinessVerificationPanel.tsx")
+
+  it("mounts the detailed panel in Settings", () => {
+    expect(settings).toContain("<BusinessVerificationPanel />")
+    expect(settings).toContain(
+      'import BusinessVerificationPanel from "@/components/dashboard/BusinessVerificationPanel"'
+    )
+  })
+
+  it("keeps the states the operational warning deliberately hides", () => {
+    // Settings must still show progress the merchant cannot act on.
+    for (const state of ["under_review", "in_progress", "verified"]) {
+      expect(panel, state).toContain(state)
+    }
+    expect(panel).toContain("verification.statusLabel")
+    expect(panel).toContain("ProviderStatusPill")
+  })
+
+  it("keeps the merchant action and the status check", () => {
+    expect(panel).toContain("handlePrimaryAction()")
+    expect(panel).toContain("handleCheckStatus()")
+    expect(panel).toContain('callApi("/refresh", "POST")')
+    expect(panel).toContain('callApi("/continue", "POST")')
+  })
+
+  it("names no infrastructure provider to the merchant", () => {
+    expect(panel.toLowerCase()).not.toContain("bridge")
+    expect(verificationWarning.toLowerCase()).not.toContain("bridge")
+    expect(settings.toLowerCase()).not.toContain("bridge")
   })
 })
 
@@ -421,7 +544,7 @@ describe("shared card system is preserved", () => {
     for (const [name, markup] of [
       ["channel mix", channelMix],
       ["status breakdown", statusBreakdown],
-      ["verification banner", verificationPanel],
+      ["verification warning", verificationWarning],
     ] as const) {
       expect(markup, name).not.toMatch(/\bmin-h-\[|\bh-\[\d/)
     }

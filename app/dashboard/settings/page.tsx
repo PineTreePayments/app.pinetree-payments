@@ -14,6 +14,7 @@ import ToggleSwitch from "@/components/ui/ToggleSwitch"
 import { PrimaryActionButton } from "@/components/ui/PrimaryActionButton"
 import { modalCloseButtonClass } from "@/components/ui/ModalCloseButton"
 import ServiceTermsConsentCard from "@/components/dashboard/ServiceTermsConsentCard"
+import BusinessVerificationPanel from "@/components/dashboard/BusinessVerificationPanel"
 import {
   BUSINESS_PROFILE_COUNTRIES,
   US_STATES
@@ -717,6 +718,14 @@ export default function SettingsPage() {
               </PrimaryActionButton>
             </div>
           </div>
+
+          {/*
+            Settings is the verification STATUS HOME. Operational dashboard
+            pages carry only the compact red warning, and only while the
+            merchant owes an action; every other state - submitted, in
+            progress, under review, verified - is visible here.
+          */}
+          <BusinessVerificationPanel />
 
           {/*
             Final step of PineTree onboarding: review and consent. It renders

@@ -136,20 +136,34 @@ describe("Infrastructure is never merchant-facing", () => {
   })
 
   it("keeps merchant-facing verification UI free of provider naming and extra controls", () => {
-    const panel = read("components/dashboard/BusinessVerificationPanel.tsx")
+    // BOTH merchant verification surfaces: the Settings status panel and the
+    // compact operational warning mounted in the dashboard shell.
+    for (const file of [
+      "components/dashboard/BusinessVerificationPanel.tsx",
+      "components/dashboard/BusinessVerificationWarning.tsx",
+    ]) {
+      const surface = read(file)
+      expect(surface.toLowerCase(), file).not.toContain("bridge by stripe")
+      expect(surface, file).not.toMatch(/Connect Bridge|Enable Bridge|Disable Bridge/i)
+      // Merchant surfaces call PineTree-domain endpoints only.
+      expect(surface, file).toContain("/api/onboarding/business-verification")
+      expect(surface, file).not.toContain("/api/providers/bridge")
+    }
 
-    expect(panel.toLowerCase()).not.toContain("bridge by stripe")
-    expect(panel).not.toMatch(/Connect Bridge|Enable Bridge|Disable Bridge/i)
-    // Merchant surfaces call PineTree-domain endpoints only.
-    expect(panel).toContain("/api/onboarding/business-verification")
-    expect(panel).not.toContain("/api/providers/bridge")
-    // Status text is Engine-authored, never hardcoded provider vocabulary.
-    expect(panel).toContain("verification?.statusLabel")
+    // Status text is Engine-authored on the surface that shows status...
+    expect(read("components/dashboard/BusinessVerificationPanel.tsx")).toContain(
+      "verification.statusLabel"
+    )
+    // ...and the operational warning shows no status at all.
+    expect(read("components/dashboard/BusinessVerificationWarning.tsx")).not.toContain(
+      "statusLabel"
+    )
   })
 
   it("does not import provider internals into browser-facing code", () => {
     for (const file of [
       "components/dashboard/BusinessVerificationPanel.tsx",
+      "components/dashboard/BusinessVerificationWarning.tsx",
       "components/dashboard/ServiceTermsConsentCard.tsx",
       "app/dashboard/providers/page.tsx",
     ]) {
@@ -281,7 +295,9 @@ describe("Unrelated provider behavior is untouched", () => {
   it("keeps the wallet page provisioning flow intact", () => {
     const page = read("app/dashboard/wallet-setup/page.tsx")
 
-    expect(page).toContain("BusinessVerificationPanel")
+    // The old per-page panel is gone; the shared dashboard shell owns the
+    // warning now.
+    expect(page).not.toContain("BusinessVerificationPanel")
     // Automatic Dynamic + Bitcoin provisioning must remain.
     expect(page).toContain("PineTree Wallet")
     expect(page).toContain("BusinessProfileRequirementBanner")
