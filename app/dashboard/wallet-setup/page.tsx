@@ -3430,34 +3430,21 @@ function WalletOverviewSummary({
   const hasSyncedOnce = Boolean(sync?.lastSyncedAt)
   const walletInsights = hasSyncedOnce ? computeWalletInsights(rows, sync) : []
 
-  // The one hero metric for this page, read from the same rail rows the wallet
-  // summary below already renders — no new calculation.
-  const connectedRailCount = rows.filter((row) => row.configured && row.enabled).length
-
   return (
     <div className="space-y-5">
+      {/* Balance, and when it was last read. The connected-network count that
+          used to sit on the right is already spelled out by the rail rows and
+          the Connected Networks chips below, and a second hero figure competed
+          with the balance it sat beside. */}
       <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/70 bg-[radial-gradient(circle_at_90%_8%,rgba(0,82,255,0.20),transparent_34%),linear-gradient(135deg,rgba(239,246,255,0.98),rgba(255,255,255,0.96))] px-5 py-5 shadow-[0_22px_50px_rgba(37,99,235,0.13)] sm:px-6 sm:py-6">
-        <div className="relative flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between sm:gap-8">
-          <div className="min-w-0">
-            <p className={dashboardSectionLabelClass}>TOTAL BALANCE</p>
-            <p className={`mt-2 ${dashboardHeroValueClass}`}>
-              {formatWalletTotalBalance(sync?.totalUsd, syncing)}
-            </p>
-            <p className="mt-3 text-xs leading-5 text-gray-500">
-              {syncing ? "Syncing..." : lastSynced ? `Last synced ${lastSynced}` : "Pending sync"}
-            </p>
-          </div>
-
-          {/* One metric on the right of the card on desktop; stacks below the
-              balance on smaller screens. */}
-          <div className="border-t border-blue-200/80 pt-4 sm:border-t-0 sm:pt-0 sm:text-right">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">
-              Connected Networks
-            </p>
-            <p className={`mt-0.5 ${dashboardHeroValueClass}`}>
-              {connectedRailCount} / {rows.length}
-            </p>
-          </div>
+        <div className="relative min-w-0">
+          <p className={dashboardSectionLabelClass}>TOTAL BALANCE</p>
+          <p className={`mt-2 ${dashboardHeroValueClass}`}>
+            {formatWalletTotalBalance(sync?.totalUsd, syncing)}
+          </p>
+          <p className="mt-3 text-xs leading-5 text-gray-500">
+            {syncing ? "Syncing..." : lastSynced ? `Last synced ${lastSynced}` : "Pending sync"}
+          </p>
         </div>
       </div>
       <SegmentedButtons
@@ -11014,12 +11001,12 @@ function PineTreeWalletRuntime() {
       ) : null}
 
       {/*
-        PineTree business verification and wallet readiness. Compact and
-        PineTree-branded: it never names or exposes the underlying regulated
+        PineTree business verification and wallet readiness. A compact banner,
+        not a feature card: it never names or exposes the underlying regulated
         infrastructure, and it sits above the wallet card without obscuring
         balances, wallet actions, withdrawals, or mobile authorization.
       */}
-      <div className="mb-3">
+      <div className="mb-3 max-w-2xl">
         <BusinessVerificationPanel />
       </div>
       {showWalletSetupCard ? (

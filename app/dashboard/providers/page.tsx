@@ -1031,13 +1031,6 @@ export default function ProvidersPage() {
     )
   }
 
-  const connectedAndEnabledProvidersCount = providers.filter((provider) => {
-    if (provider.provider === "solana") return Boolean(railReadiness?.solana.paymentReady)
-    if (provider.provider === "base") return Boolean(railReadiness?.base.paymentReady)
-    if (provider.provider === "lightning_speed") return Boolean(railReadiness?.bitcoin_lightning.paymentReady)
-    return provider.enabled && getStatus(provider.provider) === "Connected"
-  }).length
-
   return (
     <div className="space-y-5 md:space-y-7">
       <div>
@@ -1050,15 +1043,13 @@ export default function ProvidersPage() {
         </div>
       ) : null}
 
-      {/* Connected Providers sits on the right of the card rather than stacked
-          under the description, so the desktop card is balanced. */}
+      {/* Heading and description only. The connected-provider count was a
+          restatement of the cards immediately below it, and carrying it as a
+          right-side hero metric forced the card taller than its two lines of
+          text need. */}
       <DashboardHeroCard
         eyebrow="PAYMENT INFRASTRUCTURE"
         title="View connected payment providers and manage your payment infrastructure."
-        metric={{
-          label: "Connected Providers",
-          value: connectedAndEnabledProvidersCount
-        }}
       />
 
       <div className="space-y-2">

@@ -15,6 +15,11 @@
  * Status refreshes automatically on mount and on return from the hosted
  * verification step. A single low-emphasis "Check status" affordance exists
  * only while verification is genuinely outstanding.
+ *
+ * PRESENTATION: a compact one-line notice, not a dashboard feature card. It
+ * renders on normal merchant surfaces (Wallet) above balances and withdrawals,
+ * so it stays a banner-height alert that states the status and offers the one
+ * action. Detailed verification diagnostics belong to the admin surface.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -66,6 +71,52 @@ function statusTone(status: VerificationStatus): "default" | "blue" | "amber" {
   if (status === "verified") return "blue"
   if (status === "action_required" || status === "under_review") return "amber"
   return "default"
+}
+
+/**
+ * Banner treatment per status.
+ *
+ * This is a single-line notice, not a dashboard feature card: on Wallet it sits
+ * above balances, withdrawals, and the mobile authorization control, so it must
+ * never grow into a block that pushes them down the page. Red is reserved for
+ * the two states where the merchant genuinely has to act; work already underway
+ * reads amber, and an approved account is a quiet confirmation rather than an
+ * alert.
+ */
+const BANNER_TONE: Record<
+  VerificationStatus,
+  { container: string; accent: string; text: string }
+> = {
+  not_started: {
+    container: "border-red-200 bg-red-50/70",
+    accent: "bg-red-500",
+    text: "text-red-950",
+  },
+  action_required: {
+    container: "border-red-200 bg-red-50/70",
+    accent: "bg-red-500",
+    text: "text-red-950",
+  },
+  in_progress: {
+    container: "border-amber-200 bg-amber-50/70",
+    accent: "bg-amber-500",
+    text: "text-amber-950",
+  },
+  under_review: {
+    container: "border-amber-200 bg-amber-50/70",
+    accent: "bg-amber-500",
+    text: "text-amber-950",
+  },
+  temporarily_unavailable: {
+    container: "border-amber-200 bg-amber-50/70",
+    accent: "bg-amber-500",
+    text: "text-amber-950",
+  },
+  verified: {
+    container: "border-emerald-200 bg-emerald-50/60",
+    accent: "bg-emerald-500",
+    text: "text-emerald-950",
+  },
 }
 
 export default function BusinessVerificationPanel() {
@@ -184,30 +235,57 @@ export default function BusinessVerificationPanel() {
   const showCheckStatus =
     status === "under_review" || status === "in_progress" || status === "action_required"
 
+  const tone = BANNER_TONE[status]
+  const headline = verification?.headline || "Business verification required"
+  const detail = loading
+    ? "Checking your verification status..."
+    : verification?.detail ||
+      "Complete your business profile to activate wallet and settlement capabilities."
+
   return (
     <section
       aria-label="Business verification"
-      className="max-w-2xl rounded-2xl border border-gray-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:p-5"
+      className={`rounded-lg border px-3 py-2 text-sm shadow-none ${tone.container}`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="min-w-0 text-sm font-semibold leading-tight text-gray-950">
-          {verification?.headline || "Business verification"}
-        </h2>
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+        <span className={`h-4 w-1 shrink-0 rounded-full ${tone.accent}`} />
+
+        <p className={`min-w-0 flex-1 basis-full font-semibold leading-5 sm:basis-0 ${tone.text}`}>
+          {headline}
+          <span className="font-normal opacity-90"> — {detail}</span>
+        </p>
+
         <ProviderStatusPill
           label={loading ? "Checking" : verification?.statusLabel || "Not started"}
           tone={statusTone(status)}
           className="shrink-0"
         />
+
+        {showAction ? (
+          <button
+            type="button"
+            onClick={() => void handlePrimaryAction()}
+            disabled={busy}
+            className={`${primaryActionButtonClass} !h-8 !px-3 !text-xs whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60`}
+          >
+            {busy ? "Working..." : action?.label}
+          </button>
+        ) : null}
+
+        {showCheckStatus ? (
+          <button
+            type="button"
+            onClick={() => void handleCheckStatus()}
+            disabled={busy}
+            className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg px-2 text-xs font-semibold text-gray-600 transition hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Check status
+          </button>
+        ) : null}
       </div>
 
-      <p className="mt-2 text-sm leading-5 text-gray-600">
-        {loading
-          ? "Checking your verification status..."
-          : verification?.detail || "Complete your PineTree business profile to activate wallet and settlement capabilities."}
-      </p>
-
       {verification && !verification.profileComplete && verification.missingProfileFields.length > 0 ? (
-        <p className="mt-2 text-xs leading-5 text-gray-500">
+        <p className="mt-1 pl-3.5 text-xs leading-5 text-gray-600">
           Still needed: {verification.missingProfileFields.slice(0, 4).join(", ")}
           {verification.missingProfileFields.length > 4
             ? ` +${verification.missingProfileFields.length - 4} more`
@@ -216,35 +294,9 @@ export default function BusinessVerificationPanel() {
       ) : null}
 
       {errorMessage ? (
-        <p role="alert" className="mt-2 text-xs font-medium text-amber-700">
+        <p role="alert" className="mt-1 pl-3.5 text-xs font-medium text-amber-700">
           {errorMessage}
         </p>
-      ) : null}
-
-      {showAction || showCheckStatus ? (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          {showAction ? (
-            <button
-              type="button"
-              onClick={() => void handlePrimaryAction()}
-              disabled={busy}
-              className={`${primaryActionButtonClass} whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60`}
-            >
-              {busy ? "Working..." : action?.label}
-            </button>
-          ) : null}
-
-          {showCheckStatus ? (
-            <button
-              type="button"
-              onClick={() => void handleCheckStatus()}
-              disabled={busy}
-              className="inline-flex h-9 items-center justify-center rounded-lg px-2 text-xs font-semibold text-gray-600 transition hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Check status
-            </button>
-          ) : null}
-        </div>
       ) : null}
     </section>
   )

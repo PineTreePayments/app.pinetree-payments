@@ -195,17 +195,32 @@ export function InlineMetric({
   value,
   detail,
   className = "",
-  size = "default"
+  size = "default",
+  labelWrap = false
 }: {
   label: string
   value: ReactNode
   detail?: ReactNode
   className?: string
   size?: "default" | "compact" | "reduced"
+  /**
+   * Let a long label wrap onto a second line instead of being cut off.
+   *
+   * The default `truncate` suits short single-word labels, but a compound
+   * status label ("Failed / incomplete") in a narrow reporting column renders
+   * as "Failed / incompl…", which hides which statuses the number covers.
+   * Opt in where the label is genuinely longer than its column.
+   */
+  labelWrap?: boolean
 }) {
   return (
     <div className={cx("min-w-0", className)}>
-      <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">
+      <p
+        className={cx(
+          "text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500",
+          labelWrap ? "break-words" : "truncate"
+        )}
+      >
         {label}
       </p>
       <div
@@ -261,11 +276,20 @@ export function DashboardHeroCard({
   // A hero with either an inline value or a right-side metric splits into
   // left (title + description) and right (the metric) once there is room.
   const split = hasValue || Boolean(metric)
+  // Bottom-align the two columns only when there is an inline hero value for
+  // the right-hand column to line up against (Reports, Inventory). Without one
+  // the left column is just an eyebrow and a line of description, and
+  // bottom-aligning it against a tall metric pushes that text into the middle
+  // of the card — the "floating in a big empty rectangle" look. Top-aligning
+  // instead lets the card size to its content.
+  const splitAlignment = hasValue
+    ? "flex-col sm:flex-row sm:items-end sm:justify-between"
+    : "flex-col sm:flex-row sm:items-start sm:justify-between"
 
   return (
     <div className="relative overflow-hidden rounded-[1.35rem] border border-blue-200/80 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.16),transparent_34%),linear-gradient(135deg,#ffffff_0%,#f7fbff_48%,#eef5ff_100%)] p-4 shadow-[0_18px_60px_rgba(37,99,235,0.13)] sm:p-5 md:p-6">
       <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/80 to-transparent" />
-      <div className={cx("relative flex gap-4", split ? "flex-col sm:flex-row sm:items-end sm:justify-between" : "flex-col")}>
+      <div className={cx("relative flex gap-4", split ? splitAlignment : "flex-col")}>
         <div className="min-w-0">
           <p className={dashboardSectionLabelClass}>
             {eyebrow}

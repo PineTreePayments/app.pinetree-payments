@@ -52,15 +52,22 @@ describe("hero cards share the component, not the metrics", () => {
     expect(primitives).toContain("metric?: DashboardHeroMetric")
     // Splits left/right once there is room; stacks on mobile.
     expect(primitives).toContain("const split = hasValue || Boolean(metric)")
-    expect(primitives).toContain('split ? "flex-col sm:flex-row sm:items-end sm:justify-between" : "flex-col"')
+    expect(primitives).toContain('split ? splitAlignment : "flex-col"')
     expect(primitives).toContain('sm:text-right')
+  })
+
+  it("bottom-aligns the split only when there is a hero value to align against", () => {
+    // With an inline value (Reports, Inventory) the right column lines up with
+    // the big number. Without one, bottom-aligning pushed a two-line heading
+    // into the middle of an otherwise empty card, so those heroes top-align.
+    expect(primitives).toContain('? "flex-col sm:flex-row sm:items-end sm:justify-between"')
+    expect(primitives).toContain(': "flex-col sm:flex-row sm:items-start sm:justify-between"')
+    expect(primitives).toMatch(/const splitAlignment = hasValue/)
   })
 
   it("gives each page the metric that represents that page", () => {
     // Deliberately different per page — only the component is shared.
     expect(help).toContain('label: "Open Tickets"')
-    expect(read("app/dashboard/providers/page.tsx")).toContain('label: "Connected Providers"')
-    expect(wallet).toContain("Connected Networks")
     const admin = read("app/dashboard/admin/page.tsx")
     expect(admin).toContain('label: "Total Payments"')
     expect(admin).toContain('label: "Confirmed Volume"')
@@ -80,13 +87,23 @@ describe("hero cards share the component, not the metrics", () => {
     expect(inventory).not.toContain("metric={")
   })
 
-  it("moves the Providers count out from under the description", () => {
+  it("drops the Providers count from the hero entirely", () => {
     const providers = read("app/dashboard/providers/page.tsx")
-    expect(providers).toContain("metric={{")
-    expect(providers).toContain("value: connectedAndEnabledProvidersCount")
-    // The stacked value/detail pair it replaced is gone.
-    expect(providers).not.toContain("value={connectedAndEnabledProvidersCount}")
+    // The count restated the provider cards directly below it and forced the
+    // hero taller than its two lines of text needed.
+    expect(providers).not.toContain('label: "Connected Providers"')
+    expect(providers).not.toContain("connectedAndEnabledProvidersCount")
+    // Neither the earlier stacked value/detail pair nor the metric slot.
     expect(providers).not.toContain('detail="Connected Providers"')
+    const hero = providers.slice(
+      providers.indexOf('eyebrow="PAYMENT INFRASTRUCTURE"'),
+      providers.indexOf('<div className="space-y-2">')
+    )
+    expect(hero).not.toContain("metric={{")
+    // Heading and description survive.
+    expect(hero).toContain(
+      "View connected payment providers and manage your payment infrastructure."
+    )
   })
 })
 
@@ -157,31 +174,37 @@ describe("Wallet hero card", () => {
     )
   })
 
-  it("carries exactly one metric — Connected Networks — on the right", () => {
+  it("carries the balance alone — no second metric on the right", () => {
     const hero = wallet.slice(
-      wallet.indexOf("const connectedRailCount"),
+      wallet.indexOf("TOTAL BALANCE"),
       wallet.indexOf("ariaLabel=\"Wallet workflows\"")
     )
-    expect(hero).toContain("sm:justify-between")
-    expect(hero).toContain("Connected Networks")
-    expect(hero).toContain("{connectedRailCount} / {rows.length}")
-    // The lower-value metrics from the previous pass are gone.
+    // The connected-network count competed with the balance it sat beside and
+    // is already spelled out by the rail rows further down the page.
+    expect(hero).not.toContain("Connected Networks")
+    expect(hero).not.toContain("connectedRailCount")
+    expect(wallet).not.toContain("const connectedRailCount")
+    // The lower-value metrics from the previous pass are gone too.
     expect(hero).not.toContain("Assets held")
     expect(hero).not.toContain("Needs attention")
     expect(wallet).not.toContain("heldAssetCount")
     expect(wallet).not.toContain("attentionRailCount")
-    // Stacks below the balance on smaller screens.
-    expect(hero).toContain("flex flex-col gap-5 sm:flex-row")
   })
 
-  it("derives the hero metric from the existing rail rows", () => {
-    expect(wallet).toContain("rows.filter((row) => row.configured && row.enabled).length")
-    // Nothing fabricated: no hard-coded metric value.
+  it("keeps the balance and its sync timestamp", () => {
     const hero = wallet.slice(
-      wallet.indexOf("const connectedRailCount"),
+      wallet.indexOf("TOTAL BALANCE"),
       wallet.indexOf("ariaLabel=\"Wallet workflows\"")
     )
-    expect(hero).not.toMatch(/>\s*\d+\s*\/\s*\d+\s*</)
+    expect(hero).toContain("formatWalletTotalBalance(sync?.totalUsd, syncing)")
+    expect(hero).toContain("Last synced")
+  })
+
+  it("keeps the per-network rows and chips below the hero", () => {
+    // Removing the hero count must not remove the actual network detail.
+    expect(wallet).toContain("WALLET SUMMARY")
+    const chips = wallet.slice(wallet.indexOf("function EnabledRailChips("))
+    expect(chips).toContain("Connected Networks")
   })
 
   it("leaves the balance figure itself untouched", () => {

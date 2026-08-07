@@ -105,7 +105,9 @@ describe("mobile dashboard hero cleanup", () => {
       providers.indexOf('<p className={dashboardSectionLabelClass}>Payment Providers</p>')
     )
 
-    expect(hero).toContain("Connected Providers")
+    // Heading and description only — the connected count was removed in the
+    // density pass because it restated the provider cards directly below.
+    expect(hero).not.toContain("Connected Providers")
     expect(hero).not.toContain("Card providers:")
     expect(hero).not.toContain("Crypto rails:")
     expect(hero).not.toContain("border-t border-blue-200")

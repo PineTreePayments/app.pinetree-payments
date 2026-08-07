@@ -420,34 +420,38 @@ export default function TransactionsPage() {
           </div>
         </GroupedMetricSurface>
 
-        <GroupedMetricSurface title="Channel Mix" titleTone="blue" className="lg:col-span-2">
+        {/* Two numbers do not need a tall block. The card is dense, the rows are
+            compact, and the expand control sits beside the metric instead of
+            below it — the old bottom-anchored icon forced 36px of dead padding
+            under every row purely to clear it. Both controls are unchanged. */}
+        <GroupedMetricSurface dense title="Channel Mix" titleTone="blue" className="lg:col-span-2">
           <div className="grid grid-cols-2 divide-x divide-gray-100">
             <div className="relative min-w-0 overflow-hidden rounded-l-xl">
               <button
                 type="button"
                 onClick={() => showChannelTransactions("pos")}
-                className="h-full w-full p-3 pb-9 text-left transition hover:bg-gray-50 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                className="h-full w-full py-2 pl-3 pr-11 text-left transition hover:bg-gray-50 focus:outline-none focus:ring-4 focus:ring-blue-100"
               >
-                <InlineMetric label="POS Transactions" value={posTransactions.toString()} />
+                <InlineMetric size="compact" label="POS Transactions" value={posTransactions.toString()} />
               </button>
               <ExpandIconButton
                 onClick={() => showChannelTransactions("pos")}
                 ariaLabel="Expand POS transactions chart"
-                className="absolute bottom-2 right-2 !h-7 !w-7 [&>svg]:!h-3 [&>svg]:!w-3"
+                className="absolute right-2 top-1/2 -translate-y-1/2 !h-7 !w-7 [&>svg]:!h-3 [&>svg]:!w-3"
               />
             </div>
             <div className="relative min-w-0 overflow-hidden rounded-r-xl">
               <button
                 type="button"
                 onClick={() => showChannelTransactions("online")}
-                className="h-full w-full p-3 pb-9 text-left transition hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                className="h-full w-full py-2 pl-3 pr-11 text-left transition hover:bg-blue-50/70 focus:outline-none focus:ring-4 focus:ring-blue-100"
               >
-                <InlineMetric label="Online Payments" value={onlineTransactions.toString()} />
+                <InlineMetric size="compact" label="Online Payments" value={onlineTransactions.toString()} />
               </button>
               <ExpandIconButton
                 onClick={() => showChannelTransactions("online")}
                 ariaLabel="Expand online payments chart"
-                className="absolute bottom-2 right-2 !h-7 !w-7 [&>svg]:!h-3 [&>svg]:!w-3"
+                className="absolute right-2 top-1/2 -translate-y-1/2 !h-7 !w-7 [&>svg]:!h-3 [&>svg]:!w-3"
               />
             </div>
           </div>

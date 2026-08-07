@@ -13,6 +13,7 @@ import {
   DashboardSection,
   GroupedMetricSurface,
   InlineMetric,
+  MetricGrid,
   PineTreeInsightsCard,
   dashboardPageTitleClass
 } from "@/components/dashboard/DashboardPrimitives"
@@ -20,6 +21,10 @@ import {
   formatDashboardNetwork,
   formatDashboardProvider
 } from "@/components/dashboard/displayHelpers"
+import {
+  getPaymentDisplayStatus,
+  type PaymentStatusTone
+} from "@/lib/utils/paymentStatus"
 
 type ReportPeriod = "end_of_day" | "today" | "weekly" | "month" | "year" | "custom"
 
@@ -135,6 +140,68 @@ function reportInsights(summary: ReportSummary | null) {
       ? `Report totals need review: variance is ${currency(summary.reconciliation.variance)}.`
       : "Provider, rail, and asset totals are aligned for the current report."
   ]
+}
+
+/**
+ * Status accents for the Status Breakdown card.
+ *
+ * The tone is resolved through the shared Engine-owned presentation contract in
+ * `lib/utils/paymentStatus.ts` — the same source every status badge uses — so
+ * Reports cannot drift into a second set of status colors. Each entry mirrors
+ * the color that contract already assigns (Confirmed green, Failed red,
+ * Incomplete amber, Expired muted red/rose, Canceled gray, Waiting blue).
+ */
+const STATUS_ACCENT_CLASS: Record<PaymentStatusTone, string> = {
+  waiting: "bg-blue-500",
+  processing: "bg-blue-700",
+  confirmed: "bg-emerald-500",
+  failed: "bg-red-500",
+  incomplete: "bg-amber-500",
+  expired: "bg-rose-400",
+  canceled: "bg-gray-400",
+  refunded: "bg-orange-500",
+  disputed: "bg-amber-500"
+}
+
+/**
+ * `displayToneForStatus` throws on a label it does not recognize (divergence
+ * D-2 in docs/standards/README.md). A report is a read-only summary, so an
+ * unexpected label degrades to a neutral dot here rather than taking the whole
+ * page down. The count itself is still shown.
+ */
+function statusAccentClass(statusLabel: string) {
+  try {
+    return STATUS_ACCENT_CLASS[getPaymentDisplayStatus(statusLabel).tone]
+  } catch {
+    return "bg-gray-300"
+  }
+}
+
+/**
+ * Lifecycle reading order rather than count order, so the row does not reshuffle
+ * between periods. Every status the Engine reported is kept — anything outside
+ * the canonical list sorts to the end rather than being dropped.
+ */
+const STATUS_DISPLAY_ORDER = [
+  "Confirmed",
+  "Processing",
+  "Waiting",
+  "Incomplete",
+  "Failed",
+  "Expired",
+  "Canceled",
+  "Refunded",
+  "Disputed"
+]
+
+function orderStatusCounts(statusCounts: Record<string, number>) {
+  const rank = (status: string) => {
+    const index = STATUS_DISPLAY_ORDER.indexOf(status)
+    return index === -1 ? STATUS_DISPLAY_ORDER.length : index
+  }
+  return Object.entries(statusCounts).sort(
+    (a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0])
+  )
 }
 
 function toDashboardTransactionRows(rows: LedgerRow[]): DashboardTransactionRow[] {
@@ -358,12 +425,16 @@ export default function ReportsPage() {
     <div className="space-y-5 md:space-y-7">
       <h1 className={dashboardPageTitleClass}>Reports</h1>
 
+      {/* Merchant net is the one figure that belongs beside confirmed gross
+          sales. Platform fees stay in the transaction ledger, the CSV/PDF
+          exports, and the emailed report — this is a presentation change only,
+          and summary.pineTreeFees is still calculated and returned unchanged. */}
       {!loading && summary ? (
         <DashboardHeroCard
           eyebrow={`${PERIODS.find((option) => option.value === period)?.label || "Report"}${summary.isInProgress ? " · In progress" : ""}`}
           title="Confirmed gross sales"
           value={currency(summary.grossVolume)}
-          secondary={<div className="grid min-w-[300px] grid-cols-2 divide-x divide-blue-200/80"><InlineMetric label="Merchant net" value={currency(summary.netSettlements)} className="pr-4" /><InlineMetric label="Platform Fees" value={currency(summary.pineTreeFees)} className="pl-4" /></div>}
+          secondary={<InlineMetric label="Merchant net" value={currency(summary.netSettlements)} className="min-w-[150px]" />}
         />
       ) : null}
 
@@ -406,20 +477,24 @@ export default function ReportsPage() {
 
           <DashboardSection>
             <div className="grid gap-3 lg:grid-cols-2">
+              {/* Four columns only from xl. At lg these surfaces already sit two
+                  to a row, so a four-column inner grid left each column too
+                  narrow for its own label. Labels wrap rather than truncate, so
+                  "Failed / incomplete" always names both statuses it counts. */}
               <GroupedMetricSurface dense titleTone="blue" title="Volume Summary">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 lg:grid-cols-4">
-                  <InlineMetric size="compact" label="Avg. confirmed" value={currency(summary.avgTransaction)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
-                  <InlineMetric size="compact" label="Card" value={currency(summary.cardVolume)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
-                  <InlineMetric size="compact" label="Crypto" value={currency(summary.cryptoVolume)} />
-                  <InlineMetric size="compact" label="Cash" value={currency(summary.cashVolume)} />
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 xl:grid-cols-4">
+                  <InlineMetric labelWrap size="compact" label="Avg. confirmed" value={currency(summary.avgTransaction)} className="border-b border-gray-100 pb-2.5 xl:border-b-0 xl:pb-0" />
+                  <InlineMetric labelWrap size="compact" label="Card" value={currency(summary.cardVolume)} className="border-b border-gray-100 pb-2.5 xl:border-b-0 xl:pb-0" />
+                  <InlineMetric labelWrap size="compact" label="Crypto" value={currency(summary.cryptoVolume)} />
+                  <InlineMetric labelWrap size="compact" label="Cash" value={currency(summary.cashVolume)} />
                 </div>
               </GroupedMetricSurface>
               <GroupedMetricSurface dense titleTone="blue" title="Payment Activity">
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 lg:grid-cols-4">
-                  <InlineMetric size="compact" label="Tax" value={currency(summary.taxesCollected)} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
-                  <InlineMetric size="compact" label="Refunds" value={`${summary.refundedCount} · ${currency(summary.refundedAmount)}`} className="border-b border-gray-100 pb-2.5 lg:border-b-0 lg:pb-0" />
-                  <InlineMetric size="compact" label="Active" value={`${summary.waitingCount} / ${summary.processingCount}`} />
-                  <InlineMetric size="compact" label="Failed / incomplete" value={`${summary.failedCount} / ${summary.incompleteCount}`} />
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 xl:grid-cols-4">
+                  <InlineMetric labelWrap size="compact" label="Tax" value={currency(summary.taxesCollected)} className="border-b border-gray-100 pb-2.5 xl:border-b-0 xl:pb-0" />
+                  <InlineMetric labelWrap size="compact" label="Refunds" value={`${summary.refundedCount} · ${currency(summary.refundedAmount)}`} className="border-b border-gray-100 pb-2.5 xl:border-b-0 xl:pb-0" />
+                  <InlineMetric labelWrap size="compact" label="Active" value={`${summary.waitingCount} / ${summary.processingCount}`} />
+                  <InlineMetric labelWrap size="compact" label="Failed / incomplete" value={`${summary.failedCount} / ${summary.incompleteCount}`} />
                 </div>
               </GroupedMetricSurface>
             </div>
@@ -434,13 +509,20 @@ export default function ReportsPage() {
             </div>
           </DashboardSection>
 
-          <DashboardSection title="Status Breakdown" titleTone="blue">
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-              {Object.entries(summary.statusCounts).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
-                <div key={status} className="rounded-xl border border-gray-200 bg-white px-3.5 py-2.5"><p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">{status}</p><p className="mt-0.5 text-base font-semibold leading-tight text-gray-950 sm:text-lg">{count}</p></div>
+          {/* One card for every status, not one card per status. */}
+          <GroupedMetricSurface title="Status Breakdown" titleTone="blue">
+            <MetricGrid columns="five">
+              {orderStatusCounts(summary.statusCounts).map(([status, count]) => (
+                <div key={status} className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusAccentClass(status)}`} />
+                    <p className="min-w-0 break-words text-[10px] font-semibold uppercase tracking-[0.13em] text-gray-500">{status}</p>
+                  </div>
+                  <p className="mt-1 text-base font-semibold leading-tight text-gray-950 sm:text-lg">{count}</p>
+                </div>
               ))}
-            </div>
-          </DashboardSection>
+            </MetricGrid>
+          </GroupedMetricSurface>
 
           <PineTreeInsightsCard title="PINETREE INSIGHTS" insights={insights} />
 
