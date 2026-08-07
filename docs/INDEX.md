@@ -8,8 +8,8 @@ implement from it.
 
 | Document | Authority | Purpose | Read it when |
 |---|---|---|---|
-| [`../AGENTS.md`](../AGENTS.md) | Contract | Boundaries, invariants, scope rules for humans and agents | Before any engineering work |
-| [`../CLAUDE.md`](../CLAUDE.md) | Pointer | Points Claude Code at `AGENTS.md` | Never directly — it only redirects |
+| [`../AGENTS.md`](../AGENTS.md) | Contract | **The single coding-agent entry point.** The operating contract: run the preflight, read what it routes, scope rules, stop-and-report. Routes to the invariants rather than restating them | Before any engineering work |
+| [`../CLAUDE.md`](../CLAUDE.md) | Pointer | Points Claude Code at `AGENTS.md`. Carries no rules of its own | Never directly — it only redirects |
 | [`standards/README.md`](./standards/README.md) | Canonical | Authority order + the open divergence register | Before resolving any code/doc disagreement |
 | [`../.ai/README.md`](../.ai/README.md) | Tooling | How task routing resolves documents | When adding or debugging a route |
 

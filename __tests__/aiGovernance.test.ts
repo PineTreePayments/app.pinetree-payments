@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join, posix } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 
@@ -68,7 +68,7 @@ const taskMap = JSON.parse(read(".ai/task-map.json")) as {
   globalRequired: string[]
   workflows: Record<string, string>
   paths: Array<{ glob: string; documents?: string[]; optional?: string[]; domains?: string[] }>
-  domains: Record<string, { documents?: string[]; optional?: string[]; keywords?: string[] }>
+  domains: Record<string, { documents?: string[]; optional?: string[]; keywords?: string[]; note?: string }>
   exclusions: { never: string[]; neverGlobs: string[] }
 }
 
@@ -380,6 +380,28 @@ describe("AI governance: documentation-governance routing", () => {
     }
   })
 
+  it("does not drag an unrelated standard into a documentation task", () => {
+    // A bare "index" keyword on database-security used to match "documentation
+    // index" and pull Standard 04 plus the route-auth matrix into pure
+    // documentation work. Keywords that read as English words elsewhere must be
+    // phrase-scoped, the same discipline documentation-governance already applies.
+    const result = preflight("Rework the documentation index and task routing", [
+      "docs/INDEX.md",
+      ".ai/task-map.json",
+    ])
+    expect(result.domains).toEqual(["documentation-governance"])
+    expect(result.required).not.toContain(STANDARDS.database)
+    expect([...result.required, ...result.optional]).not.toContain("docs/security/route-auth-matrix.md")
+  })
+
+  it("still routes real database-index work to the database standard", () => {
+    for (const task of ["Add a database index to payments", "Review indexing strategy for merchants"]) {
+      const result = preflight(task)
+      expect(result.domains, task).toContain("database-security")
+      expect(result.required, task).toContain(STANDARDS.database)
+    }
+  })
+
   it("resolves documentation-governance from a documentation keyword with no path", () => {
     const result = preflight("Rework the documentation index and task routing")
     expect(result.domains).toContain("documentation-governance")
@@ -474,14 +496,277 @@ describe("AI governance: docs/INDEX.md is a complete, resolving map", () => {
   })
 })
 
-describe("AI governance: root contract", () => {
-  it("keeps CLAUDE.md as a small pointer to AGENTS.md", () => {
-    const claude = read("CLAUDE.md")
-    expect(claude).toContain("AGENTS.md")
-    // A pointer, not a second copy of the contract.
-    expect(claude.length).toBeLessThan(2000)
+/**
+ * One entry authority.
+ *
+ * Every coding agent must enter through AGENTS.md. Tool-specific discovery files
+ * may exist only as tiny pointers to it. The failure mode these tests guard is
+ * silent: a file that some tool auto-loads becomes a parallel instruction system
+ * without anyone deciding it should. Mirrors section 2 of
+ * scripts/ai-governance-check.mjs — the script is the enforcement, these are the
+ * readable statement of the invariant.
+ */
+const CANONICAL_ENTRY = "AGENTS.md"
+
+/** Discovery files agent tools auto-load. Presence is what matters, not the tool. */
+const AGENT_DISCOVERY_FILES = [
+  "AGENTS.md",
+  "AGENT.md",
+  "CLAUDE.md",
+  "GEMINI.md",
+  "CODEX.md",
+  "COPILOT.md",
+  ".cursorrules",
+  ".windsurfrules",
+  ".clinerules",
+  ".roorules",
+  ".github/copilot-instructions.md",
+  ".gemini/GEMINI.md",
+  ".codex/instructions.md",
+] as const
+
+/** Directories some tools load wholesale as agent rules. */
+const AGENT_RULE_DIRECTORIES = [
+  ".agents",
+  ".cursor/rules",
+  ".clinerules",
+  ".roo/rules",
+  ".github/instructions",
+] as const
+
+const APPROVED_POINTERS = ["CLAUDE.md"] as const
+const POINTER_MAX_BYTES = 1200
+
+describe("AI governance: one agent entry authority", () => {
+  it("keeps AGENTS.md as the canonical entry point", () => {
+    expect(existsSync(join(root, CANONICAL_ENTRY))).toBe(true)
+    const agents = read(CANONICAL_ENTRY)
+    expect(agents).toMatch(/single entry point/i)
+    expect(agents).toContain("ai:preflight")
   })
 
+  it("has no agent discovery file other than the entry and approved pointers", () => {
+    const rogue = AGENT_DISCOVERY_FILES.filter(
+      (file) =>
+        file !== CANONICAL_ENTRY &&
+        !(APPROVED_POINTERS as readonly string[]).includes(file) &&
+        existsSync(join(root, file))
+    )
+    expect(rogue, "a tool-specific instruction file must be a pointer or deleted").toEqual([])
+  })
+
+  it("keeps every agent rule directory absent or empty", () => {
+    const populated = AGENT_RULE_DIRECTORIES.filter((dir) => {
+      const target = join(root, dir)
+      if (!existsSync(target)) return false
+      if (!statSync(target).isDirectory()) return false
+      return readdirSync(target).length > 0
+    })
+    expect(populated, "agent rules must live in AGENTS.md, not a rules directory").toEqual([])
+  })
+
+  it("keeps every approved pointer a small pointer to AGENTS.md", () => {
+    for (const pointer of APPROVED_POINTERS) {
+      expect(existsSync(join(root, pointer)), `${pointer} must exist`).toBe(true)
+      const text = read(pointer)
+      expect(text, `${pointer} must reference ${CANONICAL_ENTRY}`).toContain(CANONICAL_ENTRY)
+      expect(text.length, `${pointer} must stay a pointer`).toBeLessThanOrEqual(POINTER_MAX_BYTES)
+    }
+  })
+
+  it("keeps substantive PineTree policy out of every pointer", () => {
+    // Specific markers of duplicated authority. A pointer legitimately names
+    // "architecture" and "workflow" in the negative, so those words alone are not
+    // the signal — provider names, money rules, and security mechanics are.
+    const forbidden: Array<[RegExp, string]> = [
+      [/docs\/standards\//, "routes to the standards"],
+      [/\bledger\b/i, "ledger rule"],
+      [/platform fee/i, "fee policy"],
+      [/\$0\.15/, "fee amount"],
+      [/idempoten/i, "idempotency rule"],
+      [/\bRLS\b|row.level security/i, "tenancy rule"],
+      [/\bHMAC\b|merchant_id/, "security mechanic"],
+      [/\bmigration/i, "migration rule"],
+      [/\bwebhook/i, "webhook rule"],
+      [/append-only|state machine|Provider Adapter/i, "architecture rule"],
+      [/\bStripe\b|\bShift4\b|\bFluidPay\b|\bShopify\b|\bWooCommerce\b/i, "provider rule"],
+      [/\bSolana\b|\bBase Pay\b|\bLightning\b|\bTrySpeed\b/i, "rail rule"],
+    ]
+    for (const pointer of APPROVED_POINTERS) {
+      const text = read(pointer)
+      for (const [pattern, label] of forbidden) {
+        expect(pattern.test(text), `${pointer} must not carry a ${label}`).toBe(false)
+      }
+    }
+  })
+
+  it("never routes a pointer as a document", () => {
+    // Routing *on* CLAUDE.md is correct — editing it should route Standard 06.
+    // Routing *to* it would put a tool-specific file back into the authority chain.
+    const routed: string[] = [...taskMap.globalRequired, ...Object.values(taskMap.workflows)]
+    for (const entry of taskMap.paths) {
+      routed.push(...(entry.documents ?? []), ...(entry.optional ?? []))
+    }
+    for (const domain of Object.values(taskMap.domains)) {
+      routed.push(...(domain.documents ?? []), ...(domain.optional ?? []))
+    }
+    expect(routed.filter((doc) => (APPROVED_POINTERS as readonly string[]).includes(doc))).toEqual([])
+
+    // But the pointer must still be a routing *key*, so editing it is governed.
+    expect(taskMap.paths.map((p) => p.glob)).toContain("CLAUDE.md")
+  })
+
+  it("never presents a pointer as technical authority in an indexed document", () => {
+    const offenders: string[] = []
+    for (const doc of ["docs/INDEX.md", "README.md", CANONICAL_ENTRY, ...markdownUnder("docs"), ...markdownUnder(".ai")]) {
+      if (!existsSync(join(root, doc))) continue
+      for (const line of read(doc).split("\n")) {
+        if (!APPROVED_POINTERS.some((p) => line.includes(p))) continue
+        if (!/\]\(/.test(line)) continue
+        if (!/pointer/i.test(line)) offenders.push(`${doc}: unlabelled pointer link`)
+        if (/\bcanonical\b|\bLevel \d|source of truth/i.test(line)) {
+          offenders.push(`${doc}: pointer presented as authority`)
+        }
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it("keeps the pointer listed in docs/INDEX.md as a pointer", () => {
+    // Listed, because an unindexed root file is unreachable and suspicious — but
+    // labelled so no reader mistakes it for a source.
+    const row = read("docs/INDEX.md")
+      .split("\n")
+      .find((line) => line.includes("CLAUDE.md") && line.startsWith("|"))
+    expect(row).toBeDefined()
+    expect(row).toMatch(/Pointer/)
+  })
+
+  it("does not duplicate Standard 01 invariant text in AGENTS.md", () => {
+    // AGENTS.md routes to authority; it must not restate the invariants, because
+    // two copies of an invariant is how they drift.
+    const agents = read(CANONICAL_ENTRY)
+    const standard01 = read(STANDARDS.platform)
+    // Sentences lifted verbatim from Standard 01 §2/§3 that used to live in AGENTS.md.
+    for (const invariant of [
+      "Provider secrets, finality decisions, fee posting, canonical transitions",
+      "The payments table is a payment-intent and status record",
+      "The standard Platform Fee is $0.15 per transaction",
+    ]) {
+      expect(standard01, `fixture drifted: ${invariant}`).toContain(invariant)
+      expect(agents, `AGENTS.md must not restate: ${invariant}`).not.toContain(invariant)
+    }
+    // It must point at the standard instead.
+    expect(agents).toContain("docs/standards/01-platform-architecture.md")
+  })
+})
+
+/**
+ * Rail invariants must be single-sourced, not weakened.
+ *
+ * The worked example: an ERC-20/USDC approval authorizes spending only, is not
+ * payment finality, and its hash must never populate the canonical payment hash.
+ * That is a payment-finality rule, so Standard 02 §2 is its canonical home — and it
+ * has lived there since commit d41682f, before the entry-point consolidation.
+ *
+ * These tests exist because de-duplicating an entry point can silently delete an
+ * invariant rather than relocate it, and because keyword routing alone would leave
+ * it unsurfaced for a task whose wording never mentions the rail.
+ */
+describe("AI governance: the approval-versus-payment-hash invariant", () => {
+  const CANONICAL = STANDARDS.lifecycle
+  const CANONICAL_TEXT =
+    "A Base USDC approval transaction is not the payment transaction and must never be stored as the successful payment hash."
+
+  it("keeps the canonical invariant in Standard 02", () => {
+    // (1) Removing this sentence must fail the suite — that is the whole point.
+    expect(read(CANONICAL)).toContain(CANONICAL_TEXT)
+    // The supporting rule that approval is not confirmation sits alongside it.
+    expect(read(CANONICAL)).toMatch(/ERC-20 approval[^.\n]*are not payment confirmation/)
+  })
+
+  it("routes Standard 02 for a Base task identified by keyword", () => {
+    // (2a) keyword routing
+    for (const task of [
+      "Fix Base USDC payment confirmation",
+      "Adjust the WalletConnect split contract call",
+      "Update ETH payment status",
+    ]) {
+      const result = preflight(task)
+      expect(result.domains, task).toContain("base")
+      expect(result.required, task).toContain(CANONICAL)
+    }
+  })
+
+  it("routes Standard 02 for a Base path even when the task text never says Base", () => {
+    // (2b) path routing — the gap this pass closed. "Fix the approval receipt
+    // helper" names no rail, and previously resolved only the reporting domain.
+    for (const [task, path] of [
+      ["Fix the approval receipt helper", "lib/basePay/approvalReceipt.ts"],
+      ["Tidy the strategy orchestrator", "lib/basePay/strategyOrchestrator.ts"],
+      ["Update the adapter's transfer verification", "providers/basePay.ts"],
+      ["Refactor the adapter class", "providers/BaseAdapter.ts"],
+    ] as const) {
+      const result = preflight(task, [path])
+      expect(result.domains, `${task} @ ${path}`).toContain("base")
+      expect(result.required, `${task} @ ${path}`).toContain(CANONICAL)
+      expect(result.ambiguous, `${task} @ ${path}`).toBe(false)
+      expect(result.missing).toEqual([])
+    }
+  })
+
+  it("does not duplicate the invariant in AGENTS.md or any pointer", () => {
+    // (3) AGENTS.md routes to the standard instead of restating the rule.
+    const restatement =
+      /approval\s+(?:tx|transaction|hash|receipt)[^.\n]{0,80}(?:never|not)[^.\n]{0,80}payment\s+hash|approval\s+hash[^.\n]{0,40}(?:never|not)[^.\n]{0,40}payment/i
+    for (const file of ["AGENTS.md", "CLAUDE.md", "README.md", ".ai/README.md"]) {
+      expect(restatement.test(read(file)), `${file} must not restate the invariant`).toBe(false)
+    }
+  })
+
+  it("keeps Standard 06 a governance gate, not a second technical authority", () => {
+    // (4) Standard 06 §3 lists this as an acceptance-validation item, which is a
+    // governance purpose and is allowed. What must not happen is Standard 06
+    // stating it as standalone normative provider guidance outside that gate list.
+    const standard06 = read(STANDARDS.governance)
+    const mentions = standard06
+      .split("\n")
+      .map((line, i) => [i, line] as const)
+      .filter(([, line]) => /approval hash/i.test(line))
+
+    expect(mentions.length, "Standard 06 should mention it once, as a gate").toBe(1)
+
+    const [lineNo] = mentions[0]
+    const acceptanceStart = standard06.split("\n").findIndex((l) => /^# 3\. Immediate acceptance priorities/.test(l))
+    const acceptanceEnd = standard06.split("\n").findIndex((l) => /^# 4\. Standard definition of done/.test(l))
+    expect(acceptanceStart).toBeGreaterThan(-1)
+    expect(lineNo, "the mention must sit inside the acceptance-priorities gate list").toBeGreaterThan(acceptanceStart)
+    expect(lineNo).toBeLessThan(acceptanceEnd)
+
+    // And it must read as validation, not as the rule's definition.
+    expect(standard06.split("\n")[lineNo]).toMatch(/^- Validate/)
+  })
+
+  it("keeps the router pointing at the standard rather than restating the rule", () => {
+    // (5) A task-map note is level-6 data, never authority. It may name the topic
+    // and cite the standard; it must not be where an agent learns the rule.
+    const note = taskMap.domains["base"].note ?? ""
+    expect(note).toMatch(/Standard 02/)
+    expect(taskMap.domains["base"].documents).toContain(CANONICAL)
+    // Every rail source path must reach the canonical standard.
+    const railPaths = taskMap.paths.filter((p) => /basePay|BaseAdapter/i.test(p.glob))
+    expect(railPaths.length).toBeGreaterThan(0)
+    for (const entry of railPaths) {
+      const viaDomain = (entry.domains ?? []).some((k) =>
+        (taskMap.domains[k]?.documents ?? []).includes(CANONICAL)
+      )
+      const viaDocs = (entry.documents ?? []).includes(CANONICAL)
+      expect(viaDomain || viaDocs, `${entry.glob} must reach Standard 02`).toBe(true)
+    }
+  })
+})
+
+describe("AI governance: root contract", () => {
   it("requires the preflight from AGENTS.md", () => {
     const agents = read("AGENTS.md")
     expect(agents).toContain("ai:preflight")

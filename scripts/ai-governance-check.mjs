@@ -70,22 +70,129 @@ const read = (p) => readFileSync(abs(p), "utf8")
 if (!exists("AGENTS.md")) fail("AGENTS.md exists", "AGENTS.md not found at repository root")
 else pass("AGENTS.md exists")
 
-// ─── 2. CLAUDE.md points to AGENTS.md ─────────────────────────────────────────
+// ─── 2. One entry authority, plus approved compatibility pointers ─────────────
+//
+// Every coding agent must enter through AGENTS.md. Tool-specific discovery files
+// may exist only as tiny pointers back to it. These checks exist because the
+// failure mode is silent: a second file that a tool auto-loads becomes a parallel
+// instruction system without anyone deciding that it should.
 
-if (!exists("CLAUDE.md")) {
-  fail("CLAUDE.md points to AGENTS.md", "CLAUDE.md not found")
-} else {
-  const claude = read("CLAUDE.md")
-  if (!/AGENTS\.md/.test(claude)) {
-    fail("CLAUDE.md points to AGENTS.md", "CLAUDE.md does not reference AGENTS.md")
-  } else if (claude.length > 2000) {
-    fail(
-      "CLAUDE.md points to AGENTS.md",
-      `CLAUDE.md is ${claude.length} bytes — it should be a small pointer, not a duplicate of the contract`
-    )
-  } else {
-    pass("CLAUDE.md points to AGENTS.md")
+/** The one substantive entry point. */
+const CANONICAL_ENTRY = "AGENTS.md"
+
+/** Discovery files agent tools auto-load. Presence is what matters, not the tool. */
+const AGENT_DISCOVERY_FILES = [
+  "AGENTS.md",
+  "AGENT.md",
+  "CLAUDE.md",
+  "GEMINI.md",
+  "CODEX.md",
+  "COPILOT.md",
+  ".cursorrules",
+  ".windsurfrules",
+  ".clinerules",
+  ".roorules",
+  ".github/copilot-instructions.md",
+  ".gemini/GEMINI.md",
+  ".codex/instructions.md"
+]
+
+/** Directories some tools load wholesale as agent rules. */
+const AGENT_RULE_DIRECTORIES = [
+  ".agents",
+  ".cursor/rules",
+  ".clinerules",
+  ".roo/rules",
+  ".github/instructions"
+]
+
+/** Tool-specific files allowed to exist, as pointers only. */
+const APPROVED_POINTERS = ["CLAUDE.md"]
+
+/**
+ * A pointer must stay small enough that it cannot quietly become a manual. The
+ * approved text is a few hundred bytes; this leaves room for one compatibility
+ * directive and nothing like a second contract.
+ */
+const POINTER_MAX_BYTES = 1200
+
+/**
+ * Substantive PineTree policy must never appear in a pointer. These are markers of
+ * duplicated engineering authority — provider names, money rules, security
+ * mechanics, routing to the standards. A pointer legitimately *names* architecture
+ * and workflow in the negative ("this file is not a source of…"), so matching on
+ * those words alone would be wrong; these markers are specific instead.
+ */
+const POINTER_FORBIDDEN = [
+  [/docs\/standards\//, "routes to the standards"],
+  [/\bledger\b/i, "ledger rule"],
+  [/platform fee/i, "fee policy"],
+  [/\$0\.15/, "fee amount"],
+  [/idempoten/i, "idempotency rule"],
+  [/\bRLS\b|row.level security/i, "tenancy rule"],
+  [/\bHMAC\b|merchant_id/, "security mechanic"],
+  [/\bmigration/i, "migration rule"],
+  [/\bwebhook/i, "webhook rule"],
+  [/append-only|state machine|Provider Adapter/i, "architecture rule"],
+  [/\bStripe\b|\bShift4\b|\bFluidPay\b|\bShopify\b|\bWooCommerce\b/i, "provider rule"],
+  [/\bSolana\b|\bBase Pay\b|\bLightning\b|\bTrySpeed\b/i, "rail rule"]
+]
+
+{
+  const problems = []
+
+  if (!exists(CANONICAL_ENTRY)) {
+    problems.push(`${CANONICAL_ENTRY} is missing — there is no entry authority`)
   }
+
+  // 2a. No discovery file may exist that is neither the entry nor an approved pointer.
+  for (const file of AGENT_DISCOVERY_FILES) {
+    if (file === CANONICAL_ENTRY || APPROVED_POINTERS.includes(file)) continue
+    if (exists(file)) {
+      problems.push(
+        `${file} exists — a tool-specific instruction file that is not an approved pointer. ` +
+          `Reduce it to a pointer to ${CANONICAL_ENTRY} and add it to APPROVED_POINTERS, or delete it.`
+      )
+    }
+  }
+
+  // 2b. Rule directories must be absent or empty — a directory of rules is a
+  //     second instruction system by another name.
+  for (const dir of AGENT_RULE_DIRECTORIES) {
+    if (!exists(dir)) continue
+    const target = abs(dir)
+    if (!statSync(target).isDirectory()) continue
+    const contents = readdirSync(target)
+    if (contents.length) {
+      problems.push(`${dir}/ contains ${contents.length} entr${contents.length === 1 ? "y" : "ies"} — agent rules must live in ${CANONICAL_ENTRY}`)
+    }
+  }
+
+  // 2c. Each approved pointer must be present, point home, stay small, and carry
+  //     no PineTree policy of its own.
+  for (const pointer of APPROVED_POINTERS) {
+    if (!exists(pointer)) {
+      problems.push(`${pointer} is an approved pointer but does not exist`)
+      continue
+    }
+    const text = read(pointer)
+    if (!new RegExp(CANONICAL_ENTRY.replace(".", "\\.")).test(text)) {
+      problems.push(`${pointer} does not reference ${CANONICAL_ENTRY}`)
+    }
+    if (text.length > POINTER_MAX_BYTES) {
+      problems.push(
+        `${pointer} is ${text.length} bytes (max ${POINTER_MAX_BYTES}) — a pointer, not a duplicate of the contract`
+      )
+    }
+    for (const [pattern, label] of POINTER_FORBIDDEN) {
+      if (pattern.test(text)) {
+        problems.push(`${pointer} contains a ${label} — substantive policy belongs in the standards, not a pointer`)
+      }
+    }
+  }
+
+  if (problems.length) for (const p of problems) fail("single agent entry authority", p)
+  else pass(`single agent entry authority (${CANONICAL_ENTRY} + ${APPROVED_POINTERS.length} pointer)`)
 }
 
 // ─── 3. Six standards exist with authority metadata ───────────────────────────
@@ -271,6 +378,116 @@ if (map) {
   if (["implement", "debug", "review", "refactor"].every((n) => map.workflows?.[n] && exists(map.workflows[n]))) {
     pass("workflow documents mapped")
   }
+
+  // 5f. The router must never route a compatibility pointer as a document.
+  //
+  // A pointer is a place a tool looks, not a document an agent reads for authority.
+  // Routing one would put a tool-specific file back into the authority chain. Note
+  // this is about routing *to* a pointer: a paths[] glob keyed *on* CLAUDE.md is
+  // correct and stays, because editing the pointer should route Standard 06.
+  {
+    const offenders = [...routed]
+      .filter(([doc]) => APPROVED_POINTERS.includes(doc))
+      .map(([doc, where]) => `${doc} is routed as a document (from ${[...where].join(", ")})`)
+    if (offenders.length) for (const o of offenders) fail("no pointer routed as authority", o)
+    else pass("no pointer routed as authority")
+  }
+
+  // 5g. No routed document may present a pointer as technical authority.
+  //
+  // docs/INDEX.md must list CLAUDE.md — an unlisted file is unreachable and
+  // suspicious — but it must be labelled a pointer, never canonical or levelled.
+  {
+    const offenders = []
+    for (const doc of [...routed.keys(), "docs/INDEX.md"]) {
+      if (!doc.endsWith(".md") || !exists(doc)) continue
+      for (const line of read(doc).split("\n")) {
+        if (!APPROVED_POINTERS.some((p) => line.includes(p))) continue
+        if (!/\]\(/.test(line)) continue // prose mention, not a link
+        if (!/pointer/i.test(line)) {
+          offenders.push(`${doc} links a pointer without labelling it a pointer: ${line.trim().slice(0, 90)}`)
+        }
+        if (/\bcanonical\b|\bLevel \d|source of truth/i.test(line)) {
+          offenders.push(`${doc} presents a pointer as authority: ${line.trim().slice(0, 90)}`)
+        }
+      }
+    }
+    if (offenders.length) for (const o of offenders) fail("pointers are never technical authority", o)
+    else pass("pointers are never technical authority")
+  }
+}
+
+// ─── 5h. Rail invariants stay single-sourced in their canonical standard ──────
+//
+// The approval-versus-payment-hash rule is the worked example: an ERC-20/USDC
+// approval authorizes spending only and is not payment finality, so an approval
+// hash must never populate the canonical payment hash. That is a payment-finality
+// rule, so its canonical home is Standard 02 §2 — not AGENTS.md, not a router note.
+//
+// This check exists because de-duplicating an entry point can silently *delete* an
+// invariant instead of relocating it, and because keyword routing alone would leave
+// it unsurfaced for a task whose wording never says "Base". It asserts three things
+// together: the canonical sentence is present, no entry-point or governance file
+// has grown a second copy, and both keyword and path routing reach the standard.
+
+const RAIL_INVARIANTS = [
+  {
+    label: "approval transaction is never the canonical payment hash",
+    canonical: "docs/standards/02-lifecycle-and-merchant-status.md",
+    /** The normative sentence. Deleting it must fail this check. */
+    canonicalText:
+      /approval transaction is not the payment transaction and must never be stored as the successful payment hash/i,
+    /** Entry points and governance files that must not restate it as their own rule. */
+    mustNotRestate: ["AGENTS.md", "CLAUDE.md", "README.md", ".ai/README.md"],
+    restatement:
+      /approval\s+(?:tx|transaction|hash|receipt)[^.\n]{0,80}(?:never|not)[^.\n]{0,80}payment\s+hash|approval\s+hash[^.\n]{0,40}(?:never|not)[^.\n]{0,40}payment/i,
+    /** Domains that must route the canonical standard. */
+    routedByDomains: ["base"],
+    /** Path globs covering the rail's source, which must also reach it. */
+    railPathPattern: /basePay|BaseAdapter/i
+  }
+]
+
+for (const inv of RAIL_INVARIANTS) {
+  const problems = []
+
+  if (!exists(inv.canonical)) {
+    problems.push(`canonical home ${inv.canonical} is missing`)
+  } else if (!inv.canonicalText.test(read(inv.canonical))) {
+    problems.push(
+      `${inv.canonical} no longer states the invariant — amend it through Standard 06 change control, never drop it`
+    )
+  }
+
+  for (const file of inv.mustNotRestate) {
+    if (!exists(file)) continue
+    if (inv.restatement.test(read(file))) {
+      problems.push(`${file} restates the invariant — it belongs only in ${inv.canonical}`)
+    }
+  }
+
+  if (map) {
+    const routesCanonical = (key) => (map.domains?.[key]?.documents ?? []).includes(inv.canonical)
+
+    for (const key of inv.routedByDomains) {
+      if (!routesCanonical(key)) {
+        problems.push(`domain "${key}" does not route ${inv.canonical}, so the invariant would not be surfaced`)
+      }
+    }
+
+    const railPaths = (map.paths ?? []).filter((e) => inv.railPathPattern.test(e.glob))
+    if (!railPaths.length) {
+      problems.push("no rail source path entry exists — path-based routing cannot surface the invariant")
+    }
+    for (const entry of railPaths) {
+      const viaDomain = (entry.domains ?? []).some(routesCanonical)
+      const viaDocs = (entry.documents ?? []).includes(inv.canonical)
+      if (!viaDomain && !viaDocs) problems.push(`path "${entry.glob}" does not reach ${inv.canonical}`)
+    }
+  }
+
+  if (problems.length) for (const p of problems) fail(`rail invariant single-sourced: ${inv.label}`, p)
+  else pass(`rail invariant single-sourced: ${inv.label}`)
 }
 
 // ─── 6. The legacy skills directory stays deleted ─────────────────────────────

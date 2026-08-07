@@ -78,4 +78,4 @@ npm test
 ```
 
 Report pre-existing failures as pre-existing. Then disclose the governance files
-you loaded, as required by `AGENTS.md` §7.
+you loaded, as required by `AGENTS.md` §9.

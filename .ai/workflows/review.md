@@ -67,4 +67,4 @@ Separate:
   to avoid re-reporting a known one.
 - **Preferences**, clearly labelled as such.
 
-Then disclose the governance files you loaded, as required by `AGENTS.md` §7.
+Then disclose the governance files you loaded, as required by `AGENTS.md` §9.

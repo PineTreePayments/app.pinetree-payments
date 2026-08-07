@@ -132,6 +132,21 @@
       "documents": ["docs/standards/02-lifecycle-and-merchant-status.md"]
     },
     {
+      "glob": "lib/basePay/**",
+      "domains": ["base", "lifecycle"],
+      "note": "Base rail helpers. The approval-versus-payment-hash invariant is normative in Standard 02 §2, which this path routes — it is not restated here."
+    },
+    {
+      "glob": "providers/basePay.ts",
+      "domains": ["base"],
+      "note": "Base adapter. Canonical confirmation rules, including approval-versus-payment-hash, are normative in Standard 02 §2, which this path routes."
+    },
+    {
+      "glob": "providers/BaseAdapter.ts",
+      "domains": ["base"],
+      "note": "Base adapter. Canonical confirmation rules, including approval-versus-payment-hash, are normative in Standard 02 §2, which this path routes."
+    },
+    {
       "glob": "__tests__/**",
       "domains": [],
       "documents": ["docs/standards/06-roadmap-documentation-governance.md"],
@@ -230,9 +245,10 @@
     },
     "database-security": {
       "label": "Database, identity, security",
-      "keywords": ["database", "schema", "migration", "rls", "row level security", "tenancy", "merchant_id", "auth", "authorization", "api key", "secret", "audit", "index", "supabase"],
+      "keywords": ["database", "schema", "migration", "rls", "row level security", "tenancy", "merchant_id", "auth", "authorization", "api key", "secret", "audit", "database index", "indexing", "supabase"],
       "documents": ["docs/standards/04-database-identity-security.md"],
-      "optional": ["docs/security/route-auth-matrix.md"]
+      "optional": ["docs/security/route-auth-matrix.md"],
+      "note": "Keywords are phrase-scoped where a bare word would over-route: a bare 'index' pulled this domain into 'documentation index' tasks, so it is 'database index' / 'indexing'."
     },
     "providers": {
       "label": "Provider connectors",
@@ -308,7 +324,7 @@
       "label": "Base (ETH / USDC)",
       "keywords": ["base", "base pay", "usdc", "eth", "erc-20", "erc20", "walletconnect", "eip-3009", "split contract"],
       "documents": ["docs/standards/05-provider-connectors-events.md", "docs/standards/02-lifecycle-and-merchant-status.md"],
-      "note": "An approval hash is never the payment hash."
+      "note": "Base confirmation, and the rule that an approval transaction is never the canonical payment transaction, are normative in Standard 02 §2 — routed by this domain and by every Base rail path. Read it there; do not re-derive it."
     },
     "solana": {
       "label": "Solana (SOL / USDC)",

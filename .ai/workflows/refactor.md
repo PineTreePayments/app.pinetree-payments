@@ -83,4 +83,4 @@ npm test
 ```
 
 State explicitly that no observable behavior changed, and name what you verified
-that against. Then disclose the governance files you loaded, per `AGENTS.md` §7.
+that against. Then disclose the governance files you loaded, per `AGENTS.md` §9.

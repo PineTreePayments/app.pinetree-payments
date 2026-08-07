@@ -1,14 +1,10 @@
-# CLAUDE.md
+# Claude Code
 
-PineTree's agent contract is model-neutral and lives in one file:
+This repository uses [`AGENTS.md`](AGENTS.md) as the single coding-agent
+instruction entry point.
 
-**→ [AGENTS.md](AGENTS.md)**
+Read and follow the repository-root `AGENTS.md` before planning, searching,
+editing, or running commands.
 
-Read it before planning or editing. It is intentionally the only copy — this
-pointer exists so Claude Code finds it, not to restate it.
-
-Start every task with:
-
-```bash
-npm run ai:preflight -- --task "<the task>" --path <paths you expect to touch>
-```
+Do not treat this file as a separate source of PineTree architecture, workflow, or
+engineering authority.
