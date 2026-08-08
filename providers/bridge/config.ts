@@ -285,3 +285,19 @@ export function isBridgeConfigured(): boolean {
     return false
   }
 }
+
+/**
+ * True only when this deployment is explicitly pointed at the Bridge sandbox.
+ *
+ * Every sandbox-only behavior - synthetic signed agreements and the simulated
+ * KYB approval - is gated on this. It FAILS CLOSED: an unset or invalid
+ * BRIDGE_ENVIRONMENT is not sandbox, so a misconfiguration can never unlock a
+ * sandbox shortcut in production.
+ */
+export function isBridgeSandbox(): boolean {
+  try {
+    return getBridgeConfig().environment === "sandbox"
+  } catch {
+    return false
+  }
+}

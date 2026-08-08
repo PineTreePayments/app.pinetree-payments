@@ -9,7 +9,11 @@
 import "./adapter"
 
 export { bridgeAdapter, BridgeAdapter } from "./adapter"
-export type { BridgeConnectMerchantInput, BridgeConnectMerchantResult } from "./adapter"
+export type {
+  BridgeConnectMerchantInput,
+  BridgeConnectMerchantResult,
+  BridgeUpdateMerchantInput,
+} from "./adapter"
 
 export {
   BRIDGE_PRODUCTION_BASE_URL,
@@ -20,6 +24,7 @@ export {
   getBridgeConfig,
   getBridgeWebhookPublicKey,
   isBridgeConfigured,
+  isBridgeSandbox,
   resolveBridgeEnvironment,
   validateBridgeBaseUrl,
 } from "./config"
@@ -27,17 +32,34 @@ export type { BridgeConfig, BridgeEnvironment } from "./config"
 
 export {
   assertUsableIdempotencyKey,
+  bridgeListItems,
   bridgeRequest,
   buildBridgeHeaders,
+  createCustomer,
+  createExternalAccount,
   createKycLink,
+  createLiquidationAddress,
+  createTosLink,
   createWebhook,
+  deactivateExternalAccount,
   fetchWebhookDetails,
   getCustomer,
+  getHostedKycLinkForCustomer,
   getKycLink,
   getMerchantStatus,
+  listExternalAccounts,
+  listLiquidationAddressDrains,
+  listLiquidationAddresses,
+  simulateKycApproval,
   syncCustomerStatus,
+  updateCustomer,
 } from "./client"
-export type { BridgeRequestContext, BridgeRequestResult } from "./client"
+export type {
+  BridgeRequestContext,
+  BridgeRequestResult,
+  CreateBridgeLiquidationAddressInput,
+  CreateBridgeUsExternalAccountInput,
+} from "./client"
 
 export {
   BridgeApiError,
@@ -51,6 +73,10 @@ export {
 
 export {
   BRIDGE_ONBOARDING_VERSION,
+  bridgeCustomerIdempotencyKey,
+  bridgeCustomerUpdateIdempotencyKey,
+  bridgeExternalAccountIdempotencyKey,
+  bridgeLiquidationAddressIdempotencyKey,
   bridgeOnboardingIdempotencyKey,
   bridgeWebhookIdempotencyKey,
 } from "./idempotency"
@@ -89,20 +115,54 @@ export {
 } from "./redact"
 
 export {
+  BRIDGE_CONNECTION_EVENT_CATEGORIES,
   SUPPORTED_BRIDGE_EVENT_CATEGORIES,
   extractBridgeEventObject,
+  isBridgeDrainEventCategory,
   translateBridgeEvent,
 } from "./translateEvent"
 export type { BridgeEventCategory, NormalizedBridgeConnectionEvent } from "./translateEvent"
 
+export {
+  bridgeChainForRail,
+  depositTxHashMatches,
+  findMatchingLiquidationAddress,
+  isReturnAddressValidForChain,
+  normalizeBridgeDrain,
+  normalizeBridgeDrainState,
+  normalizeBridgeExternalAccount,
+  normalizeBridgeLiquidationAddress,
+  railForBridgeChain,
+} from "./normalizeMoneyMovement"
 export type {
+  NormalizedBridgeDrain,
+  NormalizedBridgeExternalAccount,
+  NormalizedBridgeLiquidationAddress,
+  PineTreeLiquidationRail,
+} from "./normalizeMoneyMovement"
+
+export type {
+  BridgeAccountPurpose,
+  BridgeAddress,
+  BridgeAssociatedPerson,
+  BridgeBusinessCustomerPayload,
+  BridgeBusinessType,
   BridgeConnectionState,
   BridgeCustomer,
   BridgeCustomerStatus,
   BridgeCustomerType,
+  BridgeDrain,
+  BridgeDrainState,
   BridgeEndorsement,
+  BridgeEstimatedAnnualRevenue,
+  BridgeExternalAccount,
+  BridgeHighRiskActivity,
+  BridgeIdentifyingInformation,
   BridgeKycLink,
   BridgeKycStatus,
+  BridgeLiquidationAddress,
+  BridgeLiquidationChain,
+  BridgeSourceOfFunds,
   BridgeTosStatus,
   BridgeWebhookEndpoint,
   BridgeWebhookEvent,
@@ -110,7 +170,17 @@ export type {
   NormalizedBridgeEndorsement,
   PineTreeProviderState,
 } from "./types"
-export { PINETREE_PROVIDER_STATE_LABELS, pineTreeProviderStateLabel } from "./types"
+export {
+  BRIDGE_ACCOUNT_PURPOSES,
+  BRIDGE_BUSINESS_TYPES,
+  BRIDGE_DRAIN_STATES,
+  BRIDGE_ESTIMATED_ANNUAL_REVENUE,
+  BRIDGE_HIGH_RISK_ACTIVITIES,
+  BRIDGE_LIQUIDATION_CHAINS,
+  BRIDGE_SOURCE_OF_FUNDS,
+  PINETREE_PROVIDER_STATE_LABELS,
+  pineTreeProviderStateLabel,
+} from "./types"
 
 export {
   BRIDGE_SIGNATURE_HEADER,

@@ -53,12 +53,16 @@ describe("migration structure", () => {
     expect(versions.filter((v) => v === VERSION)).toHaveLength(1)
   })
 
-  it("sorts after every existing migration so it is forward-only", () => {
+  it("sorts after every migration that existed when it was authored", () => {
+    // Forward-only means this migration never runs BEFORE anything that already
+    // existed. Migrations authored later legitimately sort after it, so they
+    // are excluded rather than treated as a violation.
     const others = readdirSync(MIGRATIONS)
       .filter((name) => name.endsWith(".sql") && name !== FILENAME)
       .map((name) => name.split("_")[0])
-      .filter((v) => /^\d{14}$/.test(v))
+      .filter((v) => /^\d{14}$/.test(v) && Number(v) < Number(VERSION))
 
+    expect(others.length).toBeGreaterThan(0)
     for (const other of others) {
       expect(Number(VERSION)).toBeGreaterThan(Number(other))
     }

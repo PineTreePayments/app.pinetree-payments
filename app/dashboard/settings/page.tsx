@@ -19,8 +19,13 @@ import {
   US_STATES
 } from "@/engine/businessProfileLocation"
 import {
+  BUSINESS_HIGH_RISK_ACTIVITY_OPTIONS,
   BUSINESS_PROFILE_FIELD_LABELS,
   BUSINESS_PROFILE_REQUIRED_FIELDS,
+  BUSINESS_PROFILE_SECTIONS,
+  BUSINESS_PROFILE_SELECT_OPTIONS,
+  BUSINESS_PROFILE_SENSITIVE_FIELD_LABELS,
+  BUSINESS_PROFILE_YES_NO_FIELDS,
   isBusinessProfileFieldRequired,
   type BusinessProfileField
 } from "@/engine/businessProfileFields"
@@ -51,6 +56,51 @@ type MerchantSettingsPayload = {
 
 type BusinessProfileValues = Record<BusinessProfileField, string>
 type BusinessProfileErrors = Partial<Record<BusinessProfileField, string>>
+
+/**
+ * Business Profile fields beyond the original set, held in one record rather
+ * than nineteen more useState hooks. The original fields keep their individual
+ * state because the general Settings form writes them too.
+ */
+const EXTENDED_PROFILE_FIELDS = [
+  "business_legal_structure",
+  "business_industry",
+  "business_description",
+  "estimated_annual_revenue",
+  "expected_monthly_payment_volume",
+  "account_purpose",
+  "source_of_funds",
+  "high_risk_activities",
+  "operates_in_prohibited_countries",
+  "conducts_money_services",
+  "owner_title",
+  "owner_birth_date",
+  "owner_ownership_percentage",
+  "owner_address_line1",
+  "owner_address_line2",
+  "owner_city",
+  "owner_state",
+  "owner_postal_code",
+  "owner_country",
+] as const satisfies readonly BusinessProfileField[]
+
+type ExtendedProfileField = (typeof EXTENDED_PROFILE_FIELDS)[number]
+type ExtendedProfileValues = Record<ExtendedProfileField, string>
+
+const emptyExtendedProfile = (): ExtendedProfileValues =>
+  Object.fromEntries(EXTENDED_PROFILE_FIELDS.map((field) => [field, ""])) as ExtendedProfileValues
+
+/**
+ * Masked state of the tax identifiers already forwarded to the regulated
+ * provider. PineTree never stores the identifiers themselves, so the form can
+ * only show whether one is on file - which is all the merchant needs to know
+ * that it does not require re-entering.
+ */
+type VerificationIdentifierState = {
+  business_tax_id_last4: string | null
+  owner_tax_id_last4: string | null
+  submitted_at: string | null
+}
 
 type MerchantTaxSettingsPayload = {
   tax_enabled: boolean
@@ -158,6 +208,19 @@ function validateBusinessProfile(values: BusinessProfileValues) {
   if (values.owner_email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(values.owner_email.trim())) {
     errors.owner_email = "Owner Email must be a valid email address."
   }
+  const ownershipPercentage = values.owner_ownership_percentage.trim()
+  if (ownershipPercentage && !/^\d{1,3}$/.test(ownershipPercentage)) {
+    errors.owner_ownership_percentage = "Ownership Percentage must be a whole number from 0 to 100."
+  } else if (ownershipPercentage && Number(ownershipPercentage) > 100) {
+    errors.owner_ownership_percentage = "Ownership Percentage must be a whole number from 0 to 100."
+  }
+  const monthlyVolume = values.expected_monthly_payment_volume.trim().replace(/[,$\s]/g, "")
+  if (monthlyVolume && !/^\d{1,12}$/.test(monthlyVolume)) {
+    errors.expected_monthly_payment_volume = "Enter a whole dollar amount."
+  }
+  if (values.owner_birth_date.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(values.owner_birth_date.trim())) {
+    errors.owner_birth_date = "Enter the date of birth as YYYY-MM-DD."
+  }
   return errors
 }
 
@@ -181,6 +244,16 @@ export default function SettingsPage() {
   const [ownerEmail, setOwnerEmail] = useState("")
   const [ownerPhone, setOwnerPhone] = useState("")
   const [profileStatus, setProfileStatus] = useState<"incomplete" | "complete" | "needs_attention">("incomplete")
+  const [extendedProfile, setExtendedProfile] = useState<ExtendedProfileValues>(emptyExtendedProfile)
+  // Request-scoped only. Held in component state just long enough to submit,
+  // cleared immediately afterwards, and never echoed back by the API.
+  const [businessTaxId, setBusinessTaxId] = useState("")
+  const [ownerTaxId, setOwnerTaxId] = useState("")
+  const [identifierState, setIdentifierState] = useState<VerificationIdentifierState>({
+    business_tax_id_last4: null,
+    owner_tax_id_last4: null,
+    submitted_at: null,
+  })
   const [businessProfileOpen, setBusinessProfileOpen] = useState(false)
   const [businessProfileErrors, setBusinessProfileErrors] = useState<BusinessProfileErrors>({})
   const [businessProfileReturnDestination, setBusinessProfileReturnDestination] = useState<"overview" | "wallet" | "providers" | null>(null)
@@ -313,6 +386,57 @@ export default function SettingsPage() {
     return () => controller.abort()
   }, [loadSettings])
 
+  /**
+   * The canonical Business Profile read.
+   *
+   * `/api/settings` only carries the original field subset, so the verification
+   * fields and the masked identifier state come from the Business Profile
+   * endpoint that owns them. A failure here leaves the form empty rather than
+   * guessing values.
+   */
+  const loadBusinessProfile = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      const token = session?.access_token
+      if (!token) return
+
+      const res = await fetch("/api/merchant/business-profile", {
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
+        cache: "no-store",
+        signal,
+      })
+      if (!res.ok) return
+      const payload = (await res.json()) as {
+        profile?: Partial<Record<BusinessProfileField, string | null>> & {
+          profile_status?: "incomplete" | "complete" | "needs_attention"
+        }
+        identifiers?: VerificationIdentifierState
+      }
+      if (signal?.aborted || !payload.profile) return
+
+      setExtendedProfile((current) => {
+        const next = { ...current }
+        for (const field of EXTENDED_PROFILE_FIELDS) {
+          next[field] = String(payload.profile?.[field] ?? "")
+        }
+        return next
+      })
+      if (payload.identifiers) setIdentifierState(payload.identifiers)
+      if (payload.profile.profile_status) setProfileStatus(payload.profile.profile_status)
+    } catch {
+      // A failed read is never treated as an incomplete profile.
+    }
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void loadBusinessProfile(controller.signal)
+    return () => controller.abort()
+  }, [loadBusinessProfile])
+
   useEffect(() => {
     if (loading || typeof window === "undefined") return
     const params = new URLSearchParams(window.location.search)
@@ -402,6 +526,7 @@ export default function SettingsPage() {
     owner_last_name: ownerLastName,
     owner_email: ownerEmail,
     owner_phone: ownerPhone,
+    ...extendedProfile,
   }
 
   function focusFirstBusinessProfileError(errors: BusinessProfileErrors) {
@@ -436,15 +561,33 @@ export default function SettingsPage() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(businessProfileValues),
+        // Tax identifiers ride along only when the merchant just entered them.
+        // The server forwards them to the regulated provider and stores only a
+        // masked last four, so they are never sent again on a later edit.
+        body: JSON.stringify({
+          ...businessProfileValues,
+          ...(businessTaxId.trim() ? { business_tax_id: businessTaxId.trim() } : {}),
+          ...(ownerTaxId.trim() ? { owner_tax_id: ownerTaxId.trim() } : {}),
+        }),
         credentials: "include",
         cache: "no-store"
       })
-      const payload = await res.json().catch(() => null) as { profile?: { profile_status?: "incomplete" | "complete" | "needs_attention" }, error?: string } | null
+      const payload = await res.json().catch(() => null) as {
+        profile?: { profile_status?: "incomplete" | "complete" | "needs_attention" }
+        identifiers?: VerificationIdentifierState
+        error?: string
+      } | null
       if (!res.ok) throw new Error(payload?.error || "Failed to save Business Profile")
+
+      // Cleared immediately: they exist in the browser only long enough to be
+      // submitted, and PineTree never holds them at all.
+      setBusinessTaxId("")
+      setOwnerTaxId("")
+      if (payload?.identifiers) setIdentifierState(payload.identifiers)
 
       const refreshed = await callSettingsApi("GET")
       applyPayload(refreshed, accountEmail)
+      await loadBusinessProfile()
       setProfileStatus(payload?.profile?.profile_status || "complete")
       setBusinessProfileErrors({})
       setBusinessProfileOpen(false)
@@ -528,6 +671,40 @@ export default function SettingsPage() {
     else if (field === "owner_last_name") setOwnerLastName(value)
     else if (field === "owner_email") setOwnerEmail(value)
     else if (field === "owner_phone") setOwnerPhone(value)
+    else if ((EXTENDED_PROFILE_FIELDS as readonly string[]).includes(field)) {
+      setExtendedProfile((current) => {
+        const next = { ...current, [field as ExtendedProfileField]: value }
+        // The owner's state list depends on the owner's country, exactly as the
+        // business address pair already does.
+        if (field === "owner_country") next.owner_state = ""
+        return next
+      })
+    }
+  }
+
+  /**
+   * Toggle one regulated-activity answer.
+   *
+   * "None of the above" is mutually exclusive with every other option: it is a
+   * distinct merchant answer, not the absence of one, and PineTree refuses a
+   * contradictory combination rather than choosing which half to believe.
+   */
+  const toggleHighRiskActivity = (value: string, checked: boolean) => {
+    setBusinessProfileErrors((current) => ({ ...current, high_risk_activities: undefined }))
+    setExtendedProfile((current) => {
+      const selected = new Set(
+        current.high_risk_activities.split(",").map((entry) => entry.trim()).filter(Boolean)
+      )
+      if (!checked) selected.delete(value)
+      else if (value === "none_of_the_above") {
+        selected.clear()
+        selected.add(value)
+      } else {
+        selected.delete("none_of_the_above")
+        selected.add(value)
+      }
+      return { ...current, high_risk_activities: Array.from(selected).join(",") }
+    })
   }
 
   const renderBusinessProfileField = (
@@ -557,7 +734,7 @@ export default function SettingsPage() {
           {label}
           {required ? <span className="text-red-600"> *</span> : null}
         </label>
-        {field === "business_country" ? (
+        {field === "business_country" || field === "owner_country" ? (
           <select
             {...commonProps}
             onChange={(e) => setBusinessProfileField(field, e.target.value)}
@@ -568,6 +745,16 @@ export default function SettingsPage() {
             ))}
           </select>
         ) : field === "business_state" && country === "US" ? (
+          <select
+            {...commonProps}
+            onChange={(e) => setBusinessProfileField(field, e.target.value)}
+          >
+            <option value="">Select a state</option>
+            {US_STATES.map(({ code, name }) => (
+              <option key={code} value={code}>{name}</option>
+            ))}
+          </select>
+        ) : field === "owner_state" && extendedProfile.owner_country === "US" ? (
           <select
             {...commonProps}
             onChange={(e) => setBusinessProfileField(field, e.target.value)}
@@ -588,6 +775,39 @@ export default function SettingsPage() {
             <option value="services">Services</option>
             <option value="online">Online</option>
           </select>
+        ) : BUSINESS_PROFILE_SELECT_OPTIONS[field] ? (
+          <select
+            {...commonProps}
+            onChange={(e) => setBusinessProfileField(field, e.target.value)}
+          >
+            <option value="">Select</option>
+            {(BUSINESS_PROFILE_SELECT_OPTIONS[field] || []).map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        ) : (BUSINESS_PROFILE_YES_NO_FIELDS as readonly string[]).includes(field) ? (
+          // No pre-selected answer: PineTree never answers a compliance
+          // question on a merchant's behalf.
+          <select
+            {...commonProps}
+            onChange={(e) => setBusinessProfileField(field, e.target.value)}
+          >
+            <option value="">Select</option>
+            <option value="no">No</option>
+            <option value="yes">Yes</option>
+          </select>
+        ) : field === "business_description" ? (
+          <textarea
+            id={id}
+            value={value}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? `${id}-error` : undefined}
+            rows={3}
+            maxLength={1024}
+            placeholder={options?.placeholder}
+            onChange={(e) => setBusinessProfileField(field, e.target.value)}
+            className={`${fieldClass} min-h-20 ${error ? "border-red-300 focus:border-red-500 focus:ring-red-500/20" : ""}`}
+          />
         ) : (
           <input
             {...commonProps}
@@ -599,6 +819,23 @@ export default function SettingsPage() {
         {error ? <p id={`${id}-error`} className="mt-1 text-xs font-medium text-red-600">{error}</p> : null}
       </div>
     )
+  }
+
+  const businessProfileFieldOptions: Partial<
+    Record<BusinessProfileField, { type?: string; placeholder?: string; span?: "full" }>
+  > = {
+    contact_email: { type: "email", placeholder: accountEmail || "business@example.com" },
+    business_phone: { type: "tel" },
+    business_website: { placeholder: "https://example.com" },
+    business_description: { placeholder: "What you sell and who you sell it to.", span: "full" },
+    business_state: { placeholder: "State / province / region" },
+    expected_monthly_payment_volume: { placeholder: "25000" },
+    owner_email: { type: "email", placeholder: accountEmail || "owner@example.com" },
+    owner_phone: { type: "tel" },
+    owner_title: { placeholder: "Owner, CEO, Managing Member" },
+    owner_birth_date: { type: "date" },
+    owner_ownership_percentage: { placeholder: "100" },
+    owner_state: { placeholder: "State / province / region" },
   }
 
   return (
@@ -649,31 +886,104 @@ export default function SettingsPage() {
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 [-webkit-overflow-scrolling:touch] sm:px-7">
               <div className="space-y-5">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Business Information</p>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {renderBusinessProfileField("legal_business_name")}
-                    {renderBusinessProfileField("business_dba")}
-                    {renderBusinessProfileField("contact_email", { type: "email", placeholder: accountEmail || "business@example.com" })}
-                    {renderBusinessProfileField("business_type")}
-                    {renderBusinessProfileField("business_country")}
-                    {renderBusinessProfileField("business_state", { placeholder: "State / province / region" })}
-                    {renderBusinessProfileField("business_city")}
-                    {renderBusinessProfileField("business_address_line1")}
-                    {renderBusinessProfileField("business_address_line2")}
-                    {renderBusinessProfileField("business_postal_code")}
-                    {renderBusinessProfileField("business_phone", { type: "tel" })}
-                    {renderBusinessProfileField("business_website", { placeholder: "https://example.com" })}
+                {BUSINESS_PROFILE_SECTIONS.map((section) => (
+                  <div key={section.key}>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">{section.title}</p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {section.fields.map((field) => (
+                        <div key={field} className="contents">
+                          {renderBusinessProfileField(field, businessProfileFieldOptions[field])}
+                        </div>
+                      ))}
+                      {section.key === "operations" ? (
+                        <div className="md:col-span-2">
+                          <p className={labelClass}>
+                            {BUSINESS_PROFILE_FIELD_LABELS.high_risk_activities}
+                            <span className="text-red-600"> *</span>
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-gray-500">
+                            Select every activity your business is involved in, or select
+                            &ldquo;None of the above&rdquo;.
+                          </p>
+                          <div className="mt-2 grid gap-1.5 rounded-xl border border-gray-100 bg-gray-50/60 p-3 sm:grid-cols-2">
+                            {BUSINESS_HIGH_RISK_ACTIVITY_OPTIONS.map((option) => {
+                              const selected = businessProfileValues.high_risk_activities
+                                .split(",")
+                                .map((entry) => entry.trim())
+                                .filter(Boolean)
+                              return (
+                                <label key={option.value} className="flex cursor-pointer items-start gap-2 text-sm text-gray-800">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected.includes(option.value)}
+                                    onChange={(e) => toggleHighRiskActivity(option.value, e.target.checked)}
+                                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="min-w-0 leading-5">{option.label}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                          {businessProfileErrors.high_risk_activities ? (
+                            <p className="mt-1 text-xs font-medium text-red-600">
+                              {businessProfileErrors.high_risk_activities}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
+                ))}
 
+                {/*
+                  Verification. These identifiers are sent securely once and are
+                  never stored by PineTree, which is why only a masked last four
+                  can be shown afterwards.
+                */}
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Owner Information</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Verification</p>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">
+                    Used once to verify your business. PineTree does not store these numbers.
+                  </p>
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {renderBusinessProfileField("owner_first_name")}
-                    {renderBusinessProfileField("owner_last_name")}
-                    {renderBusinessProfileField("owner_email", { type: "email", placeholder: accountEmail || "owner@example.com" })}
-                    {renderBusinessProfileField("owner_phone", { type: "tel" })}
+                    <div>
+                      <label htmlFor="business-profile-business-tax-id" className={labelClass}>
+                        {BUSINESS_PROFILE_SENSITIVE_FIELD_LABELS.business_tax_id}
+                        {identifierState.business_tax_id_last4 ? null : <span className="text-red-600"> *</span>}
+                      </label>
+                      <input
+                        id="business-profile-business-tax-id"
+                        value={businessTaxId}
+                        onChange={(e) => setBusinessTaxId(e.target.value)}
+                        inputMode="numeric"
+                        autoComplete="off"
+                        placeholder={
+                          identifierState.business_tax_id_last4
+                            ? `On file ····${identifierState.business_tax_id_last4} — leave blank to keep`
+                            : "12-3456789"
+                        }
+                        className={fieldClass}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="business-profile-owner-tax-id" className={labelClass}>
+                        {BUSINESS_PROFILE_SENSITIVE_FIELD_LABELS.owner_tax_id}
+                        {identifierState.owner_tax_id_last4 ? null : <span className="text-red-600"> *</span>}
+                      </label>
+                      <input
+                        id="business-profile-owner-tax-id"
+                        value={ownerTaxId}
+                        onChange={(e) => setOwnerTaxId(e.target.value)}
+                        inputMode="numeric"
+                        autoComplete="off"
+                        placeholder={
+                          identifierState.owner_tax_id_last4
+                            ? `On file ····${identifierState.owner_tax_id_last4} — leave blank to keep`
+                            : "123-45-6789"
+                        }
+                        className={fieldClass}
+                      />
+                    </div>
                   </div>
                 </div>
 

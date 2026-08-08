@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getConnectedAccountSendStatus: vi.fn(),
   listProcessingWalletOperationsForReconciliation: vi.fn(),
   listProcessingWalletOperationsMissingProviderReferences: vi.fn(),
+  listProcessingBankWithdrawalsForReconciliation: vi.fn(),
   getWalletWithdrawal: vi.fn(),
   syncPineTreeWalletBalances: vi.fn(),
   fetch: vi.fn(),
@@ -23,6 +24,15 @@ vi.mock("@/database/walletWithdrawalRequests", () => ({
   // candidates so the processing-reconciliation behavior under test is
   // unaffected.
   listPendingDynamicWithdrawalsForRecovery: vi.fn().mockResolvedValue([]),
+  // Bank withdrawals are reconciled against settlement payout evidence in the
+  // same worker. They have their own dedicated suite; here the pass must simply
+  // find no candidates.
+  listProcessingBankWithdrawalsForReconciliation: mocks.listProcessingBankWithdrawalsForReconciliation,
+  updateWalletWithdrawalSettlementEvidence: vi.fn(),
+  findBankWithdrawalForDrain: vi.fn().mockResolvedValue(null),
+  getWalletWithdrawalRequest: vi.fn().mockResolvedValue(null),
+  markWalletWithdrawalAsBankDestination: vi.fn(),
+  updateWalletWithdrawalRequestCanonicalFields: vi.fn(),
 }))
 
 vi.mock("@/database/merchantAuditEvents", () => ({
@@ -89,6 +99,17 @@ function makeRecord(
     submitted_at: null,
     confirmed_at: null,
     failed_at: null,
+    // Every existing withdrawal is a crypto withdrawal: its destination address
+    // is the merchant's own, so a confirmed source-chain transaction confirms
+    // it. Bank withdrawals override this and are governed by payout evidence.
+    destination_kind: "crypto",
+    bank_destination_id: null,
+    liquidation_route_id: null,
+    source_chain_confirmed_at: null,
+    settlement_drain_id: null,
+    settlement_drain_state: null,
+    settlement_payout_reference: null,
+    settlement_updated_at: null,
     created_at: "2026-06-28T00:00:00Z",
     updated_at: "2026-06-28T00:00:00Z",
     ...overrides,
@@ -135,6 +156,7 @@ describe("reconcileProcessingWithdrawals", () => {
     mocks.listProcessingBitcoinWithdrawalsForReconciliation.mockResolvedValue([])
     mocks.listProcessingWalletOperationsForReconciliation.mockResolvedValue([])
     mocks.listProcessingWalletOperationsMissingProviderReferences.mockResolvedValue([])
+    mocks.listProcessingBankWithdrawalsForReconciliation.mockResolvedValue([])
     mocks.syncPineTreeWalletBalances.mockResolvedValue({})
     // Clear any env vars that would affect Base RPC
     process.env.BASE_RPC_URL = "https://base-rpc.example.com"
@@ -157,6 +179,8 @@ describe("reconcileProcessingWithdrawals", () => {
       skipped: 0,
       errors: 0,
       recoveredPending: 0,
+      bankPayoutConfirmed: 0,
+      bankPayoutFailed: 0,
     })
     expect(mocks.updateWalletWithdrawalRequest).not.toHaveBeenCalled()
     expect(mocks.insertWithdrawalAuditEvent).not.toHaveBeenCalled()

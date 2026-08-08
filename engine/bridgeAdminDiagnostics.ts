@@ -17,6 +17,8 @@ import {
   BRIDGE_PROVIDER_NAME,
 } from "@/database/merchantBridgeConnections"
 import { getLatestServiceTermsAcceptance } from "@/database/merchantServiceTerms"
+import { listMerchantBankDestinations } from "@/database/merchantBankDestinations"
+import { listLiquidationRoutes } from "@/database/merchantBridgeLiquidationRoutes"
 import {
   isBridgeCapabilityRolloutEnabled,
   resolveBridgeActivation,
@@ -57,6 +59,45 @@ export type BridgeAdminDiagnostics = {
   consentTermsVersion: string | null
   consentAcceptedAt: string | null
   environment: string | null
+  /** True only when this deployment is pointed at the provider sandbox. */
+  sandbox: boolean
+  /** Provider terms agreement that authorized customer creation. */
+  signedAgreementPresent: boolean
+  signedAgreementSynthetic: boolean
+  signedAgreementAt: string | null
+  /** When PineTree last submitted the customer payload, and its fingerprint. */
+  customerSubmittedAt: string | null
+  customerRevision: string | null
+  /**
+   * Masked tax-identifier state. PineTree never stores the identifiers - only
+   * whether they were forwarded and their last four.
+   */
+  identitySubmittedAt: string | null
+  businessTaxIdLast4: string | null
+  ownerTaxIdLast4: string | null
+  sandboxSimulatedApprovalAt: string | null
+  /** Bank payout destinations and the settlement routes bound to them. */
+  bankDestinations: {
+    id: string
+    providerExternalAccountId: string | null
+    bankName: string | null
+    accountLast4: string | null
+    status: string
+    providerDeactivationReason: string | null
+    archivedAt: string | null
+  }[]
+  liquidationRoutes: {
+    id: string
+    bankDestinationId: string
+    providerLiquidationAddressId: string
+    depositAddress: string
+    sourceRail: string
+    sourceAsset: string
+    destinationPaymentRail: string
+    destinationCurrency: string
+    returnAddress: string
+    state: string
+  }[]
 }
 
 /**
@@ -71,9 +112,11 @@ export async function getBridgeAdminDiagnostics(merchantId: string): Promise<Bri
     throw Object.assign(new Error("A merchant id is required."), { status: 400 })
   }
 
-  const [row, acceptance] = await Promise.all([
+  const [row, acceptance, bankDestinations, liquidationRoutes] = await Promise.all([
     getMerchantBridgeConnection(normalizedMerchantId),
     getLatestServiceTermsAcceptance(normalizedMerchantId),
+    listMerchantBankDestinations(normalizedMerchantId, { includeArchived: true }).catch(() => []),
+    listLiquidationRoutes(normalizedMerchantId).catch(() => []),
   ])
 
   const credentials = row?.credentials || {}
@@ -137,5 +180,36 @@ export async function getBridgeAdminDiagnostics(merchantId: string): Promise<Bri
     consentTermsVersion: acceptance?.termsVersion || credentials.consent_terms_version || null,
     consentAcceptedAt: acceptance?.acceptedAt || credentials.consent_accepted_at || null,
     environment: configuration.environment,
+    sandbox: configuration.environment === "sandbox",
+    signedAgreementPresent: Boolean(credentials.bridge_signed_agreement_id),
+    signedAgreementSynthetic: credentials.bridge_signed_agreement_synthetic === true,
+    signedAgreementAt: credentials.bridge_signed_agreement_at || null,
+    customerSubmittedAt: credentials.bridge_customer_submitted_at || null,
+    customerRevision: credentials.bridge_customer_revision || null,
+    identitySubmittedAt: credentials.bridge_identity_submitted_at || null,
+    businessTaxIdLast4: credentials.bridge_business_tax_id_last4 || null,
+    ownerTaxIdLast4: credentials.bridge_owner_tax_id_last4 || null,
+    sandboxSimulatedApprovalAt: credentials.sandbox_simulated_approval_at || null,
+    bankDestinations: bankDestinations.map((destination) => ({
+      id: destination.id,
+      providerExternalAccountId: destination.provider_external_account_id,
+      bankName: destination.bank_name,
+      accountLast4: destination.account_last4,
+      status: destination.status,
+      providerDeactivationReason: destination.provider_deactivation_reason,
+      archivedAt: destination.archived_at,
+    })),
+    liquidationRoutes: liquidationRoutes.map((route) => ({
+      id: route.id,
+      bankDestinationId: route.bank_destination_id,
+      providerLiquidationAddressId: route.provider_liquidation_address_id,
+      depositAddress: route.deposit_address,
+      sourceRail: route.source_rail,
+      sourceAsset: route.source_asset,
+      destinationPaymentRail: route.destination_payment_rail,
+      destinationCurrency: route.destination_currency,
+      returnAddress: route.return_address,
+      state: route.state,
+    })),
   }
 }

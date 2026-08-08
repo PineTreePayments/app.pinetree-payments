@@ -224,7 +224,7 @@ time-based schedulers and do not change the one-scheduler production rule.
 |---|---|---|---|---|
 | Request-triggered payment maintenance | PineTree API reads for payments, transactions, dashboard, and admin views | `runPaymentMaintenanceTick` | Opportunistically refresh payment/watch status and reconcile snapshots between scheduled sweeps. | Production; event-triggered |
 | Lightning sweep processing | Verified Speed webhook or merchant wallet read when work is due | `processQueuedLightningSweeps` | Advance bounded queued Lightning sweep work without delaying the triggering response. | Production; event-triggered |
-| Wallet withdrawal maintenance | Withdrawal submission or PineTree Wallet sync | `reconcileProcessingWithdrawals` | Recheck recently submitted processing withdrawals. | Production; event-triggered |
+| Wallet withdrawal maintenance | Withdrawal submission or PineTree Wallet sync | `reconcileProcessingWithdrawals` | Recheck recently submitted processing withdrawals. Also owns bank-withdrawal payout reconciliation (`reconcileBankWithdrawalsEngine`), because it already owns the withdrawal ledger — a second scheduler would duplicate that ownership. | Production; event-triggered |
 | Wallet readiness synchronization | PineTree Wallet profile upsert | `syncPineTreeWalletProfileProviders` | Synchronize provider readiness after a profile change. | Production; event-triggered |
 
 ### Future Background Jobs

@@ -21,7 +21,7 @@
  * customer, even if PineTree's own record was lost.
  */
 
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 
 import {
   BRIDGE_PROVIDER_MODEL,
@@ -34,15 +34,22 @@ import {
   sanitizeBridgeCredentials,
   upsertMerchantBridgeConnection,
   type BridgeCredentials,
+  type BridgeWebhookSkippedReason,
   type MerchantBridgeConnectionRow,
 } from "@/database/merchantBridgeConnections"
 import { insertMerchantAuditEvent } from "@/database/merchantAuditEvents"
 import { getMerchantBusinessProfile } from "@/engine/businessProfile"
+import {
+  buildBridgeCustomerPayload,
+  taxIdentifierLast4,
+  type BusinessVerificationSensitiveInput,
+} from "@/engine/bridgeCustomerPayload"
 import { bridgeAdapter } from "@/providers/bridge/adapter"
 import {
   describeBridgeConfiguration,
   getBridgeConfig,
   isBridgeConfigured,
+  isBridgeSandbox,
   BridgeConfigError,
 } from "@/providers/bridge/config"
 import {
@@ -58,14 +65,18 @@ import {
   isBridgeUnknownOutcomeError,
 } from "@/providers/bridge/errors"
 import {
+  isBridgeDrainEventCategory,
   translateBridgeEvent,
   type NormalizedBridgeConnectionEvent,
 } from "@/providers/bridge/translateEvent"
+import { createTosLink, simulateKycApproval } from "@/providers/bridge/client"
+import { bridgeOnboardingIdempotencyKey } from "@/providers/bridge/idempotency"
 import {
   BRIDGE_SIGNATURE_HEADER,
   verifyBridgeWebhookSignature,
 } from "@/providers/bridge/verifyWebhook"
 import type {
+  BridgeBusinessCustomerPayload,
   BridgeConnectionState,
   NormalizedBridgeConnection,
   PineTreeProviderState,
@@ -341,36 +352,200 @@ export type StartBridgeOnboardingResult = {
 }
 
 /**
- * Ensure the merchant has Bridge onboarding, creating it only when every
- * precondition holds. This is INTERNAL Engine plumbing: it is driven by
- * `engine/businessVerification.ts` as part of one unified PineTree onboarding,
- * never by a merchant-facing "Connect Bridge" action.
+ * Fingerprint of a submitted customer payload.
  *
- * Preconditions enforced here rather than by the caller, so no future call
- * site can bypass them:
- *   - Bridge must be configured for this deployment.
- *   - CONSENT: the merchant must have accepted the terms version that
- *     disclosed Bridge. Without that evidence no customer is created.
- *   - The merchant must have a legal business name and an owner email; Bridge
- *     requires both and PineTree will not invent either.
+ * Comparing fingerprints is what makes a Business Profile edit idempotent: an
+ * unchanged profile produces the same value and no provider call is made at
+ * all. The payload itself is never stored - only this digest.
  */
-export async function ensureBridgeOnboardingEngine(args: {
+function customerPayloadRevision(payload: unknown): string {
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 32)
+}
+
+/**
+ * Resolve the Bridge terms agreement that authorizes creating this customer.
+ *
+ * PRODUCTION: Bridge requires a real `signed_agreement_id`, obtained when the
+ * merchant accepts Bridge's own terms on Bridge's hosted page. Without one,
+ * PineTree does not create a customer - it asks the merchant to complete that
+ * step first.
+ *
+ * SANDBOX: Bridge documents that sandbox customers are created via the API and
+ * that a production signed-agreement id "cannot be arbitrary" - i.e. sandbox
+ * accepts a synthetic one. PineTree derives it deterministically so a retry
+ * reuses the same value. This branch is unreachable in production: it is gated
+ * on the explicit, fail-closed BRIDGE_ENVIRONMENT check.
+ */
+function resolveSignedAgreement(input: {
+  merchantId: string
+  credentials: BridgeCredentials
+}): { agreementId: string | null; synthetic: boolean } {
+  const stored = String(input.credentials.bridge_signed_agreement_id || "").trim()
+  if (stored) {
+    return { agreementId: stored, synthetic: input.credentials.bridge_signed_agreement_synthetic === true }
+  }
+
+  if (!isBridgeSandbox()) return { agreementId: null, synthetic: false }
+
+  const digest = createHash("sha256").update(`pinetree.bridge.sandbox.tos|${input.merchantId}`).digest("hex")
+  // Shaped as a UUID because Bridge documents the field as a UUID string.
+  const uuid = [
+    digest.slice(0, 8),
+    digest.slice(8, 12),
+    `4${digest.slice(13, 16)}`,
+    `8${digest.slice(17, 20)}`,
+    digest.slice(20, 32),
+  ].join("-")
+  return { agreementId: uuid, synthetic: true }
+}
+
+export type BridgeTermsLinkResult =
+  | { ok: true; termsUrl: string; correlationId: string }
+  | BridgeEngineFailure
+
+/**
+ * Request the Bridge-hosted terms page the merchant must accept before KYB.
+ *
+ * The URL is a bearer capability handed straight back to the authenticated
+ * merchant who asked for it. It is never persisted. Bridge appends
+ * `signed_agreement_id` to the PineTree return route, which is captured
+ * server-side by recordBridgeSignedAgreementEngine.
+ */
+export async function requestBridgeTermsLinkEngine(args: {
+  merchantId: string
+  returnUrl: string
+}): Promise<BridgeTermsLinkResult> {
+  const correlationId = randomUUID()
+
+  if (!isBridgeConfigured()) {
+    return failure("Verification is temporarily unavailable.", correlationId)
+  }
+
+  try {
+    const result = await createTosLink({
+      idempotencyKey: bridgeOnboardingIdempotencyKey({ merchantId: args.merchantId }),
+      redirectUri: args.returnUrl,
+      context: { correlationId, merchantId: args.merchantId },
+    })
+
+    const url = String(result.data.url || "").trim()
+    if (!url) {
+      return failure("Verification is temporarily unavailable.", correlationId, true)
+    }
+    return { ok: true, termsUrl: url, correlationId }
+  } catch (error) {
+    console.error("[bridge] terms_link_failed", { correlationId, ...describeBridgeError(error) })
+    return failure("Verification is temporarily unavailable.", correlationId, true)
+  }
+}
+
+/**
+ * Capture the agreement reference Bridge returned with the merchant's browser.
+ *
+ * A browser return is NOT approval and does not advance verification on its
+ * own. All it does is record which agreement authorizes the later submission,
+ * which is then confirmed by Bridge itself when the customer is created.
+ */
+export async function recordBridgeSignedAgreementEngine(args: {
+  merchantId: string
+  signedAgreementId: string
+  actorId?: string | null
+}): Promise<{ ok: true; correlationId: string } | BridgeEngineFailure> {
+  const correlationId = randomUUID()
+  const signedAgreementId = String(args.signedAgreementId || "").trim()
+
+  // An opaque provider reference, but it still arrives from a query string, so
+  // its shape is bounded before it is stored or sent anywhere.
+  if (!signedAgreementId || signedAgreementId.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(signedAgreementId)) {
+    return failure("That verification link could not be read. Start the terms step again.", correlationId)
+  }
+
+  try {
+    const row = await getMerchantBridgeConnection(args.merchantId)
+    const existing = row?.credentials || {}
+    const connection = connectionFromCredentials(existing)
+
+    await persistConnection({
+      merchantId: args.merchantId,
+      existing,
+      connection,
+      extraCredentials: {
+        bridge_signed_agreement_id: signedAgreementId,
+        bridge_signed_agreement_at: new Date().toISOString(),
+        bridge_signed_agreement_synthetic: false,
+      },
+    })
+
+    await insertMerchantAuditEvent({
+      merchantId: args.merchantId,
+      eventType: "provider.bridge_terms_agreement_recorded",
+      actorId: args.actorId ?? null,
+      metadata: { provider: BRIDGE_PROVIDER_NAME, correlation_id: correlationId },
+    })
+
+    return { ok: true, correlationId }
+  } catch (error) {
+    console.error("[bridge] signed_agreement_write_failed", {
+      correlationId,
+      ...describeBridgeError(error),
+    })
+    return failure("Unable to save that step right now.", correlationId, true)
+  }
+}
+
+export type BridgeCustomerEnsureResult =
+  | {
+      ok: true
+      customerId: string
+      /** True when the stored Bridge customer was reused rather than created. */
+      reused: boolean
+      /** True when a profile edit was pushed to the existing Bridge customer. */
+      updated: boolean
+      connection: BridgeConnectionState
+      correlationId: string
+    }
+  | (BridgeEngineFailure & {
+      /** PineTree Business Profile labels the merchant still owes. */
+      missingProfileFields?: string[]
+      /** Set when Bridge's own terms must be accepted before submission. */
+      requiresProviderTerms?: boolean
+    })
+
+/**
+ * Create or update the merchant's Bridge business customer from the Business
+ * Profile PineTree already holds.
+ *
+ * This is the single submission path. Preconditions are enforced here rather
+ * than by callers so no future call site can bypass them:
+ *   - Bridge configured for this deployment;
+ *   - CONSENT: the merchant accepted the terms version that disclosed Bridge;
+ *   - the Business Profile carries everything the KYB payload requires;
+ *   - Bridge's own terms agreement exists (or is sandbox-synthesized).
+ *
+ * Duplicate prevention is twofold: the stored customer id is reused when one
+ * exists, and creation otherwise sends a DETERMINISTIC idempotency key derived
+ * from the merchant id, so even a lost PineTree record cannot produce a second
+ * Bridge customer.
+ */
+export async function ensureBridgeCustomerEngine(args: {
   merchantId: string
   /** Terms version whose acceptance authorizes this submission. Required. */
   consentTermsVersion: string
   consentAcceptedAt: string
   actorId?: string | null
-}): Promise<StartBridgeOnboardingResult | BridgeEngineFailure> {
+  /** Request-scoped tax identifiers. Never persisted. */
+  sensitive?: BusinessVerificationSensitiveInput
+}): Promise<BridgeCustomerEnsureResult> {
   const correlationId = randomUUID()
 
   if (!isBridgeConfigured()) {
-    return failure("Bridge is not available yet.", correlationId)
+    return failure("Verification is temporarily unavailable.", correlationId)
   }
 
   // Consent is a hard gate on customer creation, not a UI nicety. An empty
   // version means no verified acceptance reached this call.
   if (!String(args.consentTermsVersion || "").trim()) {
-    console.warn("[bridge] onboarding_blocked_without_consent", {
+    console.warn("[bridge] submission_blocked_without_consent", {
       correlationId,
       merchantId: args.merchantId,
     })
@@ -381,19 +556,73 @@ export async function ensureBridgeOnboardingEngine(args: {
   try {
     row = await getMerchantBridgeConnection(args.merchantId)
   } catch (error) {
-    console.error("[bridge] onboarding_read_failed", { correlationId, ...describeBridgeError(error) })
-    return failure("Unable to start Bridge onboarding right now.", correlationId, true)
+    console.error("[bridge] submission_read_failed", { correlationId, ...describeBridgeError(error) })
+    return failure("Unable to continue verification right now.", correlationId, true)
   }
 
   const existing = row?.credentials || {}
   const now = new Date().toISOString()
 
-  // Resume path: a KYC link already exists, so re-read it instead of creating
-  // anything. This is what makes "Continue onboarding" safe to click twice.
-  if (existing.bridge_kyc_link_id || existing.bridge_customer_id) {
+  let profile: Awaited<ReturnType<typeof getMerchantBusinessProfile>>
+  try {
+    profile = await getMerchantBusinessProfile(args.merchantId)
+  } catch (error) {
+    console.error("[bridge] submission_profile_read_failed", {
+      correlationId,
+      ...describeBridgeError(error),
+    })
+    return failure("Unable to continue verification right now.", correlationId, true)
+  }
+
+  const agreement = resolveSignedAgreement({ merchantId: args.merchantId, credentials: existing })
+  const built = buildBridgeCustomerPayload({
+    profile,
+    sensitive: args.sensitive,
+    signedAgreementId: agreement.agreementId,
+  })
+
+  if (!built.ok) {
+    return {
+      ...failure("Add the remaining details to your Business Profile to continue.", correlationId),
+      missingProfileFields: built.missing,
+    }
+  }
+
+  const sensitiveLast4 = {
+    ...(taxIdentifierLast4(args.sensitive?.businessTaxId)
+      ? { bridge_business_tax_id_last4: taxIdentifierLast4(args.sensitive?.businessTaxId) as string }
+      : {}),
+    ...(taxIdentifierLast4(args.sensitive?.ownerTaxId)
+      ? { bridge_owner_tax_id_last4: taxIdentifierLast4(args.sensitive?.ownerTaxId) as string }
+      : {}),
+    ...(args.sensitive?.businessTaxId || args.sensitive?.ownerTaxId
+      ? { bridge_identity_submitted_at: now }
+      : {}),
+  }
+
+  const revision = customerPayloadRevision(built.payload)
+
+  // ── Update path: a Bridge customer already exists for this merchant.
+  const storedCustomerId = String(existing.bridge_customer_id || "").trim()
+  if (storedCustomerId) {
+    const unchanged = existing.bridge_customer_revision === revision && !args.sensitive?.businessTaxId &&
+      !args.sensitive?.ownerTaxId
+
     try {
+      if (!unchanged) {
+        await bridgeAdapter.updateMerchant({
+          customerId: storedCustomerId,
+          // `type` and the signed agreement are creation-time facts; resending
+          // them on an update is neither required nor meaningful.
+          payload: stripCreationOnlyFields(built.payload),
+          revision,
+          merchantId: args.merchantId,
+          context: { correlationId, merchantId: args.merchantId },
+        })
+      }
+
       const { connection } = await bridgeAdapter.syncAccount({
-        customerId: existing.bridge_customer_id || null,
+        customerId: storedCustomerId,
         kycLinkId: existing.bridge_kyc_link_id || null,
         context: { correlationId, merchantId: args.merchantId },
       })
@@ -403,71 +632,63 @@ export async function ensureBridgeOnboardingEngine(args: {
         existing,
         connection,
         onboardingRequestedAt: existing.onboarding_requested_at || now,
+        extraCredentials: {
+          ...sensitiveLast4,
+          bridge_customer_revision: revision,
+          ...(unchanged ? {} : { bridge_customer_submitted_at: now }),
+        },
       })
 
-      // The hosted URLs are single-use capabilities that PineTree never
-      // stores, so a resumed session re-requests them from Bridge below only
-      // when the link itself must be re-issued. Here the merchant continues
-      // through the same Bridge-hosted session.
-      const reissued = await reissueHostedLinks({
-        merchantId: args.merchantId,
-        kycLinkId: existing.bridge_kyc_link_id || null,
-        correlationId,
-      })
+      if (!unchanged) {
+        await insertMerchantAuditEvent({
+          merchantId: args.merchantId,
+          eventType: "provider.bridge_customer_updated",
+          actorId: args.actorId ?? null,
+          metadata: {
+            provider: BRIDGE_PROVIDER_NAME,
+            bridge_customer_id: storedCustomerId,
+            correlation_id: correlationId,
+          },
+        })
+      }
 
       return {
         ok: true,
-        kycUrl: reissued.kycUrl,
-        tosUrl: reissued.tosUrl,
+        customerId: storedCustomerId,
         reused: true,
+        updated: !unchanged,
         connection: state,
         correlationId,
       }
     } catch (error) {
       const unknown = isBridgeUnknownOutcomeError(error)
-      console.error("[bridge] onboarding_resume_failed", {
+      console.error("[bridge] customer_update_failed", {
         correlationId,
         merchantId: args.merchantId,
         ...describeBridgeError(error),
       })
       return failure(
         unknown
-          ? "Bridge did not respond in time. Your onboarding was not lost - try again."
-          : "Unable to resume Bridge onboarding right now.",
+          ? "Verification did not respond in time. Nothing was lost - try again in a moment."
+          : "Unable to continue verification right now.",
         correlationId,
         true
       )
     }
   }
 
-  // Create path: Bridge needs the legal business name and the authorized
-  // account owner's email. Both come from the merchant's business profile.
-  let legalBusinessName: string
-  let ownerEmail: string
-  try {
-    const profile = await getMerchantBusinessProfile(args.merchantId)
-    legalBusinessName = String(profile.legal_business_name || "").trim()
-    ownerEmail = String(profile.owner_email || profile.contact_email || "").trim()
-  } catch (error) {
-    console.error("[bridge] onboarding_profile_read_failed", {
-      correlationId,
-      ...describeBridgeError(error),
-    })
-    return failure("Unable to start Bridge onboarding right now.", correlationId, true)
-  }
-
-  if (!legalBusinessName || !ownerEmail) {
-    return failure(
-      "Add your legal business name and account owner email to your PineTree business profile to continue verification.",
-      correlationId
-    )
+  // ── Create path.
+  if (!agreement.agreementId) {
+    return {
+      ...failure("One more step is needed before verification can begin.", correlationId),
+      requiresProviderTerms: true,
+    }
   }
 
   try {
     const result = await bridgeAdapter.connectMerchant({
       merchantId: args.merchantId,
-      legalBusinessName,
-      ownerEmail,
+      payload: built.payload,
       context: { correlationId, merchantId: args.merchantId },
     })
 
@@ -476,12 +697,18 @@ export async function ensureBridgeOnboardingEngine(args: {
       existing,
       connection: result.connection,
       onboardingRequestedAt: now,
-      // The consent that authorized this submission is recorded on the
-      // connection itself, so the authorization is auditable alongside the
-      // customer it created.
       extraCredentials: {
+        // The consent that authorized this submission is recorded on the
+        // connection so the authorization is auditable alongside the customer
+        // it created.
         consent_terms_version: args.consentTermsVersion,
         consent_accepted_at: args.consentAcceptedAt,
+        bridge_signed_agreement_id: agreement.agreementId,
+        bridge_signed_agreement_synthetic: agreement.synthetic,
+        bridge_signed_agreement_at: existing.bridge_signed_agreement_at || now,
+        bridge_customer_revision: revision,
+        bridge_customer_submitted_at: now,
+        ...sensitiveLast4,
       },
     })
 
@@ -492,28 +719,28 @@ export async function ensureBridgeOnboardingEngine(args: {
       metadata: {
         provider: BRIDGE_PROVIDER_NAME,
         provider_model: BRIDGE_PROVIDER_MODEL,
-        bridge_kyc_link_id: result.kycLinkId,
         bridge_customer_id: result.customerId,
         consent_terms_version: args.consentTermsVersion,
+        signed_agreement_synthetic: agreement.synthetic,
         correlation_id: correlationId,
       },
     })
 
     return {
       ok: true,
-      kycUrl: result.kycUrl,
-      tosUrl: result.tosUrl,
+      customerId: result.customerId,
       reused: false,
+      updated: false,
       connection: state,
       correlationId,
     }
   } catch (error) {
     if (error instanceof BridgeConfigError) {
-      return failure("Bridge is not available yet.", correlationId)
+      return failure("Verification is temporarily unavailable.", correlationId)
     }
 
     const unknown = isBridgeUnknownOutcomeError(error)
-    console.error("[bridge] onboarding_create_failed", {
+    console.error("[bridge] customer_create_failed", {
       correlationId,
       merchantId: args.merchantId,
       ...describeBridgeError(error),
@@ -521,11 +748,11 @@ export async function ensureBridgeOnboardingEngine(args: {
 
     // A timeout is NOT a failure: Bridge may already hold the customer. The
     // deterministic idempotency key means retrying returns that same object,
-    // so the merchant is told to retry rather than that onboarding failed.
+    // so the merchant is told to retry rather than that verification failed.
     return failure(
       unknown
-        ? "Bridge did not respond in time. Nothing was lost - try again in a moment."
-        : "Unable to start Bridge onboarding right now.",
+        ? "Verification did not respond in time. Nothing was lost - try again in a moment."
+        : "Unable to continue verification right now.",
       correlationId,
       true
     )
@@ -533,36 +760,160 @@ export async function ensureBridgeOnboardingEngine(args: {
 }
 
 /**
- * Re-read the hosted onboarding URLs for an existing KYC link.
+ * Fields that only make sense when the customer is first created.
  *
- * The URLs are bearer capabilities, so PineTree never stores them: they are
- * fetched on demand and handed straight back to the authenticated merchant who
- * asked for them.
+ * Resending a signed agreement or an endorsement request on an update is
+ * neither required nor meaningful, and endorsements are already granted or
+ * pending by then.
  */
-async function reissueHostedLinks(input: {
+function stripCreationOnlyFields(
+  payload: BridgeBusinessCustomerPayload
+): Partial<BridgeBusinessCustomerPayload> {
+  const { signed_agreement_id: _agreement, endorsements: _endorsements, ...rest } = payload
+  return rest
+}
+
+/**
+ * SANDBOX ONLY: simulate KYB approval for a merchant's Bridge customer.
+ *
+ * Exists so PineTree can exercise the whole merchant journey without a real
+ * KYB provider. It is administrator-authorized by the caller and FAILS CLOSED
+ * here on the environment: production is refused regardless of what any UI
+ * sends, and there is no merchant-facing equivalent.
+ */
+export async function simulateBridgeKybApprovalEngine(args: {
   merchantId: string
-  kycLinkId: string | null
-  correlationId: string
-}): Promise<{ kycUrl: string | null; tosUrl: string | null }> {
-  if (!input.kycLinkId) return { kycUrl: null, tosUrl: null }
+  adminId: string
+}): Promise<{ ok: true; connection: BridgeConnectionState } | BridgeEngineFailure> {
+  const correlationId = randomUUID()
+
+  if (!String(args.adminId || "").trim()) {
+    return failure("An administrator identity is required.", correlationId)
+  }
+  if (!isBridgeSandbox()) {
+    console.warn("[bridge] simulate_approval_refused_outside_sandbox", { correlationId })
+    return failure("Verification simulation is available in sandbox only.", correlationId)
+  }
+
+  let row: MerchantBridgeConnectionRow | null
+  try {
+    row = await getMerchantBridgeConnection(args.merchantId)
+  } catch (error) {
+    console.error("[bridge] simulate_read_failed", { correlationId, ...describeBridgeError(error) })
+    return failure("Unable to load this merchant right now.", correlationId, true)
+  }
+
+  const existing = row?.credentials || {}
+  const customerId = String(existing.bridge_customer_id || "").trim()
+  if (!customerId) {
+    return failure("This merchant has no verification customer to simulate.", correlationId)
+  }
 
   try {
-    const { getKycLink } = await import("@/providers/bridge/client")
-    const result = await getKycLink({
-      kycLinkId: input.kycLinkId,
+    await simulateKycApproval({
+      customerId,
+      idempotencyKey: `${bridgeOnboardingIdempotencyKey({ merchantId: args.merchantId })}.simulate`,
+      context: { correlationId, merchantId: args.merchantId },
+    })
+
+    // Approval still comes from a Bridge READ, not from the simulate response.
+    const { connection } = await bridgeAdapter.syncAccount({
+      customerId,
+      kycLinkId: existing.bridge_kyc_link_id || null,
+      context: { correlationId, merchantId: args.merchantId },
+    })
+
+    const { state } = await persistConnection({
+      merchantId: args.merchantId,
+      existing,
+      connection,
+      extraCredentials: { sandbox_simulated_approval_at: new Date().toISOString() },
+    })
+
+    await insertMerchantAuditEvent({
+      merchantId: args.merchantId,
+      eventType: "provider.bridge_sandbox_approval_simulated",
+      actorId: args.adminId,
+      metadata: {
+        provider: BRIDGE_PROVIDER_NAME,
+        bridge_customer_id: customerId,
+        correlation_id: correlationId,
+      },
+    })
+
+    return { ok: true, connection: state }
+  } catch (error) {
+    console.error("[bridge] simulate_failed", { correlationId, ...describeBridgeError(error) })
+    return failure("Unable to simulate verification approval right now.", correlationId, true)
+  }
+}
+
+/**
+ * Ensure the merchant has Bridge onboarding.
+ *
+ * Thin orchestration over `ensureBridgeCustomerEngine`: PineTree submits the
+ * business customer directly from the Business Profile it already holds, then -
+ * only when Bridge still needs material PineTree does not hold - hands back the
+ * hosted URL for that remaining step. This is INTERNAL Engine plumbing driven
+ * by `engine/businessVerification.ts`, never by a merchant-facing
+ * "Connect Bridge" action.
+ */
+export async function ensureBridgeOnboardingEngine(args: {
+  merchantId: string
+  /** Terms version whose acceptance authorizes this submission. Required. */
+  consentTermsVersion: string
+  consentAcceptedAt: string
+  actorId?: string | null
+  /** Request-scoped tax identifiers. Never persisted. */
+  sensitive?: BusinessVerificationSensitiveInput
+  /** Set when the caller intends to hand the merchant into a hosted step. */
+  wantHostedUrl?: boolean
+}): Promise<StartBridgeOnboardingResult | BridgeEngineFailure> {
+  const ensured = await ensureBridgeCustomerEngine(args)
+  if (!ensured.ok) return ensured
+
+  const hosted =
+    args.wantHostedUrl && !ensured.connection.approved
+      ? await hostedVerificationUrl({
+          merchantId: args.merchantId,
+          customerId: ensured.customerId,
+          correlationId: ensured.correlationId,
+        })
+      : null
+
+  return {
+    ok: true,
+    kycUrl: hosted,
+    tosUrl: null,
+    reused: ensured.reused,
+    connection: ensured.connection,
+    correlationId: ensured.correlationId,
+  }
+}
+
+/**
+ * Fetch the hosted step URL for an existing Bridge customer.
+ *
+ * The URL is a bearer capability, so PineTree never stores it: it is fetched on
+ * demand and handed straight back to the authenticated merchant who asked for
+ * it. Losing it is a degraded experience, never a state change.
+ */
+async function hostedVerificationUrl(input: {
+  merchantId: string
+  customerId: string
+  correlationId: string
+}): Promise<string | null> {
+  try {
+    return await bridgeAdapter.getHostedVerificationUrl({
+      customerId: input.customerId,
       context: { correlationId: input.correlationId, merchantId: input.merchantId },
     })
-    return {
-      kycUrl: String(result.data.kyc_link || "").trim() || null,
-      tosUrl: String(result.data.tos_link || "").trim() || null,
-    }
   } catch (error) {
-    // Losing the hosted URL is a degraded experience, never a state change.
-    console.warn("[bridge] hosted_link_reissue_failed", {
+    console.warn("[bridge] hosted_link_fetch_failed", {
       correlationId: input.correlationId,
       ...describeBridgeError(error),
     })
-    return { kycUrl: null, tosUrl: null }
+    return null
   }
 }
 
@@ -798,13 +1149,11 @@ export async function ingestBridgeWebhookEventEngine(args: {
   }
 
   // 4. Resolve the owning merchant from PineTree's stored Bridge identifiers.
-  //    Never from anything the payload asserts about a merchant.
-  let owner: MerchantBridgeConnectionRow | null = null
+  //    Never from anything the payload asserts about a merchant. Each category
+  //    resolves through the record that actually holds its identifier.
+  let owner: { merchantId: string; connection: MerchantBridgeConnectionRow | null } | null = null
   try {
-    owner = await findMerchantByBridgeIdentifiers({
-      customerId: event.customerId,
-      kycLinkId: event.kycLinkId,
-    })
+    owner = await resolveBridgeEventOwner(event)
   } catch (error) {
     console.error("[bridge] webhook_owner_lookup_failed", {
       correlationId,
@@ -822,6 +1171,9 @@ export async function ingestBridgeWebhookEventEngine(args: {
       eventType: event.type,
       bridgeCustomerId: event.customerId,
       bridgeKycLinkId: event.kycLinkId,
+      bridgeExternalAccountId: event.externalAccountId,
+      bridgeLiquidationAddressId: event.liquidationAddressId,
+      bridgeDrainId: event.drainId,
       merchantId: owner?.merchantId || null,
       occurredAt: event.occurredAt,
       rawPayload: (payload && typeof payload === "object" ? payload : null) as Record<
@@ -841,14 +1193,15 @@ export async function ingestBridgeWebhookEventEngine(args: {
 
   if (!owner) {
     // Verified and durably stored, but PineTree does not (yet) know this
-    // Bridge customer. The event is retained as evidence rather than dropped.
+    // Bridge object. The event is retained as evidence rather than dropped.
     await markBridgeWebhookEventProcessed({ id: claim.record.id, skippedReason: "unresolved_merchant" })
     console.warn("[bridge] webhook_unresolved_merchant", { correlationId, eventId: event.eventId })
     return { ok: true, applied: false, reason: "unresolved_merchant", correlationId }
   }
 
-  const applied = await applyBridgeEventToConnection({
-    owner,
+  const applied = await applyVerifiedBridgeEvent({
+    merchantId: owner.merchantId,
+    connection: owner.connection,
     event,
     payload,
     correlationId,
@@ -857,10 +1210,99 @@ export async function ingestBridgeWebhookEventEngine(args: {
   await markBridgeWebhookEventProcessed({
     id: claim.record.id,
     merchantId: owner.merchantId,
-    skippedReason: applied.applied ? null : "out_of_order",
+    skippedReason: applied.applied ? null : (applied.reason as BridgeWebhookSkippedReason),
   })
 
   return { ok: true, applied: applied.applied, reason: applied.reason, correlationId }
+}
+
+/**
+ * Resolve the tenant for a verified event.
+ *
+ * Connection events resolve through the stored Bridge customer/KYC-link ids and
+ * carry their connection row straight through; bank-destination and drain
+ * events resolve through the PineTree records that hold those provider
+ * identifiers. In every case the merchant comes from PineTree's own stored
+ * mapping, never from anything the payload asserts.
+ */
+async function resolveBridgeEventOwner(
+  event: NormalizedBridgeConnectionEvent
+): Promise<{ merchantId: string; connection: MerchantBridgeConnectionRow | null } | null> {
+  if (event.category === "external_account" && event.externalAccountId) {
+    const { findBankDestinationByProviderId } = await import("@/database/merchantBankDestinations")
+    const destination = await findBankDestinationByProviderId(event.externalAccountId)
+    if (destination) return { merchantId: destination.merchant_id, connection: null }
+  }
+
+  if (isBridgeDrainEventCategory(event.category) && event.liquidationAddressId) {
+    const { findLiquidationRouteByProviderId } = await import(
+      "@/database/merchantBridgeLiquidationRoutes"
+    )
+    const route = await findLiquidationRouteByProviderId(event.liquidationAddressId)
+    if (route) return { merchantId: route.merchant_id, connection: null }
+  }
+
+  const connection = await findMerchantByBridgeIdentifiers({
+    customerId: event.customerId,
+    kycLinkId: event.kycLinkId,
+  })
+  return connection ? { merchantId: connection.merchantId, connection } : null
+}
+
+/**
+ * Route a verified, deduplicated event to the lifecycle it belongs to.
+ *
+ * A KYB status change and a bank payout are different lifecycles. Keeping the
+ * split explicit here is what stops a drain from ever touching the connection
+ * state machine, or a customer status from touching a withdrawal.
+ */
+async function applyVerifiedBridgeEvent(input: {
+  merchantId: string
+  connection: MerchantBridgeConnectionRow | null
+  event: NormalizedBridgeConnectionEvent
+  payload: unknown
+  correlationId: string
+}): Promise<{ applied: boolean; reason: string }> {
+  if (isBridgeDrainEventCategory(input.event.category)) {
+    const { applyBridgeDrainEventEngine } = await import("@/engine/withdrawals/bankWithdrawals")
+    return applyBridgeDrainEventEngine({
+      merchantId: input.merchantId,
+      event: input.event,
+      payload: input.payload,
+      correlationId: input.correlationId,
+    })
+  }
+
+  if (input.event.category === "external_account") {
+    const { applyBridgeExternalAccountEventEngine } = await import("@/engine/bridgeBankDestinations")
+    return applyBridgeExternalAccountEventEngine({
+      merchantId: input.merchantId,
+      event: input.event,
+      payload: input.payload,
+      correlationId: input.correlationId,
+    })
+  }
+
+  let owner = input.connection
+  if (!owner) {
+    try {
+      owner = await getMerchantBridgeConnection(input.merchantId)
+    } catch (error) {
+      console.error("[bridge] webhook_connection_read_failed", {
+        correlationId: input.correlationId,
+        ...describeBridgeError(error),
+      })
+      return { applied: false, reason: "state_reread_failed" }
+    }
+  }
+  if (!owner) return { applied: false, reason: "unresolved_merchant" }
+
+  return applyBridgeEventToConnection({
+    owner,
+    event: input.event,
+    payload: input.payload,
+    correlationId: input.correlationId,
+  })
 }
 
 /**

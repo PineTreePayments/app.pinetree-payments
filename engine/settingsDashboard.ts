@@ -236,9 +236,21 @@ export function normalizeSettings(input: Partial<MerchantSettingsPayload>): Merc
     owner_email: ownerEmail,
     owner_phone: text(input.owner_phone, 50, "Owner phone"),
   }
-  const profileStatus = BUSINESS_PROFILE_REQUIRED_FIELDS.every((field) =>
-    String(normalizedProfile[field] || "").trim()
-  ) ? "complete" : "incomplete"
+  // This legacy settings payload carries only the original Business Profile
+  // fields. It can therefore PROVE incompleteness but never completeness: the
+  // verification fields it cannot see are required too. So it downgrades when
+  // one of its own fields is missing, and otherwise defers to the status the
+  // canonical Business Profile writer (engine/businessProfile.ts) already
+  // stored. Without this, saving unrelated receipt settings could declare a
+  // half-finished profile complete.
+  const ownedProfileFields = normalizedProfile as Record<string, string | null>
+  const ownedFieldsComplete = BUSINESS_PROFILE_REQUIRED_FIELDS.filter(
+    (field) => field in ownedProfileFields
+  ).every((field) => String(ownedProfileFields[field] || "").trim())
+  const storedStatus = input.profile_status === "complete" || input.profile_status === "needs_attention"
+    ? input.profile_status
+    : "incomplete"
+  const profileStatus = ownedFieldsComplete ? storedStatus : "incomplete"
 
   return {
     business_name: normalizedProfile.legal_business_name,

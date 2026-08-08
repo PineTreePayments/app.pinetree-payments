@@ -28,6 +28,20 @@ export type WalletWithdrawalStatus =
 
 export type WalletWithdrawalSource = "manual" | "saved_address" | "automatic_sweep"
 
+/**
+ * Where the funds ultimately land.
+ *
+ * `crypto` is the historical behavior and remains the default: the destination
+ * address IS the merchant's final destination, so a confirmed source-chain
+ * transaction confirms the withdrawal.
+ *
+ * `bank` means the destination address is a settlement provider's deposit
+ * address. A confirmed source-chain transaction only proves the funds reached
+ * the provider - the bank payout is a separate, later fact, and only the
+ * provider's payout evidence may confirm the withdrawal.
+ */
+export type WalletWithdrawalDestinationKind = "crypto" | "bank"
+
 export type WalletWithdrawalRequestRecord = {
   id: string
   merchant_id: string
@@ -59,6 +73,17 @@ export type WalletWithdrawalRequestRecord = {
   submitted_at: string | null
   confirmed_at: string | null
   failed_at: string | null
+  destination_kind: WalletWithdrawalDestinationKind
+  bank_destination_id: string | null
+  liquidation_route_id: string | null
+  /** Set once the source-chain transfer to the settlement provider succeeded. */
+  source_chain_confirmed_at: string | null
+  /** The settlement provider's payout record for this deposit. */
+  settlement_drain_id: string | null
+  settlement_drain_state: string | null
+  /** ACH trace number / wire IMAD, for support. Never merchant-facing. */
+  settlement_payout_reference: string | null
+  settlement_updated_at: string | null
   created_at: string
   updated_at: string
 }
@@ -160,6 +185,19 @@ function normalize(row: Record<string, unknown>): WalletWithdrawalRequestRecord 
     submitted_at: row.submitted_at != null ? String(row.submitted_at) : null,
     confirmed_at: row.confirmed_at != null ? String(row.confirmed_at) : null,
     failed_at: row.failed_at != null ? String(row.failed_at) : null,
+    // Absent (pre-migration rows, and every existing withdrawal) means crypto:
+    // the historical behavior is preserved by construction.
+    destination_kind: row.destination_kind === "bank" ? "bank" : "crypto",
+    bank_destination_id: row.bank_destination_id != null ? String(row.bank_destination_id) : null,
+    liquidation_route_id: row.liquidation_route_id != null ? String(row.liquidation_route_id) : null,
+    source_chain_confirmed_at:
+      row.source_chain_confirmed_at != null ? String(row.source_chain_confirmed_at) : null,
+    settlement_drain_id: row.settlement_drain_id != null ? String(row.settlement_drain_id) : null,
+    settlement_drain_state:
+      row.settlement_drain_state != null ? String(row.settlement_drain_state) : null,
+    settlement_payout_reference:
+      row.settlement_payout_reference != null ? String(row.settlement_payout_reference) : null,
+    settlement_updated_at: row.settlement_updated_at != null ? String(row.settlement_updated_at) : null,
     created_at: String(row.created_at || ""),
     updated_at: String(row.updated_at || ""),
   }
@@ -581,6 +619,150 @@ export async function sumPendingWalletWithdrawalAmount(
   const whole = totalBaseUnits / scale
   const fraction = (totalBaseUnits % scale).toString().padStart(decimals, "0").replace(/0+$/, "")
   return fraction ? `${whole}.${fraction}` : whole.toString()
+}
+
+// ─── Bank (settlement-provider) withdrawals ──────────────────────────────────
+
+/**
+ * Mark a review row as a BANK withdrawal and bind it to the merchant's bank
+ * destination and settlement route.
+ *
+ * Kept separate from updateWalletWithdrawalRequest so the hot prepare/submit
+ * path's input contract never has to widen for settlement fields, exactly as
+ * updateWalletWithdrawalRequestCanonicalFields does for the dispatcher.
+ */
+export async function markWalletWithdrawalAsBankDestination(
+  merchantId: string,
+  id: string,
+  input: { bankDestinationId: string; liquidationRouteId: string }
+): Promise<WalletWithdrawalRequestRecord> {
+  const { data, error } = await db
+    .from(TABLE)
+    .update({
+      destination_kind: "bank",
+      bank_destination_id: input.bankDestinationId,
+      liquidation_route_id: input.liquidationRouteId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("merchant_id", merchantId)
+    .eq("id", id)
+    .select("*")
+    .single()
+
+  if (error || !data) {
+    throw new Error(`Failed to bind bank withdrawal destination: ${error?.message || "Not found"}`)
+  }
+  return normalize(data as Record<string, unknown>)
+}
+
+/**
+ * Record settlement-provider payout evidence.
+ *
+ * Deliberately does NOT touch `status`: canonical transitions stay with the
+ * Engine, which calls updateWalletWithdrawalRequest with its own terminal-state
+ * guard after deciding what the evidence means.
+ */
+export async function updateWalletWithdrawalSettlementEvidence(
+  merchantId: string,
+  id: string,
+  input: {
+    drainId?: string | null
+    drainState?: string | null
+    payoutReference?: string | null
+    sourceChainConfirmedAt?: string | null
+    settlementUpdatedAt?: string | null
+  }
+): Promise<WalletWithdrawalRequestRecord> {
+  const update: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (input.drainId !== undefined) update.settlement_drain_id = input.drainId
+  if (input.drainState !== undefined) update.settlement_drain_state = input.drainState
+  if (input.payoutReference !== undefined) update.settlement_payout_reference = input.payoutReference
+  if (input.sourceChainConfirmedAt !== undefined) {
+    update.source_chain_confirmed_at = input.sourceChainConfirmedAt
+  }
+  update.settlement_updated_at = input.settlementUpdatedAt ?? new Date().toISOString()
+
+  const { data, error } = await db
+    .from(TABLE)
+    .update(update)
+    .eq("merchant_id", merchantId)
+    .eq("id", id)
+    .select("*")
+    .single()
+
+  if (error || !data) {
+    throw new Error(`Failed to record settlement evidence: ${error?.message || "Not found"}`)
+  }
+  return normalize(data as Record<string, unknown>)
+}
+
+/**
+ * Nonterminal bank withdrawals that already have a source-chain transaction.
+ *
+ * These are the rows whose bank payout is still unproven, so reconciliation
+ * must look them up against the settlement provider rather than assume the
+ * source-chain receipt settled anything.
+ */
+export async function listProcessingBankWithdrawalsForReconciliation(
+  limit: number,
+  merchantId?: string
+): Promise<WalletWithdrawalRequestRecord[]> {
+  let query = db
+    .from(TABLE)
+    .select("*")
+    .eq("destination_kind", "bank")
+    .in("status", ["pending", "processing"])
+    .not("tx_hash", "is", null)
+    .not("liquidation_route_id", "is", null)
+    .order("created_at", { ascending: true })
+    .limit(limit)
+
+  if (merchantId) query = query.eq("merchant_id", merchantId)
+
+  const { data, error } = await query
+  if (error) {
+    throw new Error(`Failed to list bank withdrawals for reconciliation: ${error.message}`)
+  }
+  return (data || []).map((row) => normalize(row as Record<string, unknown>))
+}
+
+/**
+ * Correlate a settlement drain back to the withdrawal that funded it.
+ *
+ * Matching is on the DEPOSIT transaction hash within one liquidation route:
+ * every deposit creates its own drain, so the funding transaction is the only
+ * identifier that ties provider payout evidence to a specific PineTree
+ * withdrawal.
+ */
+export async function findBankWithdrawalForDrain(input: {
+  liquidationRouteId: string
+  depositTxHash?: string | null
+  drainId?: string | null
+}): Promise<WalletWithdrawalRequestRecord | null> {
+  if (input.drainId) {
+    const { data, error } = await db
+      .from(TABLE)
+      .select("*")
+      .eq("settlement_drain_id", input.drainId)
+      .maybeSingle()
+    if (error) throw new Error(`Failed to resolve withdrawal for drain: ${error.message}`)
+    if (data) return normalize(data as Record<string, unknown>)
+  }
+
+  const depositTxHash = String(input.depositTxHash || "").trim()
+  if (!depositTxHash) return null
+
+  const { data, error } = await db
+    .from(TABLE)
+    .select("*")
+    .eq("liquidation_route_id", input.liquidationRouteId)
+    .or(`tx_hash.eq.${depositTxHash},tx_hash.eq.${depositTxHash.toLowerCase()}`)
+    .order("created_at", { ascending: false })
+    .limit(1)
+
+  if (error) throw new Error(`Failed to resolve withdrawal for drain: ${error.message}`)
+  const row = data?.[0]
+  return row ? normalize(row as Record<string, unknown>) : null
 }
 
 export async function findWalletWithdrawalRequestByIdempotencyKey(

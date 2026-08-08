@@ -54,6 +54,101 @@ export function bridgeOnboardingIdempotencyKey(input: {
 }
 
 /**
+ * The idempotency key for creating a merchant's Bridge business CUSTOMER.
+ *
+ * Deliberately distinct from the KYC-link key: they create different Bridge
+ * objects, and sharing a key across two operations would make Bridge return the
+ * wrong cached response for one of them.
+ */
+export function bridgeCustomerIdempotencyKey(input: {
+  merchantId: string
+  version?: string
+}): string {
+  const merchantId = String(input.merchantId || "").trim()
+  if (!merchantId) {
+    throw new Error("A merchant id is required to derive a Bridge idempotency key.")
+  }
+  const version = String(input.version || BRIDGE_ONBOARDING_VERSION).trim() || BRIDGE_ONBOARDING_VERSION
+  return `${BRIDGE_IDEMPOTENCY_NAMESPACE}.customer.${version}.${stableDigest(merchantId, version)}`
+}
+
+/**
+ * The idempotency key for a customer UPDATE.
+ *
+ * Unlike creation, an update must actually apply each time the merchant edits
+ * their profile, so the key incorporates a caller-supplied revision. Reusing
+ * the same revision (a double-clicked Save) is a no-op at Bridge; a genuinely
+ * changed profile produces a new revision and therefore a new key.
+ */
+export function bridgeCustomerUpdateIdempotencyKey(input: {
+  merchantId: string
+  revision: string
+  version?: string
+}): string {
+  const merchantId = String(input.merchantId || "").trim()
+  const revision = String(input.revision || "").trim()
+  if (!merchantId || !revision) {
+    throw new Error("A merchant id and revision are required to derive a Bridge update key.")
+  }
+  const version = String(input.version || BRIDGE_ONBOARDING_VERSION).trim() || BRIDGE_ONBOARDING_VERSION
+  return `${BRIDGE_IDEMPOTENCY_NAMESPACE}.customer_update.${version}.${stableDigest(merchantId, revision, version)}`
+}
+
+/**
+ * The idempotency key for registering a merchant bank account with Bridge.
+ *
+ * Keyed on the merchant plus a PineTree-generated destination id, so a retried
+ * submission reuses the same Bridge external account instead of registering the
+ * bank account twice. The raw account number is never part of the key: an
+ * idempotency key travels in a header.
+ */
+export function bridgeExternalAccountIdempotencyKey(input: {
+  merchantId: string
+  destinationId: string
+  version?: string
+}): string {
+  const merchantId = String(input.merchantId || "").trim()
+  const destinationId = String(input.destinationId || "").trim()
+  if (!merchantId || !destinationId) {
+    throw new Error("A merchant id and destination id are required to derive a Bridge idempotency key.")
+  }
+  const version = String(input.version || BRIDGE_ONBOARDING_VERSION).trim() || BRIDGE_ONBOARDING_VERSION
+  return `${BRIDGE_IDEMPOTENCY_NAMESPACE}.external_account.${version}.${stableDigest(merchantId, destinationId, version)}`
+}
+
+/**
+ * The idempotency key for a liquidation address.
+ *
+ * A liquidation address is a PERMANENT route, so the key is derived from the
+ * complete route identity (merchant, chain, asset, destination bank account).
+ * Re-running the same route therefore returns the existing Bridge object
+ * instead of creating a duplicate permanent route.
+ */
+export function bridgeLiquidationAddressIdempotencyKey(input: {
+  merchantId: string
+  chain: string
+  currency: string
+  externalAccountId: string
+  destinationPaymentRail: string
+  destinationCurrency: string
+  version?: string
+}): string {
+  const parts = [
+    String(input.merchantId || "").trim(),
+    String(input.chain || "").trim(),
+    String(input.currency || "").trim(),
+    String(input.externalAccountId || "").trim(),
+    String(input.destinationPaymentRail || "").trim(),
+    String(input.destinationCurrency || "").trim(),
+  ]
+  if (parts.some((part) => !part)) {
+    throw new Error("A complete route identity is required to derive a Bridge idempotency key.")
+  }
+  const version = String(input.version || BRIDGE_ONBOARDING_VERSION).trim() || BRIDGE_ONBOARDING_VERSION
+  return `${BRIDGE_IDEMPOTENCY_NAMESPACE}.liquidation.${version}.${stableDigest(...parts, version)}`
+}
+
+/**
  * The idempotency key for registering a Bridge webhook endpoint.
  *
  * Keyed on the endpoint URL so re-running operator setup against the same URL

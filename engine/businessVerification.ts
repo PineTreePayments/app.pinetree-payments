@@ -55,10 +55,16 @@ import {
   type MerchantBusinessProfile,
 } from "@/engine/businessProfile"
 import {
+  ensureBridgeCustomerEngine,
   ensureBridgeOnboardingEngine,
   getBridgeConnectionEngine,
+  requestBridgeTermsLinkEngine,
   syncBridgeConnectionEngine,
 } from "@/engine/bridgeConnect"
+import {
+  missingKybProfileFields,
+  type BusinessVerificationSensitiveInput,
+} from "@/engine/bridgeCustomerPayload"
 import { isBridgeConfigured } from "@/providers/bridge/config"
 import type { BridgeConnectionState } from "@/providers/bridge/types"
 
@@ -239,7 +245,12 @@ function projectPreSubmission(input: {
   const termsAccepted = isServiceTermsAcceptanceCurrent(acceptance, "bridge")
   const profileComplete = profile.profile_status === "complete"
 
-  if (!profileComplete) {
+  // A profile can satisfy the required-field list and still be missing
+  // something verification needs - a legacy row saved before a field existed.
+  // Both cases route the merchant to the SAME Business Profile; there is no
+  // second form and no second card.
+  const outstandingKybFields = missingKybProfileFields(profile)
+  if (!profileComplete || outstandingKybFields.length > 0) {
     const started = Boolean(profile.legal_business_name || profile.contact_email)
     return state({
       status: started ? "in_progress" : "not_started",
@@ -311,7 +322,9 @@ function projectPreSubmission(input: {
  *
  * Every condition is a PineTree-side fact resolved server-side. A merchant who
  * abandoned signup, never completed the profile, or never consented is never
- * submitted to a provider.
+ * submitted to a provider. The KYB payload check is included because a profile
+ * that cannot produce a complete submission would only earn a provider
+ * rejection - PineTree keeps the merchant on a fixable PineTree error instead.
  */
 export function canSubmitForVerification(input: {
   profile: MerchantBusinessProfile
@@ -323,6 +336,7 @@ export function canSubmitForVerification(input: {
     input.profile.profile_status === "complete" &&
     Boolean(String(input.profile.legal_business_name || "").trim()) &&
     Boolean(String(input.profile.owner_email || input.profile.contact_email || "").trim()) &&
+    missingKybProfileFields(input.profile).length === 0 &&
     isServiceTermsAcceptanceCurrent(input.acceptance, "bridge")
   )
 }
@@ -348,6 +362,11 @@ export async function getBusinessVerificationEngine(args: {
   merchantId: string
   refresh?: boolean
   actorId?: string | null
+  /**
+   * Request-scoped tax identifiers, present only on the request that collected
+   * them. Never stored, never returned, never logged.
+   */
+  sensitive?: BusinessVerificationSensitiveInput
 }): Promise<BusinessVerificationResult> {
   const correlationId = randomUUID()
 
@@ -363,12 +382,19 @@ export async function getBusinessVerificationEngine(args: {
       existingRow?.credentials?.bridge_customer_id || existingRow?.credentials?.bridge_kyc_link_id
     )
 
-    // ── Advance: submit when every precondition holds and nothing exists yet.
-    if (!hasSubmission && canSubmitForVerification({ profile, acceptance, providerConfigured })) {
+    // ── Advance: submit when every precondition holds. A merchant who already
+    //    has a provider customer still passes through here when this request
+    //    carries fresh data, so an edit reaches the SAME customer.
+    const shouldAdvance =
+      canSubmitForVerification({ profile, acceptance, providerConfigured }) &&
+      (!hasSubmission || Boolean(args.sensitive?.businessTaxId || args.sensitive?.ownerTaxId))
+
+    if (shouldAdvance) {
       const submitted = await submitForVerification({
         merchantId: args.merchantId,
         acceptance: acceptance as MerchantServiceTermsAcceptance,
         actorId: args.actorId ?? null,
+        sensitive: args.sensitive,
       })
 
       if (submitted.ok) {
@@ -457,12 +483,14 @@ async function submitForVerification(input: {
   merchantId: string
   acceptance: MerchantServiceTermsAcceptance
   actorId: string | null
+  sensitive?: BusinessVerificationSensitiveInput
 }): Promise<{ ok: true; connection: BridgeConnectionState } | { ok: false }> {
-  const result = await ensureBridgeOnboardingEngine({
+  const result = await ensureBridgeCustomerEngine({
     merchantId: input.merchantId,
     consentTermsVersion: input.acceptance.termsVersion,
     consentAcceptedAt: input.acceptance.acceptedAt,
     actorId: input.actorId,
+    sensitive: input.sensitive,
   })
 
   if (!result.ok) return { ok: false }
@@ -576,6 +604,8 @@ export async function acceptServiceTermsEngine(args: {
 export async function continueBusinessVerificationEngine(args: {
   merchantId: string
   actorId?: string | null
+  /** Where the provider returns the merchant's browser after its terms step. */
+  termsReturnUrl?: string | null
 }): Promise<
   | { ok: true; verificationUrl: string | null; verification: BusinessVerificationState; correlationId: string }
   | { ok: false; error: string; retryable: boolean; correlationId: string }
@@ -607,9 +637,31 @@ export async function continueBusinessVerificationEngine(args: {
       consentTermsVersion: (acceptance as MerchantServiceTermsAcceptance).termsVersion,
       consentAcceptedAt: (acceptance as MerchantServiceTermsAcceptance).acceptedAt,
       actorId: args.actorId ?? null,
+      wantHostedUrl: true,
     })
 
     if (!result.ok) {
+      // The provider requires its own terms acceptance before it will process
+      // verification. That is a provider-hosted step, and this is the one place
+      // besides the consent disclosure where the merchant leaves PineTree.
+      if ("requiresProviderTerms" in result && result.requiresProviderTerms && args.termsReturnUrl) {
+        const terms = await requestBridgeTermsLinkEngine({
+          merchantId: args.merchantId,
+          returnUrl: args.termsReturnUrl,
+        })
+        if (terms.ok) {
+          const current = await getBusinessVerificationEngine({ merchantId: args.merchantId })
+          return {
+            ok: true,
+            verificationUrl: terms.termsUrl,
+            verification: current.ok
+              ? current.verification
+              : projectPreSubmission({ profile, acceptance, providerConfigured: true }),
+            correlationId,
+          }
+        }
+      }
+
       return {
         ok: false,
         error: "Unable to continue verification right now. Your information is saved.",
@@ -620,9 +672,8 @@ export async function continueBusinessVerificationEngine(args: {
 
     return {
       ok: true,
-      // Terms first when the provider still needs its own acceptance,
-      // otherwise the identity step. Both are provider-hosted so sensitive
-      // documents never transit PineTree.
+      // The provider-hosted step for whatever it still needs and PineTree does
+      // not hold, so identity documents never transit PineTree.
       verificationUrl: result.tosUrl || result.kycUrl,
       verification: projectFromProviderConnection({
         connection: result.connection,

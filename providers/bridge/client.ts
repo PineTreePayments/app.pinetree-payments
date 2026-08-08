@@ -35,9 +35,14 @@ import {
 } from "./errors"
 import { bridgeSafeBodySummary, redactBridgePayload } from "./redact"
 import type {
+  BridgeBusinessCustomerPayload,
   BridgeCustomer,
   BridgeCustomerType,
+  BridgeDrain,
+  BridgeExternalAccount,
   BridgeKycLink,
+  BridgeLiquidationAddress,
+  BridgeLiquidationChain,
   BridgeWebhookEndpoint,
   NormalizedBridgeConnection,
 } from "./types"
@@ -417,6 +422,391 @@ export async function getCustomer(input: {
     config: input.config,
     fetchImpl: input.fetchImpl,
   })
+}
+
+/**
+ * Create a Bridge business customer directly.
+ *
+ * This is the documented path for a platform that already holds the business
+ * information: PineTree submits what the merchant entered once in their
+ * PineTree Business Profile instead of sending them through a second hosted
+ * KYB questionnaire.
+ *
+ * The payload carries KYB material. It is never logged here - the shared
+ * request path redacts every diagnostic through redact.ts.
+ */
+export async function createCustomer(input: {
+  payload: BridgeBusinessCustomerPayload
+  idempotencyKey: string
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}): Promise<BridgeRequestResult<BridgeCustomer>> {
+  const result = await bridgeRequest<BridgeCustomer>({
+    operation: "create_customer",
+    method: "POST",
+    path: "/customers",
+    body: input.payload,
+    idempotencyKey: input.idempotencyKey,
+    context: input.context,
+    config: input.config,
+    fetchImpl: input.fetchImpl,
+  })
+
+  assertIdentifiedObject(result.data, "create_customer", {
+    correlationId: result.correlationId,
+    merchantId: input.context?.merchantId ?? null,
+  })
+  return result
+}
+
+/**
+ * Apply a partial update to an existing Bridge customer.
+ *
+ * A merchant editing their PineTree Business Profile updates the SAME Bridge
+ * customer. PineTree never creates a second one for the same business.
+ */
+export async function updateCustomer(input: {
+  customerId: string
+  payload: Partial<BridgeBusinessCustomerPayload>
+  idempotencyKey: string
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}): Promise<BridgeRequestResult<BridgeCustomer>> {
+  return bridgeRequest<BridgeCustomer>({
+    operation: "update_customer",
+    method: "PUT",
+    path: `/customers/${pathSegment(input.customerId, "update_customer")}`,
+    body: input.payload,
+    idempotencyKey: input.idempotencyKey,
+    context: input.context,
+    config: input.config,
+    fetchImpl: input.fetchImpl,
+  })
+}
+
+/**
+ * Retrieve the hosted KYB link for an EXISTING customer.
+ *
+ * PineTree creates the customer directly from the Business Profile, so this is
+ * used only when Bridge still needs something it can collect but PineTree may
+ * not hold - identity documents and similar. The URL is a bearer capability:
+ * it is handed to the requesting merchant and never stored.
+ */
+export async function getHostedKycLinkForCustomer(input: {
+  customerId: string
+  redirectUri?: string
+  endorsement?: string
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}): Promise<BridgeRequestResult<{ url?: string; kyc_link?: string; tos_link?: string }>> {
+  const params = new URLSearchParams()
+  if (input.redirectUri) params.set("redirect_uri", input.redirectUri)
+  if (input.endorsement) params.set("endorsement", input.endorsement)
+  const query = params.toString() ? `?${params.toString()}` : ""
+
+  return bridgeRequest<{ url?: string; kyc_link?: string; tos_link?: string }>({
+    operation: "get_hosted_kyc_link",
+    method: "GET",
+    path: `/customers/${pathSegment(input.customerId, "get_hosted_kyc_link")}/kyc_link${query}`,
+    context: input.context,
+    config: input.config,
+    fetchImpl: input.fetchImpl,
+  })
+}
+
+/**
+ * Create a Bridge-hosted terms-of-service link.
+ *
+ * Bridge requires its own terms acceptance before KYB processing, and returns
+ * the resulting `signed_agreement_id` on the redirect. The URL is a bearer
+ * capability: it is handed straight back to the requesting merchant and never
+ * stored.
+ */
+export async function createTosLink(input: {
+  idempotencyKey: string
+  redirectUri?: string
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}): Promise<BridgeRequestResult<{ url?: string }>> {
+  const query = input.redirectUri ? `?redirect_uri=${encodeURIComponent(input.redirectUri)}` : ""
+  return bridgeRequest<{ url?: string }>({
+    operation: "create_tos_link",
+    method: "POST",
+    path: `/customers/tos_links${query}`,
+    body: {},
+    idempotencyKey: input.idempotencyKey,
+    context: input.context,
+    config: input.config,
+    fetchImpl: input.fetchImpl,
+  })
+}
+
+/**
+ * Simulate KYB approval. SANDBOX ONLY.
+ *
+ * Bridge documents this endpoint as unavailable in production. The guard here
+ * is a second line of defense: the Engine already refuses to call it outside
+ * sandbox, and this refuses again from the configuration itself so no future
+ * call site can reach production with it.
+ */
+export async function simulateKycApproval(input: {
+  customerId: string
+  idempotencyKey: string
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}): Promise<BridgeRequestResult<BridgeCustomer>> {
+  const config = input.config ?? getBridgeConfig()
+  if (config.environment !== "sandbox") {
+    throw new BridgeApiError("Bridge KYB simulation is available in sandbox only.", {
+      httpStatus: 403,
+      code: "sandbox_only",
+      diagnostics: { operation: "simulate_kyc_approval" },
+    })
+  }
+
+  return bridgeRequest<BridgeCustomer>({
+    operation: "simulate_kyc_approval",
+    method: "POST",
+    path: `/customers/${pathSegment(input.customerId, "simulate_kyc_approval")}/simulate_kyc_approval`,
+    body: {},
+    idempotencyKey: input.idempotencyKey,
+    context: input.context,
+    config,
+    fetchImpl: input.fetchImpl,
+  })
+}
+
+// ─── External accounts ───────────────────────────────────────────────────────
+
+export type CreateBridgeUsExternalAccountInput = {
+  customerId: string
+  bankName: string
+  accountName?: string
+  accountOwnerName: string
+  accountOwnerType: "business" | "individual"
+  businessName?: string
+  firstName?: string
+  lastName?: string
+  routingNumber: string
+  accountNumber: string
+  checkingOrSavings: "checking" | "savings"
+  address: {
+    street_line_1: string
+    street_line_2?: string
+    city: string
+    state?: string
+    postal_code?: string
+    country: string
+  }
+  idempotencyKey: string
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}
+
+/**
+ * Register a merchant's US bank account with Bridge.
+ *
+ * The raw account number exists only inside this call. PineTree persists the
+ * Bridge external-account id and the masked last four that Bridge returns -
+ * never the number itself.
+ */
+export async function createExternalAccount(
+  input: CreateBridgeUsExternalAccountInput
+): Promise<BridgeRequestResult<BridgeExternalAccount>> {
+  const body: Record<string, unknown> = {
+    account_type: "us",
+    currency: "usd",
+    bank_name: input.bankName,
+    account_owner_name: input.accountOwnerName,
+    account_owner_type: input.accountOwnerType,
+    account: {
+      routing_number: input.routingNumber,
+      account_number: input.accountNumber,
+      checking_or_savings: input.checkingOrSavings,
+    },
+    address: input.address,
+  }
+  if (input.accountName) body.account_name = input.accountName
+  if (input.accountOwnerType === "business" && input.businessName) {
+    body.business_name = input.businessName
+  }
+  if (input.accountOwnerType === "individual") {
+    if (input.firstName) body.first_name = input.firstName
+    if (input.lastName) body.last_name = input.lastName
+  }
+
+  const result = await bridgeRequest<BridgeExternalAccount>({
+    operation: "create_external_account",
+    method: "POST",
+    path: `/customers/${pathSegment(input.customerId, "create_external_account")}/external_accounts`,
+    body,
+    idempotencyKey: input.idempotencyKey,
+    context: input.context,
+    config: input.config,
+    fetchImpl: input.fetchImpl,
+  })
+
+  assertIdentifiedObject(result.data, "create_external_account", {
+    correlationId: result.correlationId,
+    merchantId: input.context?.merchantId ?? null,
+  })
+  return result
+}
+
+export async function listExternalAccounts(input: {
+  customerId: string
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}): Promise<BridgeRequestResult<{ data?: BridgeExternalAccount[] } | BridgeExternalAccount[]>> {
+  return bridgeRequest<{ data?: BridgeExternalAccount[] } | BridgeExternalAccount[]>({
+    operation: "list_external_accounts",
+    method: "GET",
+    path: `/customers/${pathSegment(input.customerId, "list_external_accounts")}/external_accounts`,
+    context: input.context,
+    config: input.config,
+    fetchImpl: input.fetchImpl,
+  })
+}
+
+/**
+ * Deactivate a merchant's bank destination at Bridge.
+ *
+ * Bridge's semantics are deactivate-not-delete, which preserves the payout
+ * history that already references the account. PineTree mirrors that: the
+ * PineTree row is archived, never removed.
+ */
+export async function deactivateExternalAccount(input: {
+  customerId: string
+  externalAccountId: string
+  idempotencyKey: string
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}): Promise<BridgeRequestResult<BridgeExternalAccount>> {
+  return bridgeRequest<BridgeExternalAccount>({
+    operation: "deactivate_external_account",
+    method: "POST",
+    path:
+      `/customers/${pathSegment(input.customerId, "deactivate_external_account")}` +
+      `/external_accounts/${pathSegment(input.externalAccountId, "deactivate_external_account")}/deactivate`,
+    body: {},
+    idempotencyKey: input.idempotencyKey,
+    context: input.context,
+    config: input.config,
+    fetchImpl: input.fetchImpl,
+  })
+}
+
+// ─── Liquidation addresses ───────────────────────────────────────────────────
+
+export type CreateBridgeLiquidationAddressInput = {
+  customerId: string
+  chain: BridgeLiquidationChain
+  currency: "usdc"
+  externalAccountId: string
+  destinationPaymentRail: "ach"
+  destinationCurrency: "usd"
+  /**
+   * Where Bridge returns funds it cannot process. Bridge requires it to be on
+   * the SAME source chain, so this is always the merchant's PineTree Wallet
+   * address for that chain.
+   */
+  returnAddress: string
+  idempotencyKey: string
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}
+
+export async function createLiquidationAddress(
+  input: CreateBridgeLiquidationAddressInput
+): Promise<BridgeRequestResult<BridgeLiquidationAddress>> {
+  const result = await bridgeRequest<BridgeLiquidationAddress>({
+    operation: "create_liquidation_address",
+    method: "POST",
+    path: `/customers/${pathSegment(input.customerId, "create_liquidation_address")}/liquidation_addresses`,
+    body: {
+      chain: input.chain,
+      currency: input.currency,
+      external_account_id: input.externalAccountId,
+      destination_payment_rail: input.destinationPaymentRail,
+      destination_currency: input.destinationCurrency,
+      return_address: input.returnAddress,
+    },
+    idempotencyKey: input.idempotencyKey,
+    context: input.context,
+    config: input.config,
+    fetchImpl: input.fetchImpl,
+  })
+
+  assertIdentifiedObject(result.data, "create_liquidation_address", {
+    correlationId: result.correlationId,
+    merchantId: input.context?.merchantId ?? null,
+  })
+  return result
+}
+
+export async function listLiquidationAddresses(input: {
+  customerId: string
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}): Promise<BridgeRequestResult<{ data?: BridgeLiquidationAddress[] } | BridgeLiquidationAddress[]>> {
+  return bridgeRequest<{ data?: BridgeLiquidationAddress[] } | BridgeLiquidationAddress[]>({
+    operation: "list_liquidation_addresses",
+    method: "GET",
+    path: `/customers/${pathSegment(input.customerId, "list_liquidation_addresses")}/liquidation_addresses`,
+    context: input.context,
+    config: input.config,
+    fetchImpl: input.fetchImpl,
+  })
+}
+
+/**
+ * Drain history for one liquidation address.
+ *
+ * This is the AUTHORITATIVE payout evidence for a bank withdrawal: a source
+ * chain receipt only proves the merchant's USDC reached Bridge.
+ */
+export async function listLiquidationAddressDrains(input: {
+  customerId: string
+  liquidationAddressId: string
+  txHash?: string | null
+  limit?: number
+  context?: BridgeRequestContext
+  config?: BridgeConfig
+  fetchImpl?: typeof fetch
+}): Promise<BridgeRequestResult<{ data?: BridgeDrain[] } | BridgeDrain[]>> {
+  const params = new URLSearchParams()
+  if (input.txHash) params.set("tx_hash", input.txHash)
+  if (input.limit) params.set("limit", String(Math.min(Math.max(input.limit, 1), 100)))
+  const query = params.toString() ? `?${params.toString()}` : ""
+
+  return bridgeRequest<{ data?: BridgeDrain[] } | BridgeDrain[]>({
+    operation: "list_liquidation_address_drains",
+    method: "GET",
+    path:
+      `/customers/${pathSegment(input.customerId, "list_liquidation_address_drains")}` +
+      `/liquidation_addresses/${pathSegment(input.liquidationAddressId, "list_liquidation_address_drains")}` +
+      `/drains${query}`,
+    context: input.context,
+    config: input.config,
+    fetchImpl: input.fetchImpl,
+  })
+}
+
+/** Bridge list endpoints return either a bare array or `{ data: [...] }`. */
+export function bridgeListItems<T>(payload: { data?: T[] } | T[] | null | undefined): T[] {
+  if (Array.isArray(payload)) return payload
+  if (payload && Array.isArray(payload.data)) return payload.data
+  return []
 }
 
 /**

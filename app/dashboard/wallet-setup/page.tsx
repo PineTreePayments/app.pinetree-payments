@@ -102,6 +102,30 @@ type AddressEntry = { id: string; address: string; detail?: string }
 type WithdrawalRail = "base" | "solana" | "bitcoin"
 type WithdrawalAsset = "ETH" | "USDC" | "SOL" | "BTC"
 type WithdrawalScreen = "form" | "review" | "approving" | "submitted" | "failed"
+
+/**
+ * Where a withdrawal lands. "crypto" sends to an address the merchant controls;
+ * "bank" settles USDC to a saved bank account. Both run the same review ->
+ * authorize -> submit flow - only the destination and the confirmation
+ * evidence differ.
+ */
+type WithdrawalDestinationKind = "crypto" | "bank"
+
+/** The safe merchant-facing view of a saved bank account. */
+type SavedBankDestination = {
+  id: string
+  label: string
+  bankName: string | null
+  accountLast4: string | null
+  accountKind: "checking" | "savings" | null
+  status: "Ready" | "Being verified" | "Action required"
+  usable: boolean
+}
+
+/** Bank withdrawals settle USDC. Native assets have no settlement route yet. */
+function supportsBankWithdrawal(rail: WithdrawalRail, asset: WithdrawalAsset) {
+  return asset === "USDC" && (rail === "base" || rail === "solana")
+}
 type WithdrawalLifecycleState =
   | "DRAFT"
   | "REVIEW"
@@ -2765,6 +2789,10 @@ function WithdrawalFormShell({
   onBitcoinTransferTypeChange,
   destinationAddress,
   selectedDestinationId,
+  destinationKind,
+  bankDestinationId,
+  onDestinationKindChange,
+  onBankDestinationChange,
   amountDecimal,
   screen,
   review,
@@ -2802,6 +2830,10 @@ function WithdrawalFormShell({
   onBitcoinTransferTypeChange: (value: BitcoinTransferType) => void
   destinationAddress: string
   selectedDestinationId: string | null
+  destinationKind: WithdrawalDestinationKind
+  bankDestinationId: string | null
+  onDestinationKindChange: (kind: WithdrawalDestinationKind) => void
+  onBankDestinationChange: (id: string | null) => void
   amountDecimal: string
   screen: WithdrawalScreen
   review: WithdrawalReviewResponse | null
@@ -2837,8 +2869,22 @@ function WithdrawalFormShell({
   const [saveDestinationLabel, setSaveDestinationLabel] = useState("")
   const [savingDestination, setSavingDestination] = useState(false)
   const [saveDestinationError, setSaveDestinationError] = useState("")
+  const [bankDestinations, setBankDestinations] = useState<SavedBankDestination[]>([])
+  const [bankFormOpen, setBankFormOpen] = useState(false)
+  const [linkingBank, setLinkingBank] = useState(false)
+  const [bankFormError, setBankFormError] = useState("")
+  const [bankForm, setBankForm] = useState({
+    bank_name: "",
+    account_owner_name: "",
+    routing_number: "",
+    account_number: "",
+    account_kind: "checking" as "checking" | "savings",
+  })
   const amountInputRef = useRef<HTMLInputElement | null>(null)
   const savedDestinationsMethod = rail === "bitcoin" ? bitcoinTransferType : undefined
+  const bankWithdrawalSupported = supportsBankWithdrawal(rail, asset)
+  const bankMode = destinationKind === "bank" && bankWithdrawalSupported
+  const selectedBankDestination = bankDestinations.find((entry) => entry.id === bankDestinationId) || null
 
   useEffect(() => {
     if (preflightFailure) amountInputRef.current?.focus()
@@ -2866,6 +2912,67 @@ function WithdrawalFormShell({
   useEffect(() => {
     void fetchSavedDestinations()
   }, [fetchSavedDestinations])
+
+  const fetchBankDestinations = useCallback(async () => {
+    if (!accessToken || !bankWithdrawalSupported) return
+    try {
+      const res = await fetch("/api/wallets/pinetree-wallet/bank-destinations", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        credentials: "include",
+        cache: "no-store",
+      })
+      if (!res.ok) return
+      const json = (await res.json()) as { destinations?: SavedBankDestination[] }
+      setBankDestinations(json.destinations || [])
+    } catch {
+      // Saved bank accounts are a convenience layer; a fetch failure just means
+      // the list is empty and the merchant can link one.
+    }
+  }, [accessToken, bankWithdrawalSupported])
+
+  useEffect(() => {
+    void fetchBankDestinations()
+  }, [fetchBankDestinations])
+
+  /**
+   * Link a bank account.
+   *
+   * The routing and account numbers are posted once to PineTree's authenticated
+   * API, which forwards them to the settlement provider. They are cleared from
+   * this form immediately afterwards and are never stored anywhere in PineTree.
+   */
+  async function handleLinkBankAccount() {
+    if (!accessToken) return
+    setLinkingBank(true)
+    setBankFormError("")
+    try {
+      const res = await fetch("/api/wallets/pinetree-wallet/bank-destinations", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(bankForm),
+      })
+      const json = (await res.json()) as { destination?: SavedBankDestination; error?: string }
+      if (!res.ok || !json.destination) {
+        setBankFormError(json.error || "Couldn't add this bank account.")
+        return
+      }
+      setBankForm({
+        bank_name: "",
+        account_owner_name: "",
+        routing_number: "",
+        account_number: "",
+        account_kind: "checking",
+      })
+      setBankFormOpen(false)
+      onBankDestinationChange(json.destination.id)
+      void fetchBankDestinations()
+    } catch {
+      setBankFormError("Couldn't add this bank account.")
+    } finally {
+      setLinkingBank(false)
+    }
+  }
 
   async function handleSaveDestination() {
     const trimmedDestination = destinationAddress.trim()
@@ -2908,7 +3015,9 @@ function WithdrawalFormShell({
   const amountParseError = amountTrimmed.length > 0 && amountBaseUnits === null
   const invalidAmount = amountBaseUnits !== null && amountBaseUnits <= BigInt(0)
   const amountExceedsBalance = selectedBalanceKnown && selectedBalanceBaseUnits !== null && amountBaseUnits !== null && amountBaseUnits > selectedBalanceBaseUnits
-  const missingDestination = destinationAddress.trim().length === 0
+  const missingDestination = bankMode
+    ? !selectedBankDestination?.usable
+    : destinationAddress.trim().length === 0
   const noWithdrawableAssets = assetOptions.length === 0
   const bitcoinBalanceUnavailable = rail === "bitcoin" && !selectedBalanceKnown
   const reviewBlockedByInput = reviewing || noWithdrawableAssets || missingDestination || missingAmount || amountParseError || invalidAmount || selectedBalanceZero || amountExceedsBalance || bitcoinBalanceUnavailable
@@ -2916,13 +3025,19 @@ function WithdrawalFormShell({
   const formattedAvailable = formatCryptoAmount(selectedBalanceAmount, asset)
   const maxDisabled = !selectedBalanceKnown || selectedBalanceZero
   const nativeMaxNote = isNativeWithdrawalAsset(asset) && selectedBalanceKnown && !selectedBalanceZero
-  const selectedDestinationLabel = selectedDestinationId
-    ? savedDestinations.find((destination) => destination.id === selectedDestinationId)?.label.trim() || "Saved destination"
-    : "Manually entered destination"
+  const selectedDestinationLabel = bankMode
+    ? selectedBankDestination?.label || "Bank account"
+    : selectedDestinationId
+      ? savedDestinations.find((destination) => destination.id === selectedDestinationId)?.label.trim() || "Saved destination"
+      : "Manually entered destination"
   const blockingMessage =
     error ||
     (missingDestination
-      ? "Enter a destination address to review."
+      ? bankMode
+        ? bankDestinations.length === 0
+          ? "Link a bank account to withdraw to your bank."
+          : "Choose a bank account to review."
+        : "Enter a destination address to review."
       : missingAmount
         ? "Enter an amount to review."
         : amountParseError
@@ -2954,11 +3069,23 @@ function WithdrawalFormShell({
         amount={review.review.amountDecimal}
         asset={review.review.asset}
         network={reviewNetwork}
-        destination={review.review.destinationAddress}
-        destinationLabel={selectedDestinationLabel}
+        // For a bank withdrawal the destination address belongs to PineTree's
+        // settlement infrastructure, so the merchant sees their bank account -
+        // showing them an unfamiliar address would be worse than useless.
+        destination={
+          bankMode
+            ? selectedBankDestination?.accountLast4
+              ? `${selectedBankDestination.bankName || "Bank account"} ····${selectedBankDestination.accountLast4}`
+              : selectedDestinationLabel
+            : review.review.destinationAddress
+        }
+        destinationLabel={bankMode ? "Bank account" : selectedDestinationLabel}
         details={[
           { label: "Asset", value: review.review.asset },
           { label: "Network", value: reviewNetwork },
+          ...(bankMode
+            ? [{ label: "Arrives", value: "1-3 business days" } as const]
+            : []),
           { label: "Spendable", value: review.preflight ? `${review.preflight.spendableBalance} ${review.preflight.asset}` : "Verified at review" },
           { label: "Estimated network fee", value: review.preflight ? `${review.preflight.requiredFeeReserve} ${review.preflight.feeAsset}` : "Verified at submission" },
           { label: "PineTree wallet/source", value: diagnostics.savedSourceAddress ? `…${diagnostics.savedSourceAddress.slice(-8)}` : "Provider account", wide: true, mono: true },
@@ -3056,7 +3183,134 @@ function WithdrawalFormShell({
         </div>
       ) : null}
 
-      {savedDestinations.length > 0 ? (
+      {bankWithdrawalSupported ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase text-gray-500">Send to</p>
+          <SegmentedButtons
+            ariaLabel="Withdrawal destination"
+            value={destinationKind}
+            onChange={onDestinationKindChange}
+            options={[
+              { value: "crypto", label: "Crypto address" },
+              { value: "bank", label: "Bank account" },
+            ]}
+          />
+        </div>
+      ) : null}
+
+      {bankMode ? (
+        <div className="space-y-3 rounded-[1.1rem] border border-blue-100 bg-blue-50/40 px-3 py-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">Bank account</p>
+            {bankDestinations.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setBankFormOpen((open) => !open)}
+                className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-white px-3 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+              >
+                {bankFormOpen ? "Cancel" : "Link another"}
+              </button>
+            ) : null}
+          </div>
+
+          {bankDestinations.length > 0 ? (
+            <div className="relative bg-white">
+              <select
+                aria-label="Bank account"
+                value={bankDestinationId || ""}
+                onChange={(event) => onBankDestinationChange(event.target.value || null)}
+                className="h-10 w-full appearance-none rounded-lg border border-gray-200 bg-white pl-3 pr-8 text-sm text-gray-800 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-50"
+              >
+                <option value="">Select a bank account</option>
+                {bankDestinations.map((bank) => (
+                  <option key={bank.id} value={bank.id} disabled={!bank.usable}>
+                    {bank.label}
+                    {bank.usable ? "" : ` — ${bank.status}`}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            </div>
+          ) : null}
+
+          {bankDestinations.length === 0 && !bankFormOpen ? (
+            <button
+              type="button"
+              onClick={() => setBankFormOpen(true)}
+              className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+            >
+              Link bank account
+            </button>
+          ) : null}
+
+          {bankFormOpen ? (
+            <div className="space-y-2 rounded-xl border border-gray-200 bg-white p-3">
+              <p className="text-xs leading-5 text-gray-500">
+                US bank accounts only. PineTree does not store your account number.
+              </p>
+              <input
+                value={bankForm.bank_name}
+                onChange={(event) => setBankForm((form) => ({ ...form, bank_name: event.target.value }))}
+                placeholder="Bank name"
+                aria-label="Bank name"
+                className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300"
+              />
+              <input
+                value={bankForm.account_owner_name}
+                onChange={(event) => setBankForm((form) => ({ ...form, account_owner_name: event.target.value }))}
+                placeholder="Name on the account"
+                aria-label="Name on the account"
+                className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300"
+              />
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input
+                  value={bankForm.routing_number}
+                  onChange={(event) => setBankForm((form) => ({ ...form, routing_number: event.target.value }))}
+                  placeholder="Routing number"
+                  aria-label="Routing number"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-mono text-sm text-gray-900 outline-none focus:border-blue-300"
+                />
+                <input
+                  value={bankForm.account_number}
+                  onChange={(event) => setBankForm((form) => ({ ...form, account_number: event.target.value }))}
+                  placeholder="Account number"
+                  aria-label="Account number"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-mono text-sm text-gray-900 outline-none focus:border-blue-300"
+                />
+              </div>
+              <SegmentedButtons
+                ariaLabel="Account type"
+                value={bankForm.account_kind}
+                onChange={(value) => setBankForm((form) => ({ ...form, account_kind: value }))}
+                options={[
+                  { value: "checking", label: "Checking" },
+                  { value: "savings", label: "Savings" },
+                ]}
+              />
+              {bankFormError ? <p className="text-xs text-red-600">{bankFormError}</p> : null}
+              <button
+                type="button"
+                onClick={() => void handleLinkBankAccount()}
+                disabled={linkingBank}
+                className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+              >
+                {linkingBank ? "Adding..." : "Add bank account"}
+              </button>
+            </div>
+          ) : null}
+
+          <p className="text-[11px] leading-4 text-gray-500">
+            Bank transfers usually arrive in 1-3 business days. PineTree confirms this
+            withdrawal only once your bank has been paid.
+          </p>
+        </div>
+      ) : null}
+
+      {!bankMode && savedDestinations.length > 0 ? (
         <div className="space-y-2 rounded-[1.1rem] border border-blue-100 bg-blue-50/40 px-3 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">Choose Saved Destination</p>
@@ -3092,7 +3346,7 @@ function WithdrawalFormShell({
         </div>
       ) : null}
 
-      <div className="space-y-2">
+      <div className={`space-y-2 ${bankMode ? "hidden" : ""}`}>
         <p className="text-xs font-semibold uppercase text-gray-500">Paste New Address</p>
         <input
           value={destinationAddress}
@@ -4403,6 +4657,11 @@ function PineTreeWalletRuntime() {
   const [withdrawalSelectedDestinationId, setWithdrawalSelectedDestinationId] = useState<string | null>(null)
   const [withdrawalSelectedDestinationLabel, setWithdrawalSelectedDestinationLabel] = useState<string | null>(null)
   const [withdrawalAmount, setWithdrawalAmount] = useState("")
+  // Where this withdrawal lands. "crypto" is the historical behavior and the
+  // default; "bank" settles USDC to a saved bank account through PineTree's
+  // settlement infrastructure. Both use the same review/authorize/submit flow.
+  const [withdrawalDestinationKind, setWithdrawalDestinationKind] = useState<WithdrawalDestinationKind>("crypto")
+  const [withdrawalBankDestinationId, setWithdrawalBankDestinationId] = useState<string | null>(null)
   const [withdrawalScreen, setWithdrawalScreen] = useState<WithdrawalScreen>("form")
   const [withdrawalReview, setWithdrawalReview] = useState<WithdrawalReviewResponse | null>(null)
   const [withdrawalSubmitResult, setWithdrawalSubmitResult] = useState<WithdrawalSubmitResponse | null>(null)
@@ -9871,7 +10130,14 @@ function PineTreeWalletRuntime() {
       setWithdrawalError("Wallet session is not available. Refresh the page and try again.")
       return
     }
-    if (!destination) {
+    const isBankWithdrawal =
+      withdrawalDestinationKind === "bank" && supportsBankWithdrawal(withdrawalRail, withdrawalAsset)
+    if (isBankWithdrawal) {
+      if (!withdrawalBankDestinationId) {
+        setWithdrawalError("Choose a bank account to review.")
+        return
+      }
+    } else if (!destination) {
       setWithdrawalError("Enter a destination address to review.")
       return
     }
@@ -10051,21 +10317,39 @@ function PineTreeWalletRuntime() {
       setReviewingWithdrawal(true)
       setWithdrawalError("")
       try {
-        const res = await fetch("/api/wallets/pinetree-wallet/withdrawals", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-            "X-PineTree-Withdrawal-Correlation": correlationId,
-          },
-          body: JSON.stringify({
-            rail: withdrawalRail,
-            asset: withdrawalAsset,
-            destination_address: destination,
-            amount_decimal: amount,
-            destination_id: withdrawalSelectedDestinationId || undefined,
-          }),
-        })
+        // A bank withdrawal goes to its own route because the Engine must
+        // ensure the settlement route before any withdrawal row exists. The
+        // response shape is identical, so everything downstream - prepare,
+        // Dynamic authorization, submit - is the same code path.
+        const res = await fetch(
+          isBankWithdrawal
+            ? "/api/wallets/pinetree-wallet/bank-withdrawals"
+            : "/api/wallets/pinetree-wallet/withdrawals",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+              "X-PineTree-Withdrawal-Correlation": correlationId,
+            },
+            body: JSON.stringify(
+              isBankWithdrawal
+                ? {
+                    rail: withdrawalRail,
+                    asset: withdrawalAsset,
+                    amount_decimal: amount,
+                    bank_destination_id: withdrawalBankDestinationId,
+                  }
+                : {
+                    rail: withdrawalRail,
+                    asset: withdrawalAsset,
+                    destination_address: destination,
+                    amount_decimal: amount,
+                    destination_id: withdrawalSelectedDestinationId || undefined,
+                  }
+            ),
+          }
+        )
         const json = (await res.json()) as WithdrawalReviewResponse | { error?: string; error_code?: string; preflight?: WithdrawalPreflightFailure }
         if (!res.ok) {
           emitWalletSetupDebugEvent("wallet_withdrawal_review_blocked", {
@@ -11400,6 +11684,24 @@ function PineTreeWalletRuntime() {
                 }}
                 destinationAddress={withdrawalDestination}
                 selectedDestinationId={withdrawalSelectedDestinationId}
+                destinationKind={withdrawalDestinationKind}
+                bankDestinationId={withdrawalBankDestinationId}
+                onDestinationKindChange={(kind) => {
+                  setWithdrawalDestinationKind(kind)
+                  // Switching destination kind invalidates the other kind's
+                  // selection and any review built from it.
+                  setWithdrawalScreen("form")
+                  setWithdrawalReview(null)
+                  setWithdrawalSubmitResult(null)
+                  setWithdrawalError("")
+                  setWithdrawalApprovalError("")
+                }}
+                onBankDestinationChange={(id) => {
+                  setWithdrawalBankDestinationId(id)
+                  setWithdrawalScreen("form")
+                  setWithdrawalReview(null)
+                  setWithdrawalError("")
+                }}
                 amountDecimal={withdrawalAmount}
                 screen={withdrawalScreen}
                 review={withdrawalReview}

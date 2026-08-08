@@ -131,6 +131,239 @@ export type BridgeWebhookEndpoint = {
   updated_at?: string
 }
 
+// ─── Business customer payload (POST/PUT /customers) ─────────────────────────
+
+/** Documented `business_type` values - how the business is legally registered. */
+export const BRIDGE_BUSINESS_TYPES = [
+  "cooperative",
+  "corporation",
+  "llc",
+  "other",
+  "partnership",
+  "sole_prop",
+  "trust",
+] as const
+export type BridgeBusinessType = (typeof BRIDGE_BUSINESS_TYPES)[number]
+
+export const BRIDGE_ESTIMATED_ANNUAL_REVENUE = [
+  "0_99999",
+  "100000_999999",
+  "1000000_9999999",
+  "10000000_49999999",
+  "50000000_249999999",
+  "250000000_plus",
+] as const
+export type BridgeEstimatedAnnualRevenue = (typeof BRIDGE_ESTIMATED_ANNUAL_REVENUE)[number]
+
+export const BRIDGE_ACCOUNT_PURPOSES = [
+  "charitable_donations",
+  "ecommerce_retail_payments",
+  "investment_purposes",
+  "other",
+  "payments_to_friends_or_family_abroad",
+  "payroll",
+  "personal_or_living_expenses",
+  "protect_wealth",
+  "purchase_goods_and_services",
+  "receive_payments_for_goods_and_services",
+  "tax_optimization",
+  "third_party_money_transmission",
+  "treasury_management",
+] as const
+export type BridgeAccountPurpose = (typeof BRIDGE_ACCOUNT_PURPOSES)[number]
+
+export const BRIDGE_SOURCE_OF_FUNDS = [
+  "business_loans",
+  "grants",
+  "inter_company_funds",
+  "investment_proceeds",
+  "legal_settlement",
+  "owners_capital",
+  "pension_retirement",
+  "sale_of_assets",
+  "sales_of_goods_and_services",
+  "third_party_funds",
+  "treasury_reserves",
+] as const
+export type BridgeSourceOfFunds = (typeof BRIDGE_SOURCE_OF_FUNDS)[number]
+
+export const BRIDGE_HIGH_RISK_ACTIVITIES = [
+  "adult_entertainment",
+  "gambling",
+  "hold_client_funds",
+  "investment_services",
+  "lending_banking",
+  "marijuana_or_related_services",
+  "money_services",
+  "nicotine_tobacco_or_related_services",
+  "operate_foreign_exchange_virtual_currencies_brokerage_otc",
+  "pharmaceuticals",
+  "precious_metals_precious_stones_jewelry",
+  "safe_deposit_box_rentals",
+  "third_party_payment_processing",
+  "weapons_firearms_and_explosives",
+  "none_of_the_above",
+] as const
+export type BridgeHighRiskActivity = (typeof BRIDGE_HIGH_RISK_ACTIVITIES)[number]
+
+/** Bridge's `Address2025WinterRefresh` shape. `country` is ISO 3166-1 alpha-3. */
+export type BridgeAddress = {
+  street_line_1: string
+  street_line_2?: string
+  city: string
+  subdivision?: string
+  postal_code?: string
+  country: string
+}
+
+export type BridgeIdentifyingInformation = {
+  type: string
+  issuing_country: string
+  number?: string
+}
+
+export type BridgeAssociatedPerson = {
+  first_name: string
+  last_name: string
+  email: string
+  phone?: string
+  birth_date: string
+  residential_address: BridgeAddress
+  identifying_information: BridgeIdentifyingInformation[]
+  has_ownership: boolean
+  has_control: boolean
+  is_signer: boolean
+  is_director?: boolean
+  title?: string
+  ownership_percentage?: number
+  relationship_established_at?: string
+}
+
+/**
+ * The business-customer body PineTree sends to Bridge.
+ *
+ * Every field here originates from the merchant's PineTree Business Profile.
+ * Tax identifiers travel inside `identifying_information` and are never
+ * persisted by PineTree - see engine/bridgeCustomerPayload.ts.
+ */
+export type BridgeBusinessCustomerPayload = {
+  type: "business"
+  business_legal_name: string
+  business_trade_name?: string
+  business_description: string
+  email: string
+  phone?: string
+  business_type: BridgeBusinessType
+  primary_website?: string
+  registered_address: BridgeAddress
+  physical_address: BridgeAddress
+  business_industry: string[]
+  signed_agreement_id?: string
+  is_dao: boolean
+  has_material_intermediary_ownership: boolean
+  estimated_annual_revenue_usd: BridgeEstimatedAnnualRevenue
+  expected_monthly_payments_usd: number
+  operates_in_prohibited_countries: boolean
+  account_purpose: BridgeAccountPurpose
+  account_purpose_other?: string
+  high_risk_activities: BridgeHighRiskActivity[]
+  high_risk_activities_explanation?: string
+  source_of_funds: BridgeSourceOfFunds
+  conducts_money_services: boolean
+  compliance_screening_explanation?: string
+  identifying_information?: BridgeIdentifyingInformation[]
+  associated_persons?: BridgeAssociatedPerson[]
+  endorsements?: string[]
+}
+
+// ─── External accounts and liquidation addresses ─────────────────────────────
+
+export type BridgeCheckingOrSavings = "checking" | "savings"
+
+export type BridgeExternalAccount = {
+  id: string
+  customer_id?: string | null
+  bank_name?: string | null
+  account_name?: string | null
+  account_owner_name?: string | null
+  account_owner_type?: string | null
+  account_type?: string | null
+  currency?: string | null
+  active?: boolean
+  last_4?: string | null
+  account?: { last_4?: string | null; checking_or_savings?: string | null } | null
+  beneficiary_address_valid?: boolean
+  deactivation_reason?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+/** Source chains PineTree supports for a liquidation address today. */
+export const BRIDGE_LIQUIDATION_CHAINS = ["base", "solana"] as const
+export type BridgeLiquidationChain = (typeof BRIDGE_LIQUIDATION_CHAINS)[number]
+
+export type BridgeLiquidationAddress = {
+  id: string
+  customer_id?: string | null
+  /** The on-chain address the merchant sends USDC to. */
+  address?: string | null
+  chain?: string | null
+  currency?: string | null
+  external_account_id?: string | null
+  destination_payment_rail?: string | null
+  destination_currency?: string | null
+  state?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
+/**
+ * Documented drain states. `awaiting_funds` appears in Bridge's shared
+ * TransactionStatus enum, and the returns states (`missing_return_policy`,
+ * `refund_in_flight`, `refund_failed`) appear in Bridge's drain-state table.
+ */
+export const BRIDGE_DRAIN_STATES = [
+  "awaiting_funds",
+  "in_review",
+  "funds_received",
+  "payment_submitted",
+  "payment_processed",
+  "undeliverable",
+  "returned",
+  "missing_return_policy",
+  "refund_in_flight",
+  "refund_failed",
+  "refunded",
+  "error",
+  "canceled",
+] as const
+export type BridgeDrainState = (typeof BRIDGE_DRAIN_STATES)[number]
+
+export type BridgeDrain = {
+  id: string
+  customer_id?: string | null
+  liquidation_address_id?: string | null
+  amount?: string | null
+  currency?: string | null
+  state?: string | null
+  created_at?: string
+  updated_at?: string
+  deposit_tx_hash?: string | null
+  destination_tx_hash?: string | null
+  refund_tx_hash?: string | null
+  from_address?: string | null
+  destination?: {
+    payment_rail?: string | null
+    currency?: string | null
+    external_account_id?: string | null
+    trace_number?: string | null
+    imad?: string | null
+    to_address?: string | null
+  } | null
+  return_details?: { reason?: string | null; risk_rejection_reason?: string | null } | null
+  receipt?: Record<string, unknown> | null
+}
+
 /** The documented Bridge webhook event envelope. */
 export type BridgeWebhookEvent = {
   api_version?: string

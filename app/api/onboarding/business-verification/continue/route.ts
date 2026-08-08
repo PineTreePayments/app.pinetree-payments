@@ -23,7 +23,17 @@ import {
 export async function POST(req: NextRequest) {
   try {
     const { merchantId, actorId } = await requireOnboardingMerchantSession(req)
-    const result = await continueBusinessVerificationEngine({ merchantId, actorId })
+    // The provider returns the merchant's browser here after its own terms
+    // step. The URL is derived server-side from the request origin rather than
+    // taken from the body, so a caller cannot redirect a merchant elsewhere.
+    const result = await continueBusinessVerificationEngine({
+      merchantId,
+      actorId,
+      termsReturnUrl: new URL(
+        "/dashboard/settings?section=business-profile&verification=terms-returned",
+        req.nextUrl.origin
+      ).toString(),
+    })
 
     if (!result.ok) {
       return onboardingFailure({

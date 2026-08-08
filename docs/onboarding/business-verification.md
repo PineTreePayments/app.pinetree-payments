@@ -25,6 +25,19 @@ the Providers page.
 9. The merchant sees one PineTree status; eligible capabilities activate
    automatically after approval.
 
+The merchant enters business information **once**, in the Business Profile,
+organized into five sections: **Business**, **Address**, **Operations**,
+**Owners**, and **Verification**. The first four are stored. The fifth collects
+the tax identifiers, which are **never stored** — see
+[Sensitive data](#sensitive-data).
+
+PineTree never answers a compliance question on a merchant's behalf.
+`high_risk_activities`, `operates_in_prohibited_countries`,
+`conducts_money_services`, `account_purpose`, and `source_of_funds` have no
+default and no inferred value; an unanswered one leaves the profile incomplete.
+`none_of_the_above` is a real, explicit answer, and selecting it alongside a
+declared activity is rejected rather than silently reconciled.
+
 ### Merchant-facing status vocabulary
 
 The merchant sees **Business Profile** status only — `Incomplete`,
@@ -126,10 +139,12 @@ and approval/rejection/pause/review status.
 |---|---|
 | `GET /api/onboarding/business-verification` | Status projection + terms disclosure. Fast, database-only. |
 | `POST .../consent` | Record terms acceptance. **Gates all provider submission.** |
-| `POST .../continue` | Single-use hosted verification URL. |
+| `POST .../continue` | Single-use hosted URL: the provider's own terms step when it still needs one, otherwise the remaining hosted compliance step. |
+| `POST .../agreement` | Capture the `signed_agreement_id` the provider returns with the merchant's browser. **Not approval** — it only records which agreement authorizes the submission. |
 | `POST .../refresh` | Authoritative provider lookup + automatic activation. |
-| `POST /api/webhooks/bridge` | Unchanged. Raw-body signature verification, dedup, ordering. |
+| `POST /api/webhooks/bridge` | Raw-body signature verification, dedup, ordering. Categories: `customer`, `kyc_link`, `external_account`, `liquidation_address.drain`. |
 | `GET|PATCH /api/admin/business-verification` | Admin diagnostics and rollout hold. |
+| `POST /api/admin/business-verification/simulate-approval` | **Sandbox only, admin only.** Simulates KYB approval so PineTree can exercise the merchant journey. Refused in production server-side. |
 
 Merchant API keys are rejected (403) on every verification route: no approved
 scope exists for accepting legal terms or advancing regulated verification on a
@@ -189,29 +204,135 @@ PineTree return route and automatic status synchronization.
 
 ## Reuse the profile PineTree already has (KYB prefill contract)
 
-**Not yet implemented.** Recorded here so the boundary is unambiguous before the
-provider KYB integration is built.
+**Implemented.** `engine/bridgeCustomerPayload.ts` is a pure mapper from the
+Business Profile onto the provider's business-customer schema, and it is the
+only place that mapping exists.
 
-PineTree already collects a complete merchant business profile
-(`engine/businessProfile.ts`, **Settings → Business Profile**). When provider
-KYB is implemented, PineTree **submits the data it already holds** and prefills
-wherever the provider's API permits. A merchant must never be asked to re-enter:
+PineTree **submits the data it already holds**. A merchant is never asked to
+re-enter:
 
-- legal business name, DBA
+- legal business name, DBA, description, industry, legal structure
 - business address, phone, website
-- business type and tax/registration information
-- owner / controller / authorized-representative details
+- estimated revenue, expected volume, account purpose, source of funds
+- regulated-activity, prohibited-country, and money-services answers
+- owner / controller details, title, ownership percentage, residential address
 - contact details
 
-Only information the provider genuinely requires and PineTree does **not**
-already hold — typically identity documents and other sensitive compliance
-material — may prompt additional merchant input, and that is collected on the
-provider-hosted page, never by PineTree.
+Only material PineTree genuinely does not hold — identity documents and similar
+sensitive compliance evidence — may prompt further merchant input, and that is
+collected on the provider-hosted page, never by PineTree.
 
-This is a submission contract, not a new data model: the required-field set
-stays owned by `BUSINESS_PROFILE_REQUIRED_FIELDS`, and the provider remains
-internal infrastructure that is never named to merchants outside the consent
-disclosure.
+The mapper returns the **PineTree field labels** that are still missing rather
+than throwing, so an incomplete profile produces a fixable PineTree error
+instead of a provider rejection. The required-field set stays owned by
+`BUSINESS_PROFILE_REQUIRED_FIELDS`, and the provider remains internal
+infrastructure that is never named to merchants outside the consent disclosure.
+
+### Create once, update forever
+
+- The stored provider customer id is reused whenever one exists.
+- With no stored id, creation sends a **deterministic** idempotency key derived
+  from the merchant id, so even a lost PineTree record cannot produce a second
+  customer.
+- A later Business Profile edit issues a **partial update** against that same
+  customer. An unchanged profile produces the same payload fingerprint and makes
+  no provider call at all.
+- No migration mass-creates customers. Existing merchants are ensured lazily,
+  when they proceed through the flow.
+
+### Provider terms and the sandbox
+
+Production requires a real `signed_agreement_id`, obtained on the provider's own
+hosted terms page and captured server-side on return. Without one, **no customer
+is created** — the merchant is asked to complete that step first.
+
+The sandbox is different, and deliberately so: the provider documents that
+sandbox customers are created via the API, that KYC links do not work there,
+that a production agreement id "cannot be arbitrary", and that no
+payment-related webhooks fire. PineTree therefore derives a deterministic
+synthetic agreement id **only** when `BRIDGE_ENVIRONMENT` is exactly `sandbox`.
+That check fails closed: an unset or unrecognized value is not sandbox, so the
+shortcut cannot leak into production.
+
+---
+
+## Bank withdrawals
+
+Once verification is complete, a merchant can withdraw USDC to a US bank account
+from **PineTree Wallet → Withdraw → Bank account**. It is not on the Providers
+page, and there is no connection step: it is a destination inside the withdrawal
+experience the merchant already uses.
+
+```
+PineTree Wallet -> Withdraw -> "Bank account"
+  -> link bank account (once)          POST /api/wallets/pinetree-wallet/bank-destinations
+  -> review                            POST /api/wallets/pinetree-wallet/bank-withdrawals
+  -> authorize in the merchant's own PineTree Wallet (existing Dynamic signing)
+  -> submit                            (existing prepare/submit routes, unchanged)
+  -> PROCESSING until the bank is paid
+```
+
+Supported today: **USDC on Base** and **USDC on Solana**, settling to **USD over
+ACH**. Native ETH and SOL would need a conversion step before settlement; no
+conversion provider is integrated, so they are simply unavailable rather than
+silently mis-routed. Bitcoin/Lightning withdrawals are untouched and never route
+through settlement.
+
+### What confirms a bank withdrawal
+
+**Only authoritative payout evidence from the settlement provider.** A confirmed
+source-chain transaction proves the merchant's USDC reached the provider; it is
+recorded as `source_chain_confirmed_at` and the withdrawal stays PROCESSING.
+
+None of the following may confirm a bank withdrawal: clicking Approve, a wallet
+return, a Dynamic signing result, transaction submission, a confirmed
+source-chain receipt, `funds_received`, or `payment_submitted`.
+
+| Provider payout state | Canonical withdrawal | Note |
+|---|---|---|
+| `awaiting_funds`, `in_review`, `funds_received`, `payment_submitted` | PROCESSING | In flight. Never confirmation. |
+| `payment_processed` | **CONFIRMED** | The only path to success. |
+| `undeliverable`, `returned`, `refunded`, `canceled` | FAILED | Verified terminal failure, each with its own merchant-safe message. |
+| `refund_in_flight` | PROCESSING | Payout failed; the return is still moving. Flagged for an operator. |
+| `refund_failed`, `missing_return_policy` | FAILED | Flagged for an operator. |
+| `error` | *unchanged* | **UNKNOWN**, not failure. Reconciliation keeps looking; nothing is resubmitted. |
+| unrecognized | *unchanged* | Never guessed into a real state. |
+
+Ordering is enforced twice: along the documented forward progression, and by
+timestamp for the states off that path. A late `funds_received` therefore cannot
+regress a stored `payment_processed`, and a terminal withdrawal is never
+reopened.
+
+### Reconciliation
+
+`reconcileBankWithdrawalsEngine` runs inside the existing withdrawal
+reconciliation worker — not a second scheduler — and correlates payout evidence
+to a withdrawal by **deposit transaction hash within one settlement route**.
+Every deposit creates its own payout record, so that hash is the correlation
+key. This lookup, not the webhook, is what makes the outcome eventually
+knowable: the provider fires no payment webhooks in sandbox at all, and webhook
+delivery in production is at-least-once rather than guaranteed-once.
+
+### Settlement routes
+
+A settlement route is the permanent pairing of one source chain + asset with one
+bank destination. Duplicate creation is prevented in three layers: PineTree's
+own stored route is reused first, then the provider's existing routes are
+enumerated and matched, and only then is one created with a deterministic
+idempotency key derived from the complete route identity.
+
+The provider requires a return address on the **same source chain**, used when a
+deposit cannot be processed. PineTree always supplies the merchant's own
+PineTree Wallet address for that chain, and refuses to create a route without a
+valid one — an unreturnable deposit is worse than a blocked withdrawal.
+
+### Fees
+
+PineTree charges **no** bank-withdrawal fee today and sets **no** provider
+developer fee. The merchant withdrawal-fee policy is not finalized, so nothing
+is hardcoded and nothing is fabricated.
+
+---
 
 ## Existing merchants
 
@@ -232,12 +353,33 @@ mass-creates provider customers.
 
 Bridge state remains in `merchant_providers.credentials` (provider = `bridge`),
 service-role only. Consent lives in `merchant_service_terms_acceptances`
-(append-only, service-role only). Both are forward-only migrations.
+(append-only, service-role only). Bank payout destinations live in
+`merchant_bank_destinations` and their settlement routes in
+`merchant_bridge_liquidation_routes`, both service-role only. All are
+forward-only migrations.
 
-Never stored: identity documents, SSNs, EINs, beneficial-owner documents, bank
-credentials, hosted onboarding URLs, provider keys, or raw provider payloads.
-Sensitive compliance data goes from the merchant's browser to the provider and
-never transits PineTree.
+`merchant_providers`, `merchant_bank_destinations`, and
+`merchant_bridge_liquidation_routes` are never readable by the browser; the UI
+only ever sees the Engine's projection.
 
-`merchant_providers` is never readable by the browser; the UI only ever sees the
-Engine's projection.
+### Sensitive data
+
+**Never stored:** identity documents, SSNs, EINs, beneficial-owner documents,
+raw bank routing or account numbers, hosted onboarding URLs, provider keys, or
+raw provider payloads.
+
+Tax identifiers are collected in the Business Profile's Verification section and
+travel **browser → authenticated PineTree API → provider** inside a single
+request. `app/api/merchant/business-profile/route.ts` strips them before the
+profile writer runs, so there is no column they could reach. What survives is
+the masked last four and the timestamp of the submission that consumed them,
+which is why the form afterwards shows `On file ····6789 — leave blank to keep`
+rather than a value.
+
+A bank account number behaves identically: it exists only for the duration of
+the create call and PineTree persists the provider's external-account id and the
+masked last four the provider itself returns.
+
+`providers/bridge/redact.ts` is the single redaction point and covers these keys
+recursively, so a field that ever reached the logging layer still could not be
+written to a log.

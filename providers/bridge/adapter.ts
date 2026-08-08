@@ -24,12 +24,17 @@ import type { PaymentStatus, ProviderAdapterMetadata } from "@/types/provider"
 
 import { describeBridgeConfiguration, getBridgeConfig, isBridgeConfigured } from "./config"
 import {
-  createKycLink,
+  createCustomer,
+  getHostedKycLinkForCustomer,
   getMerchantStatus as fetchBridgeMerchantStatus,
   syncCustomerStatus,
+  updateCustomer,
   type BridgeRequestContext,
 } from "./client"
-import { bridgeOnboardingIdempotencyKey } from "./idempotency"
+import {
+  bridgeCustomerIdempotencyKey,
+  bridgeCustomerUpdateIdempotencyKey,
+} from "./idempotency"
 import {
   BRIDGE_DISPLAY_NAME,
   BRIDGE_PROVIDER_KEY,
@@ -38,29 +43,35 @@ import {
   normalizeBridgeConnection,
 } from "./normalize"
 import { translateBridgeEvent, type NormalizedBridgeConnectionEvent } from "./translateEvent"
-import type { NormalizedBridgeConnection } from "./types"
+import type { BridgeBusinessCustomerPayload, NormalizedBridgeConnection } from "./types"
 import { verifyBridgeWebhookSignature, BRIDGE_SIGNATURE_HEADER } from "./verifyWebhook"
 
 export type BridgeConnectMerchantInput = {
   merchantId: string
-  /** The merchant's full LEGAL business name, per Bridge's business contract. */
-  legalBusinessName: string
-  /** The authorized account owner's email address. */
-  ownerEmail: string
-  /** Overrides the configured redirect only in tests. */
-  redirectUri?: string
+  /**
+   * The complete business-customer payload, already mapped from the merchant's
+   * PineTree Business Profile by the Engine. The adapter does not build it:
+   * mapping PineTree data onto provider fields is business logic.
+   */
+  payload: BridgeBusinessCustomerPayload
   context?: BridgeRequestContext
   fetchImpl?: typeof fetch
 }
 
 export type BridgeConnectMerchantResult = {
-  kycLinkId: string
-  customerId: string | null
-  /** Single-use hosted URLs returned straight to the requesting merchant. */
-  kycUrl: string | null
-  tosUrl: string | null
+  customerId: string
   connection: NormalizedBridgeConnection
   correlationId: string
+}
+
+export type BridgeUpdateMerchantInput = {
+  customerId: string
+  payload: Partial<BridgeBusinessCustomerPayload>
+  /** Distinguishes one profile revision from another for idempotency. */
+  revision: string
+  merchantId: string
+  context?: BridgeRequestContext
+  fetchImpl?: typeof fetch
 }
 
 class BridgeAdapter extends BaseProviderAdapter {
@@ -100,38 +111,84 @@ class BridgeAdapter extends BaseProviderAdapter {
   }
 
   /**
-   * Begin Bridge onboarding for a merchant by creating (or, thanks to the
-   * deterministic idempotency key, re-fetching) the hosted KYC/KYB link.
+   * Create the merchant's Bridge business customer directly from the data
+   * PineTree already holds.
    *
    * The idempotency key is derived from the merchant id plus the onboarding
-   * version, so restarting onboarding NEVER creates a second Bridge customer.
+   * version, so restarting onboarding NEVER creates a second Bridge customer -
+   * even if PineTree's own record of it was lost.
    */
   async connectMerchant(input: BridgeConnectMerchantInput): Promise<BridgeConnectMerchantResult> {
     const config = getBridgeConfig()
-    const idempotencyKey = bridgeOnboardingIdempotencyKey({ merchantId: input.merchantId })
+    const idempotencyKey = bridgeCustomerIdempotencyKey({ merchantId: input.merchantId })
 
-    const result = await createKycLink({
-      fullName: input.legalBusinessName,
-      email: input.ownerEmail,
-      type: "business",
-      endorsements: [BRIDGE_REQUIRED_ENDORSEMENT],
-      redirectUri: input.redirectUri ?? config.kycRedirectUrl,
+    const result = await createCustomer({
+      payload: input.payload,
       idempotencyKey,
       context: { ...input.context, merchantId: input.merchantId },
       config,
       fetchImpl: input.fetchImpl,
     })
 
-    const kycLink = result.data
-
+    const customer = result.data
     return {
-      kycLinkId: String(kycLink.id),
-      customerId: String(kycLink.customer_id || "").trim() || null,
-      kycUrl: String(kycLink.kyc_link || "").trim() || null,
-      tosUrl: String(kycLink.tos_link || "").trim() || null,
-      connection: normalizeBridgeConnection({ kycLink }),
+      customerId: String(customer.id),
+      connection: normalizeBridgeConnection({ customer }),
       correlationId: result.correlationId,
     }
+  }
+
+  /**
+   * Apply a Business Profile edit to the SAME Bridge customer.
+   *
+   * The revision-scoped idempotency key makes a double-clicked Save a no-op at
+   * Bridge while still letting a genuinely changed profile through.
+   */
+  async updateMerchant(input: BridgeUpdateMerchantInput): Promise<{
+    connection: NormalizedBridgeConnection
+    correlationId: string
+  }> {
+    const result = await updateCustomer({
+      customerId: input.customerId,
+      payload: input.payload,
+      idempotencyKey: bridgeCustomerUpdateIdempotencyKey({
+        merchantId: input.merchantId,
+        revision: input.revision,
+      }),
+      context: { ...input.context, merchantId: input.merchantId },
+      fetchImpl: input.fetchImpl,
+    })
+
+    return {
+      connection: normalizeBridgeConnection({ customer: result.data }),
+      correlationId: result.correlationId,
+    }
+  }
+
+  /**
+   * The hosted step for an EXISTING customer, when Bridge still needs material
+   * PineTree does not hold (identity documents and similar). Returned to the
+   * requesting merchant only; never stored.
+   */
+  async getHostedVerificationUrl(input: {
+    customerId: string
+    redirectUri?: string
+    context?: BridgeRequestContext
+    fetchImpl?: typeof fetch
+  }): Promise<string | null> {
+    const config = getBridgeConfig()
+    const result = await getHostedKycLinkForCustomer({
+      customerId: input.customerId,
+      redirectUri: input.redirectUri ?? config.kycRedirectUrl,
+      endorsement: BRIDGE_REQUIRED_ENDORSEMENT,
+      context: input.context,
+      config,
+      fetchImpl: input.fetchImpl,
+    })
+
+    return (
+      String(result.data.url || result.data.kyc_link || result.data.tos_link || "").trim() || null
+    )
   }
 
   /**

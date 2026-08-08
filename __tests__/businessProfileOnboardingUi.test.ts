@@ -185,8 +185,14 @@ describe("Business Profile onboarding UI", () => {
     )
 
     expect(modalBlock).toContain("Fields marked with")
-    expect(modalBlock).toContain("Business Information")
-    expect(modalBlock).toContain("Owner Information")
+    // Sections are driven by the shared Business Profile contract rather than
+    // hand-listed headings, so the modal and the field contract cannot drift.
+    expect(modalBlock).toContain("BUSINESS_PROFILE_SECTIONS.map")
+    const fields = read("engine/businessProfileFields.ts")
+    for (const title of ["Business", "Address", "Operations", "Owners"]) {
+      expect(fields).toContain(`title: "${title}"`)
+    }
+    expect(modalBlock).toContain("Verification")
     expect(modalBlock).not.toContain("Payment activation")
     expect(modalBlock).not.toContain("Complete the required details below to activate payments.")
     expect(modalBlock).not.toContain("Payment activation requirement")
@@ -334,11 +340,18 @@ describe("Business Profile onboarding UI", () => {
     const settings = read("app/dashboard/settings/page.tsx")
     const locations = read("engine/businessProfileLocation.ts")
 
+    const fields = read("engine/businessProfileFields.ts")
+
     expect(settings).toContain("BUSINESS_PROFILE_COUNTRIES.map")
     expect(settings).toContain("US_STATES.map")
-    expect(settings).toContain('renderBusinessProfileField("business_country")')
-    expect(settings).toContain('renderBusinessProfileField("business_state"')
-    expect(settings).toContain('renderBusinessProfileField("business_postal_code")')
+    // The country/state pair is rendered from the shared section contract, and
+    // the same normalization now covers the owner's residential address.
+    expect(settings).toContain('field === "business_country" || field === "owner_country"')
+    expect(settings).toContain('field === "business_state" && country === "US"')
+    expect(settings).toContain('field === "owner_state" && extendedProfile.owner_country === "US"')
+    for (const field of ["business_country", "business_state", "business_postal_code"]) {
+      expect(fields).toContain(`"${field}"`)
+    }
     expect(locations).toContain('{ code: "US", name: "United States" }')
     expect(locations).toContain('{ code: "DC", name: "District of Columbia" }')
   })

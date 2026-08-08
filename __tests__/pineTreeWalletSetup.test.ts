@@ -1085,8 +1085,11 @@ describe("PineTree embedded wallet setup", () => {
   })
 
   it("Business Profile save only persists profile data and never provisions Speed or Lightning", () => {
-    expect(businessProfileApiRoute).toContain("saveMerchantBusinessProfile(merchantId, body)")
-    expect(businessProfileApiRoute).toContain("return NextResponse.json({ profile })")
+    expect(businessProfileApiRoute).toContain("saveMerchantBusinessProfile(")
+    expect(businessProfileApiRoute).toContain("profileInput as MerchantBusinessProfileInput")
+    // Tax identifiers are stripped before the profile writer ever sees them,
+    // so there is no column they could reach.
+    expect(businessProfileApiRoute).toContain("const { business_tax_id: _businessTaxId")
     expect(businessProfileApiRoute).not.toContain("ensureManagedLightningForMerchant")
     expect(businessProfileApiRoute).not.toContain("/api/wallets/lightning/pinetree-managed")
     expect(businessProfileApiRoute).not.toContain("wallet_speed_setup_started")

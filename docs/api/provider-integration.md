@@ -167,12 +167,24 @@ PineTree passes all incoming webhooks from your provider to `verifyWebhook()` be
 ### Provider-connection webhooks
 
 Not every provider webhook is a payment event. **Bridge by Stripe** delivers
-merchant/provider *connection* events (`customer`, `kyc_link`) that change KYB
-and endorsement state, never payment state. Those are translated into the
-Bridge connection-event envelope by `translateProviderEvent` and applied by
-`engine/bridgeConnect.ts`; the universal `translateEvent` returns `null` so a
-KYB status change can never reach the canonical payment state machine. See
+merchant/provider *connection* events (`customer`, `kyc_link`,
+`external_account`) that change KYB, bank-destination, and endorsement state,
+plus *money-movement* events (`liquidation_address.drain`) that carry
+**withdrawal** payout evidence. None of them is a payment event. All four are
+translated into the Bridge connection-event envelope by `translateProviderEvent`
+and routed by `engine/bridgeConnect.ts` to the lifecycle they belong to — KYB
+state to `engine/bridgeConnect.ts`, bank destinations to
+`engine/bridgeBankDestinations.ts`, and payout evidence to
+`engine/withdrawals/bankWithdrawals.ts`. The universal `translateEvent` returns
+`null` throughout, so neither a KYB status change nor a bank payout can reach
+the canonical payment state machine. See
 [`docs/environment/bridge-env-checklist.md`](../environment/bridge-env-checklist.md).
+
+For a bank withdrawal, a confirmed **source-chain** transaction proves only that
+the merchant's USDC reached Bridge. It is not payout evidence: the withdrawal
+stays PROCESSING until Bridge reports `payment_processed`. The full state
+mapping is in
+[`docs/onboarding/business-verification.md`](../onboarding/business-verification.md#bank-withdrawals).
 
 Bridge is owned by Stripe but is a **separate provider connection** from Stripe
 Connect: separate credentials, customer identifiers, capabilities, KYB state,

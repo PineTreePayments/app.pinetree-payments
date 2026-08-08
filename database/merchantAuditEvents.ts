@@ -13,6 +13,12 @@ export type WithdrawalAuditEventType =
   | "withdrawal.confirmed"
   | "withdrawal.failed"
   | "withdrawal.canceled"
+  // Bank withdrawals share the withdrawal ledger and lifecycle. These two
+  // record the extra evidence a bank payout has that a crypto one does not:
+  // the settlement route it was bound to, and the moment the source-chain
+  // transfer reached the settlement provider - which is NOT confirmation.
+  | "withdrawal.bank_review_created"
+  | "withdrawal.bank_source_chain_confirmed"
 
 export type AddressBookAuditEventType =
   | "address_book.entry_added"
@@ -35,6 +41,18 @@ export type WalletOperationAuditEventType =
   | "destination_backfill.verified"
 
 /**
+ * Merchant bank payout destinations and the settlement routes bound to them.
+ *
+ * Metadata carries the PineTree destination id and the masked last four only -
+ * never a routing number, an account number, or a provider payload.
+ */
+export type BankDestinationAuditEventType =
+  | "wallet.bank_destination_linked"
+  | "wallet.bank_destination_removed"
+  | "wallet.bank_destination_state_synced"
+  | "wallet.bank_settlement_route_created"
+
+/**
  * Privileged admin actions on merchant support tickets.
  *
  * Recorded against the ticket's merchant (so the merchant's audit trail is
@@ -54,8 +72,12 @@ export type SupportAuditEventType =
  */
 export type BridgeProviderAuditEventType =
   | "provider.bridge_onboarding_started"
+  | "provider.bridge_customer_updated"
+  | "provider.bridge_terms_agreement_recorded"
   | "provider.bridge_status_synced"
   | "provider.bridge_webhook_applied"
+  // Administrator-only, sandbox-only. Refused in production server-side.
+  | "provider.bridge_sandbox_approval_simulated"
   // Activation is automatic after Bridge approval; it is audited once, when it
   // first happens. There is no merchant enable/disable action to record.
   | "provider.bridge_capability_auto_activated"
@@ -83,6 +105,7 @@ export type MerchantAuditEventType =
   | WithdrawalAuditEventType
   | AddressBookAuditEventType
   | WalletOperationAuditEventType
+  | BankDestinationAuditEventType
 
 export type MerchantAuditEvent = {
   id: string

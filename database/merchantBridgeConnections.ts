@@ -63,6 +63,31 @@ export type BridgeCredentials = {
    */
   consent_terms_version?: string
   consent_accepted_at?: string
+  /**
+   * Bridge's reference for the terms agreement the merchant signed on Bridge's
+   * own hosted page. An opaque identifier, not a credential and not a document.
+   */
+  bridge_signed_agreement_id?: string
+  bridge_signed_agreement_at?: string
+  /** True when the agreement id was synthesized for the Bridge SANDBOX only. */
+  bridge_signed_agreement_synthetic?: boolean
+  /**
+   * Fingerprint of the last customer payload PineTree submitted. Comparing it
+   * is what decides whether a profile edit needs a Bridge update at all, and it
+   * seeds the update idempotency key so an unchanged save is a no-op.
+   */
+  bridge_customer_revision?: string
+  bridge_customer_submitted_at?: string
+  /**
+   * When tax identifiers were last handed to Bridge, and their masked last
+   * four. The identifiers themselves are NEVER stored - see
+   * engine/bridgeCustomerPayload.ts.
+   */
+  bridge_identity_submitted_at?: string
+  bridge_business_tax_id_last4?: string
+  bridge_owner_tax_id_last4?: string
+  /** Sandbox-only marker for an administrator-simulated KYB approval. */
+  sandbox_simulated_approval_at?: string
   last_synced_at?: string
   provider_created_at?: string
   provider_updated_at?: string
@@ -106,6 +131,15 @@ const ALLOWED_CREDENTIAL_KEYS: readonly (keyof BridgeCredentials)[] = [
   "admin_activation_blocked_at",
   "consent_terms_version",
   "consent_accepted_at",
+  "bridge_signed_agreement_id",
+  "bridge_signed_agreement_at",
+  "bridge_signed_agreement_synthetic",
+  "bridge_customer_revision",
+  "bridge_customer_submitted_at",
+  "bridge_identity_submitted_at",
+  "bridge_business_tax_id_last4",
+  "bridge_owner_tax_id_last4",
+  "sandbox_simulated_approval_at",
   "last_synced_at",
   "provider_created_at",
   "provider_updated_at",
@@ -247,12 +281,20 @@ export type BridgeWebhookEventRecord = {
   event_type: string
   bridge_customer_id: string | null
   bridge_kyc_link_id: string | null
+  bridge_external_account_id: string | null
+  bridge_liquidation_address_id: string | null
+  bridge_drain_id: string | null
   merchant_id: string | null
   occurred_at: string | null
   received_at: string
   processed_at: string | null
   skipped_reason: string | null
 }
+
+const BRIDGE_WEBHOOK_EVENT_COLUMNS =
+  "id, provider_event_id, event_category, event_type, bridge_customer_id, bridge_kyc_link_id, " +
+  "bridge_external_account_id, bridge_liquidation_address_id, bridge_drain_id, merchant_id, " +
+  "occurred_at, received_at, processed_at, skipped_reason"
 
 export type BridgeWebhookClaim =
   | { claimed: true; record: BridgeWebhookEventRecord }
@@ -271,6 +313,9 @@ export async function claimBridgeWebhookEvent(input: {
   eventType: string
   bridgeCustomerId: string | null
   bridgeKycLinkId: string | null
+  bridgeExternalAccountId?: string | null
+  bridgeLiquidationAddressId?: string | null
+  bridgeDrainId?: string | null
   merchantId: string | null
   occurredAt: string | null
   rawPayload: Record<string, unknown> | null
@@ -283,33 +328,32 @@ export async function claimBridgeWebhookEvent(input: {
       event_type: input.eventType,
       bridge_customer_id: input.bridgeCustomerId,
       bridge_kyc_link_id: input.bridgeKycLinkId,
+      bridge_external_account_id: input.bridgeExternalAccountId ?? null,
+      bridge_liquidation_address_id: input.bridgeLiquidationAddressId ?? null,
+      bridge_drain_id: input.bridgeDrainId ?? null,
       merchant_id: input.merchantId,
       occurred_at: input.occurredAt,
       raw_payload: input.rawPayload,
       signature_verified: true,
     })
-    .select(
-      "id, provider_event_id, event_category, event_type, bridge_customer_id, bridge_kyc_link_id, merchant_id, occurred_at, received_at, processed_at, skipped_reason"
-    )
+    .select(BRIDGE_WEBHOOK_EVENT_COLUMNS)
     .single()
 
-  if (!error) return { claimed: true, record: data as BridgeWebhookEventRecord }
+  if (!error) return { claimed: true, record: data as unknown as BridgeWebhookEventRecord }
   if (error.code !== "23505") {
     throw new Error(`Failed to claim Bridge webhook event: ${error.message}`)
   }
 
   const { data: existing, error: lookupError } = await db
     .from(BRIDGE_WEBHOOK_EVENTS_TABLE)
-    .select(
-      "id, provider_event_id, event_category, event_type, bridge_customer_id, bridge_kyc_link_id, merchant_id, occurred_at, received_at, processed_at, skipped_reason"
-    )
+    .select(BRIDGE_WEBHOOK_EVENT_COLUMNS)
     .eq("provider_event_id", input.providerEventId)
     .maybeSingle()
 
   if (lookupError || !existing) {
     throw new Error("Failed to load existing Bridge webhook event after idempotency conflict")
   }
-  return { claimed: false, record: existing as BridgeWebhookEventRecord }
+  return { claimed: false, record: existing as unknown as BridgeWebhookEventRecord }
 }
 
 /**
@@ -319,10 +363,20 @@ export async function claimBridgeWebhookEvent(input: {
  * deliberately not applied (out of order, merchant not resolvable yet). The
  * row is retained either way so the evidence is never lost.
  */
+export type BridgeWebhookSkippedReason =
+  | "duplicate"
+  | "out_of_order"
+  | "unresolved_merchant"
+  | "unsupported_category"
+  | "state_reread_failed"
+  | "no_matching_withdrawal"
+  | "unresolved_route"
+  | "applied"
+
 export async function markBridgeWebhookEventProcessed(input: {
   id: string
   merchantId?: string | null
-  skippedReason?: "duplicate" | "out_of_order" | "unresolved_merchant" | "unsupported_category" | null
+  skippedReason?: BridgeWebhookSkippedReason | null
 }): Promise<void> {
   const update: Record<string, unknown> = {
     processed_at: new Date().toISOString(),

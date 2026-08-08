@@ -14,6 +14,10 @@ import { getConnectedAccountSendStatus } from "@/providers/lightning/speedWallet
 import { getWalletWithdrawal } from "@/engine/wallet/walletOperations"
 import { syncPineTreeWalletBalances } from "@/engine/pineTreeWalletSync"
 import { recoverPendingDynamicWithdrawals } from "@/engine/withdrawals/pendingDynamicWithdrawalRecovery"
+import {
+  recordBankWithdrawalSourceChainConfirmed,
+  reconcileBankWithdrawalsEngine,
+} from "@/engine/withdrawals/bankWithdrawals"
 
 export type ReconciliationResult = {
   candidates: number
@@ -27,6 +31,13 @@ export type ReconciliationResult = {
   errors: number
   /** Pending rows whose broadcast tx was found on-chain and adopted this pass. */
   recoveredPending: number
+  /**
+   * Bank withdrawals resolved against authoritative settlement payout evidence
+   * this pass. A bank withdrawal never reaches CONFIRMED through the on-chain
+   * counters above.
+   */
+  bankPayoutConfirmed: number
+  bankPayoutFailed: number
 }
 
 type OnChainStatus = "confirmed" | "failed" | "pending"
@@ -225,6 +236,28 @@ async function reconcileOne(
     reconcileLog("WITHDRAWAL_RECONCILE_STILL_PROCESSING", {
       ...details,
       reason: "provider_pending",
+    })
+    return { outcome: "pending" }
+  }
+
+  // A BANK withdrawal's destination address belongs to the settlement provider,
+  // not the merchant. A successful source-chain receipt therefore proves only
+  // that the funds reached the provider - never that the bank was paid. The
+  // withdrawal stays PROCESSING and waits for authoritative payout evidence.
+  // A source-chain FAILURE is still terminal: nothing left the wallet at all.
+  if (withdrawal.destination_kind === "bank" && onChainStatus === "confirmed") {
+    await recordBankWithdrawalSourceChainConfirmed({
+      merchantId: merchant_id,
+      withdrawalId: id,
+    }).catch((error) => {
+      console.warn("[reconcile-withdrawals] bank source-chain evidence write failed", {
+        withdrawalId: id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+    reconcileLog("WITHDRAWAL_RECONCILE_STILL_PROCESSING", {
+      ...details,
+      reason: "bank_payout_evidence_required",
     })
     return { outcome: "pending" }
   }
@@ -450,6 +483,15 @@ export async function reconcileProcessingWithdrawals(options: {
     })
     return { candidates: 0, recovered: 0, unmatched: 0, errors: 1 }
   })
+  // Bank withdrawals are reconciled against the settlement provider in the SAME
+  // worker rather than a second cron: they share the withdrawal ledger, and a
+  // separate scheduler would duplicate this one's ownership of it.
+  const bankPayouts = await reconcileBankWithdrawalsEngine({ limit, merchantId }).catch((error) => {
+    console.warn("[reconcile-withdrawals] bank payout pass failed", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return { candidates: 0, checked: 0, confirmed: 0, failed: 0, stillProcessing: 0, unmatched: 0, errors: 1 }
+  })
   const [onChainWithdrawals, bitcoinWithdrawals, walletOperations] = await Promise.all([
     listProcessingWithdrawalsForReconciliation(limit, merchantId),
     listProcessingBitcoinWithdrawalsForReconciliation(limit, merchantId),
@@ -466,16 +508,19 @@ export async function reconcileProcessingWithdrawals(options: {
   })
 
   const result: ReconciliationResult = {
-    candidates: withdrawals.length + walletOperations.candidates + pendingRecovery.candidates,
-    checked: withdrawals.length + walletOperations.checked,
+    candidates:
+      withdrawals.length + walletOperations.candidates + pendingRecovery.candidates + bankPayouts.candidates,
+    checked: withdrawals.length + walletOperations.checked + bankPayouts.checked,
     missingProviderReference: walletOperations.missingProviderReference,
     confirmed: walletOperations.confirmed,
     failed: walletOperations.failed,
     stillProcessing: walletOperations.still_processing,
     still_processing: walletOperations.still_processing,
     skipped: walletOperations.skipped,
-    errors: walletOperations.errors + pendingRecovery.errors,
+    errors: walletOperations.errors + pendingRecovery.errors + bankPayouts.errors,
     recoveredPending: pendingRecovery.recovered,
+    bankPayoutConfirmed: bankPayouts.confirmed,
+    bankPayoutFailed: bankPayouts.failed,
   }
 
   for (const withdrawal of withdrawals) {

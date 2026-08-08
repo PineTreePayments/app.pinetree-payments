@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   insertMerchantAuditEvent: vi.fn(),
   getMerchantBusinessProfile: vi.fn(),
   connectMerchant: vi.fn(),
+  updateMerchant: vi.fn(),
+  getHostedVerificationUrl: vi.fn(),
   syncAccount: vi.fn(),
   getKycLink: vi.fn(),
   requireMerchantAuth: vi.fn(),
@@ -61,7 +63,12 @@ vi.mock("@/engine/businessProfile", async () => {
 })
 
 vi.mock("@/providers/bridge/adapter", () => ({
-  bridgeAdapter: { connectMerchant: mocks.connectMerchant, syncAccount: mocks.syncAccount },
+  bridgeAdapter: {
+    connectMerchant: mocks.connectMerchant,
+    updateMerchant: mocks.updateMerchant,
+    getHostedVerificationUrl: mocks.getHostedVerificationUrl,
+    syncAccount: mocks.syncAccount,
+  },
 }))
 
 vi.mock("@/providers/bridge/client", async () => {
@@ -98,11 +105,48 @@ const FAKE_CUSTOMER_ID = "cust_dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 const FAKE_KYC_LINK_ID = "kyc_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 const FAKE_KYC_URL = "https://bridge.test/kyc?session=fake-capability-token"
 
+/**
+ * A profile complete enough to build the whole KYB submission from - which is
+ * the point: PineTree collects this once and never asks the merchant again.
+ * Every value is fabricated.
+ */
 function completeProfile(overrides: Record<string, unknown> = {}) {
   return {
     legal_business_name: "Fake Test Business LLC",
+    business_dba: "Fake Test",
     contact_email: "contact@fake-merchant.test",
+    business_type: "retail",
+    business_legal_structure: "llc",
+    business_industry: "453998",
+    business_description: "Sells fabricated goods for testing.",
+    business_country: "US",
+    business_state: "CA",
+    business_city: "Testville",
+    business_address_line1: "100 Fake Street",
+    business_address_line2: null,
+    business_postal_code: "90210",
+    business_phone: "+15550000000",
+    business_website: "https://fake-merchant.test",
+    estimated_annual_revenue: "100000_999999",
+    expected_monthly_payment_volume: "25000",
+    account_purpose: "receive_payments_for_goods_and_services",
+    source_of_funds: "sales_of_goods_and_services",
+    high_risk_activities: "none_of_the_above",
+    operates_in_prohibited_countries: "no",
+    conducts_money_services: "no",
+    owner_first_name: "Fake",
+    owner_last_name: "Owner",
     owner_email: "owner@fake-merchant.test",
+    owner_phone: "+15550000001",
+    owner_title: "Managing Member",
+    owner_birth_date: "1990-01-01",
+    owner_ownership_percentage: "100",
+    owner_address_line1: "200 Fake Avenue",
+    owner_address_line2: null,
+    owner_city: "Testville",
+    owner_state: "CA",
+    owner_postal_code: "90210",
+    owner_country: "US",
     profile_status: "complete",
     missing_fields: [],
     ...overrides,
@@ -111,9 +155,9 @@ function completeProfile(overrides: Record<string, unknown> = {}) {
 
 function incompleteProfile(missing: string[] = ["business_phone", "owner_phone"]) {
   return {
-    legal_business_name: "Fake Test Business LLC",
-    contact_email: "contact@fake-merchant.test",
-    owner_email: "",
+    ...completeProfile(),
+    business_phone: null,
+    owner_phone: null,
     profile_status: "incomplete",
     missing_fields: missing,
   }
@@ -226,13 +270,15 @@ beforeEach(() => {
   mocks.getLatestServiceTermsAcceptance.mockResolvedValue(acceptance())
   mocks.recordServiceTermsAcceptance.mockResolvedValue(acceptance())
   mocks.connectMerchant.mockResolvedValue({
-    kycLinkId: FAKE_KYC_LINK_ID,
     customerId: FAKE_CUSTOMER_ID,
-    kycUrl: FAKE_KYC_URL,
-    tosUrl: null,
     connection: INCOMPLETE_CONNECTION,
     correlationId: "corr_fake",
   })
+  mocks.updateMerchant.mockResolvedValue({
+    connection: INCOMPLETE_CONNECTION,
+    correlationId: "corr_fake",
+  })
+  mocks.getHostedVerificationUrl.mockResolvedValue(FAKE_KYC_URL)
   mocks.syncAccount.mockResolvedValue({ connection: APPROVED_CONNECTION, correlationId: "corr_fake" })
   mocks.getKycLink.mockResolvedValue({ data: { kyc_link: FAKE_KYC_URL, tos_link: null } })
   mocks.requireMerchantAuth.mockResolvedValue({
@@ -264,10 +310,37 @@ describe("Business information is entered once", () => {
     // The canonical profile is the source; nothing re-asks the merchant.
     expect(mocks.connectMerchant).toHaveBeenCalledWith(
       expect.objectContaining({
-        legalBusinessName: "Fake Test Business LLC",
-        ownerEmail: "owner@fake-merchant.test",
+        merchantId: "merchant_alpha",
+        payload: expect.objectContaining({
+          type: "business",
+          business_legal_name: "Fake Test Business LLC",
+          email: "contact@fake-merchant.test",
+          business_type: "llc",
+          business_industry: ["453998"],
+        }),
       })
     )
+
+    // Owner details are submitted from the same profile, not re-collected.
+    const submitted = mocks.connectMerchant.mock.calls[0][0] as {
+      payload: { associated_persons?: { first_name?: string; email?: string }[] }
+    }
+    expect(submitted.payload.associated_persons?.[0]).toMatchObject({
+      first_name: "Fake",
+      email: "owner@fake-merchant.test",
+    })
+  })
+
+  it("never sends a tax identifier PineTree was not given this request", async () => {
+    await getBusinessVerificationEngine({ merchantId: "merchant_alpha" })
+
+    const submitted = mocks.connectMerchant.mock.calls[0][0] as {
+      payload: { identifying_information?: unknown[]; associated_persons?: { identifying_information?: unknown[] }[] }
+    }
+    // PineTree stores no tax identifiers, so a submission made without them
+    // carries none rather than inventing or reusing one.
+    expect(submitted.payload.identifying_information).toBeUndefined()
+    expect(submitted.payload.associated_persons?.[0]?.identifying_information).toEqual([])
   })
 
   it("blocks submission and names the missing profile fields safely", async () => {
@@ -588,6 +661,12 @@ describe("Hosted verification handoff", () => {
         bridge_kyc_status: "incomplete",
       })
     )
+    // The provider still wants something PineTree does not hold, which is the
+    // only situation in which a hosted step is offered at all.
+    mocks.syncAccount.mockResolvedValue({
+      connection: INCOMPLETE_CONNECTION,
+      correlationId: "corr_fake",
+    })
 
     const result = await continueBusinessVerificationEngine({ merchantId: "merchant_alpha" })
 
@@ -597,6 +676,17 @@ describe("Hosted verification handoff", () => {
       const [saved] = call as [{ credentials: Record<string, unknown> }]
       expect(JSON.stringify(saved.credentials)).not.toContain("fake-capability-token")
     }
+  })
+
+  it("offers no hosted step once the provider has approved the merchant", async () => {
+    mocks.getMerchantBridgeConnection.mockResolvedValue(
+      connectionRow({ bridge_customer_id: FAKE_CUSTOMER_ID })
+    )
+
+    const result = await continueBusinessVerificationEngine({ merchantId: "merchant_alpha" })
+
+    expect(result.ok && result.verificationUrl).toBeNull()
+    expect(mocks.getHostedVerificationUrl).not.toHaveBeenCalled()
   })
 
   it("refuses to continue before consent exists", async () => {

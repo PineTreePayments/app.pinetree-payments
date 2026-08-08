@@ -365,7 +365,10 @@ describe("Withdraw tab - dropdown asset selector and soft validation states", ()
     expect(reviewScreen).toContain('label: "Network"')
     expect(reviewScreen).toContain("amount={review.review.amountDecimal}")
     expect(reviewScreen).toContain("asset={review.review.asset}")
-    expect(reviewScreen).toContain("destination={review.review.destinationAddress}")
+    // A crypto withdrawal still reviews against its own destination address. A
+    // bank withdrawal shows the merchant their bank account instead, because
+    // its on-chain destination belongs to settlement infrastructure.
+    expect(reviewScreen).toContain(": review.review.destinationAddress")
     expect(reviewScreen).toContain("Estimated network fee")
     expect(reviewScreen).toContain("review.preflight.requiredFeeReserve")
     expect(reviewScreen).toContain("review.preflight.spendableBalance")
